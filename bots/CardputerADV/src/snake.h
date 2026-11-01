@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 namespace snake {
-constexpr int kCols = 20, kRows = 18, kCells = kCols * kRows, kStartLength = 3;
+constexpr int kCols = 24, kRows = 13, kCells = kCols * kRows, kStartLength = 3;
 constexpr uint32_t kStartStepMs = 200, kFastestStepMs = 80, kStepGainMs = 4;
 enum class Phase : uint8_t { Ready, Playing, Paused, Lost, Won };
 enum class Dir : uint8_t { Up, Right, Down, Left };
@@ -14,7 +14,7 @@ struct Game {
   // Ring buffer of occupied cells, tail first.
   uint16_t body[kCells] = {};
   bool occupied[kCells] = {};
-  uint16_t tail = 0, length = 0, food = 0, score = 0, best = 0;
+  uint16_t tail = 0, length = 0, food = 0, score = 0;
   // Two turns can land inside one step, so a quick U-turn isn't lost.
   Dir heading = Dir::Right, queued[2] = {Dir::Right, Dir::Right};
   uint8_t queuedCount = 0;
@@ -96,7 +96,6 @@ struct Game {
     ++length;
     if (!eating) return;
     ++score;
-    if (score > best) best = score;
     if (length == kCells) phase = Phase::Won;
     else placeFood();
   }

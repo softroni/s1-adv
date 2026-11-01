@@ -28,31 +28,18 @@ code=r'''
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
-#include <string>
-#include <type_traits>
 #include <vector>
 #include <set>
 #include <iostream>
-struct String:std::string {
- using std::string::string;String(std::string s):std::string(s){}
- template<class T,typename=std::enable_if_t<std::is_integral_v<T>>>String(T n):std::string(std::to_string(n)){}
-};
-namespace fonts{const int Font0=0,Font2=2;}
 constexpr uint16_t TFT_WHITE=0xffff;
 constexpr uint16_t rgb565_local(int r,int g,int b){return ((r&0xf8)<<8)|((g&0xfc)<<3)|(b>>3);}
-struct Rect{int x,y,w,h;};
+// No text calls exist here, so the game can't compile with text on screen.
 struct Canvas{
- const int*font=&fonts::Font0;int x=0,y=0;std::vector<Rect>text;
- void bounds(int xx,int yy,int w,int h){assert(xx>=0&&yy>=0&&w>0&&h>0&&xx+w<=240&&yy+h<=135);}
- void fillScreen(uint16_t){text.clear();}
- void fillRect(int xx,int yy,int w,int h,uint16_t){bounds(xx,yy,w,h);if(w<=5&&h<=5)assert(xx+w<=127&&yy+h<=121);}
- void drawRect(int xx,int yy,int w,int h,uint16_t c){fillRect(xx,yy,w,h,c);}
- void fillCircle(int xx,int yy,int r,uint16_t){bounds(xx-r,yy-r,2*r+1,2*r+1);assert(xx+r<127&&yy+r<121);}
- void setFont(const int*f){font=f;}void setTextColor(uint16_t,uint16_t){}
- void setCursor(int xx,int yy){x=xx;y=yy;}
- int textWidth(const String&s){return int(s.size())*(font==&fonts::Font0?6:10);}
- void print(const String&s){Rect r{x,y,textWidth(s),font==&fonts::Font0?8:16};bounds(x,y,r.w,r.h);assert(y+r.h<=129&&x+r.w<=234&&x>=127);
-  for(auto p:text)assert(x+r.w<=p.x||p.x+p.w<=x||y+r.h<=p.y||p.y+p.h<=y);text.push_back(r);}
+ int right=0,bottom=0;
+ void bounds(int xx,int yy,int w,int h){assert(xx>=0&&yy>=0&&w>0&&h>0&&xx+w<=240&&yy+h<=135);right=std::max(right,xx+w);bottom=std::max(bottom,yy+h);}
+ void fillScreen(uint16_t){}
+ void fillRect(int xx,int yy,int w,int h,uint16_t){bounds(xx,yy,w,h);}
+ void fillCircle(int xx,int yy,int r,uint16_t){bounds(xx-r,yy-r,2*r+1,2*r+1);}
 }gCanvas;
 struct Keyboard_Class{struct KeysState{bool ctrl=false,alt=false,opt=false,del=false,enter=false;};};
 enum class UiMode{Home,Snake};UiMode gUiMode=UiMode::Snake;
@@ -104,15 +91,13 @@ int main(){
  // Food grows the snake and speeds it up, down to the limit.
  shape(g,{cellAt(1,1),cellAt(2,1)},Dir::Right,cellAt(3,1));
  assert(g.stepMs()==kStartStepMs);g.step();
- assert(g.length==3&&g.score==1&&g.best==1&&g.stepMs()==kStartStepMs-kStepGainMs);consistent(g);
+ assert(g.length==3&&g.score==1&&g.stepMs()==kStartStepMs-kStepGainMs);consistent(g);
  g.score=1000;assert(g.stepMs()==kFastestStepMs);g.score=0;
  assert(!g.advance(g.lastStepMs+kStartStepMs-1));assert(g.advance(g.lastStepMs+kStartStepMs));
- // Best survives a new game.
- g.best=9;g.reset(3);assert(g.best==9&&g.score==0);
  // Filling the last cell wins and needs no more food.
  {std::vector<int> cells;for(int y=0;y<kRows;++y)for(int x=0;x<kCols;++x)cells.push_back(cellAt(y%2?kCols-1-x:x,y));
   const int last=cells.back();cells.pop_back();
-  shape(g,cells,Dir::Left,last);g.step();assert(g.phase==Phase::Won&&g.length==kCells);consistent(g);}
+  shape(g,cells,kRows%2?Dir::Right:Dir::Left,last);g.step();assert(g.phase==Phase::Won&&g.length==kCells);consistent(g);}
  // Food never lands on the snake, even with one free cell left.
  for(int run=0;run<2000;++run){shape(g,{},Dir::Right,0);int freeCell=run%kCells;
   for(int c=0;c<kCells;++c)if(c!=freeCell){g.body[g.length++]=uint16_t(c);g.occupied[c]=true;}
@@ -135,10 +120,12 @@ int main(){
  head=gSnake.head();key('\n');serviceSnake();assert(gSnake.head()==head&&gSnake.phase==Phase::Playing);
  // A finished game starts over on Enter, and steering can't revive it.
  gSnake.phase=Phase::Lost;key('w');assert(gSnake.phase==Phase::Lost);key('\n');assert(gSnake.phase==Phase::Ready&&gSnake.score==0);
- // Renderer stays in bounds in every state, at every food cell, at any size.
- for(int phase=0;phase<5;++phase){gSnake.reset(9);gSnake.phase=Phase(phase);gSnake.best=999;gSnake.score=357;
+ // Renderer stays on screen in every state and at every food cell.
+ for(int phase=0;phase<5;++phase){gSnake.reset(9);gSnake.phase=Phase(phase);
   for(int c=0;c<kCells;++c){gSnake.food=uint16_t(c);renderSnakeUi();}}
- {std::vector<int> cells;for(int c=0;c<kCells;++c)cells.push_back(c);shape(gSnake,cells,Dir::Right,0);gSnake.phase=Phase::Won;renderSnakeUi();}
+ // A full board fills the screen, so the game uses all of it.
+ {std::vector<int> cells;for(int c=0;c<kCells;++c)cells.push_back(c);shape(gSnake,cells,Dir::Right,0);gSnake.phase=Phase::Won;gCanvas=Canvas{};renderSnakeUi();
+  assert(gCanvas.right==240&&gCanvas.bottom>=130);}
  // Random play always keeps the board consistent and ends properly.
  for(int run=0;run<300;++run){Game r;r.reset(uint32_t(run)*2654435761U+1);r.play(0);
   for(int i=0;i<4000&&r.phase==Phase::Playing;++i){r.turn(Dir(r.random()%4));

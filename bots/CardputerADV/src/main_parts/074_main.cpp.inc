@@ -48,42 +48,26 @@ bool handleSnakeKey(char key, const Keyboard_Class::KeysState& keys) {
 void renderSnakeUi() {
   beginSnake();
   auto& d = gCanvas;
-  const uint16_t bg = rgb565_local(8, 13, 22), muted = rgb565_local(157, 174, 195);
-  const uint16_t field = rgb565_local(3, 7, 12), edge = rgb565_local(100, 109, 121);
-  const uint16_t bodyColor = rgb565_local(46, 190, 110), headColor = rgb565_local(74, 238, 192);
-  const uint16_t red = rgb565_local(228, 39, 55), amber = rgb565_local(255, 185, 45);
-  constexpr int kLeft = 7, kTop = 13, kCell = 6;
-  const bool playing = gSnake.phase == snake::Phase::Playing;
-  const bool lost = gSnake.phase == snake::Phase::Lost;
-  const bool won = gSnake.phase == snake::Phase::Won;
-  d.fillScreen(bg); d.setFont(&fonts::Font0);
-  d.fillRect(kLeft, kTop, snake::kCols * kCell, snake::kRows * kCell, field);
-  d.drawRect(kLeft - 1, kTop - 1, snake::kCols * kCell + 2, snake::kRows * kCell + 2, edge);
-  if (!won) {
-    const int x = kLeft + (gSnake.food % snake::kCols) * kCell, y = kTop + (gSnake.food / snake::kCols) * kCell;
-    d.fillCircle(x + 2, y + 2, 2, red);
+  // The board is the whole screen, and its edges are the walls. There's no text,
+  // so a still snake is dimmed and a lost one has a red head.
+  constexpr int kTop = 2, kCell = 10, kBlock = kCell - 1;
+  const bool moving = gSnake.phase == snake::Phase::Playing;
+  const uint16_t field = rgb565_local(3, 7, 12), wall = rgb565_local(100, 109, 121);
+  const uint16_t red = rgb565_local(228, 39, 55);
+  const uint16_t bodyColor = moving ? rgb565_local(46, 190, 110) : wall;
+  const uint16_t headColor = gSnake.phase == snake::Phase::Lost ? red
+      : moving ? rgb565_local(74, 238, 192) : TFT_WHITE;
+  d.fillScreen(wall);
+  d.fillRect(0, kTop, snake::kCols * kCell, snake::kRows * kCell, field);
+  if (gSnake.phase != snake::Phase::Won) {
+    const int x = (gSnake.food % snake::kCols) * kCell, y = kTop + (gSnake.food / snake::kCols) * kCell;
+    d.fillCircle(x + kBlock / 2, y + kBlock / 2, kBlock / 2, red);
   }
   for (int i = 0; i < gSnake.length; ++i) {
     const int cell = gSnake.cellOf(i);
-    const uint16_t color = i < gSnake.length - 1 ? bodyColor : lost ? red : headColor;
-    d.fillRect(kLeft + (cell % snake::kCols) * kCell, kTop + (cell / snake::kCols) * kCell, 5, 5, color);
+    d.fillRect((cell % snake::kCols) * kCell, kTop + (cell / snake::kCols) * kCell, kBlock, kBlock,
+               i < gSnake.length - 1 ? bodyColor : headColor);
   }
-  d.setFont(&fonts::Font2); d.setTextColor(headColor, bg); d.setCursor(132, 8); d.print("SNAKE");
-  d.setFont(&fonts::Font0); d.setTextColor(muted, bg);
-  d.setCursor(132, 29); d.print("Score " + String(int(gSnake.score)));
-  d.setCursor(132, 41); d.print("Best " + String(int(gSnake.best)));
-  d.setCursor(132, 53); d.print("Length " + String(int(gSnake.length)));
-  const char* state = "READY";
-  const char* action = "Enter: start";
-  if (playing) { state = "GO!"; action = "Enter: pause"; }
-  else if (gSnake.phase == snake::Phase::Paused) { state = "PAUSED"; action = "Enter: resume"; }
-  else if (lost) { state = "GAME OVER"; action = "Enter: new game"; }
-  else if (won) { state = "YOU WIN!"; action = "Enter: new game"; }
-  d.setTextColor(TFT_WHITE, bg); d.setCursor(132, 67); d.print(state);
-  d.setTextColor(amber, bg); d.setCursor(132, 79); d.print(action);
-  d.setTextColor(muted, bg); d.setCursor(132, 91); d.print("WASD / arrows");
-  d.setCursor(132, 101); d.print("N: new game");
-  d.setCursor(132, 111); d.print("Esc exit Tab menu");
   renderLauncherOverlay(); renderDebugOverlay();
 }
 } // namespace
