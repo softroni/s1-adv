@@ -41,7 +41,7 @@ struct String:std::string {
 enum class AssistantPulseState{Ready,Recording,Thinking,Playback,Realtime};
 enum class VoiceRequestPhase{None,Recording,Sending,Processing,Accepted,Reply,Error};
 bool gRealtimeActive=false,gRealtimeRecording=false,gRealtimeAwaiting=false,gRealtimeConnected=false;
-bool gRecording=false,gSubmitting=false,gThinking=false,gPlaybackActive=false,gVoiceNoticeVisible=false;
+bool gVoiceReplyPending=false,gRecording=false,gSubmitting=false,gThinking=false,gPlaybackActive=false,gVoiceNoticeVisible=false;
 bool gAssistantPendingVisible=false,gBootBackgroundActive=false;
 bool gVoiceCapturePreparing=false,gG0VoicePending=false;
 VoiceRequestPhase gVoiceRequestPhase=VoiceRequestPhase::None;

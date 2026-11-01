@@ -143,20 +143,29 @@ void renderChatUi() {
     d.drawRoundRect(4, 4, 232, transcriptBottom - 2, 10, rgb565_local(18, 35, 50));
   }
 
-  for (int i = startIndex; i < endIndex; ++i) {
-    LineKind kind = lines[i].kind;
+  const int bubbleRight = 230;
+  for (int i = startIndex; i < endIndex;) {
+    // Every wrapped line of one message shares a single bubble, sized to its text.
+    int last = i;
+    int widest = 0;
+    while (last < endIndex && lines[last].chatIndex == lines[i].chatIndex) {
+      widest = max<int>(widest, d.textWidth(lines[last].text));
+      ++last;
+    }
+    const int rows = last - i;
+    const LineKind kind = lines[i].kind;
     uint16_t bubble = kind == LineKind::User ? userBg : (kind == LineKind::Assistant ? aiBg : sysBg);
     uint16_t ink = kind == LineKind::User ? accent : (kind == LineKind::Assistant ? green : muted);
-    int bx = kind == LineKind::User ? 22 : 8;
-    int bw = showFace ? 212 : 224;
-    if (kind == LineKind::User && !showFace) {
-      bw = 210;
-    }
-    d.fillRoundRect(bx, y - 1, bw, lineHeight + 1, 4, bubble);
+    const int bw = min<int>(widest + 10, chatWrapWidth(showFace) + 10);
+    const int bx = kind == LineKind::User ? bubbleRight - bw : 8;
+    d.fillRoundRect(bx, y - 1, bw, rows * (lineHeight + 2) - 1, 4, bubble);
     d.setTextColor(ink, bubble);
-    d.setCursor(bx + 5, y);
-    d.print(fitCurrentFontToWidth(lines[i].text, bw - 10));
-    y += lineHeight + 2;
+    for (int row = i; row < last; ++row) {
+      d.setCursor(bx + 5, y);
+      d.print(fitCurrentFontToWidth(lines[row].text, bw - 10));
+      y += lineHeight + 2;
+    }
+    i = last;
   }
   d.setTextSize(1);
   if (maxOffset > 0 && !showFace) {

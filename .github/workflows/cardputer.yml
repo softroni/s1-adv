@@ -77,6 +77,8 @@ jobs:
       - run: python scripts/test_flash_cardputer.py
       - run: python scripts/test_voice_capture_core.py
       - run: python scripts/test_text_size.py
+      - run: python scripts/test_reply_wait_status.py
+      - run: python scripts/test_chat_bubbles.py
       - run: python scripts/test_mesh_leaf_state.py
       - run: python scripts/test_mesh_lifecycle.py
       - run: python scripts/test_mesh_radio.py
@@ -89,6 +91,7 @@ jobs:
       - run: python scripts/test_pocket_synth_audio.py
       - run: python scripts/test_checkers_demo.py
       - run: python scripts/test_minesweeper.py
+      - run: python scripts/test_snake.py
       - run: python scripts/test_internet_radio.py
       - run: python scripts/test_internet_radio_transport.py
       - run: python scripts/test_internet_radio_worker.py

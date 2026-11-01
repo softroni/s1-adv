@@ -305,6 +305,7 @@ void setUiMode(UiMode mode) {
   if (modeChanged && mode == UiMode::Chess) beginChessDemo();
   if (modeChanged && mode == UiMode::Checkers) beginCheckersDemo();
   if (modeChanged && mode == UiMode::Minesweeper) beginMinesweeper();
+  if (modeChanged && mode == UiMode::Snake) beginSnake();
   if (modeChanged && mode == UiMode::Radio) beginInternetRadio();
   if (modeChanged && mode == UiMode::VlcRemote) beginVlcRemote();
   if (modeChanged && mode == UiMode::ChessMind) beginChessMind();

@@ -54,7 +54,7 @@ void acceptPendingAssistantRequest(const String& transcript, const String& ackno
   gAssistantPendingVisible = false;
   gVoiceReplyAfterSeq = afterSeq;
   gVoiceReplyPendingMs = millis();
-  gVoiceReplyNotifyUntilMs = millis() + 600000U;
+  gVoiceReplyNotifyUntilMs = millis() + kReplyWaitTimeoutMs;
   gLastInboxAutoPollMs = 0;
   const String receipt = acknowledgement.isEmpty()
       ? String("Request accepted. The reply will arrive here.") : acknowledgement;
@@ -64,13 +64,29 @@ void acceptPendingAssistantRequest(const String& transcript, const String& ackno
   // Do not skip an older final reply that raced this HTTP acknowledgement.
   // The ordered inbox drain advances its cursor when it sees this stored seq.
   rememberStoredAssistantSeq(receiptSeq);
-  setFaceMode(FaceMode::Idle);
-  setStatus("Sent", 1200);
+  setFaceMode(FaceMode::Thinking);
+  setStatus("Thinking...", 0);
   showVoiceNotice(receipt, true);
   if (gCanvasSpriteActive) M5Cardputer.Speaker.tone(1047, 90);
   logf("[REQUEST] accepted after_seq=%u receipt_seq=%u mode=%d visible=%d",
        static_cast<unsigned>(afterSeq), static_cast<unsigned>(receiptSeq),
        static_cast<int>(gUiMode), static_cast<int>(gVoiceNoticeVisible));
+}
+
+// The assistant can work for minutes after the upload finishes. Keep saying so
+// until the reply arrives, or the device looks idle while it waits.
+void serviceReplyWaitStatus() {
+  static bool shown = false;
+  if (gVoiceReplyPending && !gRecording && !gSubmitting) {
+    const String text = "Thinking... " + String((millis() - gVoiceReplyPendingMs) / 1000U) + "s";
+    if (gStatusText != text) setStatus(text, 0);
+    if (gFaceMode == FaceMode::Idle) setFaceMode(FaceMode::Thinking);
+    shown = true;
+  } else if (shown) {
+    shown = false;
+    if (gStatusText.startsWith("Thinking...")) setStatus("Ready", 0);
+    if (gFaceMode == FaceMode::Thinking && !gThinking && !gSubmitting) setFaceMode(FaceMode::Idle);
+  }
 }
 
 void applyFirmwareJobState(const String& state, const String& requestId) {
@@ -98,7 +114,7 @@ void applyFirmwareJobState(const String& state, const String& requestId) {
 
 const char* homeStatusLabel(bool updateReady) {
   if (gG0VoicePending || gVoiceCapturePreparing) return "LOADING";
-  if (gSubmitting || gThinking || voiceRequestBusyUi()) return "THINKING";
+  if (gSubmitting || gThinking || gVoiceReplyPending || voiceRequestBusyUi()) return "THINKING";
   if (gVoiceReplySpeechBusy || !gQueuedVoiceReplySpeech.isEmpty()) return "LOADING";
   // Voice/Realtime can intentionally pause polling for minutes. An old job
   // timestamp alone is not evidence that the Bridge connection has failed.
@@ -215,7 +231,7 @@ void renderVoiceNotice() {
   d.setFont(&fonts::Font2);
   d.setTextColor(accent, panel);
   d.setCursor(14, y + 5);
-  d.print(error ? "Check delivery" : gVoiceNoticePending ? "Request accepted" : "AI Agent");
+  d.print(error ? "Check delivery" : gVoiceNoticePending ? "Thinking..." : "AI Agent");
   d.setFont(&fonts::efontCN_12);
   d.setTextSize(textScale);
   d.setTextColor(TFT_WHITE, panel);

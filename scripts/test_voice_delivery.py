@@ -218,7 +218,8 @@ int main(){
  gSubmitting=false;gThinking=false;gVoiceRequestTranscript="Russian input is retained";
  showVoiceNotice("Firmware request accepted on the server",true);
  assert(!voiceRequestBusyUi());
- gAssistantPendingVisible=true;assert(assistantPulseState()==AssistantPulseState::Ready);
+ gAssistantPendingVisible=true;
+ assert(assistantPulseState()==(gVoiceReplyPending?AssistantPulseState::Thinking:AssistantPulseState::Ready));
  assert(gVoiceRequestPhase==VoiceRequestPhase::Accepted&&gVoiceRequestTranscript=="Russian input is retained");
  assert(!handleVoiceRequestEscape()&&!gVoiceNoticeVisible&&gUiMode==UiMode::Home&&gVoiceReplyPending);
  showVoiceNotice("Actual answer",false);assert(gVoiceRequestPhase==VoiceRequestPhase::Reply);
@@ -234,7 +235,7 @@ int main(){
   assert(voiceRequestBusyUi()&&assistantPulseState()==AssistantPulseState::Thinking);
   gVoiceRequestPhase=VoiceRequestPhase::Processing;assert(voiceRequestBusyUi());
   showVoiceNotice("Request",true);assert(!voiceRequestBusyUi()&&!gVoiceNoticeVisible&&gUiMode==mode);
-  assert(assistantPulseState()==AssistantPulseState::Ready&&gVoiceReplyPending);
+  assert(assistantPulseState()==AssistantPulseState::Thinking&&gVoiceReplyPending); // Never idle while a reply is pending.
   showVoiceNotice("Answer",false);assert(!gVoiceNoticeVisible&&gUiMode==mode);
  }
 }
@@ -248,7 +249,7 @@ for forbidden in ['setUiMode(', 'setStatus(', 'render(', 'gCanvas', 'logf(', 'vT
 escape=function('047_main.cpp.inc','bool handleGlobalEscape()')
 assert escape.index('handleVoiceRequestEscape()') < escape.index('setUiMode(UiMode::Home)')
 state=function('009_main.cpp.inc','AssistantPulseState assistantPulseState()')
-assert 'gVoiceReplyPending' not in state
+assert 'gVoiceReplyPending' in state  # A pending reply is work in progress, never idle.
 print('PASS voice transitions, busy dismissal guard, accepted receipt, Enter chat, Esc Home; pending server task survives UI dismissal')
 typing=function('048_main.cpp.inc','void handleTypingKey(')
 assert typing.index('handleUnreadAssistantKey(')<typing.index('handleVoiceNoticeKey(')<typing.index('handlePetKey(')

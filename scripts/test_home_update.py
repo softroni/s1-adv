@@ -40,7 +40,7 @@ struct Keyboard_Class {struct KeysState {bool ctrl=false,alt=false,fn=false,ente
 struct {bool parsed=false;String url,sha256,version;uint32_t size=0;} gOtaManifest;
 const char* kAppVersion="0.2.161-dev";
 bool gLauncherVisible=false,gChatCommandsVisible=false,gVoiceNoticeVisible=false;
-bool gBlockingInputPumpActive=false,gRecording=false,gSubmitting=false,gThinking=false;
+bool gBlockingInputPumpActive=false,gVoiceReplyPending=false,gRecording=false,gSubmitting=false,gThinking=false;
 bool gPlaybackActive=false,gRealtimeActive=false,gRealtimeDialBusy=false,gOtaApplyInProgress=false;
 bool gPendingOtaCheckAction=false,gPendingOtaApplyAction=false,gInboxHttpBusy=false;
 bool gVoiceDialBusy=false,gVoiceReplySpeechBusy=false,gTextTurnTaskHandle=false;

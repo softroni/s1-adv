@@ -20,7 +20,7 @@ template<class T>bool deferInternetRadioMode(T){return false;}
 #include <string>
 #include <vector>
 struct String:std::string {using std::string::string;String(const std::string&s):std::string(s){}bool isEmpty()const{return empty();}};
-enum class UiMode{Home,ChatFace,Face,Hero,ChatFull,Ota,Clock,Focus,Settings,FocusSettings,ScreenSettings,Nes,Sonar,RfidLab,IrRemote,Tetris,KeyRush,BrainFlow,Files,Chess,Checkers,Minesweeper,Radio,VlcRemote};UiMode gUiMode=UiMode::Home;
+enum class UiMode{Home,ChatFace,Face,Hero,ChatFull,Ota,Clock,Focus,Settings,FocusSettings,ScreenSettings,Nes,Sonar,RfidLab,IrRemote,Tetris,KeyRush,BrainFlow,Files,Chess,Checkers,Minesweeper,Snake,Radio,VlcRemote};UiMode gUiMode=UiMode::Home;
 namespace brainflow {enum class Phase {Menu,Playing,Feedback,Paused,Finished};}
 struct{brainflow::Phase phase=brainflow::Phase::Menu;}gBrainFlow;
 struct{bool running=false;}gKeyRush;
@@ -36,7 +36,7 @@ String gActiveTextTurn,gInputBuffer,gDeviceToken="private-in-memory",gHubHost="b
 String gQueuedVoiceReplySpeech;
 std::deque<String> gPendingTextTurns,gInboxAckQueue;
 uint32_t now=30000,gOtaLastAutoCheckMs=0,gLastUserActivityMs=0,gLastUserInputMs=0,gLastInboxAutoPollMs=0,gInboxRetryAfterMs=0;
-constexpr uint32_t kOtaAutoCheckIntervalMs=20000,kOtaScreenCheckIntervalMs=5000,kInboxAutoPollIntervalMs=15000;
+constexpr uint32_t kOtaAutoCheckIntervalMs=20000,kOtaScreenCheckIntervalMs=5000,kInboxAutoPollIntervalMs=15000,kReplyWaitTimeoutMs=1800000;
 constexpr const char* kFirmwareManifestFetchPath="/api/cardputer/firmware/manifest";
 constexpr const char* kAppVersion="0.2.167-dev";constexpr const char* kBuildGitSha="test";
 bool gInboxHttpBusy=false,gVoiceReplyPending=false,gPendingOtaCheckAction=false,gPendingOtaApplyAction=false,failStart=false;
@@ -126,6 +126,7 @@ int main(){
  gUiMode=UiMode::Chess;assert(!autoInboxPollAllowed());
  gUiMode=UiMode::Checkers;assert(!autoInboxPollAllowed());
  gUiMode=UiMode::Minesweeper;assert(!autoInboxPollAllowed());
+ gUiMode=UiMode::Snake;assert(!autoInboxPollAllowed());
  // Active games and timing-sensitive peripherals also suppress background work.
  for(auto m:{UiMode::Settings,UiMode::FocusSettings,UiMode::ScreenSettings}){gUiMode=m;assert(autoInboxPollAllowed());}
  gUiMode=UiMode::Tetris;gTetrisStarted=true;assert(!autoInboxPollAllowed());

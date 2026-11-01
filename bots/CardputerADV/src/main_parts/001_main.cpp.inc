@@ -52,6 +52,7 @@
 #include "pocket_synth_audio.h"
 #include "checkers_demo.h"
 #include "minesweeper.h"
+#include "snake.h"
 #include "radio_catalog.h"
 #include "internet_radio_transport.h"
 #include "vlc_remote.h"
@@ -89,7 +90,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.207-dev"
+#define APP_VERSION "0.2.209-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"
@@ -245,6 +246,8 @@ constexpr uint32_t kBatteryHistorySampleIntervalMs = 30000;
 constexpr uint32_t kBatteryDrainMinWindowMs = 5UL * 60UL * 1000UL;
 constexpr uint8_t kBatteryHistoryCapacity = 120;
 constexpr uint32_t kInboxAutoPollIntervalMs = 15000;
+// Matches how long the bridge lets Claude work on a turn, such as a firmware build.
+constexpr uint32_t kReplyWaitTimeoutMs = 1800000;
 constexpr uint32_t kTimeSyncRetryMs = 15000;
 constexpr uint32_t kTimeResyncMs = 6UL * 60UL * 60UL * 1000UL;
 constexpr uint32_t kFocusMinDurationSec = 60;

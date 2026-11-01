@@ -402,7 +402,7 @@ void serviceAutoInboxPoll() {
   uint32_t now = millis();
   if (gInboxHttpBusy || (now < 30000U && gUiMode != UiMode::Ota) ||
       now - gLastUserInputMs < 1000U || !autoInboxPollAllowed()) return;
-  if (gVoiceReplyPending && now - gVoiceReplyPendingMs > 300000U) gVoiceReplyPending = false;
+  if (gVoiceReplyPending && now - gVoiceReplyPendingMs > kReplyWaitTimeoutMs) gVoiceReplyPending = false;
   const uint32_t otaInterval = gUiMode == UiMode::Ota ? kOtaScreenCheckIntervalMs : kOtaAutoCheckIntervalMs;
   const bool otaDue = now - gOtaLastAutoCheckMs >= otaInterval &&
                       !gPendingOtaCheckAction && !gPendingOtaApplyAction;

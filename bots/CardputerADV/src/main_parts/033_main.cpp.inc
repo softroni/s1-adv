@@ -144,6 +144,8 @@ void startRecording() {
   }
   if (!captureQueued) { failCaptureStart(); return; }
   preparation.finish();
+  // Speech and its reply belong in the conversation, not a card over Home.
+  if (gUiMode == UiMode::Home || gUiMode == UiMode::Clock) setUiMode(UiMode::ChatFull);
   beginVoiceRequestUi();
   setFaceMode(FaceMode::Listening);
   setStatus("Recording");

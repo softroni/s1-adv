@@ -5045,7 +5045,7 @@ class BridgeRuntime {
     const confirmed = ack.upstream_accepted === true;
     const queued = ack.delivery_state === "queued";
     const receipt = queued ? "Request queued. The reply will arrive in Inbox."
-      : (confirmed ? "Request accepted. The reply will arrive in Inbox."
+      : (confirmed ? (this.upstream instanceof ClaudeCodeClient ? "Claude is working on it." : "Request accepted. The reply will arrive in Inbox.")
         : "Request stored. Delivery confirmation is pending; check Inbox before retrying.");
     return {
       ...await this.buildTurnResponse({ req, device, topic, transcript, replyText: receipt, includeAudio: false }),

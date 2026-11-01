@@ -14,6 +14,9 @@
       case UiMode::Minesweeper:
         renderMinesweeperUi();
         break;
+      case UiMode::Snake:
+        renderSnakeUi();
+        break;
       case UiMode::Mesh:
         renderMeshUi();
         break;
@@ -406,6 +409,7 @@ void loop() {
   traceUiService("serviceInboxNetworkCompletion", [] { serviceInboxNetworkCompletion(); });
   traceUiService("serviceVoicePreconnect", [] { serviceVoicePreconnect(); });
   traceUiService("serviceVoiceReplySpeech", [] { serviceVoiceReplySpeech(); });
+  traceUiService("serviceReplyWaitStatus", [] { serviceReplyWaitStatus(); });
   if (!gCanvasSpriteActive && gUiMode != UiMode::Nes && !gInboxHttpBusy && !gVoiceReplySpeechBusy &&
       !gVoiceDialBusy && !gSubmitting && !gRecording && !gPlaybackActive && !gRealtimeDialBusy) {
     static uint32_t retryCanvasMs = 0;
@@ -444,6 +448,7 @@ void loop() {
   serviceChessDemo();
   serviceCheckersDemo();
   serviceMinesweeper();
+  serviceSnake();
   serviceBrainFlow();
   serviceTetris();
   serviceSmartLamp();

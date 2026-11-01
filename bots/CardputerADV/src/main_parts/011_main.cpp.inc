@@ -38,7 +38,10 @@ std::vector<VisualLine> buildVisualLines(int32_t pixelLimit) {
   std::vector<VisualLine> lines;
   int16_t chatIndex = 0;
   for (const auto& entry : gChatLines) {
-    String full = entry.prefix + ": " + normalizeEmojiDisplayText(entry.text);
+    // Side and colour show who is speaking, so only system notices keep a label.
+    const bool conversation = entry.kind == LineKind::User || entry.kind == LineKind::Assistant;
+    String full = normalizeEmojiDisplayText(entry.text);
+    if (!conversation) full = entry.prefix + ": " + full;
     auto wrapped = wrapText(full, pixelLimit);
     for (const auto& part : wrapped) {
       lines.push_back({part, entry.kind, chatIndex});
@@ -51,7 +54,7 @@ std::vector<VisualLine> buildVisualLines(int32_t pixelLimit) {
     while (dots.length() < dotCount) {
       dots += '.';
     }
-    auto pendingWrapped = wrapText("AI: " + dots, pixelLimit);
+    auto pendingWrapped = wrapText(dots, pixelLimit);
     for (const auto& part : pendingWrapped) {
       lines.push_back({part, LineKind::Assistant, -1});
     }

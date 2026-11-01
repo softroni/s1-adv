@@ -53,7 +53,7 @@ uint32_t gRecordStartMs=0;uint8_t gVoiceLevel8=0,gRecordNextChunkIndex=0;
 std::vector<uint8_t> gRecordInflightChunks;String gHubHost="example.test",gActiveRecordPath;
 constexpr size_t kRecordWriteBytes=512;constexpr uint32_t kMicSampleRate=16000;
 enum class FaceMode {Error,Listening};
-enum class UiMode {Home,Clock,Ota};UiMode gUiMode=UiMode::Home;
+enum class UiMode {Home,Clock,Ota,ChatFull};UiMode gUiMode=UiMode::Home;void setUiMode(UiMode mode){gUiMode=mode;}
 struct File {
  bool open=true;explicit operator bool()const{return open;}
  void setBufferSize(size_t){}size_t write(const uint8_t*,size_t n){return n;}

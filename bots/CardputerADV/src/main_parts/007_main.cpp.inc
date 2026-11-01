@@ -64,6 +64,8 @@ const char* uiModeName(UiMode mode) {
       return "BrainFlow";
     case UiMode::Tetris:
       return "Tetris";
+    case UiMode::Snake:
+      return "Snake";
     case UiMode::CMatrix:
       return "C-Matrix";
     case UiMode::Logs:

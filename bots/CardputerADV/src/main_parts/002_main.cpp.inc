@@ -186,6 +186,7 @@ enum class UiMode : uint8_t {
   Checkers,
   Mesh,
   Minesweeper,
+  Snake,
   Radio,
   VlcRemote,
   ChessMind,

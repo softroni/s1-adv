@@ -239,6 +239,8 @@ bool mapActionUiMode(String mode, UiMode& out) {
     out = UiMode::Radio;
   } else if (mode == "minesweeper" || mode == "mines") {
     out = UiMode::Minesweeper;
+  } else if (mode == "snake") {
+    out = UiMode::Snake;
   } else if (mode == "folders") {
     out = UiMode::AudioFolders;
   } else if (mode == "notes" || mode == "note" || mode == "notepad") {

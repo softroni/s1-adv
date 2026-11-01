@@ -36,7 +36,7 @@ enum class UiMode{Home,Clock,ChatFull,ChatFace};UiMode gUiMode=UiMode::Home;
 enum class VoiceRequestPhase{None,Recording,Sending,Processing,Accepted,Reply,Error};
 VoiceRequestPhase gVoiceRequestPhase;
 bool gInboxUnread=false,gVoiceNoticeVisible=true,gVoiceNoticePending=false,gLauncherVisible=false,gChatCommandsVisible=false;
-bool gVoiceReplyPending=false,gAssistantPendingVisible=true;
+constexpr unsigned kReplyWaitTimeoutMs=1800000;bool gVoiceReplyPending=false,gAssistantPendingVisible=true;
 unsigned gVoiceReplyNotifyUntilMs=0,gVoiceReplyAfterSeq=0,gInboxLastSeq=20,gVoiceReplyPendingMs=0;
 unsigned gLastInboxAutoPollMs=0,gVoiceNoticeShownMs=0;
 String gVoiceRequestTranscript,gVoiceNoticeText,gQueuedVoiceReplySpeech,gLastHttpDiag;
@@ -47,7 +47,7 @@ struct{void invalidate(){}}gUiFramePolicy;
 unsigned gLastRenderMs=0;bool painted=false;void render(){painted=true;}
 bool handleScreensaverWake(){return false;}
 String cleanReplyForDevice(String s){return s;}void removeLastUtf8Char(String& s){s.pop_back();}
-enum class FaceMode{Idle,Error};void setFaceMode(FaceMode){}
+enum class FaceMode{Idle,Thinking,Error};void setFaceMode(FaceMode){}
 void pushError(String){++errors;}void pushSystem(String){}void pushUser(String s){userText=s;}
 std::vector<String> history;unsigned cursorAtStorage=0;
 void appendAssistantReply(String s){cursorAtStorage=gInboxLastSeq;replyText=s;history.push_back(s);}void setStatus(String,int){}

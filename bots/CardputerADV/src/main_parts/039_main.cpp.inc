@@ -89,7 +89,7 @@ bool finishVoiceSubmission(bool transportOk, int statusCode, const String& respo
   }
 
   DynamicJsonDocument resp(4096);
-  gVoiceReplyNotifyUntilMs = millis() + 600000U;
+  gVoiceReplyNotifyUntilMs = millis() + kReplyWaitTimeoutMs;
   auto err = deserializeJson(resp, response);
   if (err) {
     showVoiceRequestError("Could not read the server receipt. Open chat to check delivery.");

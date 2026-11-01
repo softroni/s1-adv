@@ -27,12 +27,15 @@ visible until retry or exit. The firmware uses one configured conversation;
 there is no topic browser or topic creation/switching.
 
 Device Settings → Clock format switches between 12h AM/PM (default) and 24h.
-Ordinary voice keeps the original REC graphics during capture and THINK while
-sending and waiting for the server receipt. A background task stops blocking the
-device as soon as its receipt arrives. On Home, a compact card shows the accepted
-request and recognized text, or the answer. Enter opens AI Chat; Escape closes
-the card while the server task continues. Voice started in chat returns its
-receipt and answer inline. The Home clock stays READY during background work.
+Display Settings → Text size switches chat and voice replies between Small, Medium
+and Large.
+Ordinary voice keeps the original REC graphics during capture and THINK until the
+reply arrives, with the status line counting how long the assistant has been working.
+A background task stops blocking the device as soon as its receipt arrives. Holding
+G0 on Home or the clock opens AI Chat, so your words and the answer appear there as
+a conversation: yours on the right, the assistant's on the left. From another app, a
+compact card shows the accepted request and recognized text, or the answer. Enter
+opens AI Chat; Escape closes the card while the server task continues.
 A transport failure shows a delivery warning and retains the original recording
 in Voice Notes. Check chat before retrying an uncertain delivery.
 Receipts and replies also appear on Clock. Text is painted before the receipt

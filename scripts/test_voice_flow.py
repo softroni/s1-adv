@@ -44,7 +44,7 @@ unsigned uiSceneKey(){return 0;}bool gUiInputPending=false;
 bool gCanvasSpriteActive=true,gSetupPortalActive=false,gVoiceNoticePending=false;
 bool gLauncherVisible=false,gChatCommandsVisible=false;
 bool gVoiceReplySpeechBusy=false,gTransferUiActive=false,gOtaApplyInProgress=false,gPendingRestart=false;
-bool gVoiceReplyPending=true;int gChatScrollOffset=12;
+bool gVoiceReplyPending=false;int gChatScrollOffset=12;
 int speakerPlaying=0;struct {struct {int isPlaying(){return speakerPlaying;}} Speaker;} M5Cardputer;
 String gStatusText,gVoiceNoticeText,gVoiceRequestTranscript;
 unsigned gStatusUntilMs=0,gLastUiSlowLogMs=0,gVoiceNoticeShownMs=0,gVoiceRequestProgress=0;
@@ -69,7 +69,7 @@ struct {
  void setCursor(int,int y){cursorY=y;}
  void print(String s){
   assert(cursorY>=panelY&&cursorY+(font==&fonts::Font2?16:font==&fonts::Font0?8:12)<=panelY+panelH);
-  if(s=="Request accepted")trace.push_back("ACCEPTED");else if(s=="AI Agent")trace.push_back("REPLY");
+  if(s=="Thinking...")trace.push_back("ACCEPTED");else if(s=="AI Agent")trace.push_back("REPLY");
   cardText.push_back(s);
  }
 } gCanvas;
@@ -114,6 +114,10 @@ int main(){
   showVoiceNotice("Please change the firmware",true);
   if(mode==UiMode::Home||mode==UiMode::Clock)expect({"READY"});else expect({"CHAT"});
   assert(gUiMode==mode); // Neither receipt nor reply jumps to a different app.
+  // While the assistant works, the device must never look idle.
+  gVoiceReplyPending=true;
+  if(mode==UiMode::Home||mode==UiMode::Clock)expect({"THINK"});else expect({"CHAT"});
+  gVoiceReplyPending=false;
   showVoiceNotice("The agent replied",false);
   if(mode==UiMode::Home||mode==UiMode::Clock)expect({"READY"});else expect({"CHAT"});
  }
@@ -142,7 +146,7 @@ int main(){
  gUiMode=UiMode::Home;beginVoiceRequestUi();gRealtimeActive=true;
  assert(!voiceRequestBusyUi()); // Realtime retains its own rendering path.
  gRealtimeActive=false;gSubmitting=gThinking=true;gVoiceRequestPhase=VoiceRequestPhase::Processing;
- openAssistantConversation();expect({"CHAT"});
+ gVoiceReplyPending=true;openAssistantConversation();expect({"CHAT"});
  assert(gVoiceReplyPending&&gSubmitting&&gThinking&&gVoiceRequestPhase==VoiceRequestPhase::Processing);
 }
 '''
