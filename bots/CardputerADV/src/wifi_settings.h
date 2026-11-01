@@ -10,6 +10,7 @@
 //   bool startScan();
 //   int  scanResults(std::vector<Network>&);   kScanRunning, kScanFailed, or a count.
 //   void stopScan();
+//   std::string scanTrouble();      Why the last scan failed, in words for the screen.
 //   void join(ssid, password);
 //   bool joined(ssid);              On exactly this network, with an address.
 //   bool notFound();
@@ -38,7 +39,11 @@ constexpr uint32_t kJoinTimeoutMs = 20000;
 constexpr uint32_t kJoinSettleMs = 1000;
 constexpr uint32_t kScanTimeoutMs = 16000;
 constexpr uint32_t kScanRetryMs = 1000;
-constexpr uint8_t kScanTries = 5;
+// A radio that was just told to stop dialing needs a moment before it takes a scan.
+constexpr uint32_t kScanSettleMs = 600;
+constexpr uint8_t kScanTries = 10;
+// A connected radio that refuses this often is stuck, and dropping the link is what frees it.
+constexpr uint8_t kScanTriesConnected = 3;
 constexpr int kScanRunning = -1;
 constexpr int kScanFailed = -2;
 
@@ -304,6 +309,7 @@ class App {
     }
     if (scanning()) radio.stopScan();
     mScan = Scan::Idle;
+    mDropped = false;
     mNotFound = false;
     revealed = false;
     mHeld = true;
@@ -359,14 +365,14 @@ class App {
       if (!mHeld && !radio.online()) {
         mHeld = true;
         radio.hold();
+        mScanAt = now + kScanSettleMs;
+        return;
       }
       if (radio.startScan()) {
         mScan = Scan::Running;
         mScanAt = now;
-      } else if (--mScanTries == 0) {
-        endScan("Scan failed. R to try again");
       } else {
-        mScanAt = now + kScanRetryMs;
+        retryScan(radio, now);
       }
       return;
     }
@@ -375,11 +381,11 @@ class App {
     if (count == kScanRunning) {
       if (now - mScanAt < kScanTimeoutMs) return;
       radio.stopScan();
-      endScan("Scan failed. R to try again");
+      endScan(radio, "Scan timed out. R to try again");
       return;
     }
     if (count < 0) {
-      endScan("Scan failed. R to try again");
+      retryScan(radio, now);
       return;
     }
     const bool onOther = !networks.empty() && selected == networks.size();
@@ -391,11 +397,33 @@ class App {
       if (networks[i].ssid == keep) selected = i;
     }
     scanned = true;
-    endScan(mNearby.empty() ? "No networks found. R to try again" : "");
+    endScan(radio, mNearby.empty() ? "No networks found. R to try again" : "");
   }
 
-  void endScan(const std::string& text) {
+  template <class Radio>
+  void retryScan(Radio& radio, uint32_t now) {
+    if (--mScanTries == 0) {
+      endScan(radio, radio.scanTrouble());
+      return;
+    }
+    if (!mHeld && kScanTries - mScanTries >= kScanTriesConnected) {
+      mDropped = true;
+      mHeld = true;
+      radio.hold();
+    }
+    mScan = Scan::Waiting;
+    mScanAt = now + kScanRetryMs;
+  }
+
+  template <class Radio>
+  void endScan(Radio& radio, const std::string& text) {
     mScan = Scan::Idle;
+    // A link dropped only to free the radio comes back as soon as the scan is over.
+    if (mDropped) {
+      mDropped = false;
+      mHeld = false;
+      radio.rejoinCurrent();
+    }
     if (text.empty()) changed = true;
     else say(text, Mood::Bad);
   }
@@ -404,7 +432,7 @@ class App {
   std::vector<Network> mNearby;
   uint32_t mScanAt = 0, mJoinAt = 0;
   uint8_t mScanTries = 0;
-  bool mHeld = false, mTypedName = false, mNotFound = false, mUsingSaved = false;
+  bool mHeld = false, mDropped = false, mTypedName = false, mNotFound = false, mUsingSaved = false;
 };
 
 }  // namespace wifi_settings

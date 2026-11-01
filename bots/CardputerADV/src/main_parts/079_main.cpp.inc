@@ -1,6 +1,15 @@
 // Settings > Wi-Fi: pick a saved or a nearby network and join it from the device, or forget one.
 // wifi_settings.h and wifi_store.h decide what happens. This is the radio, the SD card, the keys
 // and the screen.
+
+// The Arduino scan call only says that it failed. This keeps the driver's reason for the screen.
+esp_err_t gWifiScanError = ESP_OK;
+extern "C" esp_err_t __real_esp_wifi_scan_start(const wifi_scan_config_t* config, bool block);
+extern "C" esp_err_t __wrap_esp_wifi_scan_start(const wifi_scan_config_t* config, bool block) {
+  gWifiScanError = __real_esp_wifi_scan_start(config, block);
+  return gWifiScanError;
+}
+
 namespace {
 using wifi_settings::Mood;
 using wifi_settings::Screen;
@@ -112,8 +121,21 @@ struct WifiRadio {
   }
   bool startScan() {
     if (gPet.env.scanPending) return false;  // The pet would take these results for its own.
+    gWifiScanError = ESP_OK;
     WiFi.scanDelete();
     return WiFi.scanNetworks(true, true) != WIFI_SCAN_FAILED;
+  }
+  std::string scanTrouble() {
+    if (gPet.env.scanPending) return "Pet is scanning. R to try again";
+    char text[40];
+    if (gWifiScanError != ESP_OK) {
+      snprintf(text, sizeof(text), "Scan failed %x, %uK. R to retry", static_cast<unsigned>(gWifiScanError),
+               static_cast<unsigned>(ESP.getFreeHeap() / 1024));
+    } else {
+      snprintf(text, sizeof(text), "Scan lost, Wi-Fi %d. R to retry", static_cast<int>(WiFi.status()));
+    }
+    logf("[WIFI] %s", text);
+    return text;
   }
   int scanResults(std::vector<wifi_settings::Network>& out) {
     const int count = WiFi.scanComplete();

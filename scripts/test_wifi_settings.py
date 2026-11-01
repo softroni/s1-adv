@@ -30,6 +30,8 @@ for file, text in [
     ('063_main.cpp.inc', 'case UiMode::WifiSettings:')]:
     assert text in (parts / file).read_text(), (file, text)
 assert 'main_parts/079_main.cpp.inc' in (src / 'main.cpp').read_text()
+# Without this the wrapper is never called, and every scan error reads as lost results.
+assert '-Wl,--wrap=esp_wifi_scan_start' in (root / 'bots/CardputerADV/platformio.ini').read_text()
 
 # Everything that could dial the saved network has to stand aside during a switch.
 for file, body in [
@@ -82,7 +84,8 @@ struct FakeRadio {
   std::string link, savedName = "Home", savedPassword = "homepassword";
   std::vector<Network> found;
   bool isBusy = false, dialing = true, scanRuns = false, refuseScan = false, stale = false;
-  bool failScan = false, neverFinish = false;
+  bool failScan = false, neverFinish = false, refuseUntilHeld = false;
+  int failTimes = 0;
   bool failStore = false;
   int holds = 0, scans = 0, stops = 0, joins = 0, rejoins = 0, saves = 0, stores = 0, replaces = 0;
   std::string lastJoinName, lastJoinPassword;
@@ -92,11 +95,13 @@ struct FakeRadio {
   bool busy() { return isBusy; }
   void hold() { ++holds; dialing = false; }
   bool startScan() {
-    if (refuseScan || (dialing && link.empty())) return false;
+    if (refuseScan || (dialing && link.empty()) || (refuseUntilHeld && holds == 0)) return false;
     ++scans; scanRuns = true;
     return true;
   }
+  std::string scanTrouble() { return "Scan failed 3006, 40K. R to retry"; }
   int scanResults(std::vector<Network>& out) {
+    if (failTimes > 0) { --failTimes; return kScanFailed; }
     if (failScan) return kScanFailed;
     if (neverFinish) return kScanRunning;
     out = found; scanRuns = false;
@@ -176,21 +181,61 @@ void scanning() {
   assert(r.radio.holds == 0 && r.radio.scans == 1 && !r.app.ownsRadio() && r.app.scanned);
   assert(r.app.networks.size() == 3 && r.app.rows() == 4 && r.app.selected == 0);
 
-  // Dialing a network that isn't here blocks a scan until the radio is held.
+  // Dialing a network that isn't here blocks a scan until the radio is held, and the radio gets
+  // a moment to stop dialing first.
   Rig offline;
   offline.radio.link.clear();
   offline.open();
-  assert(offline.radio.holds == 1 && offline.radio.scans == 1 && offline.app.ownsRadio());
+  assert(offline.radio.holds == 1 && offline.radio.scans == 0 && offline.app.scanning());
+  offline.step(kScanSettleMs - 1);
+  assert(offline.radio.scans == 0);
+  offline.step(1);
+  offline.step();
+  assert(offline.radio.scans == 1 && offline.app.ownsRadio() && offline.app.scanned);
   offline.app.close(offline.radio);
   assert(offline.radio.rejoins == 1 && !offline.app.ownsRadio());
 
-  // Busy radio: a bounded number of tries, then an honest message.
+  // Busy radio: a bounded number of tries, then the reason it gave. The link is dropped to free
+  // it, and it comes back even though the scan failed.
   Rig refused;
   refused.radio.refuseScan = true;
   refused.app.rescan(refused.now);
-  for (int i = 0; i < 12; ++i) refused.step(kScanRetryMs);
+  for (int i = 0; i < kScanTriesConnected - 1; ++i) refused.step(kScanRetryMs);
+  assert(refused.radio.holds == 0 && !refused.app.ownsRadio());
+  refused.step(kScanRetryMs);
+  assert(refused.radio.holds == 1 && refused.app.ownsRadio() && refused.app.scanning());
+  for (int i = 0; i < kScanTries; ++i) refused.step(kScanRetryMs);
   assert(!refused.app.scanning() && refused.app.mood == Mood::Bad);
-  assert(refused.app.message.find("Scan failed") == 0);
+  assert(refused.app.message == "Scan failed 3006, 40K. R to retry");
+  assert(refused.radio.rejoins == 1 && !refused.app.ownsRadio());
+
+  // A stuck radio that needed its link dropped: the scan works and the link comes straight back.
+  Rig freed;
+  freed.radio.refuseUntilHeld = true;
+  freed.app.rescan(freed.now);
+  for (int i = 0; i < kScanTriesConnected + 2; ++i) freed.step(kScanRetryMs);
+  assert(freed.radio.holds == 1 && freed.radio.scans == 1 && freed.app.scanned);
+  assert(freed.radio.rejoins == 1 && !freed.app.ownsRadio() && freed.app.message.empty());
+
+  // Picking a network during that retry doesn't bring the old link back on top of the join.
+  Rig leaving;
+  leaving.radio.refuseUntilHeld = true;
+  leaving.app.scanned = true;
+  leaving.app.useSaved({{"Home", "homepassword"}});
+  leaving.app.rescan(leaving.now);
+  for (int i = 0; i < kScanTriesConnected; ++i) leaving.step(kScanRetryMs);
+  assert(leaving.app.ownsRadio() && leaving.app.scanning());
+  leaving.radio.link.clear();
+  leaving.pick("Home");
+  assert(leaving.radio.joins == 1 && leaving.radio.rejoins == 0 && !leaving.app.scanning());
+
+  // A pre-existing hold stays: an offline radio isn't handed back when its scan ends.
+  Rig stays;
+  stays.radio.link.clear();
+  stays.open();
+  stays.step(kScanSettleMs);
+  stays.step();
+  assert(stays.app.ownsRadio() && stays.radio.rejoins == 0);
 
   Rig stuck;
   stuck.radio.neverFinish = true;
@@ -198,11 +243,22 @@ void scanning() {
   assert(stuck.app.scanning());
   stuck.step(kScanTimeoutMs);
   assert(!stuck.app.scanning() && stuck.radio.stops == 1 && stuck.app.mood == Mood::Bad);
+  assert(stuck.app.message.find("Scan timed out") == 0);
+
+  // Lost results are tried again.
+  Rig flaky;
+  flaky.radio.failTimes = 2;
+  flaky.open();
+  assert(flaky.app.scanning() && flaky.radio.scans == 1);
+  for (int i = 0; i < 4; ++i) flaky.step(kScanRetryMs);
+  assert(!flaky.app.scanning() && flaky.app.scanned && flaky.radio.scans == 3 && flaky.app.message.empty());
 
   Rig failed;
   failed.radio.failScan = true;
   failed.open();
+  for (int i = 0; i < 2 * kScanTries; ++i) failed.step(kScanRetryMs);
   assert(!failed.app.scanning() && failed.app.message.find("Scan failed") == 0);
+  assert(failed.radio.rejoins == 1 && !failed.app.ownsRadio());
 
   Rig empty;
   empty.radio.found.clear();

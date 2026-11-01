@@ -8,6 +8,7 @@
 | `192.168.4.1` shows your router or `blocked.eero.com` | You aren't on the Cardputer's setup Wi-Fi. eero uses the same address. Join the setup Wi-Fi, and unplug Ethernet to that router for a moment |
 | Device opens setup | Press Enter on that screen to join Wi-Fi on the device. For the bridge URL and token, use the portal it shows, or configure private `.env` before building |
 | Wi-Fi fails | 2.4 GHz coverage and credentials; captive portals need site-specific support. To change network, see [Wi-Fi controls](CONTROLS.md#wi-fi) |
+| Wi-Fi scan says "Scan failed" | The device tries for about 10 seconds first. The message gives the radio's error code and the free memory. `3006` means the radio is busy connecting. "Scan lost" means the scan started and its results never arrived |
 | Saved networks missing | Check the SD card. If Wi-Fi settings says it couldn't read them, the file was damaged or came from another Cardputer. It's set aside as `/wifi/networks.bad`, and networks are saved again as they connect |
 | Bridge returns 503 | Proxy upstream, bridge listening port, service logs and gateway connection |
 | Service says active but no port listens | Check gateway handshake; update bridge client with bounded connection timeout, then restart only the bridge |
