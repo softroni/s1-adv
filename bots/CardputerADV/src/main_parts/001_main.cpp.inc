@@ -57,6 +57,7 @@
 #include "snake.h"
 #include "nfc_notes.h"
 #include "air_music.h"
+#include "flappy.h"
 #include "radio_catalog.h"
 #include "internet_radio_transport.h"
 #include "vlc_remote.h"
@@ -94,7 +95,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.215-dev"
+#define APP_VERSION "0.2.216-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"

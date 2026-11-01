@@ -68,6 +68,8 @@ const char* uiModeName(UiMode mode) {
       return "Snake";
     case UiMode::AirMusic:
       return "Air Music";
+    case UiMode::Flappy:
+      return "Flappy Bird";
     case UiMode::NfcNotes:
       return "NFC Notes";
     case UiMode::CMatrix:

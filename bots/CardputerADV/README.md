@@ -52,7 +52,10 @@ bearing; a single stationary HC-SR04 cannot determine left/right angle.
 **Air Music** works with the M5Stack I2C ultrasonic unit (RCWL-9620, address 0x57), plugged
 into the Grove port. Open it from Games in the launcher, or type `/music` in chat. It is a
 different sensor from the HC-SR04 that Sonar uses, and only one app can use the Grove port
-at a time. Air Music and NFC Notes each release it when they close.
+at a time. Air Music, Flappy Bird and NFC Notes each release it when they close.
+
+**Flappy Bird** uses the same unit: a hand 6 to 30 cm above it steers the bird. Any key
+flaps instead, so it also plays without the sensor. Open it from Games, or type `/flappy`.
 
 ## NFC Notes
 

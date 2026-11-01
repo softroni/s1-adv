@@ -52,9 +52,9 @@ struct App {
 };
 
 // The sensor takes 120 ms to measure, far too long to hold up the main loop, so a reading
-// is started on one call and collected on a later one.
-template <class Sensor>
-void poll(App& app, Sensor& sensor, uint32_t now) {
+// is started on one call and collected on a later one. Flappy Bird listens the same way.
+template <class Listener, class Sensor>
+void poll(Listener& app, Sensor& sensor, uint32_t now) {
   if (app.waiting) {
     if (now - app.atMs < kMeasureMs) return;
     app.waiting = false;

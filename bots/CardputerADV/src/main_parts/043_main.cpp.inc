@@ -1379,6 +1379,10 @@ bool handleLocalCommand(const String& input) {
     setUiMode(UiMode::AirMusic);
     return true;
   }
+  if (cmd == "/flappy") {
+    setUiMode(UiMode::Flappy);
+    return true;
+  }
 
   if (cmd == "/nes") { setUiMode(UiMode::Nes); return true; }
   if (cmd == "/tetris" || cmd == "/game") {

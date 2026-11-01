@@ -16,6 +16,7 @@
 - `/calc`, `/alarm`, `/stopwatch`, `/assets` and `/library` open local tools.
 - `/nfc` opens NFC Notes, which reads tags and saves a name or note on them.
 - `/music` opens Air Music, which plays notes as you wave a hand over an ultrasonic unit.
+- `/flappy` opens Flappy Bird, steered by hand over the same unit or flapped with Space.
 
 This firmware has evolved across development versions. Prefer the command help
 on your built device for current shortcuts. Specialized IR, RFID and sonar
@@ -41,6 +42,15 @@ unit (address 0x57) on the Grove port.
 
 Hold a hand 4 to 44 cm above the sensor. Closer is higher, and there are ten notes, each
 about 4 cm apart. Move away to stop. Esc leaves.
+
+## Flappy Bird
+
+Flappy Bird is under Tab, Games, and `/flappy` opens it. Point the ultrasonic unit up and
+hold a hand over it: 6 cm is the bottom of the screen and 30 cm is the top, so the bird
+follows your hand. Take your hand away and the bird falls.
+
+Space or any other key flaps instead, so it also plays without the sensor. After a crash,
+the score shows for a moment and the next game is ready to start. Esc leaves.
 
 Realtime shows CONNECT, LISTEN, THINK, SPEAK, READY or ERROR above the large eyes.
 MIC ON and the input meter appear only during recording. Connection errors remain
