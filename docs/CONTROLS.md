@@ -49,8 +49,9 @@ Flappy Bird is under Tab, Games, and `/flappy` opens it. Point the ultrasonic un
 hold a hand over it: 6 cm is the bottom of the screen and 30 cm is the top, so the bird
 follows your hand. Take your hand away and the bird falls.
 
-Space or any other key flaps instead, so it also plays without the sensor. After a crash,
-the score shows for a moment and the next game is ready to start. Esc leaves.
+Space or any other key flaps instead, so it also plays without the sensor. The pipes speed
+up every 5 points, up to triple speed at 50 points. After a crash, the score shows for a
+moment and the next game is ready to start. Esc leaves.
 
 Realtime shows CONNECT, LISTEN, THINK, SPEAK, READY or ERROR above the large eyes.
 MIC ON and the input meter appear only during recording. Connection errors remain

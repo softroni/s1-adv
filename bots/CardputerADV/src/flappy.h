@@ -13,7 +13,9 @@ constexpr int kLargestGap = 60, kSmallestGap = 48;
 constexpr uint32_t kStepMs = 33;
 constexpr int kLostSteps = 45;  // A moment to see the score.
 constexpr int32_t kGravity = 72, kFlap = -819, kFallLimit = 1280;
-constexpr int32_t kStartSpeed = 333, kTopSpeed = 563, kSpeedGain = 6;
+// Pipes speed up every 5 points, reaching triple the starting speed at 50.
+constexpr int32_t kStartSpeed = 333, kTopSpeed = 3 * kStartSpeed, kSpeedStep = 67;
+constexpr int kPointsPerSpeedStep = 5;
 
 // A hand 6 to 30 cm from the sensor covers the screen, and higher is further away.
 constexpr uint32_t kHandLowMm = 60, kHandHighMm = 300, kHandGoneMm = 500;
@@ -74,7 +76,7 @@ struct Game {
     return randomState;
   }
   int32_t speed() const {
-    const int32_t faster = kStartSpeed + kSpeedGain * score;
+    const int32_t faster = kStartSpeed + kSpeedStep * (score / kPointsPerSpeedStep);
     return faster > kTopSpeed ? kTopSpeed : faster;
   }
   int currentGap() const {

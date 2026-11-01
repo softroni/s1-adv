@@ -153,6 +153,13 @@ int main(){
   int32_t xs[kPipes];for(int i=0;i<kPipes;++i)xs[i]=g.pipes[i].x;std::sort(xs,xs+kPipes);
   assert(xs[2]-xs[0]<=2*kPipeSpacing*kOne+2*g.speed());assert((xs[0]>>8)+kPipeWidth>=-5);}
  assert(g.score>100&&g.speed()==kTopSpeed&&g.currentGap()==kSmallestGap);
+ // Speed only changes on every fifth point, and stops at exactly triple.
+ for(int score=0;score<=2000;++score){g.score=uint16_t(score);
+  const int32_t expected=std::min<int32_t>(kStartSpeed*3,kStartSpeed+kSpeedStep*(score/5));
+  assert(g.speed()==expected);}
+ g.score=4;assert(g.speed()==kStartSpeed);g.score=5;assert(g.speed()>kStartSpeed);
+ g.score=49;assert(g.speed()<kStartSpeed*3);g.score=50;assert(g.speed()==kStartSpeed*3);
+ g.score=60000;assert(g.speed()==kStartSpeed*3);
  // Real play: the hand and the keys can both get a long way, on any layout.
  int handLow=100000,flapLow=100000;
  for(uint32_t s=1;s<=100;++s){handLow=std::min(handLow,handPilot(s*2654435761U));flapLow=std::min(flapLow,flapPilot(s*2654435761U));}
