@@ -50,6 +50,11 @@ const ISOLATION_ARGS = Object.freeze([
   "--disable-slash-commands"
 ]);
 
+// By default Claude Code records the system prompt on a conversation's first
+// request and reuses it on every resume, ignoring later text. Saved notes change
+// between turns, so without this they would never reach a running conversation.
+const FRESH_SYSTEM_PROMPT = Object.freeze(["--system-prompt-snapshot", "off"]);
+
 export const PROJECT_TOOLS = "Read,Write,Edit,Glob,Grep,Bash";
 // Claude Code's own web tools. Commands in Bash stay without a network, so this
 // adds looking things up, not pushing code or installing software.
@@ -167,6 +172,7 @@ export function claudeTurnArgs(settings, { appendSystemPrompt = "", sessionId = 
     "--model", settings.model,
     "--effort", settings.effort,
     ...ISOLATION_ARGS,
+    ...FRESH_SYSTEM_PROMPT,
     ...(settings.projectDir
       ? ["--tools", settings.webAccess ? `${PROJECT_TOOLS},${WEB_TOOLS}` : PROJECT_TOOLS,
           "--permission-mode", "acceptEdits", "--permission-prompts", "none",

@@ -280,6 +280,7 @@ test("the system prompt describes the access Claude really has", async t => {
 test("every turn runs tool-free and isolated from the owner's settings", () => {
   const args = claudeTurnArgs({ ...CLAUDE_CODE_DEFAULTS }, { appendSystemPrompt: "Be brief", sessionId: FIRST_ID });
   for (const flag of ["--restricted", "--strict-mcp-config", "--disable-slash-commands"]) assert.ok(args.includes(flag), flag);
+  assert.equal(args[args.indexOf("--system-prompt-snapshot") + 1], "off", "a resumed conversation must see current notes");
   assert.equal(args[args.indexOf("--tools") + 1], "");
   assert.equal(args[args.indexOf("--model") + 1], "claude-opus-5-5");
   assert.equal(args[args.indexOf("--effort") + 1], "xhigh");
