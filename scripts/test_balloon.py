@@ -10,6 +10,7 @@ src = root / 'bots/CardputerADV/src'
 parts = src / 'main_parts'
 for file, text in [
         ('001_main.cpp.inc', '#include "balloon.h"'),
+        ('001_main.cpp.inc', '#include "balloon_audio.h"'),
         ('004_main.cpp.inc', '{"Hot Air Balloon", UiMode::Balloon}'),
         ('004_main.cpp.inc', '{"Chess", UiMode::Chess}'),
         ('022_main.cpp.inc', 'mode == "balloon"'),
@@ -31,12 +32,15 @@ assert change.index('stopBalloon();') < change.index('gUiMode = mode;')
 
 code = r'''
 #include "balloon.h"
+#include "balloon_audio.h"
 #include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <vector>
 using std::min;using std::max;
@@ -87,11 +91,22 @@ struct FakeWire{
  int read(){const int b=out.front();out.erase(out.begin());return b;}
 }Wire;
 struct FakeBus{int opens=0,closes=0;void open(){++opens;}void close(){++closes;}}gAirSensor;
+struct Speaker{
+ int queued=0,plays=0,stops=0;std::vector<const int16_t*> blocks;
+ size_t isPlaying(uint8_t channel)const{assert(channel==4);return size_t(queued);}
+ bool playRaw(const int16_t*pcm,size_t n,uint32_t rate,bool stereo,uint32_t repeat,int channel,bool cut){
+  assert(queued<2&&n==balloon_audio::kBlockSamples&&rate==balloon_audio::kRate&&!stereo&&repeat==1&&channel==4&&!cut);
+  // Nothing may overwrite a block the speaker is still holding.
+  if(!blocks.empty())assert(pcm!=blocks.back());
+  blocks.push_back(pcm);++plays;++queued;return true;}
+ void stop(uint8_t channel){assert(channel==4);++stops;queued=0;}
+};
+struct{Speaker Speaker;}M5Cardputer;
 enum class UiMode{Home,Balloon};UiMode gUiMode=UiMode::Balloon;
-bool gLauncherVisible=false;
-uint32_t nowMs=1000,gLastRenderMs=999,seed=99;int wakes=0;std::vector<int> tones;
+bool gLauncherVisible=false,toneAllowed=true;
+uint32_t nowMs=1000,gLastRenderMs=999,seed=99;int wakes=0;
 uint32_t millis(){return nowMs;}uint32_t esp_random(){return ++seed;}
-void focusTone(uint16_t hz,uint16_t){tones.push_back(hz);}
+bool focusToneAllowed(){return toneAllowed;}
 bool handleScreensaverWake(){++wakes;return false;}
 struct{int changes=0;void invalidate(){++changes;}}gUiFramePolicy;
 void renderLauncherOverlay(){}void renderDebugOverlay(){}
@@ -214,20 +229,52 @@ int main(){
  key('a');assert(gBalloon.nudgeDir==-1);key(',');key('d');assert(gBalloon.nudgeDir==1);key('/');key('z');assert(gBalloon.heat==4*kKeyHeat);
  {Keyboard_Class::KeysState ctrl;ctrl.ctrl=true;const int32_t held=gBalloon.heat;assert(handleBalloonKey(' ',ctrl));assert(gBalloon.heat==held);}
  bus.envHere=bus.stickHere=true;
- // Each event has its own sound, and a bump drowns out the rest.
- tones.clear();gBalloon.events=kHurt|kGotStar;balloonSounds();assert(tones==std::vector<int>{220});
- tones.clear();gBalloon.events=kLevelUp;balloonSounds();assert(tones==std::vector<int>{1760});
- tones.clear();gBalloon.events=kGotHeart;balloonSounds();assert(tones==std::vector<int>{1047});
- tones.clear();gBalloon.events=kGotStar;balloonSounds();assert(tones==std::vector<int>{1568});
- // Leaving frees the port.
- const int closes=gAirSensor.closes;stopBalloon();assert(gAirSensor.closes==closes+1);
- gUiMode=UiMode::Home;const int opens=gAirSensor.opens;serviceBalloon();assert(gAirSensor.opens==opens);gUiMode=UiMode::Balloon;
+ // Each event has its own chime, and a bump drowns out the rest.
+ for(auto [events,first,second]:std::vector<std::tuple<int,float,float>>{{kHurt|kGotStar,330,262},{kLevelUp,1047,1568},{kGotHeart,784,1047},{kGotStar,1047,1319}}){
+  gBalloonAudio.reset();gBalloon.events=uint8_t(events);balloonSounds();assert(gBalloon.events==0&&gBalloonAudio.chimeWait>0&&gBalloonAudio.chimeHz==second);
+  assert(std::abs(gBalloonAudio.chimeFirst.step-balloon_audio::kTwoPi*first/balloon_audio::kRate)<1e-5f);}
+ gBalloonAudio.reset();gBalloon.events=0;balloonSounds();assert(gBalloonAudio.chimeWait==0);
+ // The music is quiet, never falls silent, and loops forever. No step is steeper than the
+ // tunes themselves, which is what a click would show up as.
+ {using namespace balloon_audio;Player p;int16_t block[kBlockSamples];int peak=0,jump=0,last=0,quiet=0,longestQuiet=0;
+  const int loop=int(kBeatSamples)*kBeats;
+  for(int done=0;done<3*loop;done+=kBlockSamples){p.render(block,kBlockSamples);
+   for(int16_t v:block){const int value=v;peak=std::max(peak,std::abs(value));jump=std::max(jump,std::abs(value-last));last=value;
+    quiet=std::abs(value)<15?quiet+1:0;longestQuiet=std::max(longestQuiet,quiet);}}
+  const float steepest=kTwoPi*(1319*kMelodyLevel+392*kBassLevel)/kRate;
+  assert(peak>500&&peak<int(kMelodyLevel+kBassLevel));assert(jump<steepest);assert(longestQuiet<int(kRate)*3/2);
+  for(uint16_t hz:kMelody)assert(hz==0||(hz>=500&&hz<=1400));for(uint16_t hz:kBass)assert(hz>=200&&hz<=400);
+  // A chime rings out over the music, then fades to nothing, with no clicks.
+  Player plain,chiming;chiming.chime(1047,1319);int16_t a[kBlockSamples],b[kBlockSamples];int early=0,late=0,step=0,lastDiff=0,loud=0;
+  for(int done=0;done<int(kRate)*2;done+=kBlockSamples){plain.render(a,kBlockSamples);chiming.render(b,kBlockSamples);
+   for(int i=0;i<kBlockSamples;++i){const int diff=b[i]-a[i];loud=std::max(loud,std::abs(b[i]-0));step=std::max(step,std::abs(diff-lastDiff));lastDiff=diff;
+    if(done<int(kRate)/3)early=std::max(early,std::abs(diff));if(done>int(kRate))late=std::max(late,std::abs(diff));}}
+  assert(early>800&&early<=int(2*kChimeLevel));assert(late<20);assert(step<kTwoPi*(1047+1319)*kChimeLevel/kRate);
+  assert(loud<int(kMelodyLevel+kBassLevel+2*kChimeLevel));
+  // The second note really comes later.
+  Player one;one.chime(1047,1319);one.render(a,kBlockSamples);assert(one.chimeWait==kChimeGapSamples-kBlockSamples&&one.chimeSecond.target==0);
+  one.render(a,kBlockSamples);assert(one.chimeWait==0&&one.chimeSecond.target>0);}
+ // Stars reach the music stream, and the stream is fed only when there's room.
+ auto& speaker=M5Cardputer.Speaker;
+ speaker=Speaker{};beginBalloon();serviceBalloon();assert(speaker.plays==2&&speaker.queued==2);
+ serviceBalloon();assert(speaker.plays==2);
+ speaker.queued=1;serviceBalloon();assert(speaker.plays==3);
+ speaker.queued=0;serviceBalloon();assert(speaker.plays==5);
+ assert(speaker.blocks[0]!=speaker.blocks[1]&&speaker.blocks[1]!=speaker.blocks[2]&&speaker.blocks[0]!=speaker.blocks[2]&&speaker.blocks[3]==speaker.blocks[0]);
+ // It stops behind the menu and while the assistant has the speaker, then carries on.
+ gLauncherVisible=true;int stops=speaker.stops;int plays=speaker.plays;serviceBalloon();assert(speaker.stops==stops+1&&speaker.queued==0&&speaker.plays==plays);gLauncherVisible=false;
+ serviceBalloon();assert(speaker.plays==plays+2);
+ toneAllowed=false;plays=speaker.plays;serviceBalloon();assert(speaker.queued==0&&speaker.plays==plays);toneAllowed=true;
+ // Leaving stops the music and frees the port.
+ speaker.queued=2;stops=speaker.stops;
+ const int closes=gAirSensor.closes;stopBalloon();assert(gAirSensor.closes==closes+1&&speaker.stops==stops+1&&speaker.queued==0);
+ gUiMode=UiMode::Home;const int opens=gAirSensor.opens;plays=speaker.plays;serviceBalloon();assert(gAirSensor.opens==opens&&speaker.plays==plays);gUiMode=UiMode::Balloon;
  // The renderer stays on screen in every phase, sky, score and heart count.
  for(int phase=0;phase<3;++phase)for(int stars:{0,9,10,20,30,999})for(int lives=0;lives<=kLives;++lives)for(int32_t h:{int32_t(0),int32_t(1),kMaxHeat}){
   gBalloon.reset(3);gBalloon.phase=Phase(phase);gBalloon.stars=uint16_t(stars);gBalloon.best=9999;gBalloon.lives=uint8_t(lives);gBalloon.heat=h;gBalloon.frame=uint16_t(stars*97);
   for(int i=0;i<kThings;++i){put(gBalloon,Kind(1+i%3),i*50-12,30+i*10);std::swap(gBalloon.things[0],gBalloon.things[i]);}
   renderBalloonUi();}
- std::cout<<"PASS Hot Air Balloon: SHT30 checksum, breath detection, lift and cooling, steering, stars, birds, hearts, levels, "<<totalStars/100<<" stars on average in 100 chases, sensor timing, unplugging, keyboard play, sounds, port handover, renderer bounds\n";
+ std::cout<<"PASS Hot Air Balloon: SHT30 checksum, breath detection, lift and cooling, steering, stars, birds, hearts, levels, "<<totalStars/100<<" stars on average in 100 chases, sensor timing, unplugging, keyboard play, quiet music and chimes, speaker queue, port handover, renderer bounds\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-balloon-') as directory:

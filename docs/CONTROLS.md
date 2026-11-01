@@ -64,6 +64,8 @@ Joystick 2 to the Grove port through a hub. Both are optional.
 - Collect stars, and avoid the birds. You have three hearts, and a floating heart gives
   one back. The ground is soft, so landing is safe.
 - Every 10 stars the sky changes from day to sunset to night, and the wind picks up.
+- A quiet music box plays while the game is open. It pauses behind the menu, and it stops
+  while the assistant is using the mic or speaker.
 
 Realtime shows CONNECT, LISTEN, THINK, SPEAK, READY or ERROR above the large eyes.
 MIC ON and the input meter appear only during recording. Connection errors remain

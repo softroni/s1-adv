@@ -8,6 +8,7 @@ constexpr uint8_t kBalloonStickOffsetReg = 0x60;  // Signed X then Y, zero at th
 constexpr uint8_t kBalloonStickButtonReg = 0x20;  // 0 while pressed.
 constexpr int kBalloonStickRightSign = 1;
 constexpr int kBalloonMostSteps = 3;
+constexpr uint8_t kBalloonAudioChannel = 4;
 
 class BalloonSensors {
  public:
@@ -47,6 +48,11 @@ balloon::Env gBalloonEnv;
 balloon::Stick gBalloonStick;
 uint32_t gBalloonStepMs = 0;
 bool gBalloonRunning = false;
+balloon_audio::Player gBalloonAudio;
+// Three slots, one producer, only refilled below queue depth two. Static, because the
+// speaker can still hold a block after it's told to stop.
+int16_t gBalloonPcm[3][balloon_audio::kBlockSamples];
+uint8_t gBalloonPcmSlot = 0;
 
 void balloonRedraw() {
   gLastRenderMs = 0;
@@ -55,19 +61,34 @@ void balloonRedraw() {
 void balloonSounds() {
   const uint8_t events = gBalloon.events;
   gBalloon.events = 0;
-  if (events & balloon::kHurt) focusTone(220, 180);
-  else if (events & balloon::kLevelUp) focusTone(1760, 180);
-  else if (events & balloon::kGotHeart) focusTone(1047, 120);
-  else if (events & balloon::kGotStar) focusTone(1568, 60);
+  if (events & balloon::kHurt) gBalloonAudio.chime(330, 262);
+  else if (events & balloon::kLevelUp) gBalloonAudio.chime(1047, 1568);
+  else if (events & balloon::kGotHeart) gBalloonAudio.chime(784, 1047);
+  else if (events & balloon::kGotStar) gBalloonAudio.chime(1047, 1319);
+}
+void serviceBalloonAudio() {
+  auto& speaker = M5Cardputer.Speaker;
+  if (gLauncherVisible || !focusToneAllowed()) {
+    if (speaker.isPlaying(kBalloonAudioChannel)) speaker.stop(kBalloonAudioChannel);
+    return;
+  }
+  for (int i = 0; i < 2 && speaker.isPlaying(kBalloonAudioChannel) < 2; ++i) {
+    gBalloonAudio.render(gBalloonPcm[gBalloonPcmSlot], balloon_audio::kBlockSamples);
+    if (!speaker.playRaw(gBalloonPcm[gBalloonPcmSlot], balloon_audio::kBlockSamples, balloon_audio::kRate,
+                         false, 1, kBalloonAudioChannel, false)) return;
+    gBalloonPcmSlot = (gBalloonPcmSlot + 1) % 3;
+  }
 }
 void beginBalloon() {
   gBalloon.reset(esp_random());
   gBalloonEnv = balloon::Env{};
   gBalloonStick = balloon::Stick{};
   gBalloonRunning = false;
+  gBalloonAudio.reset();
   balloonRedraw();
 }
 void stopBalloon() {
+  M5Cardputer.Speaker.stop(kBalloonAudioChannel);
   gAirSensor.close();
   gBalloonEnv = balloon::Env{};
   gBalloonStick = balloon::Stick{};
@@ -75,6 +96,7 @@ void stopBalloon() {
 }
 void serviceBalloon() {
   if (gUiMode != UiMode::Balloon) return;
+  serviceBalloonAudio();
   if (gLauncherVisible) {
     gBalloonRunning = false;  // Frozen behind the menu, and it resumes without a jump.
     return;
