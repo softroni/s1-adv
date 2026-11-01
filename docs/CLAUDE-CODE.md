@@ -262,6 +262,22 @@ works directly in your repository, so don't edit or commit there while it's work
 Anyone with your device token could offer you an update, so only install updates you asked
 for. Leave **Auto OTA** off in Device settings so that an install always needs you.
 
+## Let Claude look things up
+
+Set `upstream.claudeCode.webAccess` to `true` and restart the bridge. Claude can then use
+web search and read web pages, for things like weather and news. Tell it your city once and
+it can save that to its notes.
+
+This adds looking things up, not network access for commands. `git push` and package installs
+stay blocked, and it works with or without a project folder.
+
+**Know the risk.** Web pages can contain text written to manipulate an AI. Claude is told to
+treat pages as information and never put your notes or chat in a search or URL, but that's an
+instruction, not a limit the sandbox enforces. A page that fooled it could change files in
+your project or send out what Claude can read. So keep secrets out of the project folder, keep
+your work pushed, and be careful with unexpected firmware updates. Using web access without
+`projectDir` is the safest setup, because there's nothing for it to change.
+
 ## Privacy and isolation
 
 Your device token is the only thing between the internet and this bridge. The

@@ -21,7 +21,8 @@ export const CLAUDE_CODE_DEFAULTS = Object.freeze({
   effort: "xhigh",
   turnTimeoutMs: 600000,
   projectDir: null,
-  firmwareUpdates: false
+  firmwareUpdates: false,
+  webAccess: false
 });
 
 const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
@@ -50,6 +51,9 @@ const ISOLATION_ARGS = Object.freeze([
 ]);
 
 export const PROJECT_TOOLS = "Read,Write,Edit,Glob,Grep,Bash";
+// Claude Code's own web tools. Commands in Bash stay without a network, so this
+// adds looking things up, not pushing code or installing software.
+const WEB_TOOLS = "WebSearch,WebFetch";
 
 // The device is reachable from the internet, so project access is bounded by
 // the OS rather than by the model. Bash writes stay in the working directory
@@ -164,9 +168,11 @@ export function claudeTurnArgs(settings, { appendSystemPrompt = "", sessionId = 
     "--effort", settings.effort,
     ...ISOLATION_ARGS,
     ...(settings.projectDir
-      ? ["--tools", PROJECT_TOOLS, "--permission-mode", "acceptEdits", "--permission-prompts", "none",
+      ? ["--tools", settings.webAccess ? `${PROJECT_TOOLS},${WEB_TOOLS}` : PROJECT_TOOLS,
+          "--permission-mode", "acceptEdits", "--permission-prompts", "none",
           "--settings", JSON.stringify(projectSettings(settings.projectDir)), ...(memoryDir ? ["--add-dir", memoryDir] : [])]
-      : ["--tools", ""]),
+      : ["--tools", settings.webAccess ? WEB_TOOLS : ""]),
+    ...(settings.webAccess ? ["--allowedTools", WEB_TOOLS, "--permission-prompts", "none"] : []),
     ...(appendSystemPrompt ? ["--append-system-prompt", appendSystemPrompt] : []),
     ...(sessionId ? ["--resume", sessionId] : [])
   ];
