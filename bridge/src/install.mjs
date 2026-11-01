@@ -1,16 +1,37 @@
-import { randomBytes } from "node:crypto";
-import { readFile, writeFile, mkdir, chmod, access, stat } from "node:fs/promises";
-import { constants } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { readFile, writeFile, mkdir, chmod, access, stat, rename, rm } from "node:fs/promises";
+import { constants, createReadStream, createWriteStream } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import JSON5 from "json5";
 import { firmwareCapability } from "./firmware-automation.mjs";
 import { loadFocusAudioBundle } from "./focus-audio.mjs";
 import { CLAUDE_CODE_PROVIDER, OPENCLAW_PROVIDER, claudeCodeSettings, readClaudeLogin, resolveUpstreamProvider } from "./claude-code-client.mjs";
+import { writeJsonAtomic } from "./utils.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+// Pinned so a replaced download can never reach the speech pipeline.
+export const WHISPER_MODEL = Object.freeze({
+  name: "ggml-base.bin",
+  url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+  sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+  bytes: 147951465
+});
+
+// Services and plugin hosts can start with a short PATH that misses Homebrew.
+const PROGRAM_DIRECTORIES = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
+export async function findProgram(name, env = process.env, directories = PROGRAM_DIRECTORIES) {
+  for (const directory of [...String(env.PATH || "").split(path.delimiter), ...directories].filter(Boolean)) {
+    const candidate = path.join(directory, name);
+    try { await access(candidate, constants.X_OK); return candidate; } catch {}
+  }
+  return null;
+}
 export const defaultGatewayConfig = () => process.env.OPENCLAW_CONFIG_PATH ||
   path.join(process.env.OPENCLAW_STATE_DIR || path.join(os.homedir(), ".openclaw"), "openclaw.json");
 
@@ -82,6 +103,10 @@ async function planClaudeCodeInstall(options) {
     delete config.upstream.url;
     delete config.upstream.token;
     config.upstream.provider = CLAUDE_CODE_PROVIDER;
+    config.omnibotShim = { ...config.omnibotShim,
+      sttLocalModel: path.join(stateDir, "models", WHISPER_MODEL.name),
+      sttLocalBin: await findProgram("whisper-cli") || config.omnibotShim.sttLocalBin,
+      ttsFallbackBin: await findProgram("espeak-ng") || "espeak-ng" };
     config.devices = [{ device_id: deviceId, device_token: randomBytes(32).toString("hex"), default_topic_key: "cardputer:main", topics: ["cardputer:main"] }];
     config.topics = [{ topic_key: "cardputer:main", session_key: "agent:claude:cardputer", title: "Cardputer", contour_id: "claude" }];
     config.firmwareAutomation = { enabled: false };
@@ -95,7 +120,8 @@ async function planClaudeCodeInstall(options) {
       writes: existing ? [] : ["config.json (0600)", "firmware.env (0600)"],
       notes: ["Uses the claude program and login already on this computer. No credentials are read or copied.",
         "Replies use your Claude plan limits. Tools are off, so the device can only chat and send device actions.",
-        "Set Wi-Fi on the device, and expose the bridge through your own HTTPS proxy."] }
+        "Set Wi-Fi on the device, and expose the bridge through your own HTTPS proxy.",
+        "For voice, run the voice command after this. See docs/CLAUDE-CODE.md."] }
   };
 }
 
@@ -140,6 +166,58 @@ export async function planInstall(options = {}) {
         "The device token grants access to the selected agent. Use a dedicated restricted agent for shared devices.",
         "Firmware automation is off until explicitly provisioned. Voice needs the selected STT/TTS providers."] }
   };
+}
+
+async function modelReady(file, model) {
+  try {
+    if ((await stat(file)).size !== model.bytes) return false;
+    const hash = createHash("sha256");
+    await pipeline(createReadStream(file), hash);
+    return hash.digest("hex") === model.sha256;
+  } catch { return false; }
+}
+
+function voiceInstallHint(platform, missing) {
+  const packages = { "whisper-cli": "whisper-cpp", "espeak-ng": "espeak-ng", ffmpeg: "ffmpeg" };
+  if (platform === "darwin") return `brew install ${missing.map(name => packages[name]).join(" ")}`;
+  return `Install ${missing.join(", ")}. On Debian or Ubuntu, apt provides espeak-ng and ffmpeg; whisper-cli comes from whisper.cpp.`;
+}
+
+export async function planVoice(configPath, { env = process.env, platform = process.platform, model = WHISPER_MODEL, directories = PROGRAM_DIRECTORIES } = {}) {
+  const absolute = path.resolve(configPath);
+  const config = JSON.parse(await readFile(absolute, "utf8"));
+  const modelPath = path.join(path.dirname(absolute), "models", model.name);
+  const programs = {};
+  for (const name of ["whisper-cli", "espeak-ng", "ffmpeg"]) programs[name] = await findProgram(name, env, directories);
+  const missing = Object.keys(programs).filter(name => !programs[name]);
+  const ready = await modelReady(modelPath, model);
+  return { configPath: absolute, config, model, modelPath, modelReady: ready, programs, missing,
+    summary: { configPath: absolute, programs, missing, install: missing.length ? voiceInstallHint(platform, missing) : null,
+      model: { path: modelPath, ready, downloadBytes: ready ? 0 : model.bytes },
+      writes: [...(ready ? [] : [`${model.name} (${Math.round(model.bytes / 1048576)} MiB)`]), "voice paths in config.json (0600)"],
+      notes: ["Audio stays on this computer. Only the transcribed text goes to the assistant.",
+        "Restart the bridge after applying."] } };
+}
+
+export async function applyVoice(plan, { fetchImpl = fetch } = {}) {
+  if (plan.missing.length) throw new Error(`Missing ${plan.missing.join(", ")}. ${plan.summary.install}`);
+  if (!plan.modelReady) {
+    const response = await fetchImpl(plan.model.url, { redirect: "follow" });
+    if (!response.ok || !response.body) throw new Error(`Speech model download failed (HTTP ${response.status}).`);
+    await mkdir(path.dirname(plan.modelPath), { recursive: true, mode: 0o700 });
+    const partial = `${plan.modelPath}.part`, hash = createHash("sha256");
+    const hashing = new Transform({ transform(chunk, _encoding, done) { hash.update(chunk); done(null, chunk); } });
+    try {
+      await pipeline(Readable.fromWeb(response.body), hashing, createWriteStream(partial, { mode: 0o600 }));
+      if (hash.digest("hex") !== plan.model.sha256) throw new Error("Speech model checksum mismatch. Nothing was installed.");
+      await rename(partial, plan.modelPath);
+    } finally { await rm(partial, { force: true }); }
+  }
+  const config = JSON.parse(await readFile(plan.configPath, "utf8"));
+  config.omnibotShim = { ...config.omnibotShim, sttLocalBin: plan.programs["whisper-cli"], sttLocalModel: plan.modelPath,
+    ttsFallbackBin: plan.programs["espeak-ng"] };
+  await writeJsonAtomic(plan.configPath, config);
+  return { ...plan.summary, model: { path: plan.modelPath, ready: true, downloadBytes: 0 }, applied: true, restartRequired: true };
 }
 
 const envQuote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
@@ -199,14 +277,18 @@ export async function doctor(configPath, { probe = true, fetchImpl = fetch, clau
         'Fast/smart model choices are explicit; real responses and latency require a separate practical check.');
     }
   } catch { add("agent-config", false, "Cannot verify selected agent against the local gateway configuration."); }
-  for (const binary of ["ffmpeg", ...(config.omnibotShim?.ttsFallbackProvider === "espeak" ? ["espeak-ng"] : [])]) {
-    const found = spawnSync(binary, [binary === "ffmpeg" ? "-version" : "--version"], { encoding: "utf8", timeout: 5000 });
-    add(binary, found.status === 0, found.status === 0 ? "Available" : "Install for configured audio support");
+  const voiceHelp = "See docs/CLAUDE-CODE.md#add-voice, or run the voice setup command.";
+  const speech = [["ffmpeg", "ffmpeg", "-version"]];
+  if (config.omnibotShim?.ttsFallbackProvider === "espeak")
+    speech.push(["espeak-ng", config.omnibotShim.ttsFallbackBin || "espeak-ng", "--version"]);
+  for (const [name, binary, flag] of speech) {
+    const found = spawnSync(binary, [flag], { encoding: "utf8", timeout: 5000 });
+    add(name, found.status === 0, found.status === 0 ? "Available" : `Install for configured audio support. ${voiceHelp}`);
   }
   if (config.omnibotShim?.sttProvider === "local-whisper") {
     for (const [name, file, permission] of [["whisper-binary", config.omnibotShim.sttLocalBin, constants.X_OK], ["whisper-model", config.omnibotShim.sttLocalModel, constants.R_OK]]) {
       let ok = false; try { await access(file, permission); ok = true; } catch {}
-      add(name, ok, ok ? "Available" : "Configured local speech dependency is missing; text chat can still work.");
+      add(name, ok, ok ? "Available" : `Configured local speech dependency is missing; text chat can still work. ${voiceHelp}`);
     }
   }
   if (probe) {

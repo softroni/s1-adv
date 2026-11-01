@@ -9,10 +9,10 @@ is the alternative.
 1. With Claude Code, confirm `claude auth status` shows your subscription. With OpenClaw, confirm it already answers a normal chat on your host.
 2. Follow [Claude Code setup](CLAUDE-CODE.md) or [OpenClaw and bridge setup](OPENCLAW.md). Confirm the configured conversation is reachable with your device token.
 3. Plug in the Cardputer and run `./scripts/flash-cardputer.sh`, or follow [USB flashing](FLASHING.md). Use your own bridge address and device token.
-4. Connect the device to Wi-Fi. Check `/status`, then send `Reply with: ready`.
+4. Unplug the Cardputer and plug it back in so it starts the new firmware, then [join its setup Wi-Fi](FLASHING.md#finish-setup) and connect it to your Wi-Fi. Check `/status`, then send `Reply with: ready`.
 5. Confirm the actual answer on the device. Server health alone is not a successful chat.
 6. Add voice only after text works. Hold the device's talk control, speak, release,
-   and check both transcript and spoken reply. See [voice setup](OPENCLAW.md#voice); it applies to both providers.
+   and check both transcript and spoken reply. See [Add voice](CLAUDE-CODE.md#add-voice), or [voice setup](OPENCLAW.md#voice) for OpenClaw.
 
 Allow time for a first build to download the ESP32 toolchain. If USB upload
 cannot connect, hold G0, press Reset, release G0, then upload again.

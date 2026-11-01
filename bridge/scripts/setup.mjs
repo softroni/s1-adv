@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { planInstall, applyInstall, doctor, enablePlugin } from "../src/install.mjs";
+import { planInstall, applyInstall, doctor, enablePlugin, planVoice, applyVoice } from "../src/install.mjs";
 import { provisionFirmware } from "../src/firmware-automation.mjs";
 import { planModelRoles, applyModelRoles, MODEL_PRESETS } from '../src/model-roles.mjs';
 
@@ -34,6 +34,11 @@ export async function setupCli(argv, { openclawCommand } = {}) {
     const plan=await planModelRoles(options.config,options,{openclawCommand});
     return options.apply ? applyModelRoles(plan,{openclawCommand}) : {...plan.summary,dryRun:true,applied:false};
   }
+  if (command === "voice") {
+    if (!options.config) throw new Error("voice requires --config /absolute/private/config.json");
+    const plan = await planVoice(options.config);
+    return options.apply ? applyVoice(plan) : { ...plan.summary, dryRun: true, applied: false };
+  }
   if (command === "doctor") {
     if (!options.config) throw new Error("doctor requires --config /absolute/private/config.json");
     return doctor(options.config, { probe: !options.noProbe });
@@ -52,6 +57,7 @@ export async function setupCli(argv, { openclawCommand } = {}) {
     "node scripts/setup.mjs init [--state-dir PATH] [--public-url https://bridge.example.com] [--apply]",
     "node scripts/setup.mjs init --provider openclaw --gateway-config PATH [--state-dir PATH] [--agent cardputer] [--public-url https://bridge.example.com] [--apply]",
     "node scripts/setup.mjs doctor --config PATH [--no-probe]",
+    "node scripts/setup.mjs voice --config PATH [--apply]",
     "node scripts/setup.mjs firmware --config PATH --repo-dir PATH --branch BRANCH [--python-bin PATH] [--apply]",
     "node scripts/setup.mjs enable --config PATH [--apply]"
     ,"node scripts/setup.mjs models --config PATH [--model-profile codex|claude] [--fast-model PROVIDER/MODEL] [--smart-model PROVIDER/MODEL] [--apply]"

@@ -31,6 +31,22 @@ from that computer:
 Use `--port PATH` if more than one USB device is connected. On Windows, follow the
 manual steps below.
 
+### Finish setup
+
+1. **Unplug the Cardputer and plug it back in.** It can stay in flashing mode after
+   flashing, with a blank or unchanged screen, until it restarts. Pressing Reset can
+   also work. It then shows a setup Wi-Fi name and password.
+2. **Join that Wi-Fi network** from your computer or phone. The setup page only exists
+   on the Cardputer's own Wi-Fi.
+3. Open `http://192.168.4.1/`.
+4. Enter your 2.4 GHz Wi-Fi, bridge URL and device token, then save.
+5. Reconnect your computer to your normal network.
+
+If `192.168.4.1` shows your router or a `blocked.eero.com` page, that device isn't on
+the Cardputer's Wi-Fi yet. eero routers use the same address by default. A computer
+with an Ethernet cable to that router can reach it even after joining the Cardputer's
+Wi-Fi, so unplug the cable for a moment or use a phone.
+
 ## Download a public image
 
 [0.2.201-dev release](https://github.com/s1z0v/s1-adv/releases/tag/v0.2.201-dev)
@@ -60,7 +76,8 @@ hold G0, press Reset, release G0 and retry. This full image writes the bootloade
 partition table and application and may reset saved settings. Keep your own
 configuration backed up; the microSD is separate.
 
-After boot, connect to the setup Wi-Fi using the random password on screen,
+After flashing, unplug the Cardputer and plug it back in so it starts the new
+firmware. Then connect to the setup Wi-Fi using the random password on screen,
 open `http://192.168.4.1/`, and enter **your** Wi-Fi, HTTPS bridge URL and device
 token. The generic image uses device ID `cardputer-adv-01` and internal routing
 key `cardputer:main`, matching the default bridge installer. A custom device ID

@@ -4,7 +4,9 @@ import { mkdtemp, readFile, writeFile, stat, access, rm } from "node:fs/promises
 import path from "node:path";
 import os from "node:os";
 import http from "node:http";
-import { planInstall, applyInstall, gatewayToken, doctor, enablePlugin, configuredAgentExists } from "./install.mjs";
+import { planInstall, applyInstall, gatewayToken, doctor, enablePlugin, configuredAgentExists, planVoice, applyVoice, findProgram } from "./install.mjs";
+import { createHash } from "node:crypto";
+import { chmod, mkdir } from "node:fs/promises";
 
 test("doctor never sends a device credential to remote or malformed destinations", async t => {
   const root = await mkdtemp(path.join(os.tmpdir(), "s1-doctor-boundary-"));
@@ -167,4 +169,85 @@ test("native legacy list and current explicit agent maps preserve the selected i
   assert.equal(configuredAgentExists({agents:{list:[{id:"cardputer"}]}},"cardputer"),true);
   assert.equal(configuredAgentExists({agents:{ownership:"explicit",entries:{cardputer:{}}}},"cardputer"),true);
   assert.equal(!!configuredAgentExists({agents:{ownership:"explicit",entries:{cardputer:{}}}},"main"),false);
+});
+
+async function voiceFixture(t, programs = ["whisper-cli", "espeak-ng", "ffmpeg"]) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "s1-voice-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const bin = path.join(root, "bin");
+  await mkdir(bin);
+  for (const name of programs) {
+    await writeFile(path.join(bin, name), "#!/bin/sh\nexit 0\n");
+    await chmod(path.join(bin, name), 0o755);
+  }
+  const plan = await planInstall({ stateDir: path.join(root, "bridge") });
+  await applyInstall(plan);
+  const bytes = Buffer.from("fixture speech model");
+  const model = { name: "model.bin", url: "https://models.invalid/model.bin", bytes: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex") };
+  return { root, bin, bytes, model, configPath: plan.configPath, env: { PATH: bin } };
+}
+
+test("voice setup previews without writing, then saves paths and a verified model", async t => {
+  const fixture = await voiceFixture(t);
+  const before = await readFile(fixture.configPath, "utf8");
+  const plan = await planVoice(fixture.configPath, { env: fixture.env, model: fixture.model });
+  assert.deepEqual(plan.missing, []);
+  assert.equal(plan.summary.install, null);
+  assert.equal(plan.summary.model.ready, false);
+  assert.equal(await readFile(fixture.configPath, "utf8"), before, "a preview writes nothing");
+
+  const fetched = [];
+  const result = await applyVoice(plan, { fetchImpl: async url => { fetched.push(url); return new Response(fixture.bytes); } });
+  assert.deepEqual(fetched, [fixture.model.url]);
+  assert.equal(result.applied, true);
+  assert.equal(result.restartRequired, true);
+  assert.deepEqual(await readFile(plan.modelPath), fixture.bytes);
+  assert.equal((await stat(plan.modelPath)).mode & 0o077, 0);
+  assert.equal((await stat(fixture.configPath)).mode & 0o077, 0);
+  const config = JSON.parse(await readFile(fixture.configPath, "utf8"));
+  assert.equal(config.omnibotShim.sttLocalBin, path.join(fixture.bin, "whisper-cli"));
+  assert.equal(config.omnibotShim.ttsFallbackBin, path.join(fixture.bin, "espeak-ng"));
+  assert.equal(config.omnibotShim.sttLocalModel, plan.modelPath);
+  assert.equal(config.devices[0].device_token, JSON.parse(before).devices[0].device_token);
+  assert.equal(config.upstream.provider, "claude-code");
+
+  const again = await planVoice(fixture.configPath, { env: fixture.env, model: fixture.model });
+  assert.equal(again.modelReady, true);
+  await applyVoice(again, { fetchImpl: async () => { throw new Error("must not download again"); } });
+});
+
+test("voice setup rejects a replaced model and leaves nothing behind", async t => {
+  const fixture = await voiceFixture(t);
+  const plan = await planVoice(fixture.configPath, { env: fixture.env, model: fixture.model });
+  const before = await readFile(fixture.configPath, "utf8");
+  await assert.rejects(applyVoice(plan, { fetchImpl: async () => new Response("a different file") }), /checksum/);
+  await assert.rejects(access(plan.modelPath));
+  await assert.rejects(access(`${plan.modelPath}.part`));
+  assert.equal(await readFile(fixture.configPath, "utf8"), before);
+  await assert.rejects(applyVoice(plan, { fetchImpl: async () => new Response("", { status: 503 }) }), /HTTP 503/);
+});
+
+test("voice setup names what to install before downloading anything", async t => {
+  const fixture = await voiceFixture(t, ["ffmpeg"]);
+  // No fallback directories, so programs installed on this host can't hide the gap.
+  const options = { env: fixture.env, model: fixture.model, directories: [] };
+  const plan = await planVoice(fixture.configPath, { ...options, platform: "darwin" });
+  assert.deepEqual(plan.missing, ["whisper-cli", "espeak-ng"]);
+  assert.equal(plan.summary.install, "brew install whisper-cpp espeak-ng");
+  await assert.rejects(applyVoice(plan, { fetchImpl: async () => { throw new Error("must not download"); } }), /Missing whisper-cli/);
+  const linux = await planVoice(fixture.configPath, { ...options, platform: "linux" });
+  assert.match(linux.summary.install, /whisper\.cpp/);
+  assert.equal(await findProgram("ffmpeg", fixture.env, []), path.join(fixture.bin, "ffmpeg"));
+  assert.equal(await findProgram("whisper-cli", fixture.env, []), null);
+});
+
+test("doctor checks the configured speech programs, not a Linux default", async t => {
+  const fixture = await voiceFixture(t);
+  const plan = await planVoice(fixture.configPath, { env: fixture.env, model: fixture.model });
+  await applyVoice(plan, { fetchImpl: async () => new Response(fixture.bytes) });
+  const report = await doctor(fixture.configPath, { probe: false,
+    claudeLogin: async () => ({ installed: true, subscription: true, detail: "ok" }) });
+  for (const name of ["espeak-ng", "whisper-binary", "whisper-model"])
+    assert.equal(report.checks.find(check => check.name === name).ok, true, name);
 });

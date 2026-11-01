@@ -145,6 +145,8 @@ with tempfile.TemporaryDirectory() as temp:
     assert f'Replace the Bridge URL with:  {URL}' in done.output and '$TOKEN_HELP' not in done.output
     assert 'Device token:                 Paste it from the clipboard' in done.output
     assert 'bad substitution' not in done.output
+    assert 'Unplug the Cardputer and plug it back in' in done.output
+    assert "only\n     exists on the Cardputer's own Wi-Fi" in done.output
     assert 'Connected. Firmware 0.2.201-dev' in done.output
     assert 'Done. Send this from the Cardputer' in done.output
     assert TOKEN not in (done.flash / 'flash.log').read_text()

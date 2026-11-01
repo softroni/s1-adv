@@ -205,9 +205,13 @@ show_setup_steps() {
   say "Flashed. Finish on the setup page:"
   cat <<EOF
 
-  1. Press Reset on the Cardputer. It shows a setup Wi-Fi name and password.
-  2. Join that Wi-Fi network from this computer or your phone.
+  1. Unplug the Cardputer and plug it back in, so it starts the new firmware.
+     It then shows a setup Wi-Fi name and password.
+  2. Join that Wi-Fi network from this computer or your phone. The setup page only
+     exists on the Cardputer's own Wi-Fi, so don't skip this.
   3. Open http://192.168.4.1/
+     If you see your router or a blocked page instead, that device is still on your
+     home network. Check its Wi-Fi, and unplug any Ethernet cable for a moment.
   4. Choose your 2.4 GHz Wi-Fi and enter its password.
   5. Replace the Bridge URL with:  $bridge
   6. Device token:                 $TOKEN_HELP

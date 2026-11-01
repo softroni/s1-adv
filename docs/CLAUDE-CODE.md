@@ -82,9 +82,34 @@ Plug in the Cardputer and run this from the repository root:
 ./scripts/flash-cardputer.sh
 ```
 
-It finds your bridge URL and copies your device token to the clipboard. See
-[Build and flash](FLASHING.md) for details. Then send `Reply with: ready`. Seeing
-that answer on the device is the real test.
+It finds your bridge URL and copies your device token to the clipboard. Then:
+
+1. Unplug the Cardputer and plug it back in, so it starts the new firmware.
+2. Join the setup Wi-Fi shown on its screen, and open `http://192.168.4.1/`.
+3. Enter your Wi-Fi, bridge URL and device token, then save.
+4. Send `Reply with: ready`. Seeing that answer on the device is the real test.
+
+See [Build and flash](FLASHING.md) for details.
+
+## Add voice
+
+Push-to-talk needs a speech-to-text and a text-to-speech program on the bridge
+computer. Text chat works without them. On macOS:
+
+```bash
+brew install whisper-cpp espeak-ng ffmpeg
+cd bridge
+node scripts/setup.mjs voice --config ~/.s1-adv/config.json
+node scripts/setup.mjs voice --config ~/.s1-adv/config.json --apply
+```
+
+The first run previews what will change. `--apply` downloads the 141 MiB Whisper
+model, checks it against a pinned checksum, and saves the program paths in your
+private config. Restart the bridge afterwards. On Linux, install `espeak-ng`, `ffmpeg`
+and whisper.cpp's `whisper-cli`, then run the same commands.
+
+Your audio stays on your computer. Only the transcribed text goes to Claude. Spoken
+replies use eSpeak, which sounds robotic but runs locally.
 
 ## Settings
 
@@ -116,8 +141,8 @@ are enabled:
 - `modelRouting` (fast and smart model roles)
 - `firmwareAutomation` (agent-built firmware)
 
-Voice still needs a speech-to-text and a text-to-speech backend on the bridge host.
-`doctor` reports what's missing, and text chat works without them.
+Voice needs local speech programs. See [Add voice](#add-voice). `doctor` reports
+what's missing.
 
 ## Privacy and isolation
 

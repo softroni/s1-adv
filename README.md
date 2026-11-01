@@ -81,7 +81,7 @@ firmware-building rights only when you deliberately need them. Read the
 - A computer for the first USB flash: Python 3. [The flashing script](docs/FLASHING.md) installs the rest. Building from source needs PlatformIO.
 - Node.js 22+ for the bridge, and either [Claude Code signed in with a Claude subscription](docs/CLAUDE-CODE.md) or an existing OpenClaw installation with its supported Node.js runtime.
 - A reachable bridge address. Use HTTPS/WSS for remote access. The firmware trusts ISRG Root X1 by default.
-- For voice: FFmpeg, an STT backend and a TTS backend on the bridge host.
+- For voice: FFmpeg, an STT backend and a TTS backend on the bridge host. [`setup.mjs voice`](docs/CLAUDE-CODE.md#add-voice) sets up local ones.
 - Optional microSD for saved audio and extra assets.
 
 New microphone recordings are saved as WAV files in `/recordings/YYYYMMDD/` on
@@ -108,6 +108,17 @@ cd ..
 ```
 
 See [Build and flash](docs/FLASHING.md) for the details and the manual route.
+
+Two things that catch people out on the first flash:
+
+- **Unplug the Cardputer and plug it back in after flashing.** It can stay in flashing
+  mode with a blank or unchanged screen until you do. It then shows a setup Wi-Fi
+  name and password.
+- **Join the Cardputer's own Wi-Fi before opening the setup page.** `http://192.168.4.1/`
+  only works on that network. On your home Wi-Fi you may reach your router instead.
+  eero routers use the same address and show a `blocked.eero.com` page.
+
+To add push-to-talk, see [Add voice](docs/CLAUDE-CODE.md#add-voice).
 
 To use OpenClaw, the community bridge is published in
 [ClawHub](https://clawhub.ai/plugins/openclaw-s1-adv). On a current OpenClaw host:
