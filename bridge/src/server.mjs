@@ -16,8 +16,9 @@ import Busboy from "busboy";
 import WebSocket, { WebSocketServer } from "ws";
 import { StateStore } from "./state-store.mjs";
 import { UpstreamGatewayClient } from "./upstream-client.mjs";
-import { CLAUDE_CODE_PROVIDER, ClaudeCodeClient, claudeCodeSettings, resolveUpstreamProvider, validateClaudeCodeConfig } from "./claude-code-client.mjs";
+import { CLAUDE_CODE_PROVIDER, ClaudeCodeClient, PUBLISH_FIRMWARE_MARKER, claudeCodeSettings, resolveUpstreamProvider, validateClaudeCodeConfig } from "./claude-code-client.mjs";
 import { KokoroVoice, kokoroSettings } from "./kokoro-tts.mjs";
+import { publishProjectFirmware } from "./firmware-publish.mjs";
 import { createMininervaCompatServer } from "./mininerva-compat.mjs";
 import {
   agentIdForSession,
@@ -695,18 +696,22 @@ function buildDeviceActionPolicyText() {
 // reply text and keep working.
 function buildClaudeCodeSystemPrompt(config) {
   const shortReplyWords = Math.max(8, Number(config.deviceTurnContext?.shortReplyWords) || 15);
-  const { projectDir } = claudeCodeSettings(config);
+  const { projectDir, firmwareUpdates } = claudeCodeSettings(config);
   const access = projectDir
-    ? `You are working in the project folder ${projectDir}. You can read and change files there and run commands, but you cannot reach anything outside it or the internet. Speech can be misheard, so before changing files for a [Voice] message, say what you heard and ask for confirmation. Never delete or overwrite work without confirmation. When you change something, say what changed.`
+    ? `You are working in the project folder ${projectDir}. You can read and change files there and run commands, but you cannot reach anything outside it or the internet, and the bridge folder is read-only. Speech can be misheard, so before changing files for a [Voice] message, say what you heard and ask for confirmation. Never delete or overwrite work without confirmation. When you change something, say what changed.`
     : "This chat has no tools: you cannot read files, run commands, browse the web, or change firmware. Never claim otherwise.";
+  const firmware = firmwareUpdates
+    ? `You can update this device's firmware when the owner asks. Change the code in bots/CardputerADV. Raise APP_VERSION to a newer version in both bots/CardputerADV/platformio.ini and bots/CardputerADV/src/main_parts/001_main.cpp.inc. Build by running scripts/build-firmware.sh on its own with no output redirection, allow up to 10 minutes, and fix any errors. Commit the source. When the build succeeds and the owner wants it sent to the device, end your reply with ${PUBLISH_FIRMWARE_MARKER} on its own line and nothing after it. The bridge then checks and publishes the build and tells the owner how to install it. You cannot install it yourself, so never say it is installed.`
+    : "";
   return [
     "You are Claude, answering on a Cardputer ADV, a pocket computer with a tiny screen and a small speaker.",
     access,
+    firmware,
     `Reply in plain text without Markdown. Default to ${shortReplyWords} words or fewer and put the key point first.`,
     "A message marked [Voice] was spoken and your reply will be read aloud, and the device downloads all of it before speaking. Give the actual answer in under 20 words unless asked for more.",
     REPLY_LANGUAGE_POLICY,
     buildDeviceActionPolicyText()
-  ].join(" ");
+  ].filter(Boolean).join(" ");
 }
 
 function buildFirmwareCapabilityPolicyText() {
@@ -3572,7 +3577,8 @@ class BridgeRuntime {
 	    if (claudeCode) validateClaudeCodeConfig(config);
 	    this.upstream = claudeCode
 	      ? new ClaudeCodeClient(config, { appendSystemPrompt: buildClaudeCodeSystemPrompt(config),
-          recentMessages: sessionKey => this.recentChatMessages(sessionKey) })
+          recentMessages: sessionKey => this.recentChatMessages(sessionKey),
+          publishFirmware: claudeCodeSettings(config).firmwareUpdates ? () => this.publishClaudeFirmware() : null })
 	      : new UpstreamGatewayClient(config.upstream);
 	    const kokoro = kokoroSettings(config);
 	    this.kokoro = kokoro ? new KokoroVoice(kokoro) : null;
@@ -3610,6 +3616,18 @@ class BridgeRuntime {
       admitCapacity:(input,prepared)=>this.assertFrontCapacity(input,prepared),
       admitSmart:record=>this.admitFrontSmart(record)});
 	  }
+
+  // Offers the build and has the device look for it. Installing stays with the owner.
+  async publishClaudeFirmware() {
+    const installed = [...this.deviceFirmwareReports.values()][0]?.version || null;
+    const { version, minBattery } = await publishProjectFirmware({
+      projectDir: claudeCodeSettings(this.config).projectDir,
+      configPath: process.env.CARDPUTER_BRIDGE_CONFIG ? path.resolve(process.cwd(), process.env.CARDPUTER_BRIDGE_CONFIG) : DEFAULT_CONFIG_PATH,
+      installedVersion: installed
+    });
+    console.info(`[firmware] published version=${version}`);
+    return `Update ${version} is ready. Open /ota to review and install it, with at least ${minBattery}% battery.\n${deviceActionMarker([{ type: "ota.check" }])}`;
+  }
 
   recentChatMessages(sessionKey) {
     const topic = this.topicBySessionKey.get(sessionKey);

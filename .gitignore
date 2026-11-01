@@ -8,6 +8,7 @@ __pycache__/
 
 # PlatformIO and build artifacts
 .pio/
+.platformio/
 *.bin
 *.elf
 *.map

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
@@ -13,7 +14,7 @@ import { BridgeRuntime, cleanupTranscriptText, loadConfig } from "./server.mjs";
 import { voiceReplyWaitMs } from "./turn-delivery-policy.mjs";
 import {
   CLAUDE_CODE_DEFAULTS, ClaudeCodeClient, claudeCodeSettings, claudeEnv, claudeTurnArgs, parseClaudeResult,
-  readClaudeLogin, recoveredConversation, resolveUpstreamProvider, validateClaudeCodeConfig
+  projectSettings, readClaudeLogin, recoveredConversation, resolveUpstreamProvider, validateClaudeCodeConfig
 } from "./claude-code-client.mjs";
 
 const bridgeRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -161,6 +162,41 @@ test("project access is opt-in, sandboxed and confined to one real folder", asyn
   assert.throws(() => validateClaudeCodeConfig({ upstream: { claudeCode: { projectDir: "/no/such/s1-adv-folder" } } }), /does not exist/);
 });
 
+test("the running bridge can't be changed from inside its own project", () => {
+  const inside = projectSettings(path.resolve(bridgeRoot, ".."));
+  assert.deepEqual(inside.sandbox.filesystem.denyWrite, [realpathSync(bridgeRoot)]);
+  assert.deepEqual(inside.permissions.deny, [`Edit(/${realpathSync(bridgeRoot)}/**)`]);
+  assert.equal(projectSettings(bridgeRoot).sandbox.filesystem.denyWrite[0], realpathSync(bridgeRoot), "the bridge folder itself counts");
+  const elsewhere = projectSettings(tmpdir());
+  assert.equal(elsewhere.sandbox.filesystem, undefined);
+  assert.equal(elsewhere.permissions.deny, undefined);
+  assert.equal(elsewhere.sandbox.failIfUnavailable, true);
+});
+
+test("publishing is opt-in, needs a project, and is never shown as text", async t => {
+  assert.throws(() => validateClaudeCodeConfig({ upstream: { claudeCode: { firmwareUpdates: true } } }), /needs projectDir/);
+  const marker = "[[publish_firmware]]";
+  for (const [publishFirmware, expected] of [
+    [async () => "Update 0.2.208 is ready.", "Built it.\n\nUpdate 0.2.208 is ready."],
+    [async () => { throw new Error("the image isn't built for ESP32-S3"); }, "Built it.\n\nThe update wasn't published: the image isn't built for ESP32-S3."],
+    [null, "Built it."]
+  ]) {
+    const fake = await makeFake(t, { steps: [success(`Built it.\n${marker}`)] });
+    const { client, events } = makeClient(fake, {}, { publishFirmware });
+    await client.start();
+    await send(client, "send the update", "run-1");
+    assert.equal((await finished(client, "run-1")).status, "ok");
+    assert.equal(replyText(events[0]), expected);
+  }
+  const fake = await makeFake(t, { steps: [success("No update needed.")] });
+  let published = 0;
+  const { client } = makeClient(fake, {}, { publishFirmware: async () => { published += 1; return ""; } });
+  await client.start();
+  await send(client, "hello", "run-1");
+  await finished(client, "run-1");
+  assert.equal(published, 0, "only an explicit request publishes");
+});
+
 test("project turns run in the folder and start a new conversation", async t => {
   const fake = await makeFake(t, { steps: [success("chat"), success("project", NEXT_ID), success("project again", NEXT_ID)] });
   const chat = makeClient(fake);
@@ -208,6 +244,11 @@ test("the system prompt describes the access Claude really has", async t => {
   assert.match(project, /misheard/);
   assert.match(project, /Never delete or overwrite work without confirmation/);
   assert.match(project, /cardputer_actions/);
+  assert.ok(!project.includes("publish_firmware"), "firmware steps are a separate opt-in");
+  const firmware = await prompt({ projectDir: fake.dir, firmwareUpdates: true }, "firmware");
+  assert.match(firmware, /scripts\/build-firmware\.sh/);
+  assert.match(firmware, /\[\[publish_firmware\]\]/);
+  assert.match(firmware, /never say it is installed/);
 });
 
 test("every turn runs tool-free and isolated from the owner's settings", () => {

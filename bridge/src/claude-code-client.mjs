@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { sleep, writeJsonAtomic } from "./utils.mjs";
 
 // Runs each Cardputer turn through the owner's installed, unmodified `claude`
@@ -19,7 +20,8 @@ export const CLAUDE_CODE_DEFAULTS = Object.freeze({
   model: "claude-opus-5-5",
   effort: "xhigh",
   turnTimeoutMs: 600000,
-  projectDir: null
+  projectDir: null,
+  firmwareUpdates: false
 });
 
 const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
@@ -53,16 +55,33 @@ export const PROJECT_TOOLS = "Read,Write,Edit,Glob,Grep,Bash";
 // the OS rather than by the model. Bash writes stay in the working directory
 // and it has no network. failIfUnavailable refuses to run rather than run
 // unsandboxed, and allowUnsandboxedCommands removes the retry-outside escape.
-export const PROJECT_SANDBOX = Object.freeze({
-  sandbox: {
-    enabled: true,
-    failIfUnavailable: true,
-    allowUnsandboxedCommands: false,
-    autoAllowBashIfSandboxed: true,
-    network: { strictAllowlist: true, allowedDomains: [] }
-  },
-  permissions: { blockReadsOutsideWorkingDirectories: true }
-});
+//
+// The bridge itself runs unsandboxed. If its code sits inside the project, editing
+// it would run with full access the next time the bridge or voice worker starts,
+// so that folder stays read-only.
+const BRIDGE_ROOT = realpathSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."));
+
+export function projectSettings(projectDir, bridgeRoot = BRIDGE_ROOT) {
+  const realProject = statSync(projectDir, { throwIfNoEntry: false }) ? realpathSync(projectDir) : projectDir;
+  const bridgeInProject = bridgeRoot === realProject || bridgeRoot.startsWith(`${realProject}${path.sep}`);
+  return {
+    sandbox: {
+      enabled: true,
+      failIfUnavailable: true,
+      allowUnsandboxedCommands: false,
+      autoAllowBashIfSandboxed: true,
+      network: { strictAllowlist: true, allowedDomains: [] },
+      ...(bridgeInProject ? { filesystem: { denyWrite: [bridgeRoot] } } : {})
+    },
+    permissions: {
+      blockReadsOutsideWorkingDirectories: true,
+      ...(bridgeInProject ? { deny: [`Edit(/${bridgeRoot}/**)`] } : {})
+    }
+  };
+}
+
+// Claude ends a reply with this to ask the bridge to offer a finished build.
+export const PUBLISH_FIRMWARE_MARKER = "[[publish_firmware]]";
 
 // Fixed text only: provider error messages are never shown or logged.
 const FAILURE_REPLIES = Object.freeze({
@@ -109,6 +128,8 @@ export function validateClaudeCodeConfig(config) {
   const { projectDir } = claudeCodeSettings(config);
   if (projectDir && !statSync(projectDir, { throwIfNoEntry: false })?.isDirectory())
     throw new Error("upstream.claudeCode.projectDir does not exist");
+  if (config.upstream?.claudeCode?.firmwareUpdates && !projectDir)
+    throw new Error("upstream.claudeCode.firmwareUpdates needs projectDir");
   if (config.modelRouting?.enabled)
     throw new Error("modelRouting needs the OpenClaw provider; set upstream.claudeCode.model instead.");
   if (config.firmwareAutomation?.enabled)
@@ -144,7 +165,7 @@ export function claudeTurnArgs(settings, { appendSystemPrompt = "", sessionId = 
     ...ISOLATION_ARGS,
     ...(settings.projectDir
       ? ["--tools", PROJECT_TOOLS, "--permission-mode", "acceptEdits", "--permission-prompts", "none",
-          "--settings", JSON.stringify(PROJECT_SANDBOX), ...(memoryDir ? ["--add-dir", memoryDir] : [])]
+          "--settings", JSON.stringify(projectSettings(settings.projectDir)), ...(memoryDir ? ["--add-dir", memoryDir] : [])]
       : ["--tools", ""]),
     ...(appendSystemPrompt ? ["--append-system-prompt", appendSystemPrompt] : []),
     ...(sessionId ? ["--resume", sessionId] : [])
@@ -230,11 +251,12 @@ export function parseClaudeResult({ code, stdout, stderr, timedOut, overflowed, 
 }
 
 export class ClaudeCodeClient extends EventEmitter {
-  constructor(config, { appendSystemPrompt = "", recentMessages = () => [], spawnImpl = spawn, env = process.env, retryDelayMs = 1000 } = {}) {
+  constructor(config, { appendSystemPrompt = "", recentMessages = () => [], publishFirmware = null, spawnImpl = spawn, env = process.env, retryDelayMs = 1000 } = {}) {
     super();
     this.settings = claudeCodeSettings(config);
     this.appendSystemPrompt = appendSystemPrompt;
     this.recentMessages = recentMessages;
+    this.publishFirmware = publishFirmware;
     this.spawnImpl = spawnImpl;
     this.env = env;
     this.retryDelayMs = retryDelayMs;
@@ -367,7 +389,7 @@ export class ClaudeCodeClient extends EventEmitter {
     }
     const failed = !outcome.text;
     if (failed) console.warn(`[claude-code] turn failed category=${outcome.category}`);
-    const text = outcome.text || FAILURE_REPLIES[outcome.category];
+    const text = await this.withPublishedFirmware(outcome.text || FAILURE_REPLIES[outcome.category]);
     if (text) this.emitReply(key, runId, text);
     this.finishRun(key, runId, failed ? "error" : "ok");
   }
@@ -408,6 +430,18 @@ export class ClaudeCodeClient extends EventEmitter {
       onSpawn(child);
       return child;
     };
+  }
+
+  async withPublishedFirmware(text) {
+    if (!text?.includes(PUBLISH_FIRMWARE_MARKER)) return text;
+    const reply = text.replaceAll(PUBLISH_FIRMWARE_MARKER, "").trim();
+    if (!this.publishFirmware) return reply;
+    try {
+      return `${reply}\n\n${await this.publishFirmware()}`.trim();
+    } catch (error) {
+      console.warn("[claude-code] firmware publish refused");
+      return `${reply}\n\nThe update wasn't published: ${String(error.message || error).slice(0, 160)}.`.trim();
+    }
   }
 
   emitReply(sessionKey, runId, text) {

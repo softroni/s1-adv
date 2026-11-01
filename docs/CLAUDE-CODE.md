@@ -214,8 +214,12 @@ The limits are enforced by the operating system's sandbox, not by asking Claude:
 | Run commands | Yes | Commands can't read or change it |
 | Network | No | No |
 
-So `git push`, package installs and firmware builds don't work from the Cardputer. If
-the sandbox can't start, nothing runs.
+So `git push` and package installs don't work from the Cardputer. If the sandbox can't
+start, nothing runs.
+
+If the bridge itself is inside that folder, its own folder is read-only to Claude. The
+bridge runs outside the sandbox, so code changed there would otherwise run with full
+access to your computer the next time the bridge or its voice worker started.
 
 **Know the risk.** Your bridge is on the internet, so your device token now protects a
 folder as well as a chat. Anyone with the token can change or delete anything in that
@@ -223,6 +227,37 @@ folder, including `.git`, and text in the project's own files can try to steer C
 Speech can also be misheard, so Claude is told to confirm voice requests before changing
 files. Use a folder you can restore, keep your work pushed, and don't put secrets in it.
 If the token leaks, replace it and turn this off first.
+
+## Update firmware from the Cardputer
+
+With a [project folder](#let-claude-work-in-a-folder) set to this repository, Claude can
+change the firmware, build it and offer it to the Cardputer over Wi-Fi. Set it up once, from
+the repository root, outside the sandbox, because this step needs the network and about
+3 GB of disk space while it installs:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install platformio==6.1.19
+PLATFORMIO_CORE_DIR=.platformio .venv/bin/python scripts/cardputer.py build
+```
+
+Then set `upstream.claudeCode.firmwareUpdates` to `true` and restart the bridge. Raise
+`turnTimeoutMs` to `1800000` so a larger change has time to finish.
+
+Ask for what you want, such as "add a snake game and send it to me". Then:
+
+1. Claude changes the code, raises the version, and builds with `scripts/build-firmware.sh`
+   inside the sandbox. That build has no network and no credentials. A device keeps its
+   saved Wi-Fi and bridge settings across updates.
+2. When Claude asks for it, the bridge checks the image itself: it must be a real ESP32-S3
+   app image, fit the 3 MB slot, and be newer than the installed version.
+3. The Cardputer is told about the update. **You open `/ota`, review it and install it.**
+   Claude can't install anything, and the Cardputer needs at least 40% battery.
+
+The new firmware runs from the second app slot. Keep the USB cable available as a way back.
+
+Anyone with your device token could offer you an update, so only install updates you asked
+for. Leave **Auto OTA** off in Device settings so that an install always needs you.
 
 ## Privacy and isolation
 

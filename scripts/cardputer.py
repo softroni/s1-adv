@@ -13,6 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def environment():
     env = os.environ.copy()
+    # Kept here so Claude's sandbox can build. See docs/CLAUDE-CODE.md.
+    if (ROOT / '.platformio').is_dir():
+        env.setdefault('PLATFORMIO_CORE_DIR', str(ROOT / '.platformio'))
     path = ROOT / '.env'
     if path.exists():
         for number, line in enumerate(path.read_text().splitlines(), 1):
