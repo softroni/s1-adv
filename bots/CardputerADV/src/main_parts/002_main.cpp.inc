@@ -191,6 +191,7 @@ enum class UiMode : uint8_t {
   AirMusic,
   Flappy,
   Balloon,
+  BallCatch,
   NfcNotes,
   Radio,
   VlcRemote,

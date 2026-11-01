@@ -64,6 +64,7 @@
 #include "flappy.h"
 #include "balloon.h"
 #include "balloon_audio.h"
+#include "ball_catch.h"
 #include "radio_catalog.h"
 #include "internet_radio_transport.h"
 #include "vlc_remote.h"
@@ -101,7 +102,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.223-dev"
+#define APP_VERSION "0.2.224-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"
@@ -220,7 +221,7 @@ constexpr size_t kHttpStageChunkBytes = 4 * 1024;
 constexpr uint32_t kVoiceSocketSettleMs = 300;
 constexpr uint32_t kCtrlDoubleTapWindowMs = 420;
 constexpr uint32_t kLauncherToggleDebounceMs = 140;
-constexpr uint8_t kLauncherGroupCount = 7;
+constexpr uint8_t kLauncherGroupCount = 8;
 constexpr uint8_t kLauncherMaxSubItems = 8;
 constexpr uint32_t kKeyRushDurationMs = 30000;
 constexpr const char* kKeyRushPrefsNs = "keyrush";

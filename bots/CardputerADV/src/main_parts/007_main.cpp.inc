@@ -74,6 +74,8 @@ const char* uiModeName(UiMode mode) {
       return "Flappy Bird";
     case UiMode::Balloon:
       return "Hot Air Balloon";
+    case UiMode::BallCatch:
+      return "Ball Catch";
     case UiMode::NfcNotes:
       return "NFC Notes";
     case UiMode::CMatrix:

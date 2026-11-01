@@ -22,6 +22,7 @@ bool appAllowsBackgroundNetwork() {
     case UiMode::AirMusic:
     case UiMode::Flappy:
     case UiMode::Balloon:
+    case UiMode::BallCatch:
     case UiMode::Radio:
     case UiMode::VlcRemote: // VLC explicitly polls; keep background TLS out.
     case UiMode::Nes: // The emulator owns RAM, audio and Wi-Fi until it exits.

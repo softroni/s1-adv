@@ -25,11 +25,11 @@ inline char digitFromHid(uint8_t rawCode) {
 }
 
 inline Action resolve(char key, bool ctrl, uint8_t groupCount, uint8_t submenuCount) {
-  if (ctrl && key >= '1' && key <= '7') {
+  if (ctrl && key >= '1' && key <= '8') {
     const uint8_t index = static_cast<uint8_t>(key - '1');
     return Action(index < submenuCount ? Kind::Submenu : Kind::InvalidSubmenu, index);
   }
-  if (!ctrl && key >= '1' && key <= '7') {
+  if (!ctrl && key >= '1' && key <= '8') {
     const uint8_t index = static_cast<uint8_t>(key - '1');
     return Action(index < groupCount ? Kind::Group : Kind::None, index);
   }

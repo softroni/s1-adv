@@ -19,6 +19,7 @@
 - `/music` opens Air Music, which plays notes as you wave a hand over an ultrasonic unit.
 - `/flappy` opens Flappy Bird, steered by hand over the same unit or flapped with Space.
 - `/balloon` opens Hot Air Balloon, flown by blowing on an ENV III and steered with a Joystick 2.
+- `/catch` opens Ball Catch, where you drop a ball and catch it in a basket with a Joystick 2.
 
 This firmware has evolved across development versions. Prefer the command help
 on your built device for current shortcuts. Specialized IR, RFID and sonar
@@ -69,7 +70,7 @@ NFC Notes is under Tab, Tools, and `/nfc` opens it. It needs the M5Stack NFC uni
 
 ## Air Music
 
-Air Music is under Tab, Games, and `/music` opens it. It needs the M5Stack I2C ultrasonic
+Air Music is under Tab, Arcade, and `/music` opens it. It needs the M5Stack I2C ultrasonic
 unit (address 0x57) on the Grove port.
 
 Hold a hand 4 to 44 cm above the sensor. Closer is higher, and there are ten notes, each
@@ -77,7 +78,7 @@ about 4 cm apart. Move away to stop. Esc leaves.
 
 ## Flappy Bird
 
-Flappy Bird is under Tab, Games, and `/flappy` opens it. Point the ultrasonic unit up and
+Flappy Bird is under Tab, Arcade, and `/flappy` opens it. Point the ultrasonic unit up and
 hold a hand over it: 6 cm is the bottom of the screen and 30 cm is the top, so the bird
 follows your hand. Take your hand away and the bird falls.
 
@@ -87,7 +88,7 @@ moment and the next game is ready to start. Esc leaves.
 
 ## Hot Air Balloon
 
-Hot Air Balloon is under Tab, Games, and `/balloon` opens it. Connect an ENV III and a
+Hot Air Balloon is under Tab, Arcade, and `/balloon` opens it. Connect an ENV III and a
 Joystick 2 to the Grove port through a hub. Both are optional.
 
 - **Rise:** blow on the ENV III, hold the joystick's button, or press Space or W.
@@ -97,6 +98,17 @@ Joystick 2 to the Grove port through a hub. Both are optional.
 - Every 10 stars the sky changes from day to sunset to night, and the wind picks up.
 - A quiet music box plays while the game is open. M turns it off and on. It pauses behind
   the menu, and it stops while the assistant is using the mic or speaker.
+
+## Ball Catch
+
+Ball Catch is under Tab, Arcade, and `/catch` opens it. Connect a Joystick 2 to the Grove
+port, or play on the keyboard.
+
+- A ball slides along the top. Press the joystick's button, or Space, to drop it.
+- Move the basket underneath with the joystick, or with A and D or the arrow keys.
+- The ball's shadow shows where it will land. A catch scores a point, and a miss costs one
+  of three hearts.
+- The ball speeds up as you score, and the basket shrinks every 5 catches.
 
 Realtime shows CONNECT, LISTEN, THINK, SPEAK, READY or ERROR above the large eyes.
 MIC ON and the input meter appear only during recording. Connection errors remain

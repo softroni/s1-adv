@@ -26,6 +26,9 @@
       case UiMode::Balloon:
         renderBalloonUi();
         break;
+      case UiMode::BallCatch:
+        renderBallCatchUi();
+        break;
       case UiMode::NfcNotes:
         renderNfcNotesUi();
         break;
@@ -471,6 +474,7 @@ void loop() {
   serviceAirMusic();
   serviceFlappy();
   serviceBalloon();
+  serviceBallCatch();
   serviceBrainFlow();
   serviceTetris();
   serviceSmartLamp();

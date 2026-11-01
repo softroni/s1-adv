@@ -158,6 +158,7 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
   if (gUiMode == UiMode::AirMusic) return;  // Played by hand. Stray keys shouldn't start a chat.
   if (gUiMode == UiMode::Flappy && handleFlappyKey(key, keys)) return;
   if (gUiMode == UiMode::Balloon && handleBalloonKey(key, keys)) return;
+  if (gUiMode == UiMode::BallCatch && handleBallCatchKey(key, keys)) return;
   if (gUiMode == UiMode::NfcNotes && handleNfcNotesKey(key, keys)) return;
   if (gUiMode == UiMode::WifiSettings && handleWifiSettingsKey(key, keys)) return;
   if (gUiMode == UiMode::Radio && handleInternetRadioKey(key, keys)) return;
