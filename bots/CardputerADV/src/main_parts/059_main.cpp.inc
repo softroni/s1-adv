@@ -80,7 +80,9 @@
   d.drawRoundRect(0, 0, 240, 135, 6, realtime ? rgb565_local(86, 52, 24) : blueFrame);
 
   uint32_t nowMs = millis();
-  float t = nowMs / 1000.0f;
+  // Every animation below runs off t and level, so fixing them holds the screen still.
+  const bool working = assistantPulseWorking(state);
+  float t = working ? nowMs / 1000.0f : 0.0f;
   float breathe = sinf(t * 2.2f) * 0.9f;
   float spin = t * 0.55f;
   if (state == AssistantPulseState::Thinking) {
@@ -90,7 +92,7 @@
   } else if (realtime) {
     spin = t * (gRealtimeRecording ? 1.45f : gRealtimeAwaiting ? 1.95f : 0.82f);
   }
-  float level = max<uint8_t>(18, gVoiceLevel8) / 255.0f;
+  float level = (working ? max<uint8_t>(18, gVoiceLevel8) : 18) / 255.0f;
   if (!gRecording && !gRealtimeRecording && gVoiceLevel8 > 28) {
     gVoiceLevel8 = static_cast<uint8_t>(max<int>(28, static_cast<int>(gVoiceLevel8) - 2));
   }
@@ -181,7 +183,7 @@
   int16_t waveY = state == AssistantPulseState::Ready ? 88 : 86;
   int bars = state == AssistantPulseState::Ready ? 15 : 16;
   const bool micRecording = gRecording || gRealtimeRecording;
-  if (micRecording || realtime) {
+  if (working && (micRecording || realtime)) {
     mic_input_meter::draw(d, 121, 77, 96, gMicInputMeter.visibleLevel(micRecording, nowMs),
                           rgb565_local(45, 32, 40), c1, c2);
   } else for (int i = 0; i < bars; ++i) {
@@ -191,19 +193,7 @@
       d.fillCircle(bx, dotY, (i % 3 == 0) ? 3 : 2, (i % 2) ? c1 : c2);
       continue;
     }
-    if (state == AssistantPulseState::Playback || (realtime && gPlaybackActive)) {
-      uint8_t band = static_cast<uint8_t>(clampValue<int>(
-          (i * kPlaybackSpectrumBands) / max<int>(1, bars), 0, kPlaybackSpectrumBands - 1));
-      int16_t h = static_cast<int16_t>(4 + gVoiceEqBars[band] * 2);
-      h = clampValue<int16_t>(h, 5, 42);
-      uint16_t barColor = (i % 3 == 0) ? c2 : c1;
-      d.fillRoundRect(bx - 2, waveY - h / 2, 4, h, 2, barColor);
-      uint8_t peak = gVoiceEqPeaks[band];
-      int16_t py = waveY - static_cast<int16_t>(min<int>(42, 4 + peak * 2)) / 2 - 2;
-      d.drawFastHLine(bx - 2, py, 4, fg);
-      continue;
-    }
-    float amp = (state == AssistantPulseState::Recording || (realtime && gRealtimeRecording)) ? 1.05f :
+    float amp =(state == AssistantPulseState::Recording || (realtime && gRealtimeRecording)) ? 1.05f :
                 realtime ? 0.82f : 0.68f;
     int16_t h = static_cast<int16_t>((8.0f + fabsf(sinf(t * 3.6f + i * 0.74f)) * 22.0f +
                                       fabsf(cosf(t * 1.7f + i * 0.31f)) * 7.0f) *

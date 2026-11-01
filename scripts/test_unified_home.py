@@ -31,6 +31,7 @@ code = r'''
 #include <ctime>
 #include <string>
 #include <vector>
+#include "firmware_job_display.h"
 #include "release_delivery.h"
 using std::min;using std::max;
 struct String:std::string {
@@ -47,11 +48,12 @@ bool gVoiceCapturePreparing=false,gG0VoicePending=false;
 VoiceRequestPhase gVoiceRequestPhase=VoiceRequestPhase::None;
 uint32_t nowMs=13000,gRecordStartMs=1000,gHomeUpdatePreviewUntilMs=0,gAssistantPulsePressUntilMs=0;
 uint32_t millis(){return nowMs;}
-String gInputBuffer,gStatusText="Sending voice...",gBootBackgroundLabel;
+String gInputBuffer,gStatusText="Sending voice...",gBootBackgroundLabel,gQueuedVoiceReplySpeech;
+bool gVoiceReplySpeechBusy=false;
+firmware_job_display::State gFirmwareJobState=firmware_job_display::State::Idle;
 struct{bool clockTwelveHour=false;uint8_t minBatteryForUpdate=25;}gDeviceSettings;
 struct{int level=72;}gBatterySnapshot;
-uint8_t gVoiceLevel8=64;constexpr int kPlaybackSpectrumBands=8;
-uint8_t gVoiceEqBars[8]={},gVoiceEqPeaks[8]={};
+uint8_t gVoiceLevel8=64;
 constexpr const char*kAppVersion="0.2.178-dev";
 namespace fonts{int Font0=0,Font2=2,Font4=4,Font7=7,efontCN_12=12;}
 constexpr uint16_t TFT_WHITE=0xffff;
@@ -59,11 +61,12 @@ constexpr uint16_t rgb565_local(int r,int g,int b){return ((r&0xf8)<<8)|((g&0xfc
 template<class T>T clampValue(T n,T low,T high){return max(low,min(n,high));}
 struct Canvas {
  const int*font=&fonts::Font0;int x=0,y=0,chatRects=0,clockRects=0;
- std::vector<std::string> printed;std::vector<uint16_t> arcs;
+ std::vector<std::string> printed;std::vector<uint16_t> arcs;std::vector<std::vector<int>> shapes;
  void fillScreen(uint16_t){}
- template<class...T>void fillCircle(T...){}template<class...T>void drawCircle(T...){}
- template<class...T>void fillTriangle(T...){}template<class...T>void drawFastHLine(T...){}
+ template<class...T>void fillCircle(T...a){shapes.push_back({int(a)...});}template<class...T>void drawCircle(T...a){shapes.push_back({int(a)...});}
+ template<class...T>void fillTriangle(T...){}template<class...T>void drawFastHLine(T...a){shapes.push_back({int(a)...});}
  void fillRoundRect(int xx,int yy,int w,int h,int,uint16_t){
+  shapes.push_back({xx,yy,w,h});
   if(xx==10&&yy==107)++chatRects;
   if(xx==119&&yy==13){assert(w==103&&h==57);++clockRects;}
  }
@@ -74,17 +77,17 @@ struct Canvas {
  void setCursor(int xx,int yy){x=xx;y=yy;}
  void print(const String&s){assert(x>=0&&y>=0&&x+textWidth(s)<=240&&y<135);if(s=="REC"){assert(font==&fonts::Font2&&x>=154&&x+textWidth(s)<=216&&y>=105&&y+fontHeight()<=126);}printed.push_back(s);}
 }gCanvas;
-int badges=0,batteries=0;
+int badges=0,batteries=0,meters=0;
 void drawHomeReadyStatus(bool,bool){++badges;}
 void drawHomeBatteryStatus(int32_t){++batteries;}
-void drawAssistantPulseArc(int,int,int,int,float,float,uint16_t c){gCanvas.arcs.push_back(c);}
+void drawAssistantPulseArc(int,int,int,int,float a,float b,uint16_t c){gCanvas.arcs.push_back(c);gCanvas.shapes.push_back({int(a*1000),int(b*1000)});}
 void renderLauncherOverlay(){}void renderDebugOverlay(){}void ensureBangkokTimezone(){}
 String fitCurrentFontToWidth(const String&s,int w){return s.substr(0,w/8);}
 String tailUtf8ToFit(const String&s,int w){return s.substr(0,w/8);}
 uint32_t playbackProgressPct(){return 10;}uint32_t playbackRemainingMs(){return 1000;}
 String formatPlaybackMs(uint32_t){return "00:01";}
 struct{int visibleLevel(bool,uint32_t){return 30;}}gMicInputMeter;
-namespace mic_input_meter {template<class...T>void draw(T&&...){}}
+namespace mic_input_meter {template<class...T>void draw(T&&...){++meters;}}
 namespace clock_display {void format(char*p,size_t n,int h,int m,bool){std::snprintf(p,n,"%02d:%02d",h,m);}}
 bool candidateAvailable=false,gSdReady=true,gOtaPendingVerify=false,gOtaConfirmedThisBoot=false;
 bool gPendingOtaCheckAction=false,gInboxHttpBusy=false;
@@ -100,12 +103,33 @@ template<class...T>void drawServiceOrb(T...){}
 template<class...T>void drawInfoRow(T...){}
 '''
 for signature in ['AssistantPulseState assistantPulseState()', 'void drawAssistantPulseButton(', 'void renderAssistantPulseChatHint()',
-                  'void renderAssistantPulseUi()', 'void renderOtaUi()']:
+                  'bool assistantPulseWorking(', 'void renderAssistantPulseUi()', 'void renderOtaUi()']:
     code += function(signature) + '\n'
 code += r'''
-void reset(){gCanvas=Canvas{};badges=batteries=0;}
+void reset(){gCanvas=Canvas{};badges=batteries=meters=0;}
 bool printed(const char*s){return std::find(gCanvas.printed.begin(),gCanvas.printed.end(),s)!=gCanvas.printed.end();}
+std::vector<std::vector<int>> frame(uint32_t at,uint8_t voice){nowMs=at;gVoiceLevel8=voice;reset();renderAssistantPulseUi();nowMs=13000;return gCanvas.shapes;}
+// Same picture at another time and at another voice level.
+bool still(){const auto first=frame(20000,200);return first==frame(23700,40);}
+void checkMotion(){
+ assert(still());
+ for(bool*on:{&gRecording,&gPlaybackActive,&gRealtimeActive,&gRealtimeRecording}){
+  *on=true;assert(still());assert(meters==0);*on=false;}
+ gRealtimeActive=gRealtimeConnected=true;assert(still());gRealtimeConnected=false;
+ gRealtimeAwaiting=true;assert(!still());gRealtimeActive=gRealtimeAwaiting=false;
+ for(bool*on:{&gThinking,&gSubmitting,&gVoiceReplyPending,&gVoiceReplySpeechBusy,&gVoiceCapturePreparing,&gG0VoicePending}){
+  *on=true;assert(!still());*on=false;}
+ gQueuedVoiceReplySpeech="Four";assert(!still());gQueuedVoiceReplySpeech.clear();
+ using State=firmware_job_display::State;
+ for(State job:{State::Building,State::Working}){gFirmwareJobState=job;assert(!still());}
+ for(State job:{State::Ready,State::Attention,State::Failed,State::Stalled,State::Unconfirmed,State::AwaitingInput,State::TaskError}){gFirmwareJobState=job;assert(still());}
+ gFirmwareJobState=State::Idle;
+ // Working while recording keeps the live mic meter.
+ gFirmwareJobState=State::Working;gRecording=true;frame(20000,64);assert(meters==1);gRecording=false;gFirmwareJobState=State::Idle;
+ assert(still());gVoiceLevel8=64;
+}
 int main(){
+ checkMotion();
  reset();renderAssistantPulseUi();assert(gCanvas.clockRects==1&&gCanvas.chatRects==1&&badges==1&&batteries==1);
  assert(printed("> type to chat"));
  for(bool pending:{false,true}){
@@ -147,4 +171,4 @@ with tempfile.TemporaryDirectory(prefix='s1-unified-home-') as directory:
                     '-I', str(root / 'bots/CardputerADV/src'), str(p / 'test.cpp'),
                     '-o', str(p / 'test')], check=True)
     subprocess.run([str(p / 'test')], check=True)
-print('PASS actual Home/OTA renderers: one scene, red recording, clock/timer, hidden draft/battery, compact progress, one Enter action')
+print('PASS actual Home/OTA renderers: one scene, red recording, clock/timer, hidden draft/battery, compact progress, one Enter action, still unless thinking or working')

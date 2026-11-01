@@ -240,7 +240,14 @@ void renderAssistantPulseChatHint() {
   else d.print(hasInput ? tailUtf8ToFit("> " + gInputBuffer, 116) : (realtime ? "> realtime" : "> type to chat"));
 }
 
-
+// The Pulse screen moves only while the assistant is thinking or working.
+bool assistantPulseWorking(AssistantPulseState state) {
+  return state == AssistantPulseState::Thinking || gRealtimeAwaiting ||
+      gG0VoicePending || gVoiceCapturePreparing ||
+      gVoiceReplySpeechBusy || !gQueuedVoiceReplySpeech.isEmpty() ||
+      gFirmwareJobState == firmware_job_display::State::Building ||
+      gFirmwareJobState == firmware_job_display::State::Working;
+}
 
 void renderAssistantPulseUi() {
   auto& d = gCanvas;
