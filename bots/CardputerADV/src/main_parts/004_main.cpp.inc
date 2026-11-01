@@ -258,6 +258,7 @@ bool gPostInstallStoryPending = false;
 uint32_t gPostInstallStoryNextMs = 0;
 uint8_t gPostInstallStoryAttempts = 0;
 int gChatScrollOffset = 0;
+int gChatVisibleRows = 0; // Measured by the last chat render; depends on text size.
 int gLauncherSelection = 0;
 int gLauncherSubSelection = 0;
 uint8_t gLauncherLastSub[kLauncherGroupCount] = {};

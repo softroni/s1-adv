@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -131,6 +131,83 @@ test("the child environment cannot select API billing or see host secrets", () =
     ANTHROPIC_API_KEY: "secret", ANTHROPIC_AUTH_TOKEN: "secret", ANTHROPIC_BASE_URL: "https://evil.example",
     CLAUDE_CODE_USE_BEDROCK: "1", OPENAI_API_KEY: "secret", CARDPUTER_BRIDGE_CONFIG: "/private", CLAUDECODE: "1" });
   assert.deepEqual(Object.keys(env).sort(), ["CLAUDE_CODE_OAUTH_TOKEN", "HOME", "LC_ALL", "PATH"]);
+});
+
+test("project access is opt-in, sandboxed and confined to one real folder", async t => {
+  const defaults = claudeTurnArgs({ ...CLAUDE_CODE_DEFAULTS });
+  assert.equal(defaults[defaults.indexOf("--tools") + 1], "", "no tools unless a project folder is configured");
+  assert.ok(!defaults.includes("--settings"));
+
+  const args = claudeTurnArgs({ ...CLAUDE_CODE_DEFAULTS, projectDir: "/work/project" });
+  assert.equal(args[args.indexOf("--tools") + 1], "Read,Write,Edit,Glob,Grep,Bash");
+  assert.ok(args.includes("--restricted"), "the owner's settings and CLAUDE.md stay out");
+  assert.ok(args.includes("--strict-mcp-config"));
+  assert.equal(args[args.indexOf("--permission-prompts") + 1], "none", "nobody is at the keyboard to answer");
+  assert.ok(!args.some(arg => /skip-permissions|bypass/i.test(arg)));
+  const { sandbox, permissions } = JSON.parse(args[args.indexOf("--settings") + 1]);
+  assert.equal(sandbox.enabled, true);
+  assert.equal(sandbox.failIfUnavailable, true, "must refuse to run rather than run unsandboxed");
+  assert.equal(sandbox.allowUnsandboxedCommands, false, "must not retry outside the sandbox");
+  assert.equal(sandbox.network.strictAllowlist, true);
+  assert.deepEqual(sandbox.network.allowedDomains, []);
+  assert.equal(permissions.blockReadsOutsideWorkingDirectories, true);
+
+  const settings = projectDir => claudeCodeSettings({ upstream: { claudeCode: { projectDir } } });
+  assert.equal(settings("/work/project/").projectDir, "/work/project");
+  assert.throws(() => settings("relative/path"), /absolute/);
+  assert.throws(() => settings("/"), /project folder/);
+  assert.throws(() => settings(homedir()), /project folder/);
+  assert.throws(() => settings(path.dirname(homedir())), /project folder/);
+  assert.throws(() => validateClaudeCodeConfig({ upstream: { claudeCode: { projectDir: "/no/such/s1-adv-folder" } } }), /does not exist/);
+});
+
+test("project turns run in the folder and start a new conversation", async t => {
+  const fake = await makeFake(t, { steps: [success("chat"), success("project", NEXT_ID), success("project again", NEXT_ID)] });
+  const chat = makeClient(fake);
+  await chat.client.start();
+  await send(chat.client, "hello", "run-1");
+  await finished(chat.client, "run-1");
+
+  const project = path.join(fake.dir, "project");
+  await mkdir(project);
+  const { client, events } = makeClient(fake, { projectDir: project });
+  await client.start();
+  await send(client, "what folder is this?", "run-2");
+  await finished(client, "run-2");
+  await send(client, "and again", "run-3");
+  await finished(client, "run-3");
+  const calls = await fake.calls();
+  assert.equal(await realpath(calls[1].cwd), await realpath(project));
+  assert.ok(!calls[1].argv.includes("--resume"), "a tool-free conversation must not carry over");
+  assert.equal(calls[2].argv[calls[2].argv.indexOf("--resume") + 1], NEXT_ID);
+  assert.equal(replyText(events.at(-1)), "project again");
+});
+
+test("a sandbox that can't start is reported and nothing runs unsandboxed", async t => {
+  const fake = await makeFake(t, { steps: [failure("Sandbox is required but failed to initialize: unsupported")] });
+  const project = path.join(fake.dir, "project");
+  await mkdir(project);
+  const { client, events } = makeClient(fake, { projectDir: project });
+  await client.start();
+  await send(client, "change something", "run-1");
+  assert.equal((await finished(client, "run-1")).status, "error");
+  assert.match(replyText(events[0]), /sandbox couldn't start/);
+  assert.equal((await fake.calls()).length, 1, "no retry");
+});
+
+test("the system prompt describes the access Claude really has", async t => {
+  const fake = await makeFake(t);
+  const example = JSON.parse(await readFile(path.join(bridgeRoot, "config.example.json"), "utf8"));
+  const prompt = async (claudeCode, name) => new BridgeRuntime({ ...example, stateDir: path.join(fake.dir, name),
+    upstream: { provider: "claude-code", claudeCode: { command: fake.command, ...claudeCode } } }).upstream.appendSystemPrompt;
+  const chat = await prompt({}, "chat");
+  assert.match(chat, /no tools/);
+  const project = await prompt({ projectDir: fake.dir }, "project");
+  assert.ok(!project.includes("no tools"));
+  assert.ok(project.includes(`project folder ${fake.dir}`));
+  assert.match(project, /misheard/);
+  assert.match(project, /Never delete or overwrite work without confirmation/);
+  assert.match(project, /cardputer_actions/);
 });
 
 test("every turn runs tool-free and isolated from the owner's settings", () => {

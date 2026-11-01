@@ -192,6 +192,7 @@ void loadDeviceSettings() {
   gDeviceSettings.screenAutoOffEnabled = gPrefs.getBool("lcd_off", false);
   gDeviceSettings.screenOffAfterMin = static_cast<uint8_t>(gPrefs.getUChar("lcd_off_m", kDefaultScreenOffAfterMin));
   gDeviceSettings.screensaverClockOnWake = gPrefs.getBool("scr_clk", true);
+  gDeviceSettings.textSize = min<uint8_t>(gPrefs.getUChar("text_size", 0), kTextSizeCount - 1);
   gDeviceSettings.notificationVolumePct = static_cast<uint8_t>(gPrefs.getUChar("vol_notif", kDefaultNotificationVolumePct));
   gDeviceSettings.updateChannel = gPrefs.getString("fw_chan", "dev");
   gDeviceSettings.audioLanguage = gPrefs.getString("aud_lang", "en");
@@ -232,6 +233,7 @@ void saveDeviceSettings() {
   gPrefs.putBool("lcd_off", gDeviceSettings.screenAutoOffEnabled);
   gPrefs.putUChar("lcd_off_m", gDeviceSettings.screenOffAfterMin);
   gPrefs.putBool("scr_clk", gDeviceSettings.screensaverClockOnWake);
+  gPrefs.putUChar("text_size", gDeviceSettings.textSize);
   gPrefs.putUChar("vol_notif", gDeviceSettings.notificationVolumePct);
   gPrefs.putString("fw_chan", gDeviceSettings.updateChannel);
   gPrefs.putString("aud_lang", gDeviceSettings.audioLanguage);

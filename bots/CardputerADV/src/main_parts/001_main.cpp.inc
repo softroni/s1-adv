@@ -89,7 +89,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.205-dev"
+#define APP_VERSION "0.2.206-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"
@@ -220,7 +220,11 @@ constexpr uint32_t kSmartLampMinCommandGapMs = 520;
 constexpr const char* kSmartLampPrefsNs = "smartlamp";
 constexpr uint8_t kDeviceSettingsItemCount = 8;
 constexpr uint8_t kFocusSettingsItemCount = 11;
-constexpr uint8_t kScreenSettingsItemCount = 10;
+constexpr uint8_t kScreenSettingsItemCount = 11;
+constexpr uint8_t kTextSizeCount = 3;
+// Scaling the one font that covers Cyrillic costs no flash. Larger efont files
+// would not fit the 3 MB app slot.
+constexpr float kTextSizeScales[kTextSizeCount] = {1.0f, 1.5f, 2.0f};
 constexpr uint8_t kSettingsItemCount = kScreenSettingsItemCount;
 constexpr uint8_t kDefaultDisplayBrightnessPct = 70;
 constexpr uint8_t kScreensaverStyleCount = 3;
@@ -331,6 +335,10 @@ constexpr size_t kRecordWriteBytes = 512;
 constexpr size_t kRecordChunkSamples = 1024;
 constexpr size_t kRecordChunkBytes = kRecordChunkSamples * sizeof(int16_t);
 constexpr size_t kRecordChunkBufferCount = 3;
+// A TLS handshake is seconds of CPU work, started as recording starts. loopTask
+// drains the microphone on core 1 with only two 64 ms chunks queued, so this
+// work stays on core 0 or the first seconds of every recording are lost.
+constexpr BaseType_t kVoiceNetworkCore = 0;
 // Realtime uses the model's native PCM clock. Keep the ordinary voice-note
 // path at kMicSampleRate; it has a separate codec lifecycle.
 constexpr uint32_t kRealtimeInputSampleRate = 24000;

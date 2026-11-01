@@ -132,6 +132,10 @@ void adjustCurrentSetting(int delta) {
         gDeviceSettings.screensaverDimBrightnessPct = static_cast<uint8_t>(clampValue<int>(gDeviceSettings.screensaverDimBrightnessPct + delta * 5, 0, 100));
         applyDisplayBrightness();
         break;
+      case 10:
+        gDeviceSettings.textSize = static_cast<uint8_t>(
+            (gDeviceSettings.textSize + kTextSizeCount + (delta >= 0 ? 1 : -1)) % kTextSizeCount);
+        break;
       case 8:
         gDeviceSettings.screenOffAfterMin = static_cast<uint8_t>(clampValue<int>(gDeviceSettings.screenOffAfterMin + delta * 5, 5, 240));
         break;
@@ -210,6 +214,9 @@ void toggleCurrentSetting() {
         break;
       case 9:
         gDeviceSettings.screensaverClockOnWake = !gDeviceSettings.screensaverClockOnWake;
+        break;
+      case 10:
+        gDeviceSettings.textSize = static_cast<uint8_t>((gDeviceSettings.textSize + 1U) % kTextSizeCount);
         break;
       default:
         break;

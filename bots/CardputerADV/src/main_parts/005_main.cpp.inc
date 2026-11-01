@@ -539,6 +539,8 @@ bool homeFirmwareUpdateAvailable();
 bool handleHomeUpdateKey(char key, const Keyboard_Class::KeysState& keys);
 bool syncAssetsFromManifest(bool pomodoroOnly = false);
 String fitCurrentFontToWidth(String text, int32_t pixelLimit);
+float chatTextScale();
+int chatWrapWidth(bool showFace);
 void drawTinyFooter(uint16_t bg, uint16_t fg, const String& text, int16_t x = 12, int16_t y = 124,
                     int16_t w = 216);
 String compactBytes(uint32_t bytes);

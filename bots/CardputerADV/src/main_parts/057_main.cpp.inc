@@ -45,6 +45,8 @@ String settingValue(uint8_t index) {
         return String(gDeviceSettings.screenOffAfterMin) + "m";
       case 9:
         return gDeviceSettings.screensaverClockOnWake ? "on" : "off";
+      case 10:
+        return textSizeName(gDeviceSettings.textSize);
       default:
         return "-";
     }

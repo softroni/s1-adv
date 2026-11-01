@@ -314,6 +314,8 @@ String settingLabel(uint8_t index) {
         return "Off after";
       case 9:
         return "Clock on wake";
+      case 10:
+        return "Text size";
       default:
         return "-";
     }

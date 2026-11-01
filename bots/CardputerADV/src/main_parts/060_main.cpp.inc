@@ -111,16 +111,26 @@ void renderChatUi() {
   if (!showFace && gInputBuffer.length() > 78) {
     inputLines = 3;
   }
-  int composerH = 17 + (inputLines - 1) * 11;
+  // The face panel leaves room for one line, so it keeps the small size.
+  const float textScale = showFace ? 1.0f : chatTextScale();
+  // Typing stops growing at Medium so Large keeps three transcript rows.
+  const float inputScale = min(textScale, kTextSizeScales[1]);
+  d.setFont(&fonts::efontCN_12);
+  d.setTextSize(inputScale);
+  const int inputHeight = d.fontHeight();
+  d.setTextSize(1);
+  int composerH = max<int>(17 + (inputLines - 1) * 11, inputHeight + 6);
   int composerY = 135 - composerH - 13;
   int transcriptTop = showFace ? 88 : 8;
   int transcriptBottom = composerY - (showStatus ? 14 : 4);
 
   d.setFont(&fonts::efontCN_12);
+  d.setTextSize(textScale);
   int lineHeight = d.fontHeight() + 1;
   int visibleRows = max<int>(1, (transcriptBottom - transcriptTop) / max<int>(1, lineHeight + 2));
+  gChatVisibleRows = visibleRows;
   int y = transcriptTop;
-  auto lines = buildVisualLines(showFace ? 216 : 228);
+  auto lines = buildVisualLines(chatWrapWidth(showFace));
   int maxOffset = max<int>(0, static_cast<int>(lines.size()) - visibleRows);
   if (gChatScrollOffset > maxOffset) {
     gChatScrollOffset = maxOffset;
@@ -148,6 +158,7 @@ void renderChatUi() {
     d.print(fitCurrentFontToWidth(lines[i].text, bw - 10));
     y += lineHeight + 2;
   }
+  d.setTextSize(1);
   if (maxOffset > 0 && !showFace) {
     int railX = 232;
     int railH = max<int>(12, transcriptBottom - transcriptTop - 8);
@@ -170,9 +181,12 @@ void renderChatUi() {
   drawChatComposerPrompt(composerY, composerH, rgb565_local(4, 32, 45),
                          gInputBuffer.isEmpty() ? muted : amber);
   d.setTextColor(gInputBuffer.isEmpty() ? muted : TFT_WHITE, rgb565_local(2, 17, 29));
-  String inputLine = gInputBuffer.isEmpty() ? "type to chat" : tailUtf8ToFit(gInputBuffer, 174);
+  d.setTextSize(inputScale);
+  // A larger font would otherwise run into the ENT label.
+  String inputLine = gInputBuffer.isEmpty() ? "type to chat" : tailUtf8ToFit(gInputBuffer, inputScale > 1.0f ? 164 : 174);
   d.setCursor(34, composerY + 4);
   d.print(inputLine);
+  d.setTextSize(1);
   d.setFont(&fonts::Font0);
   d.setTextColor(accent, rgb565_local(2, 17, 29));
   d.setCursor(204, composerY + composerH - 9);

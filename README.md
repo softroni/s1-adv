@@ -118,7 +118,10 @@ Two things that catch people out on the first flash:
   only works on that network. On your home Wi-Fi you may reach your router instead.
   eero routers use the same address and show a `blocked.eero.com` page.
 
-To add push-to-talk, see [Add voice](docs/CLAUDE-CODE.md#add-voice).
+To add push-to-talk, see [Add voice](docs/CLAUDE-CODE.md#add-voice). To let Claude
+change a project from the Cardputer, see [Let Claude work in a folder](docs/CLAUDE-CODE.md#let-claude-work-in-a-folder).
+
+Chat and voice replies too small? Open **Display** settings and change **Text size**.
 
 To use OpenClaw, the community bridge is published in
 [ClawHub](https://clawhub.ai/plugins/openclaw-s1-adv). On a current OpenClaw host:

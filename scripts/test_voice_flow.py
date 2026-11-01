@@ -59,12 +59,13 @@ uint16_t rgb565_local(int r,int g,int b){return uint16_t(r+g+b);}
 int cardLines=1;std::vector<String> cardText;
 std::vector<String> wrapText(String text,int){return std::vector<String>(cardLines,text);}
 String fitCurrentFontToWidth(String text,int){return text;}
+float testTextScale=1.0f;float chatTextScale(){return testTextScale;}
 struct {
  int panelY=0,panelH=0,cursorY=0;const int* font=nullptr;int pushed=0;
  void pushSprite(int,int){++pushed;}
  void fillRoundRect(int,int y,int w,int h,int,uint16_t){assert(y>=0&&y+h<=135&&w<=240);panelY=y;panelH=h;}
  void drawRoundRect(int,int,int,int,int,uint16_t){}
- void setFont(const int* f){font=f;}void setTextColor(uint16_t,uint16_t){}
+ float textSize=1;void setFont(const int* f){font=f;} void setTextSize(float size){textSize=size;} int fontHeight(){return static_cast<int>(12*textSize);}void setTextColor(uint16_t,uint16_t){}
  void setCursor(int,int y){cursorY=y;}
  void print(String s){
   assert(cursorY>=panelY&&cursorY+(font==&fonts::Font2?16:font==&fonts::Font0?8:12)<=panelY+panelH);
@@ -120,6 +121,10 @@ int main(){
  showVoiceNotice("It’s 4:52 PM in Bali.",false);
  assert(!gScreensaverActive&&!gVoiceNoticeVisible&&gInboxUnread);
  showVoiceRequestError("Delivery failed");assert(gCanvas.panelY==4&&gCanvas.panelH==122);
+ // Larger text must still fit the screen and hand back an unscaled canvas.
+ for(float scale:{1.5f,2.0f}){testTextScale=scale;showVoiceRequestError("Delivery failed");
+  assert(gCanvas.panelY==4&&gCanvas.panelY+gCanvas.panelH<=135&&gCanvas.textSize==1);}
+ testTextScale=1.0f;showVoiceRequestError("Delivery failed");assert(gCanvas.panelH==122);
  expect({"READY"}); // Real card is fully visible in its FIRST frame.
  assert(cardText.back()=="Enter read more   Esc OK");
  assert(voiceReplyFeedbackReady());speakerPlaying=1;assert(!voiceReplyFeedbackReady());speakerPlaying=0;

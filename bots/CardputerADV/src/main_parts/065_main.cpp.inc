@@ -198,10 +198,15 @@ void renderVoiceNotice() {
   const uint16_t panel = rgb565_local(9, 27, 42);
   const bool error=gVoiceRequestPhase==VoiceRequestPhase::Error;
   const uint16_t accent = error ? rgb565_local(255,96,80) : gVoiceNoticePending ? rgb565_local(255,136,64) : rgb565_local(105, 255, 156);
+  const float textScale = chatTextScale();
   d.setFont(&fonts::efontCN_12);
+  d.setTextSize(textScale);
   auto lines = wrapText(gVoiceNoticeText, 212);
-  const int count = min<int>(6, lines.size());
-  const int height = max<int>(80, 38 + count * 14);
+  const int lineStep = d.fontHeight() + 2;
+  d.setTextSize(1);
+  const int maxLines = max<int>(1, (135 - 8 - 38) / lineStep);
+  const int count = min<int>(maxLines, lines.size());
+  const int height = max<int>(80, 38 + count * lineStep);
   // The first frame must already contain readable feedback. A slide-in that
   // starts above the display can freeze there while TLS borrows the canvas.
   const int y = 4;
@@ -212,15 +217,17 @@ void renderVoiceNotice() {
   d.setCursor(14, y + 5);
   d.print(error ? "Check delivery" : gVoiceNoticePending ? "Request accepted" : "AI Agent");
   d.setFont(&fonts::efontCN_12);
+  d.setTextSize(textScale);
   d.setTextColor(TFT_WHITE, panel);
   for (int i = 0; i < count; ++i) {
-    d.setCursor(14, y + 25 + i * 14);
+    d.setCursor(14, y + 25 + i * lineStep);
     d.print(fitCurrentFontToWidth(lines[i], 212));
   }
+  d.setTextSize(1);
   d.setFont(&fonts::Font0);
   d.setTextColor(rgb565_local(147, 173, 192), panel);
   d.setCursor(14, y + height - 10);
-  d.print(lines.size() > 6 ? "Enter read more   Esc OK" : "Enter chat       Esc OK");
+  d.print(static_cast<int>(lines.size()) > maxLines ? "Enter read more   Esc OK" : "Enter chat       Esc OK");
 }
 
 struct VoiceSpeechPayload {
@@ -582,7 +589,7 @@ void beginVoicePreconnect() {
     gVoiceDialCanvasReleased=releaseUiCanvasForNetwork("voice preconnect TLS");
   gVoiceDialBusy = true;
   VoiceDialPayload* raw = payload.release();
-  if (xTaskCreate(voicePreconnectTask, "voice-connect", 8192, raw, 1, nullptr) != pdPASS) {
+  if (xTaskCreatePinnedToCore(voicePreconnectTask, "voice-connect", 8192, raw, 1, nullptr, kVoiceNetworkCore) != pdPASS) {
     delete raw; gVoiceDialBusy = false;
     if(gVoiceDialCanvasReleased){restoreUiCanvasAfterNetwork();gVoiceDialCanvasReleased=false;}
   }
@@ -635,7 +642,7 @@ void beginVoiceCaptureUpload() {
   headers += "\r\n";
   gVoiceCaptureUpload = capture; gVoiceReadyStreamed = false; gVoiceDialBusy = true;
   VoiceDialPayload* raw = payload.release();
-  if (xTaskCreate(voicePreconnectTask, "voice-stream", 8192, raw, 1, nullptr) != pdPASS) {
+  if (xTaskCreatePinnedToCore(voicePreconnectTask, "voice-stream", 8192, raw, 1, nullptr, kVoiceNetworkCore) != pdPASS) {
     delete raw; gVoiceDialBusy = false; gVoiceCaptureUpload.reset();
   } else logf("[VOICE_STREAM] background capture started t=%u", static_cast<unsigned>(millis()));
 }

@@ -25,6 +25,15 @@
   return out;
 }
 
+float chatTextScale() {
+  return kTextSizeScales[min<uint8_t>(gDeviceSettings.textSize, kTextSizeCount - 1)];
+}
+
+// Matches the narrowest bubble text area, so a wrapped line is never cut off.
+int chatWrapWidth(bool showFace) {
+  return showFace ? 202 : 200;
+}
+
 std::vector<VisualLine> buildVisualLines(int32_t pixelLimit) {
   std::vector<VisualLine> lines;
   int16_t chatIndex = 0;
@@ -50,7 +59,18 @@ std::vector<VisualLine> buildVisualLines(int32_t pixelLimit) {
   return lines;
 }
 
+// Line wrapping depends on the font and size, and the canvas may hold another
+// screen's settings when this runs outside a chat render.
+std::vector<VisualLine> measureChatLines(bool showFace) {
+  gCanvas.setFont(&fonts::efontCN_12);
+  gCanvas.setTextSize(showFace ? 1.0f : chatTextScale());
+  auto lines = buildVisualLines(chatWrapWidth(showFace));
+  gCanvas.setTextSize(1);
+  return lines;
+}
+
 int visibleChatRows(bool showFace, bool showStatus) {
+  if (gChatVisibleRows > 0) return gChatVisibleRows;
   if (showFace) {
     return showStatus ? 3 : 4;
   }
@@ -64,7 +84,7 @@ bool playVisibleVoiceHistoryLine() {
   bool showFace = gUiMode == UiMode::ChatFace;
   bool showStatus = !gStatusText.isEmpty() && gStatusText != "Ready";
   int visibleRows = visibleChatRows(showFace, showStatus);
-  auto lines = buildVisualLines(showFace ? 216 : 228);
+  auto lines = measureChatLines(showFace);
   int maxOffset = max<int>(0, static_cast<int>(lines.size()) - visibleRows);
   gChatScrollOffset = clampValue(gChatScrollOffset, 0, maxOffset);
   int startIndex = max<int>(0, static_cast<int>(lines.size()) - visibleRows - gChatScrollOffset);
@@ -92,16 +112,8 @@ bool playVisibleVoiceHistoryLine() {
 void scrollChatBy(int delta) {
   bool showFace = gUiMode == UiMode::ChatFace;
   bool showStatus = !gStatusText.isEmpty() && gStatusText != "Ready";
-  int visibleRows = 0;
-  int pixelLimit = 0;
-  if (showFace) {
-    visibleRows = showStatus ? 3 : 4;
-    pixelLimit = 216;
-  } else {
-    visibleRows = showStatus ? 7 : 8;
-    pixelLimit = 228;
-  }
-  auto lines = buildVisualLines(pixelLimit);
+  int visibleRows = visibleChatRows(showFace, showStatus);
+  auto lines = measureChatLines(showFace);
   int maxOffset = static_cast<int>(lines.size()) - visibleRows;
   if (maxOffset < 0) {
     maxOffset = 0;

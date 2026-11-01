@@ -55,7 +55,8 @@
       "command": "claude",
       "model": "claude-opus-5-5",
       "effort": "xhigh",
-      "turnTimeoutMs": 600000
+      "turnTimeoutMs": 600000,
+      "projectDir": null
     },
     "url": "ws://127.0.0.1:18789",
     "token": "replace-me",

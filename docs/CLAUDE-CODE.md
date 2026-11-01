@@ -121,8 +121,8 @@ Your audio stays on your computer. Only the transcribed text goes to Claude.
 Setup transcribes English, because language detection is unreliable on short clips.
 To use another language, set `omnibotShim.sttLocalLanguage` to its code or `auto`.
 
-**Known issue:** the first 2 to 3 seconds of a recording can be lost, because the
-firmware opens its secure connection as recording starts. After holding G0, wait about
+Firmware before 0.2.206 can lose the first 2 to 3 seconds of a recording, because it
+opens its secure connection as recording starts. On those versions, hold G0, wait about
 3 seconds before you speak, then keep holding for a moment after you finish.
 
 Spoken replies are limited to about 20 words unless you ask for more, because the
@@ -152,16 +152,48 @@ response, and the answer arrives on the live feed.
 Chat, push-to-talk, conversation history, spoken replies, device actions such as
 starting a focus timer, and Wi-Fi updates all work.
 
-The session has **no tools**. Claude can't read files, run commands or browse the
-web from the Cardputer, and it has no access to your projects. These OpenClaw
-features aren't available in this mode, and the bridge refuses to start if they
-are enabled:
+By default the session has **no tools**. Claude can't read files, run commands or
+browse the web from the Cardputer, and it has no access to your projects. To change
+that for one folder, see [Let Claude work in a folder](#let-claude-work-in-a-folder).
+These OpenClaw features aren't available in this mode, and the bridge refuses to start
+if they are enabled:
 
 - `modelRouting` (fast and smart model roles)
 - `firmwareAutomation` (agent-built firmware)
 
 Voice needs local speech programs. See [Add voice](#add-voice). `doctor` reports
 what's missing.
+
+## Let Claude work in a folder
+
+To let the Cardputer change a project, set `upstream.claudeCode.projectDir` in
+`config.json` to that folder's full path, then restart the bridge:
+
+```json
+"claudeCode": { "projectDir": "/full/path/to/your/project" }
+```
+
+Claude then starts in that folder and can read and edit files, run commands and make
+git commits there, with no approval prompts. It must be a project folder: the bridge
+refuses your home folder or a whole disk. Conversations restart when you turn this on.
+
+The limits are enforced by the operating system's sandbox, not by asking Claude:
+
+| | Inside the folder | Outside it |
+| --- | --- | --- |
+| Read and edit files | Yes | No |
+| Run commands | Yes | Commands can't read or change it |
+| Network | No | No |
+
+So `git push`, package installs and firmware builds don't work from the Cardputer. If
+the sandbox can't start, nothing runs.
+
+**Know the risk.** Your bridge is on the internet, so your device token now protects a
+folder as well as a chat. Anyone with the token can change or delete anything in that
+folder, including `.git`, and text in the project's own files can try to steer Claude.
+Speech can also be misheard, so Claude is told to confirm voice requests before changing
+files. Use a folder you can restore, keep your work pushed, and don't put secrets in it.
+If the token leaks, replace it and turn this off first.
 
 ## Privacy and isolation
 
@@ -176,12 +208,15 @@ session is locked down so that token reaches as little as possible:
 - The child process gets a short list of environment variables. `ANTHROPIC_API_KEY`
   and `ANTHROPIC_AUTH_TOKEN` are removed, so a key on the host can't silently bill
   your API account, and other host secrets stay out.
-- Each conversation runs in its own empty folder, `data/claude-code/workspace`.
+- Without `projectDir`, each conversation runs in its own empty folder,
+  `data/claude-code/workspace`. With it, these isolation flags still apply, and tools
+  are limited as described in [Let Claude work in a folder](#let-claude-work-in-a-folder).
 - If `claude auth status` doesn't show a subscription login, the bridge refuses
   turns instead of falling back to anything else.
 
 If a token leaks, someone could chat in that conversation, read it and use up your
-plan limits. Generate a new token and reflash or reprovision the device.
+plan limits, and change your project folder if you've set one. Generate a new token and
+reflash or reprovision the device.
 
 Claude Code keeps its usual transcripts for these conversations in
 `~/.claude/projects`. The bridge keeps only the conversation ID.

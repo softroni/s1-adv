@@ -265,10 +265,19 @@ struct DeviceSettings {
   bool screenAutoOffEnabled = false;
   uint8_t screenOffAfterMin = kDefaultScreenOffAfterMin;
   bool screensaverClockOnWake = true;
+  uint8_t textSize = 0;
   uint8_t notificationVolumePct = kDefaultNotificationVolumePct;
   String updateChannel = "dev";
   String audioLanguage = "en";
 };
+
+const char* textSizeName(uint8_t size) {
+  switch (size) {
+    case 1: return "Medium";
+    case 2: return "Large";
+    default: return "Small";
+  }
+}
 
 const char* eyeSkinName(uint8_t skin) {
   switch (skin % kEyeSkinCount) {

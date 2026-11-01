@@ -16,7 +16,7 @@ import Busboy from "busboy";
 import WebSocket, { WebSocketServer } from "ws";
 import { StateStore } from "./state-store.mjs";
 import { UpstreamGatewayClient } from "./upstream-client.mjs";
-import { CLAUDE_CODE_PROVIDER, ClaudeCodeClient, resolveUpstreamProvider, validateClaudeCodeConfig } from "./claude-code-client.mjs";
+import { CLAUDE_CODE_PROVIDER, ClaudeCodeClient, claudeCodeSettings, resolveUpstreamProvider, validateClaudeCodeConfig } from "./claude-code-client.mjs";
 import { KokoroVoice, kokoroSettings } from "./kokoro-tts.mjs";
 import { createMininervaCompatServer } from "./mininerva-compat.mjs";
 import {
@@ -695,9 +695,13 @@ function buildDeviceActionPolicyText() {
 // reply text and keep working.
 function buildClaudeCodeSystemPrompt(config) {
   const shortReplyWords = Math.max(8, Number(config.deviceTurnContext?.shortReplyWords) || 15);
+  const { projectDir } = claudeCodeSettings(config);
+  const access = projectDir
+    ? `You are working in the project folder ${projectDir}. You can read and change files there and run commands, but you cannot reach anything outside it or the internet. Speech can be misheard, so before changing files for a [Voice] message, say what you heard and ask for confirmation. Never delete or overwrite work without confirmation. When you change something, say what changed.`
+    : "This chat has no tools: you cannot read files, run commands, browse the web, or change firmware. Never claim otherwise.";
   return [
     "You are Claude, answering on a Cardputer ADV, a pocket computer with a tiny screen and a small speaker.",
-    "This chat has no tools: you cannot read files, run commands, browse the web, or change firmware. Never claim otherwise.",
+    access,
     `Reply in plain text without Markdown. Default to ${shortReplyWords} words or fewer and put the key point first.`,
     "A message starting with [Voice] was spoken and your reply will be read aloud, and the device downloads all of it before speaking. Give the actual answer in under 20 words unless asked for more.",
     REPLY_LANGUAGE_POLICY,

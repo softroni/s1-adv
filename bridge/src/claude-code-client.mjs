@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { statSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { sleep, writeJsonAtomic } from "./utils.mjs";
 
@@ -16,7 +18,8 @@ export const CLAUDE_CODE_DEFAULTS = Object.freeze({
   command: "claude",
   model: "claude-opus-5-5",
   effort: "xhigh",
-  turnTimeoutMs: 600000
+  turnTimeoutMs: 600000,
+  projectDir: null
 });
 
 const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
@@ -34,14 +37,31 @@ const CHILD_ENV = /^(HOME|USER|LOGNAME|PATH|SHELL|TMPDIR|TEMP|TMP|LANG|LC_[A-Z]+
 // docs/CLAUDE-CODE.md before changing this list.
 const ISOLATION_ARGS = Object.freeze([
   "--restricted",
-  "--tools", "",
   "--strict-mcp-config",
   "--disable-slash-commands"
 ]);
 
+export const PROJECT_TOOLS = "Read,Write,Edit,Glob,Grep,Bash";
+
+// The device is reachable from the internet, so project access is bounded by
+// the OS rather than by the model. Bash writes stay in the working directory
+// and it has no network. failIfUnavailable refuses to run rather than run
+// unsandboxed, and allowUnsandboxedCommands removes the retry-outside escape.
+export const PROJECT_SANDBOX = Object.freeze({
+  sandbox: {
+    enabled: true,
+    failIfUnavailable: true,
+    allowUnsandboxedCommands: false,
+    autoAllowBashIfSandboxed: true,
+    network: { strictAllowlist: true, allowedDomains: [] }
+  },
+  permissions: { blockReadsOutsideWorkingDirectories: true }
+});
+
 // Fixed text only: provider error messages are never shown or logged.
 const FAILURE_REPLIES = Object.freeze({
   auth: "Claude Code is not signed in on the bridge computer. Run claude auth login there, then try again.",
+  sandbox: "The sandbox couldn't start, so nothing ran. Check Claude Code on the bridge computer.",
   limit: "Your Claude plan limit has been reached. Try again after it resets.",
   timeout: "Claude took too long, so this request was stopped. Try again or ask something shorter."
 });
@@ -67,11 +87,22 @@ export function claudeCodeSettings(config) {
     throw new Error("upstream.claudeCode.effort must be low, medium, high, xhigh or max");
   if (!Number.isInteger(settings.turnTimeoutMs) || settings.turnTimeoutMs < 5000 || settings.turnTimeoutMs > 3600000)
     throw new Error("upstream.claudeCode.turnTimeoutMs must be 5000..3600000");
+  if (settings.projectDir !== undefined && settings.projectDir !== null) {
+    if (typeof settings.projectDir !== "string" || !path.isAbsolute(settings.projectDir) || settings.projectDir.includes("\0"))
+      throw new Error("upstream.claudeCode.projectDir must be an absolute path");
+    const directory = path.resolve(settings.projectDir);
+    // Access covers the whole folder, so it must be a project, not a whole home or disk.
+    if (directory === path.parse(directory).root || directory === os.homedir() || os.homedir().startsWith(`${directory}${path.sep}`))
+      throw new Error("upstream.claudeCode.projectDir must be a project folder, not your home folder or disk");
+    settings.projectDir = directory;
+  }
   return settings;
 }
 
 export function validateClaudeCodeConfig(config) {
-  claudeCodeSettings(config);
+  const { projectDir } = claudeCodeSettings(config);
+  if (projectDir && !statSync(projectDir, { throwIfNoEntry: false })?.isDirectory())
+    throw new Error("upstream.claudeCode.projectDir does not exist");
   if (config.modelRouting?.enabled)
     throw new Error("modelRouting needs the OpenClaw provider; set upstream.claudeCode.model instead.");
   if (config.firmwareAutomation?.enabled)
@@ -88,6 +119,10 @@ export function claudeTurnArgs(settings, { appendSystemPrompt = "", sessionId = 
     "--model", settings.model,
     "--effort", settings.effort,
     ...ISOLATION_ARGS,
+    ...(settings.projectDir
+      ? ["--tools", PROJECT_TOOLS, "--permission-mode", "acceptEdits", "--permission-prompts", "none",
+          "--settings", JSON.stringify(PROJECT_SANDBOX)]
+      : ["--tools", ""]),
     ...(appendSystemPrompt ? ["--append-system-prompt", appendSystemPrompt] : []),
     ...(sessionId ? ["--resume", sessionId] : [])
   ];
@@ -151,6 +186,7 @@ export async function readClaudeLogin({ command = CLAUDE_CODE_DEFAULTS.command, 
 }
 
 function classifyFailure(detail) {
+  if (/sandbox is required|sandbox[^\n]*(unavailable|failed to initialize)/iu.test(detail)) return "sandbox";
   if (/no conversation found|session[^\n]*not found/iu.test(detail)) return "missing-session";
   if (/not logged in|\/login|invalid api key|authentication|unauthorized|oauth token/iu.test(detail)) return "auth";
   if (/usage limit|rate limit|limit reached|hit your[^\n]*limit|quota/iu.test(detail)) return "limit";
@@ -179,7 +215,7 @@ export class ClaudeCodeClient extends EventEmitter {
     this.env = env;
     this.retryDelayMs = retryDelayMs;
     const root = path.join(config.stateDir, "claude-code");
-    this.workspace = path.join(root, "workspace");
+    this.workspace = this.settings.projectDir || path.join(root, "workspace");
     this.sessionsPath = path.join(root, "sessions.json");
     this.sessions = new Map();
     this.runs = new Map();
@@ -189,6 +225,12 @@ export class ClaudeCodeClient extends EventEmitter {
     this.shouldRun = true;
     this.watchingLogin = false;
     this.firstCheck = new Promise(resolve => { this.finishFirstCheck = resolve; });
+  }
+
+  // A conversation from another mode remembers having no tools, or another
+  // folder, and Claude would carry on as if that were still true.
+  conversationKey(key) {
+    return this.settings.projectDir ? `${key}@${this.settings.projectDir}` : key;
   }
 
   async start() {
@@ -279,14 +321,15 @@ export class ClaudeCodeClient extends EventEmitter {
   }
 
   async runTurn({ key, message, runId }) {
-    let outcome = await this.invoke(message, this.sessions.get(key));
+    const conversation = this.conversationKey(key);
+    let outcome = await this.invoke(message, this.sessions.get(conversation));
     if (outcome.category === "missing-session") {
       // Claude Code expires old transcripts. Continue in a new conversation.
-      this.sessions.delete(key);
+      this.sessions.delete(conversation);
       outcome = await this.invoke(message, null);
     }
     if (outcome.sessionId) {
-      this.sessions.set(key, outcome.sessionId);
+      this.sessions.set(conversation, outcome.sessionId);
       await this.saveSessions();
     }
     if (outcome.category === "auth") {
