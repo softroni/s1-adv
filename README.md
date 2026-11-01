@@ -120,6 +120,8 @@ Two things that catch people out on the first flash:
 
 To add push-to-talk, see [Add voice](docs/CLAUDE-CODE.md#add-voice). To let Claude
 change a project from the Cardputer, see [Let Claude work in a folder](docs/CLAUDE-CODE.md#let-claude-work-in-a-folder).
+Claude keeps your conversation across restarts and can save lasting notes. See
+[How Claude remembers](docs/CLAUDE-CODE.md#how-claude-remembers).
 
 Chat and voice replies too small? Open **Display** settings and change **Text size**.
 

@@ -164,6 +164,35 @@ if they are enabled:
 Voice needs local speech programs. See [Add voice](#add-voice). `doctor` reports
 what's missing.
 
+## How Claude remembers
+
+Claude remembers in three layers, so a restart or an expired chat doesn't start you from
+nothing:
+
+| Layer | What it keeps | Lost when |
+| --- | --- | --- |
+| The conversation | Everything, resumed on every message | Claude Code clears old transcripts, or `projectDir` changes |
+| Saved messages | The latest 30 messages are passed to any new conversation | The bridge's history is deleted. It keeps the latest 250 |
+| Permanent notes | Facts you ask it to remember | You delete `data/claude-code/memory/MEMORY.md` |
+
+Restarting the Cardputer, the bridge or the computer loses nothing.
+
+To save something permanently, say "remember that I prefer metric units", and "forget that"
+to remove it. Claude also saves lasting facts it notices, and it's told never to save
+passwords or tokens. It decides what to write, and voice can be misheard, so you can check
+or edit the file yourself:
+
+```bash
+cat ~/.s1-adv/data/claude-code/memory/MEMORY.md
+```
+
+Notes live in the bridge's private folder, not your project, so they can't be committed or
+pushed. Claude gets access to that one folder and nothing else in private state. Notes are
+loaded into every message as facts, not instructions, up to 8,000 characters.
+
+Claude can only change notes when [`projectDir`](#let-claude-work-in-a-folder) is set.
+Without it, existing notes are still read.
+
 ## Let Claude work in a folder
 
 To let the Cardputer change a project, set `upstream.claudeCode.projectDir` in

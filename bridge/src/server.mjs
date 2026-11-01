@@ -703,7 +703,7 @@ function buildClaudeCodeSystemPrompt(config) {
     "You are Claude, answering on a Cardputer ADV, a pocket computer with a tiny screen and a small speaker.",
     access,
     `Reply in plain text without Markdown. Default to ${shortReplyWords} words or fewer and put the key point first.`,
-    "A message starting with [Voice] was spoken and your reply will be read aloud, and the device downloads all of it before speaking. Give the actual answer in under 20 words unless asked for more.",
+    "A message marked [Voice] was spoken and your reply will be read aloud, and the device downloads all of it before speaking. Give the actual answer in under 20 words unless asked for more.",
     REPLY_LANGUAGE_POLICY,
     buildDeviceActionPolicyText()
   ].join(" ");
@@ -3571,7 +3571,8 @@ class BridgeRuntime {
 	    const claudeCode = resolveUpstreamProvider(config) === CLAUDE_CODE_PROVIDER;
 	    if (claudeCode) validateClaudeCodeConfig(config);
 	    this.upstream = claudeCode
-	      ? new ClaudeCodeClient(config, { appendSystemPrompt: buildClaudeCodeSystemPrompt(config) })
+	      ? new ClaudeCodeClient(config, { appendSystemPrompt: buildClaudeCodeSystemPrompt(config),
+          recentMessages: sessionKey => this.recentChatMessages(sessionKey) })
 	      : new UpstreamGatewayClient(config.upstream);
 	    const kokoro = kokoroSettings(config);
 	    this.kokoro = kokoro ? new KokoroVoice(kokoro) : null;
@@ -3609,6 +3610,15 @@ class BridgeRuntime {
       admitCapacity:(input,prepared)=>this.assertFrontCapacity(input,prepared),
       admitSmart:record=>this.admitFrontSmart(record)});
 	  }
+
+  recentChatMessages(sessionKey) {
+    const topic = this.topicBySessionKey.get(sessionKey);
+    if (!topic) return [];
+    return this.store.getHistory(topic.topic_key, 0, 60).items
+      // A delivery failure notice isn't part of what was said.
+      .filter(item => item.content?.kind === "text" && !item.source?.terminal_error)
+      .map(item => ({ role: item.sender?.kind === "assistant" ? "Claude" : "You", text: item.content.text }));
+  }
 
   // Kokoro's voices are English, so Cyrillic stays with eSpeak.
   async synthesizeKokoro(text, targetSampleRate) {

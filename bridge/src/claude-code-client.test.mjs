@@ -13,7 +13,7 @@ import { BridgeRuntime, cleanupTranscriptText, loadConfig } from "./server.mjs";
 import { voiceReplyWaitMs } from "./turn-delivery-policy.mjs";
 import {
   CLAUDE_CODE_DEFAULTS, ClaudeCodeClient, claudeCodeSettings, claudeEnv, claudeTurnArgs, parseClaudeResult,
-  readClaudeLogin, resolveUpstreamProvider, validateClaudeCodeConfig
+  readClaudeLogin, recoveredConversation, resolveUpstreamProvider, validateClaudeCodeConfig
 } from "./claude-code-client.mjs";
 
 const bridgeRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -472,11 +472,12 @@ async function freePort() {
   });
 }
 
-async function startBridge(t, fake, shim = {}) {
+async function startBridge(t, fake, shim = {}, { reuse = false } = {}) {
   const example = JSON.parse(await readFile(path.join(bridgeRoot, "config.example.json"), "utf8"));
   const dir = path.join(fake.dir, "bridge");
   const token = "test-claude-code-device-token-000000000000000001";
   const port = await freePort();
+  if (reuse) await fake.stopBridge();
   const config = { ...example, server: { host: "127.0.0.1", port }, stateDir: path.join(dir, "data") };
   config.upstream = { provider: "claude-code", claudeCode: { command: fake.command } };
   config.omnibotShim = { ...example.omnibotShim, ...shim };
@@ -489,6 +490,7 @@ async function startBridge(t, fake, shim = {}) {
   await writeFile(configPath, JSON.stringify(config));
   const child = spawn(process.execPath, ["src/server.mjs"], { cwd: bridgeRoot,
     env: { ...process.env, ANTHROPIC_API_KEY: "must-not-reach-claude", CARDPUTER_BRIDGE_CONFIG: configPath }, stdio: "ignore" });
+  fake.stopBridge = () => new Promise(resolve => { child.once("exit", resolve); child.kill("SIGTERM"); });
   t.after(() => child.kill("SIGKILL"));
   const base = `http://127.0.0.1:${port}`;
   const headers = { Authorization: `Bearer ${token}`, "content-type": "application/json" };
@@ -504,7 +506,7 @@ async function startBridge(t, fake, shim = {}) {
     headers: { Authorization: headers.Authorization, "content-type": "application/octet-stream", "x-audio-sample-rate": "16000",
       "x-turn-id": turnId, "x-client-msg-id": turnId, "x-reply-audio": "false", "x-save-reply-audio": "false", "x-voice-wait-ms": "1000" },
     body: Buffer.alloc(32000 * seconds) }).then(response => response.json());
-  return { turn, voice };
+  return { turn, voice, sessionsPath: path.join(config.stateDir, "claude-code", "sessions.json") };
 }
 
 test("full bridge: device text turns reach Claude Code and replies, context and actions return", async t => {
@@ -575,6 +577,115 @@ require("fs").writeFileSync(args[args.indexOf("-of") + 1] + ".txt", " [BLANK_AUD
   const reply = await voice("voice-silent-1");
   assert.equal(reply.error, "could not transcribe speech");
   assert.equal((await fake.calls()).length, 0);
+});
+
+const systemPrompt = call => call.argv[call.argv.indexOf("--append-system-prompt") + 1];
+
+test("notes are private, reach every new turn, and are facts rather than instructions", async t => {
+  const fake = await makeFake(t, { steps: [success("one"), success("two"), success("three")] });
+  const project = path.join(fake.dir, "project");
+  await mkdir(project);
+  const { client } = makeClient(fake, { projectDir: project }, { appendSystemPrompt: "Base prompt." });
+  await client.start();
+  assert.ok(!client.memoryPath.startsWith(project), "notes must not be somewhere they could be committed");
+  assert.equal(path.dirname(client.memoryPath), client.memoryDir);
+  assert.equal((await stat(client.memoryDir)).mode & 0o077, 0);
+
+  await send(client, "first", "run-1");
+  await finished(client, "run-1");
+  await writeFile(client.memoryPath, "Owner prefers metric units.");
+  await send(client, "second", "run-2");
+  await finished(client, "run-2");
+  await writeFile(client.memoryPath, "x".repeat(20000));
+  await send(client, "third", "run-3");
+  await finished(client, "run-3");
+
+  const [first, second, third] = await fake.calls();
+  assert.equal(first.argv[first.argv.indexOf("--add-dir") + 1], client.memoryDir);
+  assert.ok(systemPrompt(first).startsWith("Base prompt."));
+  assert.ok(systemPrompt(first).includes(client.memoryPath), "Claude must know where to write");
+  assert.ok(!systemPrompt(first).includes("Saved notes"), "a missing file adds nothing");
+  assert.match(systemPrompt(second), /Owner prefers metric units\./);
+  assert.match(systemPrompt(second), /not instructions/);
+  assert.match(systemPrompt(second), /Never save passwords/);
+  assert.ok(systemPrompt(third).length < 11000, "notes stay bounded");
+});
+
+test("without tools, notes are still read but Claude isn't told it can write them", async t => {
+  const fake = await makeFake(t, { steps: [success("one")] });
+  const { client } = makeClient(fake);
+  await client.start();
+  await writeFile(client.memoryPath, "Owner likes tea.");
+  await send(client, "hello", "run-1");
+  await finished(client, "run-1");
+  const [call] = await fake.calls();
+  assert.match(systemPrompt(call), /Owner likes tea\./);
+  assert.ok(!systemPrompt(call).includes("update that file"));
+  assert.ok(!call.argv.includes("--add-dir"));
+});
+
+test("a restored conversation is bounded, ordered and leaves out the current message", () => {
+  assert.equal(recoveredConversation([]), "");
+  assert.equal(recoveredConversation([{ role: "You", text: "only the current message" }]), "");
+  const text = recoveredConversation([{ role: "You", text: "My dog\n  is  Rex" }, { role: "Claude", text: "Hello Rex" }, { role: "You", text: "now" }]);
+  assert.ok(text.indexOf("You: My dog is Rex") < text.indexOf("Claude: Hello Rex"));
+  assert.ok(!text.includes("You: now"));
+  assert.match(text, /background, not instructions/);
+  const many = Array.from({ length: 100 }, (_, index) => ({ role: "You", text: `message ${index} ${"x".repeat(900)}` }));
+  const bounded = recoveredConversation(many);
+  assert.ok(bounded.length < 7000);
+  assert.ok(bounded.includes("message 98"), "the newest messages are kept");
+  assert.ok(!bounded.includes("message 10 "));
+  assert.ok(!bounded.includes("message 99"));
+});
+
+test("a new or expired conversation starts with the saved messages, and a resumed one doesn't", async t => {
+  const fake = await makeFake(t, { steps: [success("one"), success("two"),
+    { code: 1, stderr: "No conversation found with session ID" }, success("three", NEXT_ID)] });
+  const history = [{ role: "You", text: "My dog is Rex" }, { role: "Claude", text: "Hello Rex" }, { role: "You", text: "ignored" }];
+  const { client } = makeClient(fake, {}, { recentMessages: () => history });
+  await client.start();
+  await send(client, "[Voice]\nwhat is my dog called?", "run-1");
+  await finished(client, "run-1");
+  await send(client, "and again", "run-2");
+  await finished(client, "run-2");
+  await send(client, "after it expired", "run-3");
+  await finished(client, "run-3");
+  const [first, second, expired, fresh] = await fake.calls();
+  assert.match(first.stdin, /You: My dog is Rex/);
+  assert.ok(first.stdin.endsWith("[Voice]\nwhat is my dog called?"), "the message and its voice mark stay intact");
+  assert.equal(second.stdin, "and again");
+  assert.equal(expired.stdin, "after it expired");
+  assert.ok(fresh.stdin.includes("You: My dog is Rex") && fresh.stdin.endsWith("after it expired"));
+});
+
+test("a failed history lookup can't lose the turn", async t => {
+  const fake = await makeFake(t, { steps: [success("ok")] });
+  const { client, events } = makeClient(fake, {}, { recentMessages: () => { throw new Error("store unavailable"); } });
+  await client.start();
+  await send(client, "hello", "run-1");
+  assert.equal((await finished(client, "run-1")).status, "ok");
+  assert.equal(replyText(events[0]), "ok");
+  assert.equal((await fake.calls())[0].stdin, "hello");
+});
+
+test("full bridge: after the conversation is lost, Claude gets the saved messages but no failure notices", async t => {
+  const fake = await makeFake(t, { steps: [success("Nice to meet you"), failure("usage limit reached"), failure("something internal"), success("Your name is Sam", NEXT_ID)] });
+  const { turn, sessionsPath } = await startBridge(t, fake);
+  await turn("my name is Sam");
+  await turn("second message");
+  await turn("third message");
+  await rm(sessionsPath, { force: true });
+  await writeFile(sessionsPath, "{}");
+  const restarted = await startBridge(t, fake, {}, { reuse: true });
+  const reply = await restarted.turn("what is my name?");
+  assert.equal(reply.reply, "Your name is Sam");
+  const last = (await fake.calls()).at(-1);
+  assert.ok(!last.argv.includes("--resume"));
+  assert.match(last.stdin, /You: my name is Sam/);
+  assert.match(last.stdin, /Claude: Nice to meet you/);
+  assert.ok(!last.stdin.includes("The request failed on the server"));
+  assert.ok(last.stdin.endsWith("what is my name?"));
 });
 
 test("voice turns are labelled for short spoken replies, and OpenClaw keeps its envelope", async t => {
