@@ -14,4 +14,9 @@ assert 'if (!conversation) full = entry.prefix' in lines and '"AI: "' not in lin
 start = read('033')
 assert start.index('setUiMode(UiMode::ChatFull)') < start.index('beginVoiceRequestUi();')
 assert 'gUiMode == UiMode::Home || gUiMode == UiMode::Clock' in start
+
+# Commands start with '/', so it must reach the text box even when that's empty.
+typing = read('048')
+scroll = typing[typing.index('[CHAT] scroll up key') :typing.index('[CHAT] scroll down key')]
+assert "key == '/'" not in scroll
 print('chat bubbles: ok')

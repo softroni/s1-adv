@@ -237,7 +237,8 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
     scrollChatBy(1);
     return;
   }
-  if (gInputBuffer.isEmpty() && (key == '.' || key == '>' || key == '/')) {
+  // Not '/': every command starts with it, so it must always type.
+  if (gInputBuffer.isEmpty() && (key == '.' || key == '>')) {
     logf("[CHAT] scroll down key=%d", static_cast<int>(key));
     scrollChatBy(-1);
     return;
