@@ -227,13 +227,40 @@ int main(){
  renderBalloonUi();assert(gCanvas.text.back()=="Press Space to fly");
  key(' ');assert(gBalloon.phase==Phase::Playing&&gBalloon.heat==kKeyHeat);key('w');key(';');key('\n');assert(gBalloon.heat==4*kKeyHeat);
  key('a');assert(gBalloon.nudgeDir==-1);key(',');key('d');assert(gBalloon.nudgeDir==1);key('/');key('z');assert(gBalloon.heat==4*kKeyHeat);
+ // M toggles the music without touching the balloon, and a new game remembers the choice.
+ key('m');assert(!gBalloonMusicOn&&!gBalloonAudio.music&&gBalloon.heat==4*kKeyHeat);
+ beginBalloon();assert(!gBalloonAudio.music);key('M');assert(gBalloonMusicOn&&gBalloonAudio.music);
+ beginBalloon();assert(gBalloonAudio.music);key(' ');key('w');key(';');key('\n');
  {Keyboard_Class::KeysState ctrl;ctrl.ctrl=true;const int32_t held=gBalloon.heat;assert(handleBalloonKey(' ',ctrl));assert(gBalloon.heat==held);}
  bus.envHere=bus.stickHere=true;
  // Each event has its own chime, and a bump drowns out the rest.
- for(auto [events,first,second]:std::vector<std::tuple<int,float,float>>{{kHurt|kGotStar,330,262},{kLevelUp,1047,1568},{kGotHeart,784,1047},{kGotStar,1047,1319}}){
+ for(auto [events,first,second]:std::vector<std::tuple<int,float,float>>{{kLevelUp,1047,1568},{kGotHeart,784,1047},{kGotStar,1047,1319}}){
   gBalloonAudio.reset();gBalloon.events=uint8_t(events);balloonSounds();assert(gBalloon.events==0&&gBalloonAudio.chimeWait>0&&gBalloonAudio.chimeHz==second);
   assert(std::abs(gBalloonAudio.chimeFirst.step-balloon_audio::kTwoPi*first/balloon_audio::kRate)<1e-5f);}
- gBalloonAudio.reset();gBalloon.events=0;balloonSounds();assert(gBalloonAudio.chimeWait==0);
+ gBalloonAudio.reset();gBalloon.events=0;balloonSounds();assert(gBalloonAudio.chimeWait==0&&gBalloonAudio.buzzLeft==0);
+ // Losing a heart buzzes, losing the last one crashes for longer and louder, and either
+ // one drowns out a star.
+ gBalloonAudio.reset();gBalloon.lives=1;gBalloon.events=kHurt|kGotStar;balloonSounds();
+ const uint32_t heartBuzz=gBalloonAudio.buzzLeft;assert(heartBuzz>0&&gBalloonAudio.chimeWait==0&&gBalloonAudio.buzzer.target==balloon_audio::kBuzzLevel);
+ gBalloonAudio.reset();gBalloon.lives=0;gBalloon.events=kHurt;balloonSounds();
+ assert(gBalloonAudio.buzzLeft>heartBuzz*2&&gBalloonAudio.buzzer.target==balloon_audio::kCrashLevel&&gBalloonAudio.buzzer.square);
+ gBalloonAudio.reset();
+ // A buzz is rough and falling, ends on time, and the crash is the loudest thing in the game.
+ {using namespace balloon_audio;Player p;p.setMusic(false);p.buzz(420,60,0.9f,kCrashLevel);
+  std::vector<int16_t> pcm(kRate*2);p.render(pcm.data(),int(pcm.size()));
+  int peak=0,firstCrossings=0,lastCrossings=0,flatTop=0;const int span=int(kRate)/5,end=int(kRate*9/10);
+  for(int i=1;i<end;++i){peak=std::max(peak,std::abs(int(pcm[i])));const bool cross=(pcm[i-1]<0)!=(pcm[i]<0);
+   if(i<span)firstCrossings+=cross;if(i>=end-span)lastCrossings+=cross;}
+  for(int i=1;i<span;++i)flatTop+=std::abs(pcm[i]-pcm[i-1])<40&&std::abs(int(pcm[i]))>1000;
+  assert(peak>2500&&peak<=int(kCrashLevel));assert(firstCrossings>2*lastCrossings&&lastCrossings>0);
+  assert(flatTop>span/2);for(size_t i=size_t(kRate)+200;i<pcm.size();++i)assert(pcm[i]==0);
+  // Music off stops the tune, even mid-note, and chimes still sound. Music on brings it back.
+  Player quiet;int16_t block[kBlockSamples];quiet.render(block,kBlockSamples);quiet.setMusic(false);
+  for(int i=0;i<4;++i)quiet.render(block,kBlockSamples);
+  for(int done=0;done<int(kBeatSamples)*kBeats;done+=kBlockSamples){quiet.render(block,kBlockSamples);for(int16_t v:block)assert(v==0);}
+  quiet.chime(1047,1319);int heard=0;for(int i=0;i<4;++i){quiet.render(block,kBlockSamples);for(int16_t v:block)heard=std::max(heard,std::abs(int(v)));}assert(heard>800);
+  quiet.setMusic(true);quiet.chimeFirst=quiet.chimeSecond=Voice{};heard=0;
+  for(int done=0;done<int(kBeatSamples)*6;done+=kBlockSamples){quiet.render(block,kBlockSamples);for(int16_t v:block)heard=std::max(heard,std::abs(int(v)));}assert(heard>500);}
  // The music is quiet, never falls silent, and loops forever. No step is steeper than the
  // tunes themselves, which is what a click would show up as.
  {using namespace balloon_audio;Player p;int16_t block[kBlockSamples];int peak=0,jump=0,last=0,quiet=0,longestQuiet=0;
@@ -274,7 +301,7 @@ int main(){
   gBalloon.reset(3);gBalloon.phase=Phase(phase);gBalloon.stars=uint16_t(stars);gBalloon.best=9999;gBalloon.lives=uint8_t(lives);gBalloon.heat=h;gBalloon.frame=uint16_t(stars*97);
   for(int i=0;i<kThings;++i){put(gBalloon,Kind(1+i%3),i*50-12,30+i*10);std::swap(gBalloon.things[0],gBalloon.things[i]);}
   renderBalloonUi();}
- std::cout<<"PASS Hot Air Balloon: SHT30 checksum, breath detection, lift and cooling, steering, stars, birds, hearts, levels, "<<totalStars/100<<" stars on average in 100 chases, sensor timing, unplugging, keyboard play, quiet music and chimes, speaker queue, port handover, renderer bounds\n";
+ std::cout<<"PASS Hot Air Balloon: SHT30 checksum, breath detection, lift and cooling, steering, stars, birds, hearts, levels, "<<totalStars/100<<" stars on average in 100 chases, sensor timing, unplugging, keyboard play, quiet music with an off switch, chimes and buzzes, speaker queue, port handover, renderer bounds\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-balloon-') as directory:

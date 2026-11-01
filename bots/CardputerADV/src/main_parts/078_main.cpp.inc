@@ -53,6 +53,7 @@ balloon_audio::Player gBalloonAudio;
 // speaker can still hold a block after it's told to stop.
 int16_t gBalloonPcm[3][balloon_audio::kBlockSamples];
 uint8_t gBalloonPcmSlot = 0;
+bool gBalloonMusicOn = true;  // Stays as it was left until the device restarts.
 
 void balloonRedraw() {
   gLastRenderMs = 0;
@@ -61,7 +62,8 @@ void balloonRedraw() {
 void balloonSounds() {
   const uint8_t events = gBalloon.events;
   gBalloon.events = 0;
-  if (events & balloon::kHurt) gBalloonAudio.chime(330, 262);
+  if ((events & balloon::kHurt) && gBalloon.lives == 0) gBalloonAudio.buzz(420, 60, 0.9f, balloon_audio::kCrashLevel);
+  else if (events & balloon::kHurt) gBalloonAudio.buzz(240, 150, 0.35f, balloon_audio::kBuzzLevel);
   else if (events & balloon::kLevelUp) gBalloonAudio.chime(1047, 1568);
   else if (events & balloon::kGotHeart) gBalloonAudio.chime(784, 1047);
   else if (events & balloon::kGotStar) gBalloonAudio.chime(1047, 1319);
@@ -85,6 +87,7 @@ void beginBalloon() {
   gBalloonStick = balloon::Stick{};
   gBalloonRunning = false;
   gBalloonAudio.reset();
+  gBalloonAudio.setMusic(gBalloonMusicOn);
   balloonRedraw();
 }
 void stopBalloon() {
@@ -129,7 +132,10 @@ void serviceBalloon() {
 bool handleBalloonKey(char key, const Keyboard_Class::KeysState& keys) {
   if (keys.ctrl || keys.alt || keys.opt) return true;
   const char lower = static_cast<char>(tolower(static_cast<unsigned char>(key)));
-  if (lower == 'a' || key == ',') gBalloon.nudge(-1);
+  if (lower == 'm') {
+    gBalloonMusicOn = !gBalloonMusicOn;
+    gBalloonAudio.setMusic(gBalloonMusicOn);
+  } else if (lower == 'a' || key == ',') gBalloon.nudge(-1);
   else if (lower == 'd' || key == '/') gBalloon.nudge(1);
   else if (lower == 'w' || key == ';' || keys.enter || key == '\r' || key == '\n' || key == ' ') {
     gBalloon.addHeat(balloon::kKeyHeat);
