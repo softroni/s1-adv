@@ -14,6 +14,7 @@
 | 401 or 403 | Device token, device ID and topic allowlist agree on both sides |
 | Topics work but no reply | Gateway pairing, scopes, session key, provider authentication and actual upstream readiness |
 | Text works, voice fails | FFmpeg, STT binary/model, TTS binary and their service-user permissions. Look for `ENOENT` in the bridge log, and run [`setup.mjs voice`](CLAUDE-CODE.md#add-voice) |
+| Spoken replies sound robotic | That's eSpeak. Run [`setup.mjs voice`](CLAUDE-CODE.md#add-voice) with Python 3.10 to 3.13 installed, then restart the bridge |
 | OTA appears successful | Verify rebooted version on the device; a download or queued event is insufficient |
 
 Start with `/status`, then capture the serial monitor at 115200 baud. For the

@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { doctor, enablePlugin, planInstall, applyInstall } from "./install.mjs";
 import { planModelRoles } from "./model-roles.mjs";
 import { BridgeRuntime, loadConfig } from "./server.mjs";
+import { voiceReplyWaitMs } from "./turn-delivery-policy.mjs";
 import {
   CLAUDE_CODE_DEFAULTS, ClaudeCodeClient, claudeCodeSettings, claudeEnv, claudeTurnArgs, parseClaudeResult,
   readClaudeLogin, resolveUpstreamProvider, validateClaudeCodeConfig
@@ -41,9 +42,11 @@ if (argv[0] === "auth") {
     const step = steps.shift() || { code: 3 };
     fs.writeFileSync(path.join(here, "steps.json"), JSON.stringify(steps));
     if (step.hang) { setInterval(() => {}, 1000); return; }
-    if (step.stderr) process.stderr.write(step.stderr);
-    process.stdout.write(step.stdout || "");
-    process.exitCode = step.code || 0;
+    setTimeout(() => {
+      if (step.stderr) process.stderr.write(step.stderr);
+      process.stdout.write(step.stdout || "");
+      process.exitCode = step.code || 0;
+    }, step.delayMs || 0);
   });
 }
 `;
@@ -97,6 +100,12 @@ test("provider defaults to Claude Code, and configs naming a gateway stay on Ope
   assert.equal(resolveUpstreamProvider({ upstream: { provider: "claude-code", url: "ws://127.0.0.1:18789" } }), "claude-code");
   assert.equal(resolveUpstreamProvider({ upstream: { provider: "openclaw" } }), "openclaw");
   assert.throws(() => resolveUpstreamProvider({ upstream: { provider: "other" } }), /upstream.provider/);
+});
+
+test("voice replies wait for Claude, while OpenClaw keeps the device's requested wait", () => {
+  assert.equal(voiceReplyWaitMs("1000", 25000, "claude-code"), 10000);
+  assert.equal(voiceReplyWaitMs("1000", 25000, "openclaw"), 1000);
+  assert.equal(voiceReplyWaitMs("1000", 25000, undefined), 1000);
 });
 
 test("defaults are Opus 5.5 at extra high effort", async () => {
@@ -385,13 +394,14 @@ async function freePort() {
   });
 }
 
-async function startBridge(t, fake) {
+async function startBridge(t, fake, shim = {}) {
   const example = JSON.parse(await readFile(path.join(bridgeRoot, "config.example.json"), "utf8"));
   const dir = path.join(fake.dir, "bridge");
   const token = "test-claude-code-device-token-000000000000000001";
   const port = await freePort();
   const config = { ...example, server: { host: "127.0.0.1", port }, stateDir: path.join(dir, "data") };
   config.upstream = { provider: "claude-code", claudeCode: { command: fake.command } };
+  config.omnibotShim = { ...example.omnibotShim, ...shim };
   config.media = Object.fromEntries(Object.keys(example.media).map(key => [key, path.join(dir, key)]));
   config.assets = { ...example.assets, rootDir: path.join(dir, "assets"), logsDir: path.join(dir, "logs") };
   config.firmware = { ...example.firmware, rootDir: path.join(dir, "firmware") };
@@ -411,7 +421,12 @@ async function startBridge(t, fake) {
   assert.equal(health.upstream_connected, true);
   const turn = message => fetch(`${base}/api/device-text-turn`, { method: "POST", headers,
     body: JSON.stringify({ device_id: config.devices[0].device_id, message }) }).then(response => response.json());
-  return { turn };
+  // The same request the firmware makes, including its 1 s wait.
+  const voice = (turnId, seconds = 1) => fetch(`${base}/api/device-audio-turn-raw`, { method: "POST",
+    headers: { Authorization: headers.Authorization, "content-type": "application/octet-stream", "x-audio-sample-rate": "16000",
+      "x-turn-id": turnId, "x-client-msg-id": turnId, "x-reply-audio": "false", "x-save-reply-audio": "false", "x-voice-wait-ms": "1000" },
+    body: Buffer.alloc(32000 * seconds) }).then(response => response.json());
+  return { turn, voice };
 }
 
 test("full bridge: device text turns reach Claude Code and replies, context and actions return", async t => {
@@ -443,6 +458,23 @@ test("full bridge: device text turns reach Claude Code and replies, context and 
   assert.match(prompt, /no tools/);
   assert.match(prompt, /cardputer_actions/);
   assert.ok(!/cardputer_status|OpenClaw/.test(prompt));
+});
+
+test("full bridge: a voice reply slower than the firmware's 1 s wait still comes back at once", async t => {
+  const fake = await makeFake(t, { steps: [{ ...success("Paris is the capital."), delayMs: 1500 }] });
+  const whisper = path.join(fake.dir, "whisper-cli");
+  await writeFile(whisper, `#!${process.execPath}
+const args = process.argv.slice(2);
+require("fs").writeFileSync(args[args.indexOf("-of") + 1] + ".txt", "What is the capital of France?\\n");
+`);
+  await chmod(whisper, 0o755);
+  const { voice } = await startBridge(t, fake, { sttLocalBin: whisper, sttLocalModel: path.join(fake.dir, "model.bin") });
+  const reply = await voice("voice-test-1");
+  assert.equal(reply.pending, undefined, "a pending reply waits for the device's 4 s inbox poll");
+  assert.equal(reply.transcript, "What is the capital of France?");
+  assert.equal(reply.reply, "Paris is the capital.");
+  const [call] = await fake.calls();
+  assert.equal(call.stdin, "[Voice]\nWhat is the capital of France?");
 });
 
 test("voice turns are labelled for short spoken replies, and OpenClaw keeps its envelope", async t => {

@@ -17,6 +17,7 @@ import WebSocket, { WebSocketServer } from "ws";
 import { StateStore } from "./state-store.mjs";
 import { UpstreamGatewayClient } from "./upstream-client.mjs";
 import { CLAUDE_CODE_PROVIDER, ClaudeCodeClient, resolveUpstreamProvider, validateClaudeCodeConfig } from "./claude-code-client.mjs";
+import { KokoroVoice, kokoroSettings } from "./kokoro-tts.mjs";
 import { createMininervaCompatServer } from "./mininerva-compat.mjs";
 import {
   agentIdForSession,
@@ -698,7 +699,7 @@ function buildClaudeCodeSystemPrompt(config) {
     "You are Claude, answering on a Cardputer ADV, a pocket computer with a tiny screen and a small speaker.",
     "This chat has no tools: you cannot read files, run commands, browse the web, or change firmware. Never claim otherwise.",
     `Reply in plain text without Markdown. Default to ${shortReplyWords} words or fewer and put the key point first.`,
-    "A message starting with [Voice] was spoken and your reply will be read aloud: give the actual answer in 1-3 spoken sentences.",
+    "A message starting with [Voice] was spoken and your reply will be read aloud, and the device downloads all of it before speaking. Give the actual answer in under 20 words unless asked for more.",
     REPLY_LANGUAGE_POLICY,
     buildDeviceActionPolicyText()
   ].join(" ");
@@ -3563,6 +3564,8 @@ class BridgeRuntime {
 	    this.upstream = claudeCode
 	      ? new ClaudeCodeClient(config, { appendSystemPrompt: buildClaudeCodeSystemPrompt(config) })
 	      : new UpstreamGatewayClient(config.upstream);
+	    const kokoro = kokoroSettings(config);
+	    this.kokoro = kokoro ? new KokoroVoice(kokoro) : null;
 	    this.assistant = claudeCode
 	      ? { id: "claude-code:main", name: "Claude" }
 	      : { id: "openclaw:main", name: "OpenClaw" };
@@ -3598,6 +3601,22 @@ class BridgeRuntime {
       admitSmart:record=>this.admitFrontSmart(record)});
 	  }
 
+  // Kokoro's voices are English, so Cyrillic stays with eSpeak.
+  async synthesizeKokoro(text, targetSampleRate) {
+    if (!this.kokoro || containsCyrillic(text)) return null;
+    try {
+      const voice = await this.kokoro.synthesize(text);
+      if (!voice) return null;
+      // Only exact divisions resample cleanly. The device takes any rate it's told.
+      const exact = voice.sampleRate % targetSampleRate === 0;
+      return { pcm: exact ? downsamplePcm16Mono(voice.pcm, voice.sampleRate, targetSampleRate) : voice.pcm,
+        sampleRate: exact ? targetSampleRate : voice.sampleRate };
+    } catch (error) {
+      console.warn(`[tts] kokoro_failed err=${String(error.message || error).slice(0, 120)}`);
+      return null;
+    }
+  }
+
   async start() {
     const legacyState = await readJsonFile(path.join(this.config.stateDir, "state.json"), null);
     if (Object.keys(legacyState?.devices || {}).length > 1)
@@ -3625,6 +3644,8 @@ class BridgeRuntime {
       this.turnOutbox.kick();
     });
     await this.turnOutbox.resume();
+    // Load the voice before the first reply needs it.
+    this.kokoro?.start();
     void this.front.resume().catch(error=>console.warn(`[front] recovery held: ${String(error.message || error).slice(0,160)}`));
     // The HTTP service must stay observable while the gateway is unavailable.
     // UpstreamGatewayClient retries with bounded handshakes in the background.
@@ -4345,7 +4366,14 @@ class BridgeRuntime {
         console.warn(`[tts] openai_failed trace=${traceId || "-"} err=${String(error.message || error).slice(0, 240)}`);
       }
     }
-    if (!wavBytes && String(this.config.omnibotShim.ttsFallbackProvider || "").toLowerCase() === "espeak") {
+    if (!wavBytes) {
+      const voice = await this.synthesizeKokoro(cleaned, targetSampleRate);
+      if (voice) {
+        provider = "kokoro";
+        wavBytes = Buffer.concat([createWavHeader(voice.pcm.length, voice.sampleRate), voice.pcm]);
+      }
+    }
+    if (!wavBytes && ["espeak", "kokoro"].includes(String(this.config.omnibotShim.ttsFallbackProvider || "").toLowerCase())) {
       provider = "espeak";
       const voice = containsCyrillic(cleaned)
         ? this.config.omnibotShim.ttsFallbackVoiceRu
@@ -6579,7 +6607,7 @@ async function main() {
           }),
           waitForUpstream: true
         });
-        const voiceWaitMs = voiceReplyWaitMs(req.headers["x-voice-wait-ms"], config.omnibotShim.voiceTurnWaitMs || config.omnibotShim.turnWaitMs);
+        const voiceWaitMs = voiceReplyWaitMs(req.headers["x-voice-wait-ms"], config.omnibotShim.voiceTurnWaitMs || config.omnibotShim.turnWaitMs, config.upstream?.provider);
         const reply = await runtime.waitForAssistantReply(
           topic.topic_key,
           ack.seq,
@@ -6643,7 +6671,15 @@ async function main() {
 	            console.warn(`[tts] device_openai_failed err=${String(error.message || error).slice(0, 240)}`);
 	          }
 	        }
-	        if (!outputPcm?.length && String(config.omnibotShim.ttsFallbackProvider || "").toLowerCase() === "espeak") {
+	        if (!outputPcm?.length) {
+	          const voice = await runtime.synthesizeKokoro(text, targetSampleRate);
+	          if (voice) {
+	            provider = "kokoro";
+	            targetSampleRate = voice.sampleRate;
+	            outputPcm = voice.pcm;
+	          }
+	        }
+	        if (!outputPcm?.length && ["espeak", "kokoro"].includes(String(config.omnibotShim.ttsFallbackProvider || "").toLowerCase())) {
 	          provider = "espeak";
 	          const voice = containsCyrillic(text)
 	            ? config.omnibotShim.ttsFallbackVoiceRu

@@ -103,13 +103,25 @@ node scripts/setup.mjs voice --config ~/.s1-adv/config.json
 node scripts/setup.mjs voice --config ~/.s1-adv/config.json --apply
 ```
 
-The first run previews what will change. `--apply` downloads the 141 MiB Whisper
-model, checks it against a pinned checksum, and saves the program paths in your
-private config. Restart the bridge afterwards. On Linux, install `espeak-ng`, `ffmpeg`
-and whisper.cpp's `whisper-cli`, then run the same commands.
+The first run previews what will change. `--apply` downloads the Whisper speech
+model and a natural Kokoro voice, about 260 MiB in total, and checks both against
+pinned checksums. It installs Kokoro in a private Python environment, confirms it can
+speak, then saves the paths in your private config. Restart the bridge afterwards.
 
-Your audio stays on your computer. Only the transcribed text goes to Claude. Spoken
-replies use eSpeak, which sounds robotic but runs locally.
+The natural voice needs Python 3.10 to 3.13. Without one, spoken replies use eSpeak,
+which is robotic but works. On Linux, install `espeak-ng`, `ffmpeg` and whisper.cpp's
+`whisper-cli`, then run the same commands.
+
+To change the voice, add `--voice am_michael` for example and restart the bridge.
+Kokoro's English voices start with `af_`, `am_`, `bf_` and `bm_`. Russian replies
+stay with eSpeak, which is also the fallback if Kokoro fails.
+
+Your audio stays on your computer. Only the transcribed text goes to Claude.
+
+Spoken replies are limited to about 20 words unless you ask for more, because the
+Cardputer downloads the whole reply before it plays anything. Claude usually answers
+in 1 to 2 seconds, and the bridge holds the request until then, so replies don't wait
+for the device's 4-second inbox check.
 
 ## Settings
 

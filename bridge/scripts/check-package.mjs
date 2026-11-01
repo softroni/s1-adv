@@ -29,6 +29,7 @@ for (const file of files) {
   assert(audioFiles.has(file) || !/\.(?:bin|wav|mp3|pem|key|env)$|\.test\.mjs$|smoke|mock-upstream|fixtures|security-model-gate/i.test(file), `Non-runtime file: ${file}`);
   assert(allowedRoot.has(file) || /^src\/[a-z0-9-]+\.mjs$/.test(file) ||
     /^scripts\/(?:setup|agent-status|publish-firmware|firmware-[a-z0-9-]+)\.mjs$/.test(file) ||
+    file === "scripts/kokoro-worker.py" ||
     ["skills/s1-adv/SKILL.md", "skills/s1-adv-firmware/SKILL.md"].includes(file) || audioFiles.has(file) ||
     file === "assets/focus-audio/manifest.json", `Unexpected package file: ${file}`);
 }

@@ -8,7 +8,7 @@ import { planModelRoles, applyModelRoles, MODEL_PRESETS } from '../src/model-rol
 export async function setupCli(argv, { openclawCommand } = {}) {
   const [command = "help", ...rest] = argv;
   const options = {};
-  const names = { "gateway-config":"gatewayConfig", "gateway-token-file":"gatewayTokenFile", "gateway-url":"gatewayUrl", "state-dir":"stateDir", "public-url":"publicUrl", "device-id":"deviceId", agent:"agent", port:"port", config:"config", "repo-dir":"repoDir", branch:"branch", "python-bin":"pythonBin", "push-remote":"pushRemote", 'model-profile':'modelProfile', 'fast-model':'fastModel', 'smart-model':'smartModel', 'fast-thinking':'fastThinking', 'smart-thinking':'smartThinking', 'fast-deadline-ms':'fastDeadlineMs', provider:'provider' };
+  const names = { "gateway-config":"gatewayConfig", "gateway-token-file":"gatewayTokenFile", "gateway-url":"gatewayUrl", "state-dir":"stateDir", "public-url":"publicUrl", "device-id":"deviceId", agent:"agent", port:"port", config:"config", "repo-dir":"repoDir", branch:"branch", "python-bin":"pythonBin", "push-remote":"pushRemote", 'model-profile':'modelProfile', 'fast-model':'fastModel', 'smart-model':'smartModel', 'fast-thinking':'fastThinking', 'smart-thinking':'smartThinking', 'fast-deadline-ms':'fastDeadlineMs', provider:'provider', voice:'voice' };
   for (let i = 0; i < rest.length; ++i) {
     const flag = rest[i].replace(/^--/, "");
     if (flag === "apply") options.apply = true;
@@ -36,7 +36,7 @@ export async function setupCli(argv, { openclawCommand } = {}) {
   }
   if (command === "voice") {
     if (!options.config) throw new Error("voice requires --config /absolute/private/config.json");
-    const plan = await planVoice(options.config);
+    const plan = await planVoice(options.config, options.voice ? { voice: options.voice } : {});
     return options.apply ? applyVoice(plan) : { ...plan.summary, dryRun: true, applied: false };
   }
   if (command === "doctor") {
@@ -57,7 +57,7 @@ export async function setupCli(argv, { openclawCommand } = {}) {
     "node scripts/setup.mjs init [--state-dir PATH] [--public-url https://bridge.example.com] [--apply]",
     "node scripts/setup.mjs init --provider openclaw --gateway-config PATH [--state-dir PATH] [--agent cardputer] [--public-url https://bridge.example.com] [--apply]",
     "node scripts/setup.mjs doctor --config PATH [--no-probe]",
-    "node scripts/setup.mjs voice --config PATH [--apply]",
+    "node scripts/setup.mjs voice --config PATH [--voice af_heart] [--apply]",
     "node scripts/setup.mjs firmware --config PATH --repo-dir PATH --branch BRANCH [--python-bin PATH] [--apply]",
     "node scripts/setup.mjs enable --config PATH [--apply]"
     ,"node scripts/setup.mjs models --config PATH [--model-profile codex|claude] [--fast-model PROVIDER/MODEL] [--smart-model PROVIDER/MODEL] [--apply]"

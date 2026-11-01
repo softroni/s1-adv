@@ -191,7 +191,7 @@ async function voiceFixture(t, programs = ["whisper-cli", "espeak-ng", "ffmpeg"]
 test("voice setup previews without writing, then saves paths and a verified model", async t => {
   const fixture = await voiceFixture(t);
   const before = await readFile(fixture.configPath, "utf8");
-  const plan = await planVoice(fixture.configPath, { env: fixture.env, model: fixture.model });
+  const plan = await planVoice(fixture.configPath, { env: fixture.env, model: fixture.model, directories: [] });
   assert.deepEqual(plan.missing, []);
   assert.equal(plan.summary.install, null);
   assert.equal(plan.summary.model.ready, false);
@@ -212,14 +212,14 @@ test("voice setup previews without writing, then saves paths and a verified mode
   assert.equal(config.devices[0].device_token, JSON.parse(before).devices[0].device_token);
   assert.equal(config.upstream.provider, "claude-code");
 
-  const again = await planVoice(fixture.configPath, { env: fixture.env, model: fixture.model });
+  const again = await planVoice(fixture.configPath, { env: fixture.env, model: fixture.model, directories: [] });
   assert.equal(again.modelReady, true);
   await applyVoice(again, { fetchImpl: async () => { throw new Error("must not download again"); } });
 });
 
 test("voice setup rejects a replaced model and leaves nothing behind", async t => {
   const fixture = await voiceFixture(t);
-  const plan = await planVoice(fixture.configPath, { env: fixture.env, model: fixture.model });
+  const plan = await planVoice(fixture.configPath, { env: fixture.env, model: fixture.model, directories: [] });
   const before = await readFile(fixture.configPath, "utf8");
   await assert.rejects(applyVoice(plan, { fetchImpl: async () => new Response("a different file") }), /checksum/);
   await assert.rejects(access(plan.modelPath));
@@ -244,10 +244,71 @@ test("voice setup names what to install before downloading anything", async t =>
 
 test("doctor checks the configured speech programs, not a Linux default", async t => {
   const fixture = await voiceFixture(t);
-  const plan = await planVoice(fixture.configPath, { env: fixture.env, model: fixture.model });
+  const plan = await planVoice(fixture.configPath, { env: fixture.env, model: fixture.model, directories: [] });
   await applyVoice(plan, { fetchImpl: async () => new Response(fixture.bytes) });
   const report = await doctor(fixture.configPath, { probe: false,
     claudeLogin: async () => ({ installed: true, subscription: true, detail: "ok" }) });
   for (const name of ["espeak-ng", "whisper-binary", "whisper-model"])
     assert.equal(report.checks.find(check => check.name === name).ok, true, name);
+});
+
+function kokoroFixtureFiles() {
+  return [["model", "kokoro.onnx", "model bytes"], ["voices", "voices.bin", "voice bytes"]].map(([key, name, text]) => ({ key, name,
+    url: `https://models.invalid/${name}`, bytes: text.length, content: text, sha256: createHash("sha256").update(text).digest("hex") }));
+}
+
+test("the natural voice installs privately, proves it speaks, then becomes the default", async t => {
+  const fixture = await voiceFixture(t, ["whisper-cli", "espeak-ng", "ffmpeg", "python3.12"]);
+  const kokoroFiles = kokoroFixtureFiles();
+  const options = { env: fixture.env, model: fixture.model, directories: [], kokoroFiles };
+  const plan = await planVoice(fixture.configPath, { ...options, voice: "am_michael" });
+  assert.equal(plan.summary.naturalVoice.enabled, true);
+  assert.equal(plan.summary.naturalVoice.voice, "am_michael");
+  assert.ok(plan.summary.writes.some(write => write.includes("kokoro.onnx")));
+  const commands = [], spoken = [];
+  const fetchImpl = async url => new Response(kokoroFiles.find(file => file.url === url)?.content ?? fixture.bytes);
+  await applyVoice(plan, { fetchImpl, runCommand: async (command, args) => commands.push([command, ...args]),
+    verifyVoice: async settings => spoken.push(settings) });
+  assert.equal(commands[0][0], path.join(fixture.bin, "python3.12"));
+  assert.ok(commands[1].includes("kokoro-onnx==0.6.1"), "the package version is pinned");
+  assert.equal(spoken.length, 1);
+  const shim = JSON.parse(await readFile(fixture.configPath, "utf8")).omnibotShim;
+  assert.equal(shim.ttsFallbackProvider, "kokoro");
+  assert.equal(shim.ttsKokoro.voice, "am_michael");
+  assert.equal(shim.ttsKokoro.python, path.join(path.dirname(fixture.configPath), "kokoro", "venv", "bin", "python"));
+  assert.deepEqual(await readFile(shim.ttsKokoro.model, "utf8"), "model bytes");
+  assert.equal(shim.ttsFallbackBin, path.join(fixture.bin, "espeak-ng"), "eSpeak stays as the fallback");
+});
+
+test("a natural voice that can't speak leaves the working setup alone", async t => {
+  const fixture = await voiceFixture(t, ["whisper-cli", "espeak-ng", "ffmpeg", "python3.12"]);
+  const kokoroFiles = kokoroFixtureFiles();
+  const plan = await planVoice(fixture.configPath, { env: fixture.env, model: fixture.model, directories: [], kokoroFiles });
+  const before = await readFile(fixture.configPath, "utf8");
+  const fetchImpl = async url => new Response(kokoroFiles.find(file => file.url === url)?.content ?? fixture.bytes);
+  await assert.rejects(applyVoice(plan, { fetchImpl, runCommand: async () => {},
+    verifyVoice: async () => { throw new Error("no audio"); } }), /no audio/);
+  assert.equal(await readFile(fixture.configPath, "utf8"), before);
+  await assert.rejects(planVoice(fixture.configPath, { env: fixture.env, voice: "--bad", directories: [] }), /Voice must/);
+});
+
+test("without a suitable Python, voice setup still works and says why it is using eSpeak", async t => {
+  const fixture = await voiceFixture(t);
+  const plan = await planVoice(fixture.configPath, { env: fixture.env, model: fixture.model, directories: [] });
+  assert.equal(plan.summary.naturalVoice.enabled, false);
+  assert.ok(plan.summary.notes.some(note => note.includes("eSpeak")));
+  await applyVoice(plan, { fetchImpl: async () => new Response(fixture.bytes) });
+  assert.equal(JSON.parse(await readFile(fixture.configPath, "utf8")).omnibotShim.ttsFallbackProvider, "espeak");
+});
+
+test("doctor reports a natural voice that has gone missing", async t => {
+  const fixture = await voiceFixture(t);
+  const config = JSON.parse(await readFile(fixture.configPath, "utf8"));
+  config.omnibotShim = { ...config.omnibotShim, ttsFallbackProvider: "kokoro",
+    ttsKokoro: { python: path.join(fixture.root, "gone"), model: "/gone", voices: "/gone" } };
+  await writeFile(fixture.configPath, JSON.stringify(config), { mode: 0o600 });
+  const report = await doctor(fixture.configPath, { probe: false,
+    claudeLogin: async () => ({ installed: true, subscription: true, detail: "ok" }) });
+  assert.equal(report.checks.find(check => check.name === "kokoro-voice").ok, false);
+  assert.equal(report.audioDependenciesReady, false);
 });

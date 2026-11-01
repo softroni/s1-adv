@@ -7,6 +7,7 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { KOKORO_DEFAULTS, KokoroVoice } from "./kokoro-tts.mjs";
 import JSON5 from "json5";
 import { firmwareCapability } from "./firmware-automation.mjs";
 import { loadFocusAudioBundle } from "./focus-audio.mjs";
@@ -21,6 +22,18 @@ export const WHISPER_MODEL = Object.freeze({
   url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
   sha256: "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
   bytes: 147951465
+});
+
+const KOKORO_RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0";
+export const KOKORO = Object.freeze({
+  package: "kokoro-onnx==0.6.1",
+  pythons: ["python3.12", "python3.13", "python3.11", "python3.10"],
+  files: Object.freeze([
+    Object.freeze({ key: "model", name: "kokoro-v1.0.int8.onnx", url: `${KOKORO_RELEASE}/kokoro-v1.0.int8.onnx`,
+      sha256: "6e742170d309016e5891a994e1ce1559c702a2ccd0075e67ef7157974f6406cb", bytes: 92361271 }),
+    Object.freeze({ key: "voices", name: "voices-v1.0.bin", url: `${KOKORO_RELEASE}/voices-v1.0.bin`,
+      sha256: "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d", bytes: 28214398 })
+  ])
 });
 
 // Services and plugin hosts can start with a short PATH that misses Homebrew.
@@ -183,7 +196,22 @@ function voiceInstallHint(platform, missing) {
   return `Install ${missing.join(", ")}. On Debian or Ubuntu, apt provides espeak-ng and ffmpeg; whisper-cli comes from whisper.cpp.`;
 }
 
-export async function planVoice(configPath, { env = process.env, platform = process.platform, model = WHISPER_MODEL, directories = PROGRAM_DIRECTORIES } = {}) {
+// Homebrew's espeak-ng works where the copy bundled with the Python package can't find its data.
+async function espeakFiles() {
+  for (const prefix of ["/opt/homebrew", "/usr/local"]) {
+    const espeakLib = path.join(prefix, "lib", "libespeak-ng.dylib"), espeakData = path.join(prefix, "share", "espeak-ng-data");
+    try { await access(espeakLib); await access(espeakData); return { espeakLib, espeakData }; } catch {}
+  }
+  return {};
+}
+
+function runSetupCommand(command, args) {
+  const result = spawnSync(command, args, { encoding: "utf8", timeout: 600000 });
+  if (result.status !== 0) throw new Error(`${path.basename(command)} failed during voice setup.`);
+}
+
+export async function planVoice(configPath, { env = process.env, platform = process.platform, model = WHISPER_MODEL, directories = PROGRAM_DIRECTORIES, voice = KOKORO_DEFAULTS.voice, kokoroFiles = KOKORO.files } = {}) {
+  if (!/^[a-z]{2}_[a-z]+$/.test(voice)) throw new Error("Voice must look like af_heart.");
   const absolute = path.resolve(configPath);
   const config = JSON.parse(await readFile(absolute, "utf8"));
   const modelPath = path.join(path.dirname(absolute), "models", model.name);
@@ -191,31 +219,64 @@ export async function planVoice(configPath, { env = process.env, platform = proc
   for (const name of ["whisper-cli", "espeak-ng", "ffmpeg"]) programs[name] = await findProgram(name, env, directories);
   const missing = Object.keys(programs).filter(name => !programs[name]);
   const ready = await modelReady(modelPath, model);
-  return { configPath: absolute, config, model, modelPath, modelReady: ready, programs, missing,
+  const kokoroDir = path.join(path.dirname(absolute), "kokoro");
+  let python = null;
+  for (const name of KOKORO.pythons) python ||= await findProgram(name, env, directories);
+  const files = [];
+  for (const file of kokoroFiles) files.push({ ...file, path: path.join(kokoroDir, file.name), ready: await modelReady(path.join(kokoroDir, file.name), file) });
+  const downloads = python ? files.filter(file => !file.ready) : [];
+  const mib = bytes => `${Math.round(bytes / 1048576)} MiB`;
+  return { configPath: absolute, config, model, modelPath, modelReady: ready, programs, missing, voice, python, kokoroDir, kokoroFiles: files,
     summary: { configPath: absolute, programs, missing, install: missing.length ? voiceInstallHint(platform, missing) : null,
       model: { path: modelPath, ready, downloadBytes: ready ? 0 : model.bytes },
-      writes: [...(ready ? [] : [`${model.name} (${Math.round(model.bytes / 1048576)} MiB)`]), "voice paths in config.json (0600)"],
+      naturalVoice: { enabled: !!python, voice, python },
+      writes: [...(ready ? [] : [`${model.name} (${mib(model.bytes)})`]), ...downloads.map(file => `${file.name} (${mib(file.bytes)})`),
+        ...(python ? [`${KOKORO.package} in a private Python environment`] : []), "voice paths in config.json (0600)"],
       notes: ["Audio stays on this computer. Only the transcribed text goes to the assistant.",
+        ...(python ? [] : ["Python 3.10 to 3.13 wasn't found, so spoken replies will use eSpeak. Install one and repeat for a natural voice."]),
         "Restart the bridge after applying."] } };
 }
 
-export async function applyVoice(plan, { fetchImpl = fetch } = {}) {
+async function downloadVerified(file, target, fetchImpl) {
+  const response = await fetchImpl(file.url, { redirect: "follow" });
+  if (!response.ok || !response.body) throw new Error(`Speech model download failed (HTTP ${response.status}).`);
+  await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+  const partial = `${target}.part`, hash = createHash("sha256");
+  const hashing = new Transform({ transform(chunk, _encoding, done) { hash.update(chunk); done(null, chunk); } });
+  try {
+    await pipeline(Readable.fromWeb(response.body), hashing, createWriteStream(partial, { mode: 0o600 }));
+    if (hash.digest("hex") !== file.sha256) throw new Error("Speech model checksum mismatch. Nothing was installed.");
+    await rename(partial, target);
+  } finally { await rm(partial, { force: true }); }
+}
+
+async function speakOnce(settings) {
+  const voice = new KokoroVoice(settings);
+  try {
+    if (!(await voice.synthesize("Ready."))?.pcm?.length) throw new Error("Kokoro produced no audio.");
+  } finally { voice.stop(); }
+}
+
+async function installKokoro(plan, { fetchImpl, runCommand, verifyVoice }) {
+  const venv = path.join(plan.kokoroDir, "venv"), python = path.join(venv, "bin", "python");
+  await mkdir(plan.kokoroDir, { recursive: true, mode: 0o700 });
+  await runCommand(plan.python, ["-m", "venv", venv]);
+  await runCommand(python, ["-m", "pip", "install", "-q", KOKORO.package]);
+  for (const file of plan.kokoroFiles) if (!file.ready) await downloadVerified(file, file.path, fetchImpl);
+  const paths = Object.fromEntries(plan.kokoroFiles.map(file => [file.key, file.path]));
+  const settings = { python, ...paths, voice: plan.voice, speed: KOKORO_DEFAULTS.speed, ...(await espeakFiles()) };
+  // Prove it speaks before the config depends on it.
+  await verifyVoice({ ...KOKORO_DEFAULTS, ...settings });
+  return settings;
+}
+
+export async function applyVoice(plan, { fetchImpl = fetch, runCommand = runSetupCommand, verifyVoice = speakOnce } = {}) {
   if (plan.missing.length) throw new Error(`Missing ${plan.missing.join(", ")}. ${plan.summary.install}`);
-  if (!plan.modelReady) {
-    const response = await fetchImpl(plan.model.url, { redirect: "follow" });
-    if (!response.ok || !response.body) throw new Error(`Speech model download failed (HTTP ${response.status}).`);
-    await mkdir(path.dirname(plan.modelPath), { recursive: true, mode: 0o700 });
-    const partial = `${plan.modelPath}.part`, hash = createHash("sha256");
-    const hashing = new Transform({ transform(chunk, _encoding, done) { hash.update(chunk); done(null, chunk); } });
-    try {
-      await pipeline(Readable.fromWeb(response.body), hashing, createWriteStream(partial, { mode: 0o600 }));
-      if (hash.digest("hex") !== plan.model.sha256) throw new Error("Speech model checksum mismatch. Nothing was installed.");
-      await rename(partial, plan.modelPath);
-    } finally { await rm(partial, { force: true }); }
-  }
+  if (!plan.modelReady) await downloadVerified(plan.model, plan.modelPath, fetchImpl);
+  const kokoro = plan.python ? await installKokoro(plan, { fetchImpl, runCommand, verifyVoice }) : null;
   const config = JSON.parse(await readFile(plan.configPath, "utf8"));
   config.omnibotShim = { ...config.omnibotShim, sttLocalBin: plan.programs["whisper-cli"], sttLocalModel: plan.modelPath,
-    ttsFallbackBin: plan.programs["espeak-ng"] };
+    ttsFallbackBin: plan.programs["espeak-ng"], ...(kokoro ? { ttsFallbackProvider: "kokoro", ttsKokoro: kokoro } : {}) };
   await writeJsonAtomic(plan.configPath, config);
   return { ...plan.summary, model: { path: plan.modelPath, ready: true, downloadBytes: 0 }, applied: true, restartRequired: true };
 }
@@ -279,11 +340,18 @@ export async function doctor(configPath, { probe = true, fetchImpl = fetch, clau
   } catch { add("agent-config", false, "Cannot verify selected agent against the local gateway configuration."); }
   const voiceHelp = "See docs/CLAUDE-CODE.md#add-voice, or run the voice setup command.";
   const speech = [["ffmpeg", "ffmpeg", "-version"]];
-  if (config.omnibotShim?.ttsFallbackProvider === "espeak")
+  const kokoro = config.omnibotShim?.ttsFallbackProvider === "kokoro";
+  if (config.omnibotShim?.ttsFallbackProvider === "espeak" || kokoro)
     speech.push(["espeak-ng", config.omnibotShim.ttsFallbackBin || "espeak-ng", "--version"]);
   for (const [name, binary, flag] of speech) {
     const found = spawnSync(binary, [flag], { encoding: "utf8", timeout: 5000 });
     add(name, found.status === 0, found.status === 0 ? "Available" : `Install for configured audio support. ${voiceHelp}`);
+  }
+  if (kokoro) {
+    const { python, model, voices } = config.omnibotShim.ttsKokoro || {};
+    let ok = false;
+    try { await access(python, constants.X_OK); await access(model); await access(voices); ok = true; } catch {}
+    add("kokoro-voice", ok, ok ? "Available" : `Natural voice files are missing; replies fall back to eSpeak. ${voiceHelp}`);
   }
   if (config.omnibotShim?.sttProvider === "local-whisper") {
     for (const [name, file, permission] of [["whisper-binary", config.omnibotShim.sttLocalBin, constants.X_OK], ["whisper-model", config.omnibotShim.sttLocalModel, constants.R_OK]]) {
@@ -328,7 +396,7 @@ export async function doctor(configPath, { probe = true, fetchImpl = fetch, clau
   const textChecks = ["private-config","device-token","single-device","loopback-listener","bridge-http","upstream","delivery",
     ...(provider === CLAUDE_CODE_PROVIDER ? ["claude-cli","claude-subscription"] : ["gateway-token","agent-config"])];
   return { configPath: absolute, provider, checks, textReady: probe && checks.filter(c => textChecks.includes(c.name)).every(c => c.ok),
-    audioDependenciesReady: checks.filter(c => ["ffmpeg","espeak-ng","whisper-binary","whisper-model"].includes(c.name)).every(c => c.ok),
+    audioDependenciesReady: checks.filter(c => ["ffmpeg","espeak-ng","whisper-binary","whisper-model","kokoro-voice"].includes(c.name)).every(c => c.ok),
     firmwareAutomationEnabled: config.firmwareAutomation?.enabled === true, firmwareCapability: firmware, focusAudio,
     note: "A model round trip and physical-device acceptance are separate checks." };
 }
