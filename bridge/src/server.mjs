@@ -2609,6 +2609,11 @@ async function transcribeLocalWhisper(config, { audioBytes, language = "" }) {
 function cleanupTranscriptText(text) {
   let cleaned = String(text || "").trim();
   cleaned = cleaned
+    // Whisper describes non-speech in brackets: [BLANK_AUDIO], [ Silence ], [MUSIC].
+    // None of that is the user's words, so it must never reach the assistant.
+    .replace(/\[[^\]\n]{1,40}\]/gu, " ")
+    .replace(/^\s*\([^)\n]{1,40}\)\s*$/u, "")
+    .trim()
     .replace(/^here(?:'s| is)\s+the\s+transcript\s+of\s+the\s+audio\s*:\s*/iu, "")
     .replace(/^transcript\s*:\s*/iu, "")
     .replace(/^["“”]+|["“”]+$/gu, "")
@@ -7543,5 +7548,5 @@ async function main() {
   });
 }
 
-export { BridgeRuntime, buildFirmwareCapabilityPolicyText, wireRealtimeBridge, openRealtimeModelSocket, buildDeviceTurnEnvelope, loadConfig, transcode };
+export { BridgeRuntime, buildFirmwareCapabilityPolicyText, cleanupTranscriptText, wireRealtimeBridge, openRealtimeModelSocket, buildDeviceTurnEnvelope, loadConfig, transcode };
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) void main();

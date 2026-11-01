@@ -9,7 +9,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { doctor, enablePlugin, planInstall, applyInstall } from "./install.mjs";
 import { planModelRoles } from "./model-roles.mjs";
-import { BridgeRuntime, loadConfig } from "./server.mjs";
+import { BridgeRuntime, cleanupTranscriptText, loadConfig } from "./server.mjs";
 import { voiceReplyWaitMs } from "./turn-delivery-policy.mjs";
 import {
   CLAUDE_CODE_DEFAULTS, ClaudeCodeClient, claudeCodeSettings, claudeEnv, claudeTurnArgs, parseClaudeResult,
@@ -344,6 +344,7 @@ test("setup writes a Claude Code config by default and an OpenClaw config only w
   await applyInstall(plan);
   const config = JSON.parse(await readFile(plan.configPath, "utf8"));
   assert.equal(config.upstream.provider, "claude-code");
+  assert.equal(config.omnibotShim.sttLocalLanguage, "en");
   assert.equal(config.upstream.url, undefined);
   assert.equal(config.upstream.token, undefined);
   assert.equal((await stat(plan.configPath)).mode & 0o077, 0);
@@ -475,6 +476,28 @@ require("fs").writeFileSync(args[args.indexOf("-of") + 1] + ".txt", "What is the
   assert.equal(reply.reply, "Paris is the capital.");
   const [call] = await fake.calls();
   assert.equal(call.stdin, "[Voice]\nWhat is the capital of France?");
+});
+
+test("Whisper's non-speech tags are never treated as the user's words", () => {
+  for (const silent of ["[BLANK_AUDIO]", " [BLANK_AUDIO] ", "[ Silence ]", "[MUSIC]", "[BLANK_AUDIO]\n[BLANK_AUDIO]", "(wind blowing)"])
+    assert.equal(cleanupTranscriptText(silent), "", silent);
+  assert.equal(cleanupTranscriptText("[MUSIC] hello there"), "hello there");
+  assert.equal(cleanupTranscriptText("What is 2 (two) plus 2?"), "What is 2 (two) plus 2?");
+  assert.equal(cleanupTranscriptText("Thank you very much."), "Thank you very much.");
+});
+
+test("full bridge: a silent clip stops at the bridge and never reaches Claude", async t => {
+  const fake = await makeFake(t, { steps: [success("must not be used")] });
+  const whisper = path.join(fake.dir, "whisper-cli");
+  await writeFile(whisper, `#!${process.execPath}
+const args = process.argv.slice(2);
+require("fs").writeFileSync(args[args.indexOf("-of") + 1] + ".txt", " [BLANK_AUDIO]\\n");
+`);
+  await chmod(whisper, 0o755);
+  const { voice } = await startBridge(t, fake, { sttLocalBin: whisper, sttLocalModel: path.join(fake.dir, "model.bin") });
+  const reply = await voice("voice-silent-1");
+  assert.equal(reply.error, "could not transcribe speech");
+  assert.equal((await fake.calls()).length, 0);
 });
 
 test("voice turns are labelled for short spoken replies, and OpenClaw keeps its envelope", async t => {

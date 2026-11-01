@@ -118,6 +118,13 @@ stay with eSpeak, which is also the fallback if Kokoro fails.
 
 Your audio stays on your computer. Only the transcribed text goes to Claude.
 
+Setup transcribes English, because language detection is unreliable on short clips.
+To use another language, set `omnibotShim.sttLocalLanguage` to its code or `auto`.
+
+**Known issue:** the first 2 to 3 seconds of a recording can be lost, because the
+firmware opens its secure connection as recording starts. After holding G0, wait about
+3 seconds before you speak, then keep holding for a moment after you finish.
+
 Spoken replies are limited to about 20 words unless you ask for more, because the
 Cardputer downloads the whole reply before it plays anything. Claude usually answers
 in 1 to 2 seconds, and the bridge holds the request until then, so replies don't wait

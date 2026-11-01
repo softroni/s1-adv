@@ -117,6 +117,8 @@ async function planClaudeCodeInstall(options) {
     delete config.upstream.token;
     config.upstream.provider = CLAUDE_CODE_PROVIDER;
     config.omnibotShim = { ...config.omnibotShim,
+      // Language detection is unreliable on clips this short: "hello" can come back as "Ciao."
+      sttLocalLanguage: "en",
       sttLocalModel: path.join(stateDir, "models", WHISPER_MODEL.name),
       sttLocalBin: await findProgram("whisper-cli") || config.omnibotShim.sttLocalBin,
       ttsFallbackBin: await findProgram("espeak-ng") || "espeak-ng" };
