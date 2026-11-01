@@ -10,5 +10,8 @@ constants = (parts / '001_main.cpp.inc').read_text()
 assert 'constexpr BaseType_t kVoiceNetworkCore = 0;' in constants
 assert 'xTaskCreate(voicePreconnectTask' not in network
 assert network.count('xTaskCreatePinnedToCore(voicePreconnectTask') == 2
-assert network.count('nullptr, kVoiceNetworkCore)') == 2
+assert network.count('raw, kVoiceNetworkPriority, nullptr, kVoiceNetworkCore)') == 2
+# Above idle priority, a handshake over 5 s starves core 0's idle task and the
+# task watchdog reboots the device.
+assert 'constexpr UBaseType_t kVoiceNetworkPriority = tskIDLE_PRIORITY;' in constants
 print('voice capture core: ok')

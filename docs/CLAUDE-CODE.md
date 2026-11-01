@@ -121,7 +121,7 @@ Your audio stays on your computer. Only the transcribed text goes to Claude.
 Setup transcribes English, because language detection is unreliable on short clips.
 To use another language, set `omnibotShim.sttLocalLanguage` to its code or `auto`.
 
-Firmware before 0.2.206 can lose the first 2 to 3 seconds of a recording, because it
+Firmware before 0.2.207 can lose the first 2 to 3 seconds of a recording, because it
 opens its secure connection as recording starts. On those versions, hold G0, wait about
 3 seconds before you speak, then keep holding for a moment after you finish.
 

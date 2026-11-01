@@ -1,5 +1,7 @@
 # S1-ADV 0.2.206
 
+**Don't use this build.** It restarts when you release G0. See [0.2.207](RELEASE-0.2.207.md).
+
 Firmware source release. Build it with your own settings; see
 [Build and flash](FLASHING.md). The public release image stays at 0.2.201.
 

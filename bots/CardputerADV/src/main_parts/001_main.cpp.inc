@@ -89,7 +89,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.206-dev"
+#define APP_VERSION "0.2.207-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"
@@ -339,6 +339,10 @@ constexpr size_t kRecordChunkBufferCount = 3;
 // drains the microphone on core 1 with only two 64 ms chunks queued, so this
 // work stays on core 0 or the first seconds of every recording are lost.
 constexpr BaseType_t kVoiceNetworkCore = 0;
+// Core 0's idle task must run or the 5 s task watchdog panics and reboots, and a
+// handshake can outlast that. Sharing idle priority lets it run; Wi-Fi and lwIP
+// are far higher, so the network itself isn't slowed.
+constexpr UBaseType_t kVoiceNetworkPriority = tskIDLE_PRIORITY;
 // Realtime uses the model's native PCM clock. Keep the ordinary voice-note
 // path at kMicSampleRate; it has a separate codec lifecycle.
 constexpr uint32_t kRealtimeInputSampleRate = 24000;

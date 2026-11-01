@@ -589,7 +589,7 @@ void beginVoicePreconnect() {
     gVoiceDialCanvasReleased=releaseUiCanvasForNetwork("voice preconnect TLS");
   gVoiceDialBusy = true;
   VoiceDialPayload* raw = payload.release();
-  if (xTaskCreatePinnedToCore(voicePreconnectTask, "voice-connect", 8192, raw, 1, nullptr, kVoiceNetworkCore) != pdPASS) {
+  if (xTaskCreatePinnedToCore(voicePreconnectTask, "voice-connect", 8192, raw, kVoiceNetworkPriority, nullptr, kVoiceNetworkCore) != pdPASS) {
     delete raw; gVoiceDialBusy = false;
     if(gVoiceDialCanvasReleased){restoreUiCanvasAfterNetwork();gVoiceDialCanvasReleased=false;}
   }
@@ -642,7 +642,7 @@ void beginVoiceCaptureUpload() {
   headers += "\r\n";
   gVoiceCaptureUpload = capture; gVoiceReadyStreamed = false; gVoiceDialBusy = true;
   VoiceDialPayload* raw = payload.release();
-  if (xTaskCreatePinnedToCore(voicePreconnectTask, "voice-stream", 8192, raw, 1, nullptr, kVoiceNetworkCore) != pdPASS) {
+  if (xTaskCreatePinnedToCore(voicePreconnectTask, "voice-stream", 8192, raw, kVoiceNetworkPriority, nullptr, kVoiceNetworkCore) != pdPASS) {
     delete raw; gVoiceDialBusy = false; gVoiceCaptureUpload.reset();
   } else logf("[VOICE_STREAM] background capture started t=%u", static_cast<unsigned>(millis()));
 }

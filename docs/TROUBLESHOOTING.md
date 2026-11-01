@@ -14,7 +14,7 @@
 | 401 or 403 | Device token, device ID and topic allowlist agree on both sides |
 | Topics work but no reply | Gateway pairing, scopes, session key, provider authentication and actual upstream readiness |
 | Text works, voice fails | FFmpeg, STT binary/model, TTS binary and their service-user permissions. Look for `ENOENT` in the bridge log, and run [`setup.mjs voice`](CLAUDE-CODE.md#add-voice) |
-| Voice replies say nothing was heard, or words are wrong | Before firmware 0.2.206, the start of each recording can be lost. Update, or hold G0, wait about 3 seconds, then speak. See [Add voice](CLAUDE-CODE.md#add-voice) |
+| Voice replies say nothing was heard, or words are wrong | Before firmware 0.2.207, the start of each recording can be lost. Update, or hold G0, wait about 3 seconds, then speak. See [Add voice](CLAUDE-CODE.md#add-voice) |
 | Claude says it has no tools or doesn't know its folder | That's the default. See [Let Claude work in a folder](CLAUDE-CODE.md#let-claude-work-in-a-folder) |
 | Spoken replies sound robotic | That's eSpeak. Run [`setup.mjs voice`](CLAUDE-CODE.md#add-voice) with Python 3.10 to 3.13 installed, then restart the bridge |
 | OTA appears successful | Verify rebooted version on the device; a download or queued event is insufficient |
