@@ -17,6 +17,7 @@
 - `/nfc` opens NFC Notes, which reads tags and saves a name or note on them.
 - `/music` opens Air Music, which plays notes as you wave a hand over an ultrasonic unit.
 - `/flappy` opens Flappy Bird, steered by hand over the same unit or flapped with Space.
+- `/balloon` opens Hot Air Balloon, flown by blowing on an ENV III and steered with a Joystick 2.
 
 This firmware has evolved across development versions. Prefer the command help
 on your built device for current shortcuts. Specialized IR, RFID and sonar
@@ -52,6 +53,17 @@ follows your hand. Take your hand away and the bird falls.
 Space or any other key flaps instead, so it also plays without the sensor. The pipes speed
 up every 5 points, up to triple speed at 50 points. After a crash, the score shows for a
 moment and the next game is ready to start. Esc leaves.
+
+## Hot Air Balloon
+
+Hot Air Balloon is under Tab, Games, and `/balloon` opens it. Connect an ENV III and a
+Joystick 2 to the Grove port through a hub. Both are optional.
+
+- **Rise:** blow on the ENV III, hold the joystick's button, or press Space or W.
+- **Steer:** push the joystick left or right, or press A and D or the arrow keys.
+- Collect stars, and avoid the birds. You have three hearts, and a floating heart gives
+  one back. The ground is soft, so landing is safe.
+- Every 10 stars the sky changes from day to sunset to night, and the wind picks up.
 
 Realtime shows CONNECT, LISTEN, THINK, SPEAK, READY or ERROR above the large eyes.
 MIC ON and the input meter appear only during recording. Connection errors remain

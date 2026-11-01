@@ -245,6 +245,8 @@ bool mapActionUiMode(String mode, UiMode& out) {
     out = UiMode::AirMusic;
   } else if (mode == "flappy" || mode == "flappy_bird") {
     out = UiMode::Flappy;
+  } else if (mode == "balloon" || mode == "hot_air_balloon") {
+    out = UiMode::Balloon;
   } else if (mode == "folders") {
     out = UiMode::AudioFolders;
   } else if (mode == "notes" || mode == "note" || mode == "notepad") {

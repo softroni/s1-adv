@@ -189,6 +189,7 @@ enum class UiMode : uint8_t {
   Snake,
   AirMusic,
   Flappy,
+  Balloon,
   NfcNotes,
   Radio,
   VlcRemote,

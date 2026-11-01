@@ -303,6 +303,7 @@ void setUiMode(UiMode mode) {
   // Right away, not from its service, because the next app may want the Grove port.
   if (modeChanged && gUiMode == UiMode::AirMusic) stopAirMusic();
   if (modeChanged && gUiMode == UiMode::Flappy) stopFlappy();
+  if (modeChanged && gUiMode == UiMode::Balloon) stopBalloon();
   gUiMode = mode;
   if (modeChanged && mode == UiMode::Files) refreshFileManager();
   if (modeChanged && mode == UiMode::Chess) beginChessDemo();
@@ -311,6 +312,7 @@ void setUiMode(UiMode mode) {
   if (modeChanged && mode == UiMode::Snake) beginSnake();
   if (modeChanged && mode == UiMode::AirMusic) beginAirMusic();
   if (modeChanged && mode == UiMode::Flappy) beginFlappy();
+  if (modeChanged && mode == UiMode::Balloon) beginBalloon();
   if (modeChanged && mode == UiMode::NfcNotes) beginNfcNotes();
   if (modeChanged && mode == UiMode::Radio) beginInternetRadio();
   if (modeChanged && mode == UiMode::VlcRemote) beginVlcRemote();

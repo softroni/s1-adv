@@ -23,6 +23,9 @@
       case UiMode::Flappy:
         renderFlappyUi();
         break;
+      case UiMode::Balloon:
+        renderBalloonUi();
+        break;
       case UiMode::NfcNotes:
         renderNfcNotesUi();
         break;
@@ -462,6 +465,7 @@ void loop() {
   // After NFC Notes, which gives up the Grove port from its service.
   serviceAirMusic();
   serviceFlappy();
+  serviceBalloon();
   serviceBrainFlow();
   serviceTetris();
   serviceSmartLamp();

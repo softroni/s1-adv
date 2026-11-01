@@ -94,6 +94,7 @@ jobs:
       - run: python scripts/test_snake.py
       - run: python scripts/test_air_music.py
       - run: python scripts/test_flappy.py
+      - run: python scripts/test_balloon.py
       - run: python scripts/test_nfc_notes.py
       - run: python scripts/test_internet_radio.py
       - run: python scripts/test_internet_radio_transport.py
