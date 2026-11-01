@@ -1,5 +1,8 @@
 # Install the S1-ADV OpenClaw integration
 
+The bridge uses your Claude subscription by default, without OpenClaw; see
+[Claude Code](CLAUDE-CODE.md). Follow this guide to use OpenClaw instead.
+
 S1-ADV includes a community OpenClaw plugin and the same bridge as a standalone
 Node.js service. Use the plugin for Gateway-managed startup and setup commands,
 or follow the [manual service guide](OPENCLAW-MANUAL.md). The plugin is maintained

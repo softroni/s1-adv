@@ -47,6 +47,7 @@ jobs:
       - run: node --test src/streaming-upload.test.mjs
       - run: node --test src/turn-outbox.test.mjs
       - run: npm run test:upstream
+      - run: npm run test:claude-code
       - run: npm run smoke
       - run: npm run smoke:mininerva
       - run: npm run smoke:realtime-contract

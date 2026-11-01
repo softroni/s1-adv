@@ -11,17 +11,18 @@
 
 Security: [bridge hardening](docs/SECURITY-REVIEW-2026-10-23.md) · [public history audit](docs/SECURITY-REVIEW-2026-10-22.md).
 
-**S1-ADV** turns a M5Stack Cardputer ADV into a pocket workspace for your
-**OpenClaw** agent: keyboard, voice, local tools and firmware you can extend.
-Type a question, hold the talk button, check a reply, or use the offline apps.
-The agent runs on your computer or server; the Cardputer runs this firmware.
+**S1-ADV** turns a M5Stack Cardputer ADV into a pocket workspace for **Claude**,
+through your own Claude subscription, or for your **OpenClaw** agent: keyboard,
+voice, local tools and firmware you can extend. Type a question, hold the talk
+button, check a reply, or use the offline apps. The assistant runs on your computer
+or server; the Cardputer runs this firmware.
 
 **Video walkthrough:** [I Built an AI OS That Evolves on Demand](https://www.youtube.com/watch?v=_0f9UTwefmo).
 
 S1-ADV is experimental firmware built on Arduino/FreeRTOS, with an included
-OpenClaw bridge. See [Credits](CREDITS.md) for the project origin and cover details.
+bridge for Claude Code and OpenClaw. See [Credits](CREDITS.md) for the project origin and cover details.
 
-[Install the OpenClaw plugin on ClawHub](https://clawhub.ai/plugins/openclaw-s1-adv) · [Get started](docs/GETTING-STARTED.md) · [Flash firmware](docs/FLASHING.md) · [Connect OpenClaw](docs/OPENCLAW.md) · [Troubleshooting](docs/TROUBLESHOOTING.md)
+[Get started](docs/GETTING-STARTED.md) · [Use your Claude subscription](docs/CLAUDE-CODE.md) · [Flash firmware](docs/FLASHING.md) · [Connect OpenClaw](docs/OPENCLAW.md) · [Install the OpenClaw plugin on ClawHub](https://clawhub.ai/plugins/openclaw-s1-adv) · [Troubleshooting](docs/TROUBLESHOOTING.md)
 
 **Current firmware: [0.2.201-dev](https://github.com/s1z0v/s1-adv/releases/tag/v0.2.201-dev)**
 includes Internet Radio, Mesh, Chess, Checkers, Minesweeper and direct Focus
@@ -33,7 +34,7 @@ Use a credential-free release image or build with your own settings.
 
 | On the Cardputer | What powers it |
 | --- | --- |
-| Keyboard chat and push-to-talk voice | Your OpenClaw agent through the included bridge |
+| Keyboard chat and push-to-talk voice | Claude Code on your subscription, or your OpenClaw agent, through the included bridge |
 | One configured conversation and its history | Authenticated HTTP and WebSocket feed |
 | Spoken replies and an SD audio library | Server-side STT/TTS and device audio playback |
 | Firmware updates over Wi-Fi | Your bridge's authenticated OTA manifest |
@@ -53,26 +54,32 @@ Start with text, then add ordinary push-to-talk voice.
 ## How it fits together
 
 ```text
-Cardputer ADV  <--- Wi-Fi --->  Cardputer bridge  <--- local WS --->  OpenClaw
-keyboard / mic / speaker       Node.js on your host                  your agent
+                                                     +--->  claude -p   (default)
+Cardputer ADV  <--- Wi-Fi --->  Cardputer bridge  ---+      your Claude subscription
+keyboard / mic / speaker       Node.js on your host  |
+                                                     +--->  OpenClaw    (optional)
+                                                            your agent
 ```
 
 The repository includes both sides: [firmware](bots/CardputerADV) and
-[bridge](bridge). Install it as an OpenClaw plugin with setup/doctor commands,
-or run the same bridge as a standalone service. The included
-[setup skill](skills/s1-adv) guides your agent through the reviewed configuration;
-no personal server settings or model account are bundled.
+[bridge](bridge). By default the bridge runs each message through the `claude`
+program on your computer, under your own login and with no tools. With OpenClaw,
+install it as a plugin with setup/doctor commands, or run the same bridge as a
+standalone service. The included [setup skill](skills/s1-adv) guides an OpenClaw
+agent through the reviewed configuration; no personal server settings or model
+account are bundled.
 
 Use one device identity per bridge instance, with separate private storage for
-each device. Start with a restricted chat agent; enable firmware-building rights
-only when you deliberately need them. Read the [security model](SECURITY.md).
+each device. With OpenClaw, start with a restricted chat agent and enable
+firmware-building rights only when you deliberately need them. Read the
+[security model](SECURITY.md).
 
 ## What you need
 
 - **M5Stack Cardputer ADV**, with ESP32-S3 and 8 MB flash. Other Cardputer models are untested.
 - A USB data cable and a 2.4 GHz Wi-Fi network.
 - A computer for the first USB flash: Python 3 and PlatformIO.
-- An existing OpenClaw installation with its supported Node.js runtime. The standalone bridge needs Node.js 22+.
+- Node.js 22+ for the bridge, and either [Claude Code signed in with a Claude subscription](docs/CLAUDE-CODE.md) or an existing OpenClaw installation with its supported Node.js runtime.
 - A reachable bridge address. Use HTTPS/WSS for remote access. The firmware trusts ISRG Root X1 by default.
 - For voice: FFmpeg, an STT backend and a TTS backend on the bridge host.
 - Optional microSD for saved audio and extra assets.
@@ -83,7 +90,16 @@ and older recordings remain in `/voice`; existing files do not need migration.
 
 ## Start here
 
-The community bridge is published in
+To use your Claude subscription, follow [the Claude Code guide](docs/CLAUDE-CODE.md):
+
+```bash
+git clone https://github.com/softroni/s1-adv.git
+cd s1-adv/bridge
+npm ci
+node scripts/setup.mjs init --public-url https://YOUR_BRIDGE --apply
+```
+
+To use OpenClaw, the community bridge is published in
 [ClawHub](https://clawhub.ai/plugins/openclaw-s1-adv). On a current OpenClaw host:
 
 ```bash
@@ -95,7 +111,7 @@ Review its native security/capability report, then follow the
 address. Firmware automation stays off by default. Installation is not a hosted
 server or a completed device setup.
 
-For firmware source and the manual installation route:
+For the OpenClaw firmware source and manual installation route:
 
 ```bash
 git clone https://github.com/s1z0v/s1-adv.git

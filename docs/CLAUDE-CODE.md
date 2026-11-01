@@ -1,0 +1,167 @@
+# Use your Claude subscription
+
+Claude Code is the bridge's default provider. Each Cardputer message runs through
+the `claude` program on your computer, under your own subscription login. You
+don't need OpenClaw or an API key. To use OpenClaw instead, see
+[Switch to OpenClaw](#switch-to-openclaw).
+
+```text
+Cardputer ADV  <--- HTTPS/WSS --->  Bridge  --->  claude -p  --->  Claude
+keyboard / mic / speaker            Node.js       your login
+```
+
+The bridge starts `claude` for one message at a time and resumes the same
+conversation on the next one. It never reads, stores or forwards your Claude
+credentials.
+
+## What you need
+
+- [Claude Code](https://code.claude.com/docs) installed and signed in with a
+  Claude subscription. Check with `claude auth status`.
+- Node.js 22+ and FFmpeg on the computer that runs the bridge.
+- A Cardputer ADV with S1-ADV firmware and 2.4 GHz Wi-Fi.
+- A public HTTPS address for the bridge. The firmware only connects over TLS and
+  trusts ISRG Root X1 by default.
+
+That computer has to stay on and awake while you use the Cardputer.
+
+## Set it up
+
+```bash
+cd bridge
+npm ci
+node scripts/setup.mjs init --public-url https://YOUR_BRIDGE --apply
+node scripts/setup.mjs doctor --config ~/.s1-adv/config.json --no-probe
+```
+
+Setup creates `~/.s1-adv/` with `config.json` and `firmware.env`. Both are private
+and hold your device token. Then start the bridge:
+
+```bash
+CARDPUTER_BRIDGE_CONFIG=~/.s1-adv/config.json npm start
+```
+
+The bridge listens on `127.0.0.1:31889`, so put an HTTPS proxy in front of it. If
+you use Tailscale, Funnel is the shortest route, because the Cardputer can't join
+your tailnet and `tailscale serve` won't reach it:
+
+```bash
+tailscale funnel --bg 31889
+```
+
+Funnel puts the token-protected bridge on the public internet. Physical testing of
+a Funnel certificate on the device is still outstanding, so check TLS first if the
+Cardputer can't connect.
+
+Finish with [Build and flash](FLASHING.md), entering your bridge URL and the device
+token from `~/.s1-adv/config.json`. Then send `Reply with: ready`. Seeing that answer
+on the device is the real test.
+
+## Settings
+
+These live under `upstream.claudeCode` in `config.json`:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `command` | `claude` | Program to run. Use a full path if the bridge's `PATH` can't find it |
+| `model` | `claude-opus-5-5` | Claude Code model name or alias |
+| `effort` | `xhigh` | `low`, `medium`, `high`, `xhigh` or `max` |
+| `turnTimeoutMs` | `600000` | Longest a single reply can run before it is stopped |
+
+Restart the bridge after changing them. Lower effort gives faster replies and uses
+less of your plan.
+
+A reply that takes more than 60 seconds isn't lost. The device gets a pending
+response, and the answer arrives on the live feed.
+
+## What this mode can do
+
+Chat, push-to-talk, conversation history, spoken replies, device actions such as
+starting a focus timer, and Wi-Fi updates all work.
+
+The session has **no tools**. Claude can't read files, run commands or browse the
+web from the Cardputer, and it has no access to your projects. These OpenClaw
+features aren't available in this mode, and the bridge refuses to start if they
+are enabled:
+
+- `modelRouting` (fast and smart model roles)
+- `firmwareAutomation` (agent-built firmware)
+
+Voice still needs a speech-to-text and a text-to-speech backend on the bridge host.
+`doctor` reports what's missing, and text chat works without them.
+
+## Privacy and isolation
+
+Your device token is the only thing between the internet and this bridge. The
+session is locked down so that token reaches as little as possible:
+
+- `--restricted`, `--tools ""`, `--strict-mcp-config` and `--disable-slash-commands`
+  keep out your tools, MCP servers, plugins, hooks, memory and global `CLAUDE.md`.
+  A tools-off run without `--restricted` still loads your `CLAUDE.md` and MCP
+  servers, so don't remove these flags.
+- The message goes through standard input, so it never appears in the process list.
+- The child process gets a short list of environment variables. `ANTHROPIC_API_KEY`
+  and `ANTHROPIC_AUTH_TOKEN` are removed, so a key on the host can't silently bill
+  your API account, and other host secrets stay out.
+- Each conversation runs in its own empty folder, `data/claude-code/workspace`.
+- If `claude auth status` doesn't show a subscription login, the bridge refuses
+  turns instead of falling back to anything else.
+
+If a token leaks, someone could chat in that conversation, read it and use up your
+plan limits. Generate a new token and reflash or reprovision the device.
+
+Claude Code keeps its usual transcripts for these conversations in
+`~/.claude/projects`. The bridge keeps only the conversation ID.
+
+## Terms and plan limits
+
+Replies count against the same plan limits as the rest of your Claude Code use.
+
+Anthropic's [legal and compliance terms](https://code.claude.com/docs/en/legal-and-compliance)
+say subscription login supports ordinary use of Claude Code. They don't allow
+developers to route requests through subscription credentials for their users, or
+to handle Claude.ai credentials. They don't explicitly cover a personal bridge like
+this one, so read them yourself. This mode is designed for one person using the
+unmodified `claude` program, on their own computer, with their own login. **Don't host
+it for other people.** Anyone else should run their own bridge with their own login,
+or use an API key through OpenClaw.
+
+## Remote Control
+
+Remote Control can't carry Cardputer traffic: only claude.ai/code and the Claude
+apps can connect to it. You can still run `claude remote-control` on the same
+computer for your phone, but that's a separate conversation from the Cardputer's.
+
+## If something goes wrong
+
+| On the device | Cause | Fix |
+| --- | --- | --- |
+| `Claude Code is not signed in...` | Login expired or missing | Run `claude auth login` on the bridge computer. The bridge reconnects by itself |
+| `Your Claude plan limit has been reached...` | Plan limit | Wait for the reset |
+| `Claude took too long...` | Hit `turnTimeoutMs` | Lower `effort`, or raise the timeout |
+| `The request failed on the server...` | Other failure, or the bridge restarted mid-reply | Check the bridge log, then send it again |
+
+Claude Code plans to make `--bare` the default for `claude -p`, and bare mode doesn't
+read subscription logins. If turns start reporting that you aren't signed in right
+after a Claude Code update while `claude auth status` still shows your login, this
+is the likely cause. Check that update's release notes.
+
+Old conversations expire with Claude Code's transcript cleanup. The bridge then
+starts a new conversation by itself, so Claude won't remember the earlier one.
+
+## Switch to OpenClaw
+
+OpenClaw stays fully supported. Follow the [OpenClaw guide](OPENCLAW.md). Its setup
+writes `"provider": "openclaw"` for you. To switch an existing config by hand, set
+these and restart:
+
+```json
+"upstream": {
+  "provider": "openclaw",
+  "url": "ws://127.0.0.1:18789",
+  "token": "YOUR_GATEWAY_TOKEN"
+}
+```
+
+A config with an `upstream.url` and no `provider` keeps using OpenClaw, so existing
+installations don't change.

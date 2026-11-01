@@ -9,7 +9,10 @@ Private firmware builds can embed Wi-Fi passwords and device tokens. Never
 attach provisioned binaries, `.env`, `bridge/config.json`, `data/`, recordings or
 conversation logs to public issues. Rotate any credential that was disclosed.
 
-The public setup uses the OpenClaw gateway for model calls. Optional direct
+By default, model calls run through the owner's `claude` program with its own
+subscription login, no tools and no access to the owner's settings; the bridge holds
+no Claude credentials. See [Claude Code](docs/CLAUDE-CODE.md). The OpenClaw setup uses
+the OpenClaw gateway for model calls. Optional direct
 provider routes are disabled by default. Do not copy rotating OAuth stores into
 competing refresh writers. Configure only the agent actions you intend a
 handheld client to invoke.

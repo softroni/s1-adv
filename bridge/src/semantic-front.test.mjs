@@ -10,6 +10,7 @@ import {parseFrontDecision} from './semantic-front.mjs';
 async function fixture(run) {
  const dir=await mkdtemp(path.join(os.tmpdir(),'s1-semantic-front-'));
  const config=JSON.parse(await readFile(new URL('../config.example.json',import.meta.url),'utf8'));
+ config.upstream.provider = "openclaw";
  config.stateDir=dir;config.upstream.deviceIdentityPath=path.join(dir,'identity.json');config.telegram={enabled:false};
  config.modelRouting={enabled:true,deadlineMs:80,fast:{agentId:'main',execution:'isolated-agent-runtime',model:'openai/gpt-5.6-luna',thinking:'medium'},
    smart:{agentId:'main',model:'openai/gpt-6.1-sol',thinking:'high'}};

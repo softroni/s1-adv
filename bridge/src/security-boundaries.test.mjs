@@ -86,6 +86,7 @@ async function withBridge(run, security = {}, extra = {}) {
   const port = reservation.address().port;
   await new Promise(resolve => reservation.close(resolve));
   const config = JSON.parse(await readFile(path.join(root, "config.example.json"), "utf8"));
+  config.upstream.provider = "openclaw";
   config.server.port = port;
   config.stateDir = path.join(tmp, "state");
   config.media = Object.fromEntries(["inboundDir", "canonicalDir", "playbackDir", "tmpDir"].map(key => [key, path.join(tmp, key)]));

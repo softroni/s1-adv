@@ -16,6 +16,7 @@ import Busboy from "busboy";
 import WebSocket, { WebSocketServer } from "ws";
 import { StateStore } from "./state-store.mjs";
 import { UpstreamGatewayClient } from "./upstream-client.mjs";
+import { CLAUDE_CODE_PROVIDER, ClaudeCodeClient, resolveUpstreamProvider, validateClaudeCodeConfig } from "./claude-code-client.mjs";
 import { createMininervaCompatServer } from "./mininerva-compat.mjs";
 import {
   agentIdForSession,
@@ -267,7 +268,9 @@ async function loadConfig() {
     ...(config.realtimeVoice || {})
   };
   validateDeviceTokens(config);
-  validateUpstreamTransport(config);
+  config.upstream.provider = resolveUpstreamProvider(config);
+  if (config.upstream.provider === CLAUDE_CODE_PROVIDER) validateClaudeCodeConfig(config);
+  else validateUpstreamTransport(config);
   return config;
 }
 
@@ -684,6 +687,21 @@ function buildDeviceActionPolicyText() {
     "If the user asks you to say or test an arbitrary spoken phrase, do not use audio.play or voice.play; put the phrase in the visible reply because reply_audio will synthesize it. " +
     "Do not emit device_actions for normal conversation. Do not invent unsupported actions. Use settings actions when the user asks to change device preferences."
   );
+}
+
+// Claude Code mode has no tools, so the OpenClaw policy (agent status calls,
+// firmware work, session tools) must not reach it. Device actions are plain
+// reply text and keep working.
+function buildClaudeCodeSystemPrompt(config) {
+  const shortReplyWords = Math.max(8, Number(config.deviceTurnContext?.shortReplyWords) || 15);
+  return [
+    "You are Claude, answering on a Cardputer ADV, a pocket computer with a tiny screen and a small speaker.",
+    "This chat has no tools: you cannot read files, run commands, browse the web, or change firmware. Never claim otherwise.",
+    `Reply in plain text without Markdown. Default to ${shortReplyWords} words or fewer and put the key point first.`,
+    "A message starting with [Voice] was spoken and your reply will be read aloud: give the actual answer in 1-3 spoken sentences.",
+    REPLY_LANGUAGE_POLICY,
+    buildDeviceActionPolicyText()
+  ].join(" ");
 }
 
 function buildFirmwareCapabilityPolicyText() {
@@ -3540,7 +3558,14 @@ class BridgeRuntime {
     validateModelRouting(config);
 	    this.config = config;
 	    this.store = new StateStore(config);
-	    this.upstream = new UpstreamGatewayClient(config.upstream);
+	    const claudeCode = resolveUpstreamProvider(config) === CLAUDE_CODE_PROVIDER;
+	    if (claudeCode) validateClaudeCodeConfig(config);
+	    this.upstream = claudeCode
+	      ? new ClaudeCodeClient(config, { appendSystemPrompt: buildClaudeCodeSystemPrompt(config) })
+	      : new UpstreamGatewayClient(config.upstream);
+	    this.assistant = claudeCode
+	      ? { id: "claude-code:main", name: "Claude" }
+	      : { id: "openclaw:main", name: "OpenClaw" };
 	    this.clients = new Set();
 	    this.topicBySessionKey = new Map(config.topics.map((topic) => [topic.session_key, topic]));
 	    this.bootstrapPromise = null;
@@ -4256,7 +4281,7 @@ class BridgeRuntime {
       sender: {
         kind: "assistant",
         id: "openclaw:firmware-release",
-        display_name: "OpenClaw"
+        display_name: this.assistant.name
       },
       source: {
         transport: "cardputer_ota_release"
@@ -4571,7 +4596,7 @@ class BridgeRuntime {
       sender: {
         kind: "assistant",
         id: "openclaw:fast-lane",
-        display_name: "OpenClaw"
+        display_name: this.assistant.name
       },
       source: {
         transport: source,
@@ -5110,7 +5135,7 @@ class BridgeRuntime {
       metadata.sender_id
         ? `telegram:${metadata.sender_id}`
         : senderKind === "assistant"
-          ? "openclaw:main"
+          ? this.assistant.id
           : "operator";
     const createdAt = normalizeTimestamp(raw?.timestamp || metadata.timestamp);
     const correlation = gatewayTurnCorrelation(raw, meta);
@@ -5124,7 +5149,7 @@ class BridgeRuntime {
         id: senderId,
         display_name:
           metadata.sender ||
-          (senderKind === "assistant" ? "OpenClaw" : senderKind === "device" ? "Cardputer" : "User")
+          (senderKind === "assistant" ? this.assistant.name : senderKind === "device" ? "Cardputer" : "User")
       },
       source:
         metadata.message_id || gatewayMessageId || correlation.upstream_run_id
@@ -5346,7 +5371,7 @@ class BridgeRuntime {
           clientMsgId: `mirror:${appended.id}`,
           source: "cardputer_firmware_job_mirror"
         });
-        void maybeRelayTelegramText(this.config, mirrorTopic, text, "OpenClaw").catch((error) => {
+        void maybeRelayTelegramText(this.config, mirrorTopic, text, this.assistant.name).catch((error) => {
           console.warn(
             `[telegram] firmware_job_mirror_failed topic=${mirrorTopic.topic_key} ` +
             `err=${String(error.message || error).slice(0, 240)}`
@@ -5557,6 +5582,10 @@ class BridgeRuntime {
   }
 
   buildDeviceTurnUpstreamText({ device, topicKey, text, clientMsgId = "", inputMode = "text" }) {
+    if (this.upstream instanceof ClaudeCodeClient) {
+      // The resumed session holds the history; the system prompt holds the policy.
+      return inputMode === "voice" ? `[Voice]\n${text}` : text;
+    }
     if (!this.config.deviceTurnContext?.enabled) {
       return text;
     }
@@ -7469,7 +7498,7 @@ async function main() {
           host: config.server.host,
           port: config.server.port,
           stateDir: config.stateDir,
-          upstream: config.upstream.url
+          upstream: config.upstream.provider === CLAUDE_CODE_PROVIDER ? CLAUDE_CODE_PROVIDER : config.upstream.url
         },
         null,
         2

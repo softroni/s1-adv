@@ -51,6 +51,7 @@ test('HTTP liveness starts with an unavailable gateway', {timeout: 10000}, async
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const dir = await mkdtemp(path.join(tmpdir(), 'cardputer-offline-'));
   const cfg = JSON.parse(await readFile(path.join(root, 'config.example.json'), 'utf8'));
+  cfg.upstream.provider = "openclaw";
   cfg.server.port = 0;
   cfg.stateDir = path.join(dir, 'data');
   cfg.upstream.url = 'ws://127.0.0.1:1';

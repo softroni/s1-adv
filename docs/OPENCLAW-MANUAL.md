@@ -32,6 +32,7 @@ Edit the local `config.json`:
 
 | Field | Set it to |
 | --- | --- |
+| `upstream.provider` | `openclaw`; the example defaults to [Claude Code](CLAUDE-CODE.md) |
 | `upstream.url` | Your gateway WebSocket URL |
 | `upstream.token` | Your existing gateway token, stored only on this host |
 | `devices[0].device_id` | `cardputer-adv-01`, matching the firmware build |

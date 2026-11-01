@@ -1,7 +1,7 @@
 # Contributing to S1-ADV
 
 Read [the architecture](docs/ARCHITECTURE.md) and use `bots/CardputerADV` for
-firmware, `bridge/` for the OpenClaw adapter, and `skills/s1-adv/`
+firmware, `bridge/` for the Claude Code and OpenClaw adapters, and `skills/s1-adv/`
 for the optional agent setup skill.
 
 ## Verify a change
@@ -12,6 +12,7 @@ In `bridge/`, with Node.js 22+ and FFmpeg installed:
 npm ci
 npm run test:security
 npm run test:upstream
+npm run test:claude-code
 npm run smoke
 npm run smoke:realtime-contract
 ```

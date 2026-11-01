@@ -14,6 +14,7 @@ async function until(predicate) {
 async function fixture(run) {
   const dir = await mkdtemp(path.join(tmpdir(), 'cardputer-outbox-'));
   const config = JSON.parse(await readFile(new URL('../config.example.json', import.meta.url), 'utf8'));
+  config.upstream.provider = "openclaw";
   config.upstream.deviceIdentityPath = path.join(dir,'gateway-identity.json');
   config.stateDir = dir; config.devices = config.devices.slice(0, 1); config.telegram = { enabled:false };
   const runtimes = [], sends = [], terminals = new Map();

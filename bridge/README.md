@@ -1,6 +1,9 @@
 # ESP32 S1-ADV
 
-Text and G0 voice replies continue the same OpenClaw session. The agent sets
+The bridge uses your own Claude subscription through Claude Code by default; see
+[Claude Code setup](https://github.com/softroni/s1-adv/blob/main/docs/CLAUDE-CODE.md). OpenClaw stays a supported alternative, and the rest of this page describes it.
+
+With OpenClaw, text and G0 voice replies continue the same session. The agent sets
 NEEDS INPUT / WORKING / BUILDING explicitly; ordinary questions do not start
 firmware builds. See [contextual replies and task status](https://github.com/s1z0v/s1-adv/blob/main/docs/AGENT-STATUS.md).
 
@@ -162,12 +165,12 @@ This improves the first response, not audio-upload duration or hardware input la
 ```bash
 cd bridge
 npm ci --ignore-scripts
-node scripts/setup.mjs init --agent cardputer --public-url https://YOUR_BRIDGE
-node scripts/setup.mjs init --agent cardputer --public-url https://YOUR_BRIDGE --apply
+node scripts/setup.mjs init --provider openclaw --agent cardputer --public-url https://YOUR_BRIDGE
+node scripts/setup.mjs init --provider openclaw --agent cardputer --public-url https://YOUR_BRIDGE --apply
 CARDPUTER_BRIDGE_CONFIG="$HOME/.openclaw/s1-adv/config.json" npm start
 ```
 
-You can instead edit `config.example.json` by hand. Replace token placeholders,
+You can instead edit `config.example.json` by hand and set `upstream.provider` to `openclaw`. Replace token placeholders,
 choose the existing agent/session, set private absolute data paths and preserve
 its identity file. See the
 [service/TLS templates](https://github.com/s1z0v/s1-adv/blob/main/docs/OPENCLAW-MANUAL.md).

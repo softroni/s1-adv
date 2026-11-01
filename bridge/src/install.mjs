@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import JSON5 from "json5";
 import { firmwareCapability } from "./firmware-automation.mjs";
 import { loadFocusAudioBundle } from "./focus-audio.mjs";
+import { CLAUDE_CODE_PROVIDER, OPENCLAW_PROVIDER, claudeCodeSettings, readClaudeLogin, resolveUpstreamProvider } from "./claude-code-client.mjs";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const defaultGatewayConfig = () => process.env.OPENCLAW_CONFIG_PATH ||
@@ -35,12 +36,15 @@ export function configuredAgentExists(gateway, agent) {
     agents.list?.some(record=>record.id===agent) || Object.hasOwn(agents.entries || {},agent);
 }
 
-export async function planInstall(options = {}) {
-  const gatewayPath = path.resolve(options.gatewayConfig || defaultGatewayConfig());
-  const gateway = JSON5.parse(await readFile(gatewayPath, "utf8"));
-  const stateDir = path.resolve(options.stateDir || path.join(path.dirname(gatewayPath), "s1-adv"));
-  const configPath = path.join(stateDir, "config.json");
-  const agent = validAgent(options.agent || "cardputer");
+function installProvider(options) {
+  if (options.provider && ![CLAUDE_CODE_PROVIDER, OPENCLAW_PROVIDER].includes(options.provider))
+    throw new Error(`Provider must be ${CLAUDE_CODE_PROVIDER} or ${OPENCLAW_PROVIDER}`);
+  // Naming a gateway or agent is an explicit OpenClaw install. Otherwise Claude Code is the default.
+  return options.provider || (options.gatewayConfig || options.gatewayTokenFile || options.gatewayUrl || options.agent
+    ? OPENCLAW_PROVIDER : CLAUDE_CODE_PROVIDER);
+}
+
+function validatedInstallIdentity(options) {
   const deviceId = options.deviceId || "cardputer-adv-01";
   if (!/^[a-zA-Z0-9_-]{1,64}$/.test(deviceId)) throw new Error("Invalid device ID");
   const port = Number(options.port || 31889);
@@ -49,6 +53,60 @@ export async function planInstall(options = {}) {
   if (publicUrl && (publicUrl.protocol !== "https:" || publicUrl.username || publicUrl.password ||
       publicUrl.pathname !== "/" || publicUrl.search || publicUrl.hash))
     throw new Error("Public URL must be an HTTPS origin without credentials, path or query");
+  return { deviceId, port, publicUrl };
+}
+
+function applyNewPaths(config, { stateDir, port }) {
+  config.server = { host: "127.0.0.1", port };
+  config.stateDir = path.join(stateDir, "data");
+  for (const [key, relative] of Object.entries({ inboundDir: "inbound", canonicalDir: "media/canonical", playbackDir: "media/playback", tmpDir: "media/tmp" }))
+    config.media[key] = path.join(config.stateDir, relative);
+  config.assets.rootDir = path.join(config.stateDir, "assets");
+  config.assets.logsDir = path.join(config.stateDir, "logs");
+  config.firmware.rootDir = path.join(config.stateDir, "firmware");
+}
+
+async function readExistingConfig(configPath) {
+  try { return JSON.parse(await readFile(configPath, "utf8")); }
+  catch (error) { if (error.code !== "ENOENT") throw error; return null; }
+}
+
+async function planClaudeCodeInstall(options) {
+  const { deviceId, port, publicUrl } = validatedInstallIdentity(options);
+  const stateDir = path.resolve(options.stateDir || path.join(os.homedir(), ".s1-adv"));
+  const configPath = path.join(stateDir, "config.json");
+  const existing = await readExistingConfig(configPath);
+  const config = existing || JSON.parse(await readFile(path.join(packageRoot, "config.example.json"), "utf8"));
+  if (!existing) {
+    applyNewPaths(config, { stateDir, port });
+    delete config.upstream.url;
+    delete config.upstream.token;
+    config.upstream.provider = CLAUDE_CODE_PROVIDER;
+    config.devices = [{ device_id: deviceId, device_token: randomBytes(32).toString("hex"), default_topic_key: "cardputer:main", topics: ["cardputer:main"] }];
+    config.topics = [{ topic_key: "cardputer:main", session_key: "agent:claude:cardputer", title: "Cardputer", contour_id: "claude" }];
+    config.firmwareAutomation = { enabled: false };
+    config.installation = { publicUrl: publicUrl?.origin || "" };
+  }
+  const settings = claudeCodeSettings(config);
+  return { config, configPath, stateDir, existing: !!existing, provider: CLAUDE_CODE_PROVIDER,
+    summary: { provider: CLAUDE_CODE_PROVIDER, configPath, stateDir, bridge: config.server,
+      publicUrl: config.installation?.publicUrl || "not configured", model: settings.model, effort: settings.effort,
+      existingConfigurationPreserved: !!existing, firmwareAutomation: false,
+      writes: existing ? [] : ["config.json (0600)", "firmware.env (0600)"],
+      notes: ["Uses the claude program and login already on this computer. No credentials are read or copied.",
+        "Replies use your Claude plan limits. Tools are off, so the device can only chat and send device actions.",
+        "Set Wi-Fi on the device, and expose the bridge through your own HTTPS proxy."] }
+  };
+}
+
+export async function planInstall(options = {}) {
+  if (installProvider(options) === CLAUDE_CODE_PROVIDER) return planClaudeCodeInstall(options);
+  const gatewayPath = path.resolve(options.gatewayConfig || defaultGatewayConfig());
+  const gateway = JSON5.parse(await readFile(gatewayPath, "utf8"));
+  const stateDir = path.resolve(options.stateDir || path.join(path.dirname(gatewayPath), "s1-adv"));
+  const configPath = path.join(stateDir, "config.json");
+  const agent = validAgent(options.agent || "cardputer");
+  const { deviceId, port, publicUrl } = validatedInstallIdentity(options);
   const token = options.gatewayTokenFile
     ? (await readFile(path.resolve(options.gatewayTokenFile), "utf8")).trim() : gatewayToken(gateway);
   if (!token) throw new Error("Gateway token unavailable. Use an environment SecretRef or --gateway-token-file; never pass a token on the command line.");
@@ -58,18 +116,11 @@ export async function planInstall(options = {}) {
   if (upstream.username || upstream.password || !["ws:", "wss:"].includes(upstream.protocol) ||
       (upstream.protocol === "ws:" && !["127.0.0.1", "localhost", "[::1]"].includes(upstream.hostname)))
     throw new Error("Gateway must use loopback WS or verified WSS");
-  let existing = null;
-  try { existing = JSON.parse(await readFile(configPath, "utf8")); }
-  catch (error) { if (error.code !== "ENOENT") throw error; }
+  const existing = await readExistingConfig(configPath);
   const config = existing || JSON.parse(await readFile(path.join(packageRoot, "config.example.json"), "utf8"));
   if (!existing) {
-    config.server = { host: "127.0.0.1", port };
-    config.stateDir = path.join(stateDir, "data");
-    for (const [key, relative] of Object.entries({ inboundDir: "inbound", canonicalDir: "media/canonical", playbackDir: "media/playback", tmpDir: "media/tmp" }))
-      config.media[key] = path.join(config.stateDir, relative);
-    config.assets.rootDir = path.join(config.stateDir, "assets");
-    config.assets.logsDir = path.join(config.stateDir, "logs");
-    config.firmware.rootDir = path.join(config.stateDir, "firmware");
+    applyNewPaths(config, { stateDir, port });
+    config.upstream.provider = OPENCLAW_PROVIDER;
     config.upstream.url = upstreamUrl;
     config.upstream.token = token;
     config.devices = [{ device_id: deviceId, device_token: randomBytes(32).toString("hex"), default_topic_key: "cardputer:main", topics: ["cardputer:main"] }];
@@ -93,11 +144,12 @@ export async function planInstall(options = {}) {
 
 const envQuote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
 export async function applyInstall(plan) {
-  if (!plan.summary.agentExists) throw new Error("Selected agent does not exist. Create a restricted cardputer agent with OpenClaw, or explicitly select an existing agent, then repeat setup.");
+  if (plan.provider !== CLAUDE_CODE_PROVIDER && !plan.summary.agentExists) throw new Error("Selected agent does not exist. Create a restricted cardputer agent with OpenClaw, or explicitly select an existing agent, then repeat setup.");
   await mkdir(plan.stateDir, { recursive: true, mode: 0o700 });
   await chmod(plan.stateDir,0o700);
   if (plan.existing) return { ...plan.summary, applied: false, reason: "Existing configuration retained; device token unchanged." };
-  for (const name of ["config.json", "firmware.env", "openclaw-plugin-config.json"]) {
+  const outputs = ["config.json", "firmware.env", ...(plan.provider === CLAUDE_CODE_PROVIDER ? [] : ["openclaw-plugin-config.json"])];
+  for (const name of outputs) {
     try { await stat(path.join(plan.stateDir, name)); }
     catch (error) { if (error.code === "ENOENT") continue; throw error; }
     throw new Error("Setup output already exists; refusing to overwrite private files.");
@@ -111,15 +163,16 @@ export async function applyInstall(plan) {
   await writeFile(path.join(plan.stateDir, "firmware.env"),
     "# Private. Set Wi-Fi locally or use device setup. Never commit or share this file.\n" +
     Object.entries(values).map(([k,v]) => `${k}=${envQuote(v)}`).join("\n") + "\n", { mode: 0o600, flag: "wx" });
-  await writeFile(path.join(plan.stateDir, "openclaw-plugin-config.json"),
+  if (plan.provider !== CLAUDE_CODE_PROVIDER) await writeFile(path.join(plan.stateDir, "openclaw-plugin-config.json"),
     `${JSON.stringify({ plugins: { entries: { "s1-adv": { enabled: true, config: { configPath: plan.configPath, autoStart: true } } } } }, null, 2)}\n`,
     { mode: 0o600, flag: "wx" });
   return { ...plan.summary, applied: true };
 }
 
-export async function doctor(configPath, { probe = true, fetchImpl = fetch } = {}) {
+export async function doctor(configPath, { probe = true, fetchImpl = fetch, claudeLogin = readClaudeLogin } = {}) {
   const absolute = path.resolve(configPath);
   const config = JSON.parse(await readFile(absolute, "utf8"));
+  const provider = resolveUpstreamProvider(config);
   const checks = [];
   const add = (name, ok, detail) => checks.push({ name, ok, detail });
   const mode = (await stat(absolute)).mode & 0o777;
@@ -127,8 +180,12 @@ export async function doctor(configPath, { probe = true, fetchImpl = fetch } = {
   add("device-token", config.devices?.every(d => typeof d.device_token === "string" && d.device_token.length >= 32), "One unique random token per device.");
   add("single-device",config.devices?.length===1,"One device identity per bridge instance; keep private state/media/OTA directories separate.");
   add("loopback-listener", ["127.0.0.1", "::1", "localhost"].includes(config.server?.host), "Expose through a verified TLS proxy, not a public raw listener.");
-  add("gateway-token", !!config.upstream?.token && config.upstream.token !== "replace-me", "Gateway token present; value omitted.");
-  try {
+  if (provider === CLAUDE_CODE_PROVIDER) {
+    const login = await claudeLogin({ command: claudeCodeSettings(config).command });
+    add("claude-cli", login.installed, login.installed ? "Available" : login.detail);
+    add("claude-subscription", login.subscription, login.detail);
+  } else try {
+    add("gateway-token", !!config.upstream?.token && config.upstream.token !== "replace-me", "Gateway token present; value omitted.");
     const gateway = JSON5.parse(await readFile(config.installation?.gatewayConfigPath || defaultGatewayConfig(), "utf8"));
     const agent = config.installation?.agentId || config.topics?.[0]?.session_key?.split(":")[1];
     add("agent-config", !!configuredAgentExists(gateway,agent), "Configured session must name an existing agent; model response is checked separately.");
@@ -170,7 +227,9 @@ export async function doctor(configPath, { probe = true, fetchImpl = fetch } = {
         redirect: "error", headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5000) });
       const body = await response.json();
       add("bridge-http", response.ok && body.ok === true, `HTTP ${response.status}`);
-      add("upstream", body.upstream_connected === true, "Checks the real gateway connection, not a model answer.");
+      add("upstream", body.upstream_connected === true, provider === CLAUDE_CODE_PROVIDER
+        ? "Checks the Claude Code login seen by the bridge, not a model answer."
+        : "Checks the real gateway connection, not a model answer.");
       add("delivery", body.delivery_ready === true, body.delivery_hold?.message ||
         "The bridge must explicitly confirm delivery readiness; a legacy health response is not qualification.");
     } catch { add("bridge-http", false, "Not reachable. Start the reviewed bridge/plugin and approve its exact device identity if requested."); }
@@ -184,7 +243,9 @@ export async function doctor(configPath, { probe = true, fetchImpl = fetch } = {
         bytes: files.reduce((sum, file) => sum + file.size, 0) };
     } catch { focusAudio.error = "Bundled Focus audio is missing or invalid; text delivery is independent."; }
   }
-  return { configPath: absolute, checks, textReady: probe && checks.filter(c => ["private-config","device-token","single-device","loopback-listener","gateway-token","agent-config","bridge-http","upstream","delivery"].includes(c.name)).every(c => c.ok),
+  const textChecks = ["private-config","device-token","single-device","loopback-listener","bridge-http","upstream","delivery",
+    ...(provider === CLAUDE_CODE_PROVIDER ? ["claude-cli","claude-subscription"] : ["gateway-token","agent-config"])];
+  return { configPath: absolute, provider, checks, textReady: probe && checks.filter(c => textChecks.includes(c.name)).every(c => c.ok),
     audioDependenciesReady: checks.filter(c => ["ffmpeg","espeak-ng","whisper-binary","whisper-model"].includes(c.name)).every(c => c.ok),
     firmwareAutomationEnabled: config.firmwareAutomation?.enabled === true, firmwareCapability: firmware, focusAudio,
     note: "A model round trip and physical-device acceptance are separate checks." };
@@ -195,6 +256,8 @@ export async function enablePlugin(configPath, { apply = false, gatewayConfigPat
       openclawCommand.some(value => typeof value !== "string" || !value || value.includes("\0")))
     throw new Error("Invalid OpenClaw CLI invocation");
   const [program, ...prefix] = openclawCommand;
+  if (resolveUpstreamProvider(JSON.parse(await readFile(path.resolve(configPath), "utf8"))) === CLAUDE_CODE_PROVIDER)
+    throw new Error("Claude Code mode runs as a standalone bridge. It needs no OpenClaw plugin entry.");
   gatewayConfigPath = path.resolve(gatewayConfigPath);
   const report = await doctor(configPath, { probe: false });
   const required = ["private-config", "device-token", "single-device", "loopback-listener", "gateway-token", "agent-config"];

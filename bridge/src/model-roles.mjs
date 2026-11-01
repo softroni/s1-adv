@@ -4,6 +4,7 @@ import path from 'node:path';
 import net from 'node:net';
 import JSON5 from 'json5';
 import { sha256, writeJsonAtomic } from './utils.mjs';
+import { CLAUDE_CODE_PROVIDER } from './claude-code-client.mjs';
 
 // Preferences, not claims of account access. Installation validates the host's
 // own advertised catalog before enabling either role.
@@ -59,6 +60,8 @@ export function readModelCatalog(command = ['openclaw']) {
 
 export async function planModelRoles(configPath, options={}, { catalog, openclawCommand=['openclaw'] }={}) {
   const absolute=await realpath(path.resolve(configPath)), text=await readFile(absolute,'utf8'), config=JSON.parse(text);
+  if(config.upstream?.provider===CLAUDE_CODE_PROVIDER)
+    throw new Error('Model roles need the OpenClaw provider. In Claude Code mode, set upstream.claudeCode.model and effort.');
   const auditConfig={...config,stateDir:config.stateDir?path.resolve(path.dirname(absolute),config.stateDir):null};
   const gatewayPath=await realpath(path.resolve(options.gatewayConfig || config.installation?.gatewayConfigPath || ''));
   if(gatewayPath===absolute) throw new Error('Bridge and Gateway configuration must be distinct files.');

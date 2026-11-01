@@ -10,6 +10,7 @@ import { agentStatusCredential, hasAgentStatusAccess, createAgentStatusTool, pub
 async function fixture(run) {
  const dir=await mkdtemp(path.join(os.tmpdir(),'s1-agent-status-'));
  const config=JSON.parse(await readFile(new URL('../config.example.json',import.meta.url),'utf8'));
+ config.upstream.provider = "openclaw";
  config.stateDir=dir;config.upstream.deviceIdentityPath=path.join(dir,'identity.json');
  config.upstream.token='fixture-gateway-token-with-more-than-32-characters';
  config.telegram={enabled:false};config.firmware.rootDir=path.join(dir,'firmware');

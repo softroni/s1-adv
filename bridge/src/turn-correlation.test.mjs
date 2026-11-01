@@ -12,6 +12,7 @@ import { BridgeRuntime } from './server.mjs';
 async function withRuntime(run) {
   const dir = await mkdtemp(path.join(tmpdir(), 'cardputer-turn-correlation-'));
   const config = JSON.parse(await readFile(new URL('../config.example.json', import.meta.url), 'utf8'));
+  config.upstream.provider = "openclaw";
   config.stateDir = dir;
   config.upstream.deviceIdentityPath = path.join(dir, "test-gateway-identity.json");
   config.devices = config.devices.slice(0, 1);
@@ -199,6 +200,7 @@ test('an upgrade with many unresolved legacy receipts keeps authenticated HTTP d
   const dir=await mkdtemp(path.join(tmpdir(),'cardputer-upgrade-health-'));
   const root=fileURLToPath(new URL('../',import.meta.url));
   const config=JSON.parse(await readFile(new URL('../config.example.json',import.meta.url),'utf8'));
+  config.upstream.provider = "openclaw";
   config.server={host:'127.0.0.1',port:await availablePort()};config.stateDir=path.join(dir,'state');
   config.media=Object.fromEntries(['inboundDir','canonicalDir','playbackDir','tmpDir'].map(key=>[key,path.join(dir,key)]));
   config.assets.rootDir=path.join(dir,'assets');config.assets.logsDir=path.join(dir,'logs');
@@ -246,6 +248,7 @@ test('HTTP text timeout is pending and a late A cannot become the next B respons
   const upstreamPort = await availablePort(); let bridgePort = await availablePort();
   while (bridgePort === upstreamPort) bridgePort = await availablePort();
   const config = JSON.parse(await readFile(new URL('../config.example.json', import.meta.url), 'utf8'));
+  config.upstream.provider = "openclaw";
   const token = 'test-device-token-correlation-00000000000000000000001';
   config.server = { host:'127.0.0.1',port:bridgePort }; config.stateDir = path.join(dir,'state');
   config.media = Object.fromEntries(['inboundDir','canonicalDir','playbackDir','tmpDir'].map(k=>[k,path.join(dir,k)]));
