@@ -67,7 +67,7 @@ void acceptPendingAssistantRequest(const String& transcript, const String& ackno
   setFaceMode(FaceMode::Thinking);
   setStatus("Thinking...", 0);
   showVoiceNotice(receipt, true);
-  if (gCanvasSpriteActive) M5Cardputer.Speaker.tone(1047, 90);
+  playActivityCue(activity_cue::Cue::Thinking);
   logf("[REQUEST] accepted after_seq=%u receipt_seq=%u mode=%d visible=%d",
        static_cast<unsigned>(afterSeq), static_cast<unsigned>(receiptSeq),
        static_cast<int>(gUiMode), static_cast<int>(gVoiceNoticeVisible));
@@ -112,8 +112,16 @@ void applyFirmwareJobState(const String& state, const String& requestId) {
   gBridgeHttpFailed = false;
 }
 
+// A voice message is sending until its upload is done. A text message goes in a moment, so the
+// label just stays long enough to read.
+bool activitySending() {
+  if (gVoiceRequestPhase == VoiceRequestPhase::Sending) return !gVoiceUploadDone;
+  return gSubmitting && static_cast<int32_t>(gTextSendUntilMs - millis()) > 0;
+}
+
 const char* homeStatusLabel(bool updateReady) {
   if (gG0VoicePending || gVoiceCapturePreparing) return "LOADING";
+  if (activitySending()) return "SENDING";
   if (gSubmitting || gThinking || gVoiceReplyPending || voiceRequestBusyUi()) return "THINKING";
   if (gVoiceReplySpeechBusy || !gQueuedVoiceReplySpeech.isEmpty()) return "LOADING";
   // Voice/Realtime can intentionally pause polling for minutes. An old job
@@ -129,6 +137,7 @@ const char* homeStatusLabel(bool updateReady) {
 void beginVoiceRequestUi() {
   gVoiceRequestTranscript="";gVoiceNoticeText="";gVoiceRequestProgress=0;
   gVoiceRequestPhase=VoiceRequestPhase::Recording;
+  gVoiceUploadDone=false;
   gVoiceNoticePending=false;gVoiceNoticeVisible=true;gVoiceNoticeShownMs=millis();
   gLauncherVisible=false;gChatCommandsVisible=false;
 }
@@ -403,6 +412,7 @@ void serviceVoiceReplySpeech() {
     const bool current = result->generation == gVoiceReplySpeechGeneration;
     const bool play = result->ok && current && !gRecording && !gRealtimeActive && !gPlaybackActive;
     bool started = play && startPlaybackStreamFromRawPcmFile(result->path, result->sampleRate, result->bytes, "voice reply",result->fs);
+    gPlaybackSpeech = started;
     logf("[VOICE][LAT] speech_http start=%u headers=%u done=%u playback_request=%u started=%d",
          static_cast<unsigned>(result->startedMs), static_cast<unsigned>(result->headersMs),
          static_cast<unsigned>(result->finishedMs), static_cast<unsigned>(millis()), started);
@@ -438,6 +448,7 @@ void serviceVoiceReplySpeech() {
   doc["device_id"] = gDeviceId; doc["text"] = gQueuedVoiceReplySpeech;
   serializeJson(doc, payload->body); gQueuedVoiceReplySpeech = "";
   gVoiceReplySpeechBusy = true;
+  setStatus("Loading voice...", 15000);
   clearEmojiCache();
   M5Cardputer.Speaker.end();
   if (tlsHandshakeNeedsCanvas())

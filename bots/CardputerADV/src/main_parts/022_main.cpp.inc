@@ -26,6 +26,7 @@ bool startPlaybackStreamFromRawPcmFile(const String& path, uint32_t sampleRate, 
   resetPlaybackAnalyzer();
   gPlaybackStreaming = true;
   gPlaybackActive = true;
+  gPlaybackSpeech = false;
   pulseButtonPress();
   setFaceMode(FaceMode::Speaking);
   setStatus("Playing voice...", 1200);
@@ -77,6 +78,7 @@ bool startPlaybackStreamFromWavFile(const String& path, const String& diag) {
   resetPlaybackAnalyzer();
   gPlaybackStreaming = true;
   gPlaybackActive = true;
+  gPlaybackSpeech = false;
   pulseButtonPress();
   setFaceMode(FaceMode::Speaking);
   setStatus("Playing voice...", 1200);

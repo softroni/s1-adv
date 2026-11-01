@@ -168,7 +168,7 @@ bool applyInboxResponse(String& body, bool forcePlay, bool speak, bool quiet, bo
       if (voiceReplyArrived || static_cast<int32_t>(gVoiceReplyNotifyUntilMs - millis()) > 0)
         gQueuedVoiceReplySpeech = cleanReplyForDevice(gInboxLastText);
       if(firmwareNotice) playUpdateChime();
-      else M5Cardputer.Speaker.tone(1319,90);
+      else playActivityCue(activity_cue::Cue::ReplyReady);
       setStatus("AI Agent replied",4000);
     }
     if (speak) {

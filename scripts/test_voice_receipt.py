@@ -34,7 +34,7 @@ struct String:std::string {
 };
 enum class UiMode{Home,Clock,ChatFull,ChatFace};UiMode gUiMode=UiMode::Home;
 enum class VoiceRequestPhase{None,Recording,Sending,Processing,Accepted,Reply,Error};
-VoiceRequestPhase gVoiceRequestPhase;
+VoiceRequestPhase gVoiceRequestPhase;bool gVoiceUploadDone=false;
 bool gInboxUnread=false,gVoiceNoticeVisible=true,gVoiceNoticePending=false,gLauncherVisible=false,gChatCommandsVisible=false;
 constexpr unsigned kReplyWaitTimeoutMs=1800000;bool gVoiceReplyPending=false,gAssistantPendingVisible=true;
 unsigned gVoiceReplyNotifyUntilMs=0,gVoiceReplyAfterSeq=0,gInboxLastSeq=20,gVoiceReplyPendingMs=0;
@@ -53,7 +53,8 @@ std::vector<String> history;unsigned cursorAtStorage=0;
 void appendAssistantReply(String s){cursorAtStorage=gInboxLastSeq;replyText=s;history.push_back(s);}void setStatus(String,int){}
 void setVoiceDiag(String){}void setHttpDiag(String s){gLastHttpDiag=s;}
 void executeOrDeferDeviceActionsJson(String){++actions;}
-struct {struct {void tone(int,int){assert(painted);++tones;}} Speaker;} M5Cardputer;
+namespace activity_cue {enum class Cue {Sending,Thinking,ReplyReady};}
+bool playActivityCue(activity_cue::Cue){assert(painted);++tones;return true;}
 struct HTTPClient{static String errorToString(int){return "connection";}};
 // Parsing is separately covered by bridge contract tests. Inject decoded values
 // here so the actual firmware receipt handler must close every THINK path.

@@ -128,7 +128,7 @@ enum class UiMode {Home,Clock,Face,Hero,ChatFull,ChatFace,Other}; UiMode gUiMode
 struct Keyboard_Class {struct KeysState {bool enter=false,ctrl=false,alt=false,fn=false;};};
 bool gVoiceNoticeVisible=false,gInboxUnread=true;
 enum class VoiceRequestPhase {None,Recording,Sending,Processing,Accepted,Reply,Error};
-VoiceRequestPhase gVoiceRequestPhase=VoiceRequestPhase::None;
+VoiceRequestPhase gVoiceRequestPhase=VoiceRequestPhase::None;bool gVoiceUploadDone=false;
 String gVoiceRequestTranscript,gVoiceNoticeText;unsigned gVoiceRequestProgress=0;
 bool gVoiceNoticePending=false,gLauncherVisible=false,gChatCommandsVisible=false;
 bool gRecording=false,gSubmitting=false,gThinking=false,gAssistantPendingVisible=false,gPlaybackActive=false;

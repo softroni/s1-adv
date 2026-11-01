@@ -369,12 +369,14 @@ void maybeStartNextTextTurn() {
   gActiveTextTurn = payload->text;
   gSubmitting = true;
   gThinking = true;
+  gTextSendUntilMs = millis() + activity_cue::kSendingShowMs;
   gAssistantPendingVisible = true;
   setFaceMode(FaceMode::Thinking);
   setStatus(gPendingTextTurns.empty() ? "Sending..." : ("Sending... +" + String(gPendingTextTurns.size())));
 
   prepareNetworkMemory("text", false);
   render(); // Paint the pending message before TLS allocation or waiting.
+  playActivityCue(activity_cue::Cue::Sending);
   TextTurnTaskPayload* rawPayload = payload.release();
   BaseType_t taskOk = xTaskCreate(
       textTurnTask,

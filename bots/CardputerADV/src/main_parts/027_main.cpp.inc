@@ -201,12 +201,23 @@ String focusTimeString(uint32_t seconds) {
   return String(buf);
 }
 
+// The speaker is off during capture and while TLS holds the memory, and it's never shared.
+bool chimeMayPlay() {
+  return gCanvasSpriteActive && !gRecording && !gPlaybackActive && !gRealtimeActive &&
+         !gRealtimeExclusiveMode && !gVoiceCapturePreparing && !gVoiceDialBusy &&
+         !gRealtimeDialBusy && !gVoiceReplySpeechBusy && !M5Cardputer.Speaker.isPlaying();
+}
+
 bool playUpdateChime() {
-  if(!gDeviceSettings.beepOnUpdate || !gCanvasSpriteActive || gRecording ||
-     gPlaybackActive || gRealtimeActive || gRealtimeExclusiveMode ||
-     gVoiceCapturePreparing || gVoiceDialBusy || gRealtimeDialBusy ||
-     gVoiceReplySpeechBusy || M5Cardputer.Speaker.isPlaying()) return false;
+  if(!gDeviceSettings.beepOnUpdate || !chimeMayPlay()) return false;
   release_delivery::makeUpdateChime(gUpdateChime);
+  return M5Cardputer.Speaker.playRaw(gUpdateChime,release_delivery::kChimeSamples,
+                                   release_delivery::kChimeRate,false,1,0);
+}
+
+bool playActivityCue(activity_cue::Cue cue) {
+  if(!chimeMayPlay()) return false;
+  activity_cue::render(cue,gUpdateChime,release_delivery::kChimeSamples,release_delivery::kChimeRate);
   return M5Cardputer.Speaker.playRaw(gUpdateChime,release_delivery::kChimeSamples,
                                    release_delivery::kChimeRate,false,1,0);
 }

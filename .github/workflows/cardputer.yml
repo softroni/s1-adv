@@ -96,6 +96,7 @@ jobs:
       - run: python scripts/test_flappy.py
       - run: python scripts/test_balloon.py
       - run: python scripts/test_ball_catch.py
+      - run: python scripts/test_activity_cue.py
       - run: python scripts/test_nfc_notes.py
       - run: python scripts/test_wifi_settings.py
       - run: python scripts/test_wifi_store.py

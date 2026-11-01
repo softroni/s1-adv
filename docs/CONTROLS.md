@@ -57,6 +57,20 @@ available.
 If the setup screen appears because the old network is gone, press Enter on it to do all of
 this on the device. It restarts once it has joined.
 
+## Status and sounds
+
+The Home screen shows what the assistant is doing, and a soft sound marks most stages.
+
+| Status | Means | Sound |
+| --- | --- | --- |
+| SENDING | Your message is going out | Two rising notes, for typed messages. A voice message is silent here, because the speaker is off while it uploads |
+| THINKING | The assistant has your message | Two low taps |
+| LOADING | The reply's voice is downloading | The reply sound plays just before this: two falling notes |
+| SPEAK | The assistant is talking | The speech itself |
+
+The bridge doesn't tell the device whether Claude is searching or writing code, so those all
+show as THINKING.
+
 ## NFC Notes
 
 NFC Notes is under Tab, Tools, and `/nfc` opens it. It needs the M5Stack NFC unit

@@ -57,6 +57,9 @@ String gVoiceNoticeText;
 uint32_t gVoiceNoticeShownMs = 0;
 String gQueuedVoiceReplySpeech;
 bool gVoiceReplySpeechBusy = false;
+bool gVoiceUploadDone = false;
+bool gPlaybackSpeech = false;  // What's playing is the assistant talking, not a saved file.
+uint32_t gTextSendUntilMs = 0;
 volatile uint32_t gVoiceReplySpeechGeneration = 0;
 void showVoiceNotice(const String& text, bool pending);
 firmware_job_display::State gFirmwareJobState = firmware_job_display::State::Idle;
@@ -127,6 +130,7 @@ bool handleAssistantMenuKey(char key,const Keyboard_Class::KeysState& keys);
 bool handleEyeSkinKey(char key,const Keyboard_Class::KeysState& keys);
 void renderRealtimeEyesUi();
 bool playUpdateChime();
+bool playActivityCue(activity_cue::Cue cue);
 void renderRealtimeUi();
 void renderRealtimeBadges();
 void toggleRealtimeView();

@@ -194,6 +194,7 @@ bool postRawVoiceTurn(const uint8_t* ramPayload, const String& filePath, size_t 
     gVoiceCaptureUpload->registered = true;
   }
   setStatus("Transcribing / AI Agent...");
+  gVoiceUploadDone = true;
   if(gVoiceNoticeVisible) gVoiceRequestPhase=VoiceRequestPhase::Processing;
   render();
   setHttpDiag("voice_post: wait reply");

@@ -34,7 +34,7 @@ using std::min;using std::max;
 struct String:std::string {using std::string::string;String(const std::string& s):std::string(s){};};
 enum class AssistantPulseState{Realtime,Recording,Thinking,Playback,Ready};
 enum class VoiceRequestPhase{None,Recording,Sending,Processing,Accepted,Reply,Error};
-VoiceRequestPhase gVoiceRequestPhase=VoiceRequestPhase::None;
+VoiceRequestPhase gVoiceRequestPhase=VoiceRequestPhase::None;bool gVoiceUploadDone=false;
 bool gInboxUnread=false,gVoiceNoticeVisible=false,gRecording=false,gSubmitting=false,gThinking=false,gPlaybackActive=false;
 bool gRealtimeActive=false,gRealtimeRecording=false,gRealtimeAwaiting=false;
 bool gRealtimeScreenVisible=false;

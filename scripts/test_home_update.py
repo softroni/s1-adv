@@ -43,7 +43,8 @@ bool gLauncherVisible=false,gChatCommandsVisible=false,gVoiceNoticeVisible=false
 bool gBlockingInputPumpActive=false,gVoiceReplyPending=false,gRecording=false,gSubmitting=false,gThinking=false;
 bool gPlaybackActive=false,gRealtimeActive=false,gRealtimeDialBusy=false,gOtaApplyInProgress=false;
 bool gPendingOtaCheckAction=false,gPendingOtaApplyAction=false,gInboxHttpBusy=false;
-bool gVoiceDialBusy=false,gVoiceReplySpeechBusy=false,gTextTurnTaskHandle=false;
+bool gVoiceDialBusy=false,gVoiceReplySpeechBusy=false,gTextTurnTaskHandle=false,sendingNow=false;
+bool activitySending(){return sendingNow;}
 bool gOtaPendingVerify=false;
 bool voiceRequestBusyUi(){return gVoiceNoticeVisible && (gRecording || gSubmitting || gThinking);}
 uint32_t gPendingOtaActionAfterMs=0,now=1000;
@@ -254,6 +255,7 @@ int main(){
  assert(handleOtaKey('\n',keys));assert(!gPendingOtaApplyAction);gOtaPendingVerify=false;
  // The compact Home badge remains honest while the unified scene is sending.
  gThinking=true;assert(std::string(homeStatusLabel(false))=="THINKING");
+ sendingNow=true;assert(std::string(homeStatusLabel(false))=="SENDING");sendingNow=false;
  gThinking=false;
 }
 '''

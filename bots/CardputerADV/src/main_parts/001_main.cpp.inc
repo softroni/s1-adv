@@ -65,6 +65,7 @@
 #include "balloon.h"
 #include "balloon_audio.h"
 #include "ball_catch.h"
+#include "activity_cue.h"
 #include "radio_catalog.h"
 #include "internet_radio_transport.h"
 #include "vlc_remote.h"
@@ -102,7 +103,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.224-dev"
+#define APP_VERSION "0.2.225-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"

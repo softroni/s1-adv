@@ -103,7 +103,7 @@ namespace fs {class FS {
   bool remove(const String&){++fixture.removes;fixture.recording.clear();return true;}
 };}
 fs::FS filesystem;
-bool gVoiceDialBusy=false,gVoiceReplySpeechBusy=false,gVoiceNoticeVisible=true,gCanvasSpriteActive=true,gVoicePreconnectEarly=false;
+bool gVoiceDialBusy=false,gVoiceReplySpeechBusy=false,gVoiceNoticeVisible=true,gCanvasSpriteActive=true,gVoicePreconnectEarly=false,gVoiceUploadDone=false;
 String gHubHost="bridge.invalid",gDeviceId="test-device",gDeviceToken="fixture-token";
 uint16_t gHubPort=443;
 constexpr unsigned kMicSampleRate=16000,kTtsDefaultSampleRate=24000,kTurnHttpTimeoutMs=65000;

@@ -1015,7 +1015,7 @@ bool handleHostSerialCommand(String line) {
     const String text=clock?line.substring(24):String("Ready.");
     if(clock)setUiMode(UiMode::Clock);
     showVoiceNotice(text, false);
-    if(clock && gCanvasSpriteActive) M5Cardputer.Speaker.tone(1319,90);
+    if(clock) playActivityCue(activity_cue::Cue::ReplyReady);
     gQueuedVoiceReplySpeech = text;
     return true;
   }

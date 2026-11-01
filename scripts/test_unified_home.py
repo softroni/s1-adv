@@ -49,7 +49,7 @@ VoiceRequestPhase gVoiceRequestPhase=VoiceRequestPhase::None;
 uint32_t nowMs=13000,gRecordStartMs=1000,gHomeUpdatePreviewUntilMs=0,gAssistantPulsePressUntilMs=0;
 uint32_t millis(){return nowMs;}
 String gInputBuffer,gStatusText="Sending voice...",gBootBackgroundLabel,gQueuedVoiceReplySpeech;
-bool gVoiceReplySpeechBusy=false;
+bool gVoiceReplySpeechBusy=false,gPlaybackSpeech=false;
 firmware_job_display::State gFirmwareJobState=firmware_job_display::State::Idle;
 struct{bool clockTwelveHour=false;uint8_t minBatteryForUpdate=25;}gDeviceSettings;
 struct{int level=72;}gBatterySnapshot;
@@ -130,6 +130,10 @@ void checkMotion(){
 }
 int main(){
  checkMotion();
+ // Speech and a saved file are labeled differently.
+ gPlaybackActive=true;reset();renderAssistantPulseUi();assert(printed("PLAY")&&!printed("SPEAK"));
+ gPlaybackSpeech=true;reset();renderAssistantPulseUi();assert(printed("SPEAK")&&!printed("PLAY"));
+ gPlaybackActive=gPlaybackSpeech=false;
  reset();renderAssistantPulseUi();assert(gCanvas.clockRects==1&&gCanvas.chatRects==1&&badges==1&&batteries==1);
  assert(printed("> type to chat"));
  for(bool pending:{false,true}){

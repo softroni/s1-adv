@@ -3,7 +3,7 @@
 from pathlib import Path
 import os,subprocess,tempfile,wave
 root=Path(__file__).resolve().parents[1]
-s=(root/'bots/CardputerADV/src/main_parts/027_main.cpp.inc').read_text();a=s.index('bool playUpdateChime()');i=s.index('{',a)+1;n=1
+s=(root/'bots/CardputerADV/src/main_parts/027_main.cpp.inc').read_text();a=s.index('bool chimeMayPlay()');i=s.index('{',s.index('bool playUpdateChime()'))+1;n=1
 while n:n+=(s[i]=='{')-(s[i]=='}');i+=1
 code=r'''
 #include <cassert>

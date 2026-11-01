@@ -35,7 +35,7 @@
     c2 = cyan;
     c3 = rgb565_local(22, 73, 46);
     fg = rgb565_local(241, 255, 246);
-    label = "PLAY";
+    label = gPlaybackSpeech ? "SPEAK" : "PLAY";
   } else if (realtime) {
     if (gRealtimeRecording) {
       c1 = red;
