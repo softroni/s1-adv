@@ -8,7 +8,7 @@ is the alternative.
 
 1. With Claude Code, confirm `claude auth status` shows your subscription. With OpenClaw, confirm it already answers a normal chat on your host.
 2. Follow [Claude Code setup](CLAUDE-CODE.md) or [OpenClaw and bridge setup](OPENCLAW.md). Confirm the configured conversation is reachable with your device token.
-3. Follow [USB flashing](FLASHING.md). Use your own bridge address and device token.
+3. Plug in the Cardputer and run `./scripts/flash-cardputer.sh`, or follow [USB flashing](FLASHING.md). Use your own bridge address and device token.
 4. Connect the device to Wi-Fi. Check `/status`, then send `Reply with: ready`.
 5. Confirm the actual answer on the device. Server health alone is not a successful chat.
 6. Add voice only after text works. Hold the device's talk control, speak, release,

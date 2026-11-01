@@ -3,6 +3,34 @@
 Target: **M5Stack Cardputer ADV**, ESP32-S3, **8 MB flash**.
 Do not substitute an old 2 MB Plai partition layout or a generic ESP32 target.
 
+## Flash with one command
+
+On macOS or Linux, plug in the Cardputer and run this from the repository root:
+
+```bash
+./scripts/flash-cardputer.sh
+```
+
+You only need bash, curl and Python 3. It works on a computer with nothing else set
+up:
+
+- It downloads the public release and esptool into `~/.s1-adv/flash`, and checks the
+  firmware against a pinned checksum.
+- It confirms the device is an ESP32-S3 with 8 MB flash, and asks before flashing.
+- If the device doesn't answer, it shows the G0 and Reset steps and tries again.
+- It shows the setup steps. A bridge set up on the same computer is found
+  automatically, and your device token is copied to the clipboard without being shown.
+
+If the bridge runs on a different computer, pass its address, then get the token
+from that computer:
+
+```bash
+./scripts/flash-cardputer.sh --bridge-url https://YOUR_BRIDGE
+```
+
+Use `--port PATH` if more than one USB device is connected. On Windows, follow the
+manual steps below.
+
 ## Download a public image
 
 [0.2.201-dev release](https://github.com/s1z0v/s1-adv/releases/tag/v0.2.201-dev)

@@ -78,7 +78,7 @@ firmware-building rights only when you deliberately need them. Read the
 
 - **M5Stack Cardputer ADV**, with ESP32-S3 and 8 MB flash. Other Cardputer models are untested.
 - A USB data cable and a 2.4 GHz Wi-Fi network.
-- A computer for the first USB flash: Python 3 and PlatformIO.
+- A computer for the first USB flash: Python 3. [The flashing script](docs/FLASHING.md) installs the rest. Building from source needs PlatformIO.
 - Node.js 22+ for the bridge, and either [Claude Code signed in with a Claude subscription](docs/CLAUDE-CODE.md) or an existing OpenClaw installation with its supported Node.js runtime.
 - A reachable bridge address. Use HTTPS/WSS for remote access. The firmware trusts ISRG Root X1 by default.
 - For voice: FFmpeg, an STT backend and a TTS backend on the bridge host.
@@ -98,6 +98,16 @@ cd s1-adv/bridge
 npm ci
 node scripts/setup.mjs init --public-url https://YOUR_BRIDGE --apply
 ```
+
+Then plug in the Cardputer and flash it with one command, on macOS or Linux. It
+downloads what it needs, so you can run it from any computer:
+
+```bash
+cd ..
+./scripts/flash-cardputer.sh
+```
+
+See [Build and flash](docs/FLASHING.md) for the details and the manual route.
 
 To use OpenClaw, the community bridge is published in
 [ClawHub](https://clawhub.ai/plugins/openclaw-s1-adv). On a current OpenClaw host:

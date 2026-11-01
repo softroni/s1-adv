@@ -34,28 +34,57 @@ node scripts/setup.mjs init --public-url https://YOUR_BRIDGE --apply
 node scripts/setup.mjs doctor --config ~/.s1-adv/config.json --no-probe
 ```
 
-Setup creates `~/.s1-adv/` with `config.json` and `firmware.env`. Both are private
-and hold your device token. Then start the bridge:
+Include the port in `YOUR_BRIDGE` if it isn't 443, for example
+`https://bridge.example.com:10000`. Setup creates `~/.s1-adv/` with `config.json`
+and `firmware.env`. Both are private and hold your device token, so never commit
+or share them. Then start the bridge:
 
 ```bash
 CARDPUTER_BRIDGE_CONFIG=~/.s1-adv/config.json npm start
 ```
 
-The bridge listens on `127.0.0.1:31889`, so put an HTTPS proxy in front of it. If
-you use Tailscale, Funnel is the shortest route, because the Cardputer can't join
-your tailnet and `tailscale serve` won't reach it:
+To keep it running after you close the terminal, use this instead. It stops when
+the computer restarts:
 
 ```bash
-tailscale funnel --bg 31889
+CARDPUTER_BRIDGE_CONFIG=~/.s1-adv/config.json nohup npm start >> ~/.s1-adv/bridge.log 2>&1 &
 ```
 
-Funnel puts the token-protected bridge on the public internet. Physical testing of
-a Funnel certificate on the device is still outstanding, so check TLS first if the
-Cardputer can't connect.
+The bridge listens on `127.0.0.1:31889`, so put an HTTPS proxy in front of it.
 
-Finish with [Build and flash](FLASHING.md), entering your bridge URL and the device
-token from `~/.s1-adv/config.json`. Then send `Reply with: ready`. Seeing that answer
-on the device is the real test.
+### Tailscale Funnel
+
+If you use Tailscale, Funnel is the shortest route, because the Cardputer can't
+join your tailnet and `tailscale serve` won't reach it. Funnel only works on ports
+443, 8443 and 10000, and it replaces whatever already uses the port. Check first:
+
+```bash
+tailscale serve status
+```
+
+If 443 is free, run `tailscale funnel --bg 31889`. If it's in use, use a free port:
+
+```bash
+tailscale funnel --bg --https=10000 31889
+```
+
+Your bridge URL is then `https://YOUR-MACHINE.YOUR-TAILNET.ts.net:10000`. Funnel
+can take a few minutes to become reachable after you first enable it. It puts the
+token-protected bridge on the public internet. Physical testing of a Funnel
+certificate on the device is still outstanding, so check TLS first if the Cardputer
+can't connect.
+
+### Flash the Cardputer
+
+Plug in the Cardputer and run this from the repository root:
+
+```bash
+./scripts/flash-cardputer.sh
+```
+
+It finds your bridge URL and copies your device token to the clipboard. See
+[Build and flash](FLASHING.md) for details. Then send `Reply with: ready`. Seeing
+that answer on the device is the real test.
 
 ## Settings
 
