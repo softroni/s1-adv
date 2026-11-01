@@ -38,7 +38,7 @@ if (argv[0] === "auth") {
 } else {
   let stdin = "";
   process.stdin.setEncoding("utf8").on("data", chunk => { stdin += chunk; }).on("end", () => {
-    fs.appendFileSync(path.join(here, "calls.jsonl"), JSON.stringify({ argv, stdin, cwd: process.cwd(), env: Object.keys(process.env) }) + "\\n");
+    fs.appendFileSync(path.join(here, "calls.jsonl"), JSON.stringify({ argv, stdin, cwd: process.cwd(), env: Object.keys(process.env), pid: process.pid }) + "\\n");
     const steps = JSON.parse(fs.readFileSync(path.join(here, "steps.json"), "utf8"));
     const step = steps.shift() || { code: 3 };
     fs.writeFileSync(path.join(here, "steps.json"), JSON.stringify(steps));
@@ -579,6 +579,21 @@ test("full bridge: device text turns reach Claude Code and replies, context and 
   assert.match(prompt, /no tools/);
   assert.match(prompt, /cardputer_actions/);
   assert.ok(!/cardputer_status|OpenClaw/.test(prompt));
+});
+
+test("full bridge: stopping the bridge stops a running turn instead of orphaning it", async t => {
+  const fake = await makeFake(t, { steps: [{ hang: true }] });
+  const { turn } = await startBridge(t, fake);
+  void turn("work for a long time").catch(() => {});
+  const [call] = await until(async () => {
+    const calls = await fake.calls();
+    return calls.length ? calls : null;
+  }, 10000);
+  assert.doesNotThrow(() => process.kill(call.pid, 0), "the turn should be running");
+  await fake.stopBridge();
+  await until(() => {
+    try { process.kill(call.pid, 0); return false; } catch { return true; }
+  }, 8000);
 });
 
 test("full bridge: a voice reply slower than the firmware's 1 s wait still comes back at once", async t => {

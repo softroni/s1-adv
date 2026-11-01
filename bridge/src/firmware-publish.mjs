@@ -62,6 +62,9 @@ export async function publishProjectFirmware({ projectDir, configPath, installed
   const version = firmwareVersion(await readFile(await projectFile(projectDir, VERSION_FILE), "utf8"));
   if (!isNewerVersion(version, installedVersion))
     throw new Error(`version ${version} isn't newer than ${installedVersion}. Increase APP_VERSION and rebuild`);
+  // The version file can move on while an older build is still on disk. A
+  // mismatched label would make the device offer the same update forever.
+  if (!bytes.includes(Buffer.from(version))) throw new Error(`the build isn't version ${version}. Rebuild it`);
   // Publish the bytes that were checked, not a path that could change afterwards.
   const folder = await mkdtemp(path.join(tmpdir(), "s1-firmware-"));
   try {

@@ -5,8 +5,9 @@ import path from "node:path";
 import test from "node:test";
 import { firmwareVersion, inspectFirmwareImage, isNewerVersion, publishProjectFirmware } from "./firmware-publish.mjs";
 
-function image({ size = 128 * 1024, chip = 9, magic = 0xe9, desc = 0xabcd5432 } = {}) {
+function image({ size = 128 * 1024, chip = 9, magic = 0xe9, desc = 0xabcd5432, version = "0.2.208-dev" } = {}) {
   const bytes = Buffer.alloc(size);
+  bytes.write(version, 4096);
   bytes[0] = magic;
   bytes.writeUInt16LE(chip, 12);
   bytes.writeUInt32LE(desc, 32);
@@ -64,7 +65,8 @@ test("a valid build reaches the update manifest with approval still required", a
 test("nothing is published for a bad or old build", async t => {
   for (const [options, installed, expected] of [
     [{ bytes: image({ chip: 0 }) }, "0.2.207-dev", /ESP32-S3/],
-    [{ version: "0.2.207-dev" }, "0.2.207-dev", /isn't newer/],
+    [{ version: "0.2.207-dev", bytes: image({ version: "0.2.207-dev" }) }, "0.2.207-dev", /isn't newer/],
+    [{ version: "0.2.209-dev", bytes: image({ version: "0.2.208-dev" }) }, "0.2.207-dev", /isn't version 0\.2\.209-dev/],
     [{ bytes: null }, "0.2.207-dev", /wasn't found/]
   ]) {
     const fixture = await project(t, options);

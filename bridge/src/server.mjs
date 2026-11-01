@@ -7564,6 +7564,12 @@ async function main() {
     });
   });
 
+  // A running turn must end with the bridge. Left behind, it would keep changing
+  // the project with nothing listening for its reply.
+  for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => {
+    void Promise.resolve(runtime.upstream.stop()).finally(() => process.exit(0));
+  });
+
   server.listen(config.server.port, config.server.host, () => {
     console.log(
       JSON.stringify(

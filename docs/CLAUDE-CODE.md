@@ -256,6 +256,9 @@ Ask for what you want, such as "add a snake game and send it to me". Then:
 
 The new firmware runs from the second app slot. Keep the USB cable available as a way back.
 
+Restarting the bridge stops any work Claude is doing, so wait for its reply first. Claude
+works directly in your repository, so don't edit or commit there while it's working.
+
 Anyone with your device token could offer you an update, so only install updates you asked
 for. Leave **Auto OTA** off in Device settings so that an install always needs you.
 
