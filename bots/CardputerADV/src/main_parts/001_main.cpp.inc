@@ -90,7 +90,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.212-dev"
+#define APP_VERSION "0.2.213-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"
@@ -419,7 +419,7 @@ constexpr uint8_t kPlaybackSpectrumMaxBar = 18;
 constexpr size_t kOtaIoBufferBytes = 4096;
 constexpr size_t kEmojiCacheCap = 10;
 constexpr size_t kEmojiMaxPngBytes = 64 * 1024;
-constexpr const char* kBangkokTz = "ICT-7";
+constexpr const char* kDeviceTz = "CST6CDT,M3.2.0,M11.1.0";  // US Central, with daylight saving.
 
 constexpr uint16_t rgb565_local(uint8_t r, uint8_t g, uint8_t b) {
   return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);

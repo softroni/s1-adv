@@ -87,11 +87,11 @@ bool hasValidSystemTime() {
   return time(nullptr) > 1700000000;
 }
 
-void ensureBangkokTimezone() {
+void ensureDeviceTimezone() {
   if (gTimeZoneConfigured) {
     return;
   }
-  setenv("TZ", kBangkokTz, 1);
+  setenv("TZ", kDeviceTz, 1);
   tzset();
   gTimeZoneConfigured = true;
 }

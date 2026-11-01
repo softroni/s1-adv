@@ -251,5 +251,5 @@ bool assistantPulseWorking(AssistantPulseState state) {
 
 void renderAssistantPulseUi() {
   auto& d = gCanvas;
-  ensureBangkokTimezone();
+  ensureDeviceTimezone();
   AssistantPulseState state = assistantPulseState();

@@ -150,7 +150,7 @@ bool finishVoiceSubmission(bool transportOk, int statusCode, const String& respo
 }
 
 void syncClockFromNtp(bool force) {
-  ensureBangkokTimezone();
+  ensureDeviceTimezone();
   if (!gWifiReady) {
     return;
   }
@@ -182,8 +182,9 @@ void syncClockFromNtp(bool force) {
   gTimeValid = hasValidSystemTime();
   if (gTimeValid) {
     gLastTimeSyncMs = now;
-    return;
+  } else {
+    setStatus("Clock sync...", 700);
   }
-  configTzTime(kBangkokTz, "time.google.com", "pool.ntp.org", "time.cloudflare.com");
-  setStatus("Clock sync...", 700);
+  // A clock kept across a restart can look valid and still be wrong, so always ask.
+  configTzTime(kDeviceTz, "time.google.com", "pool.ntp.org", "time.cloudflare.com");
 }

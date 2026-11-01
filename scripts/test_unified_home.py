@@ -81,7 +81,7 @@ int badges=0,batteries=0,meters=0;
 void drawHomeReadyStatus(bool,bool){++badges;}
 void drawHomeBatteryStatus(int32_t){++batteries;}
 void drawAssistantPulseArc(int,int,int,int,float a,float b,uint16_t c){gCanvas.arcs.push_back(c);gCanvas.shapes.push_back({int(a*1000),int(b*1000)});}
-void renderLauncherOverlay(){}void renderDebugOverlay(){}void ensureBangkokTimezone(){}
+void renderLauncherOverlay(){}void renderDebugOverlay(){}void ensureDeviceTimezone(){}
 String fitCurrentFontToWidth(const String&s,int w){return s.substr(0,w/8);}
 String tailUtf8ToFit(const String&s,int w){return s.substr(0,w/8);}
 uint32_t playbackProgressPct(){return 10;}uint32_t playbackRemainingMs(){return 1000;}
