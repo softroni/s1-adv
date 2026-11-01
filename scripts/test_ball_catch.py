@@ -12,7 +12,7 @@ for file, text in [
         ('001_main.cpp.inc', '#include "ball_catch.h"'),
         ('001_main.cpp.inc', 'kLauncherGroupCount = 8'),
         ('004_main.cpp.inc', '{"Ball Catch", UiMode::BallCatch}'),
-        ('004_main.cpp.inc', '{"Arcade", "JOY"'),
+        ('004_main.cpp.inc', '{"Arcade", "Sensor and joystick games"'),
         ('022_main.cpp.inc', 'mode == "ball_catch"'),
         ('024_main.cpp.inc', 'mode == UiMode::BallCatch) beginBallCatch();'),
         ('024_main.cpp.inc', 'gUiMode == UiMode::BallCatch) stopBallCatch();'),

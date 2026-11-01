@@ -466,19 +466,19 @@ void handleLauncherKey(char key, const Keyboard_Class::KeysState& keys) {
     applyLauncherSelection();
     return;
   }
-  if (key == ',' || key == ';' || lowerKey == 'a' || lowerKey == 'h') {
+  if (key == ';' || lowerKey == 'w' || lowerKey == 'k') {
     moveLauncherSubSelection(-1);
     return;
   }
-  if (key == '.' || key == '/' || lowerKey == 'd' || lowerKey == 'l') {
+  if (key == '.' || lowerKey == 's' || lowerKey == 'j') {
     moveLauncherSubSelection(1);
     return;
   }
-  if (lowerKey == 'w' || lowerKey == 'k') {
+  if (key == ',' || lowerKey == 'a' || lowerKey == 'h') {
     moveLauncherSelection(-1);
     return;
   }
-  if (lowerKey == 's' || lowerKey == 'j') {
+  if (key == '/' || lowerKey == 'd' || lowerKey == 'l') {
     moveLauncherSelection(1);
     return;
   }

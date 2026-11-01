@@ -2,7 +2,7 @@
 
 - Type a question and press Enter in chat.
 - Hold **G0**, speak, then release to send. **Ctrl+V** or double **Ctrl** toggles recording.
-- **Tab** opens the app menu from Home and the chat/eyes screens; arrows select, Enter opens.
+- **Tab** opens the app menu from Home and the chat/eyes screens. Up/down or W/S picks a row, left/right or A/D switches group, and Enter opens. **1-8** jumps to a group, and **Ctrl+1-8** opens that row.
 - **Ctrl+K** opens assistant commands. R selects Realtime, C AI Chat, E Chat Eyes, F Big Eyes.
 - **Ctrl+U** on the Home clock installs an available update. An orange **NEW UPDATE / Ctrl+U** badge replaces READY until the newer firmware is installed. Without a candidate, Ctrl+U checks for updates.
 - **Ctrl+R** starts Realtime or commits the current speech turn. While awaiting a reply, it stops Realtime.

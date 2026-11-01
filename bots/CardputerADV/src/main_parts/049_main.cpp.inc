@@ -21,13 +21,13 @@
     switchLauncherGroupAndApply(1);
   } else if (tabDown) {
     handleTypingKey('\t',keys);
-  } else if (gLauncherVisible && leftDown) {
-    moveLauncherSubSelection(-1);
-  } else if (gLauncherVisible && rightDown) {
-    moveLauncherSubSelection(1);
   } else if (gLauncherVisible && upDown) {
-    moveLauncherSelection(-1);
+    moveLauncherSubSelection(-1);
   } else if (gLauncherVisible && downDown) {
+    moveLauncherSubSelection(1);
+  } else if (gLauncherVisible && leftDown) {
+    moveLauncherSelection(-1);
+  } else if (gLauncherVisible && rightDown) {
     moveLauncherSelection(1);
   } else if ((gUiMode == UiMode::Mesh || gUiMode == UiMode::NfcNotes || gUiMode == UiMode::WifiSettings) && (upDown || downDown)) {
     handleTypingKey(upDown ? char(1) : char(2),keys);

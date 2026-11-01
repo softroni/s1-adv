@@ -29,10 +29,9 @@ wrong answer and round finish. They use the existing notification speaker lifecy
 and are suppressed during recording, playback, realtime voice, submit or thinking.
 No third-party audio or Elevate assets are included.
 
-Launcher digit rules are deterministic: plain `1..7` selects the left group;
-`Ctrl+1..6` is resolved first and immediately opens that 1-based item in the
-current group's right submenu. Invalid Ctrl+digits are consumed without changing
-the left group. Arrows, Enter and Tab keep their previous behavior.
+Launcher digit rules are deterministic: plain `1..8` selects a group;
+`Ctrl+1..8` is resolved first and immediately opens that 1-based item in the
+current group. Invalid Ctrl+digits are consumed without changing the group.
 
 ## Research and design boundaries
 

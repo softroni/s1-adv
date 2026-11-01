@@ -113,6 +113,7 @@ jobs:
       - run: python scripts/test_home_clock.py
       - run: python scripts/test_clock_sync.py
       - run: python scripts/test_keyrush_layout.py
+      - run: python scripts/test_launcher_layout.py
       - run: python scripts/test_realtime_screen.py
       - run: python scripts/test_realtime_connection.py
       - run: python scripts/test_realtime_audio_buffer.py --sanitize

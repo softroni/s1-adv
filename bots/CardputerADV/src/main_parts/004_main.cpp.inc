@@ -73,7 +73,6 @@ struct LauncherSubItem {
 
 struct LauncherGroup {
   const char* title;
-  const char* glyph;
   const char* hint;
   uint16_t accent;
   uint8_t count;
@@ -145,29 +144,29 @@ struct KeyRushRuntime {
 };
 
 constexpr LauncherGroup kLauncherGroups[kLauncherGroupCount] = {
-    {"AI Agent", "AI", "Assistant and chat", rgb565_local(47, 227, 255), 6,
+    {"AI Agent", "Assistant and chat", rgb565_local(47, 227, 255), 6,
      {{"Realtime", UiMode::Home, true}, {"Pulse", UiMode::Home}, {"AI Chat", UiMode::ChatFull},
       {"Chat Eyes", UiMode::ChatFace}, {"Big Eyes", UiMode::Face}, {"AI Pet", UiMode::Hero}}},
-    {"Media", "WAV", "Listen and capture", rgb565_local(88, 240, 141), 8,
+    {"Media", "Listen and capture", rgb565_local(88, 240, 141), 8,
      {{"Library", UiMode::Library}, {"Folders", UiMode::AudioFolders}, {"Voice Notes", UiMode::Voice},
       {"Notes", UiMode::Notes}, {"Assets", UiMode::Assets}, {"Files", UiMode::Files}, {"Internet Radio", UiMode::Radio},
       {"VLC Remote", UiMode::VlcRemote}}},
-    {"Focus", "25", "Time and attention", rgb565_local(255,136,64), 8,
+    {"Focus", "Time and attention", rgb565_local(255,136,64), 8,
      {{"Pomodoro", UiMode::Focus}, {"Alarm", UiMode::Alarm},
       {"Stopwatch", UiMode::Stopwatch}, {"Calendar", UiMode::Calendar}, {"Chess Mind", UiMode::ChessMind},
       {"Chess", UiMode::Chess}, {"BrainFlow", UiMode::BrainFlow}, {"KeyRush", UiMode::KeyRush}}},
-    {"Tools", "UTIL", "Local hardware tools", rgb565_local(255, 150, 80), 8,
+    {"Tools", "Local hardware tools", rgb565_local(255, 210, 64), 8,
      {{"Calculator", UiMode::Calculator}, {"NFC Notes", UiMode::NfcNotes}, {"RFID Lab", UiMode::RfidLab},
       {"IR Remote", UiMode::IrRemote}, {"smartLamp", UiMode::SmartLamp}, {"Sonar", UiMode::Sonar}, {"Mesh", UiMode::Mesh},
       {"Pocket Synth", UiMode::PocketSynth}}},
-    {"Games", "PLAY", "Keyboard and board games", rgb565_local(157, 102, 255), 5,
+    {"Games", "Keyboard and board games", rgb565_local(157, 102, 255), 5,
      {{"Tetris", UiMode::Tetris}, {"NES", UiMode::Nes}, {"Checkers", UiMode::Checkers}, {"Minesweeper", UiMode::Minesweeper}, {"Snake", UiMode::Snake}}},
-    {"Arcade", "JOY", "Sensor and joystick games", rgb565_local(255, 126, 182), 4,
+    {"Arcade", "Sensor and joystick games", rgb565_local(255, 126, 182), 4,
      {{"Air Music", UiMode::AirMusic}, {"Flappy Bird", UiMode::Flappy}, {"Hot Air Balloon", UiMode::Balloon}, {"Ball Catch", UiMode::BallCatch}}},
-    {"Settings", "SET", "All device settings", rgb565_local(203, 216, 226), 4,
+    {"Settings", "All device settings", rgb565_local(203, 216, 226), 4,
      {{"Device", UiMode::Settings}, {"Display", UiMode::ScreenSettings},
       {"Wi-Fi", UiMode::WifiSettings}, {"Pomodoro", UiMode::FocusSettings}}},
-    {"System", "SYS", "Firmware and diagnostics", rgb565_local(180, 150, 255), 3,
+    {"System", "Firmware and diagnostics", rgb565_local(180, 150, 255), 3,
      {{"Firmware", UiMode::Ota}, {"Logs", UiMode::Logs}, {"C-Matrix", UiMode::CMatrix}}},
 };
 

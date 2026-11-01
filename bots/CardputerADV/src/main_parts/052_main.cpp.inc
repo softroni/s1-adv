@@ -56,64 +56,61 @@ void renderDebugOverlay() {
   d.setFont(&fonts::Font2);
 }
 
-void drawLauncherIcon(uint8_t group, int16_t x, int16_t y, int16_t s, uint16_t accent, uint16_t bg) {
-  auto& d = gCanvas;
-  int16_t cx = x + s / 2;
-  int16_t cy = y + s / 2;
-  int16_t r = max<int16_t>(5, s / 4);
-  d.fillRoundRect(x, y, s, s, max<int16_t>(5, s / 5), bg);
-  d.drawRoundRect(x, y, s, s, max<int16_t>(5, s / 5), accent);
-  d.fillCircle(cx, cy, max<int16_t>(6, s / 3), rgb565_local(10, 14, 26));
-  d.drawCircle(cx, cy, max<int16_t>(8, s / 3 + 3), accent);
-  switch (group) {
-    case 0:
-      d.drawRoundRect(cx - r, cy - r / 2, r * 2, r, 4, accent);
-      d.drawFastHLine(cx - r / 2, cy - 1, r, accent);
-      d.fillCircle(cx - r / 2, cy - r / 2, 2, accent);
-      d.fillCircle(cx + r / 2, cy - r / 2, 2, accent);
-      break;
-    case 1:
-      for (int i = 0; i < 5; ++i) {
-        int h = 4 + ((i * 5 + millis() / 100) % max<int>(5, s / 3));
-        d.fillRoundRect(cx - 10 + i * 5, cy + 8 - h, 3, h, 1, accent);
-      }
-      break;
-    case 2:
-      d.setFont(&fonts::Font2);
-      d.setTextColor(accent, bg);
-      d.setCursor(cx - 10, cy - 6);
-      d.print("25");
-      d.drawArc(cx, cy, max<int16_t>(10, s / 2 - 4), max<int16_t>(7, s / 2 - 8), 35, 310, accent);
-      break;
-    case 3:
-      d.drawLine(cx - 8, cy + 8, cx + 7, cy - 7, accent);
-      d.drawCircle(cx + 7, cy - 7, 4, accent);
-      d.fillCircle(cx - 8, cy + 8, 4, accent);
-      d.fillCircle(cx - 8, cy + 8, 2, bg);
-      break;
-    case 4:
-      d.drawRoundRect(cx - 11, cy - 7, 22, 14, 5, accent);
-      d.drawFastHLine(cx - 8, cy, 7, accent);
-      d.drawFastVLine(cx - 5, cy - 3, 7, accent);
-      d.fillCircle(cx + 5, cy - 2, 2, accent);
-      d.fillCircle(cx + 8, cy + 3, 2, accent);
-      break;
-    case 5:
-      d.drawCircle(cx, cy, r + 2, accent);
-      d.drawFastHLine(cx - r - 2, cy, (r + 2) * 2, accent);
-      d.drawFastVLine(cx, cy - r - 2, (r + 2) * 2, accent);
-      d.fillCircle(cx, cy, 5, accent);
-      break;
-    case 6:
-    default:
-      d.drawRoundRect(cx - r, cy - r / 2, r * 2, r, 4, accent);
-      d.drawFastHLine(cx - r / 2, cy - 2, r, accent);
-      d.drawFastHLine(cx - r / 2, cy + 3, r - 3, accent);
-      d.fillCircle(cx + r / 2, cy, 2, accent);
-      break;
+const uint8_t* launcherItemIcon(const LauncherSubItem& item) {
+  using namespace launcher_icons;
+  switch (item.mode) {
+    case UiMode::Home: return item.startRealtime ? kWaveform : kHeart;
+    case UiMode::ChatFull: return kChat;
+    case UiMode::ChatFace: return kChatEyes;
+    case UiMode::Face: return kEyes;
+    case UiMode::Hero: return kPaw;
+    case UiMode::Library: return kBooks;
+    case UiMode::AudioFolders: return kFolder;
+    case UiMode::Voice: return kMic;
+    case UiMode::Notes: return kNotepad;
+    case UiMode::Assets: return kPicture;
+    case UiMode::Files: return kFile;
+    case UiMode::Radio: return kRadio;
+    case UiMode::VlcRemote: return kCone;
+    case UiMode::Focus:
+    case UiMode::FocusSettings: return kTomato;
+    case UiMode::Alarm: return kBell;
+    case UiMode::Stopwatch: return kStopwatch;
+    case UiMode::Calendar: return kCalendar;
+    case UiMode::ChessMind: return kKnight;
+    case UiMode::Chess: return kPawn;
+    case UiMode::BrainFlow: return kBolt;
+    case UiMode::KeyRush: return kKeyboard;
+    case UiMode::Calculator: return kCalculator;
+    case UiMode::NfcNotes: return kNfc;
+    case UiMode::RfidLab: return kCard;
+    case UiMode::IrRemote: return kRemote;
+    case UiMode::SmartLamp: return kBulb;
+    case UiMode::Sonar: return kSonar;
+    case UiMode::Mesh: return kMesh;
+    case UiMode::PocketSynth: return kPiano;
+    case UiMode::Tetris: return kTetris;
+    case UiMode::Nes: return kNesPad;
+    case UiMode::Checkers: return kCheckers;
+    case UiMode::Minesweeper: return kMine;
+    case UiMode::Snake: return kSnake;
+    case UiMode::AirMusic: return kAirMusic;
+    case UiMode::Flappy: return kBird;
+    case UiMode::Balloon: return kBalloon;
+    case UiMode::BallCatch: return kBallCatch;
+    case UiMode::Settings: return kDevice;
+    case UiMode::ScreenSettings: return kDisplay;
+    case UiMode::WifiSettings: return kWifi;
+    case UiMode::Ota: return kDownload;
+    case UiMode::Logs: return kLog;
+    case UiMode::CMatrix: return kMatrix;
+    default: return nullptr;
   }
 }
 
+// The menu fills the screen: a strip with one tab per group, where the selected tab widens to
+// hold its name, then five rows of that group. The canvas is 8-bit, so every colour here has to
+// stay distinct after RGB332 reduction. Dark tints do not survive it.
 void renderLauncherOverlay() {
   if (!gLauncherVisible) {
     return;
@@ -123,86 +120,72 @@ void renderLauncherOverlay() {
   const LauncherGroup& group = kLauncherGroups[gLauncherSelection];
   gLauncherSubSelection = clampValue<int>(gLauncherSubSelection, 0, group.count - 1);
 
-  const uint16_t bg = rgb565_local(2, 7, 10);
-  const uint16_t panel = rgb565_local(5, 13, 18);
-  const uint16_t rowBg = rgb565_local(8, 17, 23);
-  const uint16_t selectedBg = rgb565_local(14, 31, 39);
-  const uint16_t line = rgb565_local(42, 55, 63);
-  const uint16_t muted = rgb565_local(128, 145, 155);
+  static_assert(sizeof(launcher_icons::kGroups) / sizeof(launcher_icons::kGroups[0]) == kLauncherGroupCount,
+                "launcher_icons::kGroups needs one icon per group");
+  constexpr int16_t kScreenW = 240;
+  constexpr int16_t kTabH = 21;
+  constexpr int16_t kListY = 24;
+  constexpr int16_t kRowH = 22;
+  constexpr int kVisibleRows = 5;
+  constexpr int16_t kRowNumberX = 223;
+  const int16_t iconSize = launcher_icons::kSize;
+  const uint16_t black = TFT_BLACK;
+  const uint16_t white = TFT_WHITE;
+  const uint16_t muted = rgb565_local(109, 109, 85);
+  const uint16_t scrollTrack = rgb565_local(36, 36, 85);
 
-  d.fillRoundRect(5, 4, 230, 121, 8, bg);
-  d.drawRoundRect(5, 4, 230, 121, 8, rgb565_local(48, 54, 61));
-  d.fillRoundRect(10, 7, 220, 16, 5, panel);
+  d.fillScreen(black);
 
-  d.setFont(&fonts::Font2);
-  d.setTextColor(group.accent, panel);
-  d.setCursor(15, 9);
-  d.print(group.title);
-  String page = String(gLauncherSelection + 1) + "/" + String(kLauncherGroupCount);
-  d.setTextColor(muted, panel);
-  d.setCursor(220 - d.textWidth(page), 9);
-  d.print(page);
-
-  const int16_t railX = 10;
-  const int16_t railY = 25;
-  const int16_t railW = 82;
-  const int16_t railH = 10;
-  const int16_t railGap = 1;
-  constexpr int kVisibleGroupRows = 8;
-  int groupWindowStart = clampValue<int>(
-      gLauncherSelection - kVisibleGroupRows + 1, 0,
-      max<int>(0, kLauncherGroupCount - kVisibleGroupRows));
-
-  for (int row = 0; row < min<int>(kVisibleGroupRows, kLauncherGroupCount); ++row) {
-    int idx = groupWindowStart + row;
-    const LauncherGroup& item = kLauncherGroups[idx];
-    const bool isSelected = idx == gLauncherSelection;
-    const int16_t y = railY + row * (railH + railGap);
-    const uint16_t fill = isSelected ? selectedBg : rowBg;
-    d.fillRoundRect(railX, y, railW, railH, 4, fill);
-    d.drawRoundRect(railX, y, railW, railH, 4, isSelected ? item.accent : line);
-
-    d.setFont(&fonts::Font0);
-    d.setTextColor(isSelected ? TFT_WHITE : muted, fill);
-    d.setCursor(railX + 5, y + 1);
-    d.print(String(idx + 1));
-
-    d.setTextColor(isSelected ? item.accent : TFT_LIGHTGREY, fill);
-    d.setCursor(railX + 17, y + 1);
-    d.print(fitCurrentFontToWidth(item.title, railW - 28));
-
-    if (isSelected) {
-      d.fillCircle(railX + railW - 7, y + railH / 2, 3, item.accent);
+  d.setFont(&fonts::FreeSansBold9pt7b);
+  const int16_t selectedTabW = 27 + d.textWidth(group.title);
+  const int16_t otherTabW = (kScreenW - selectedTabW) / (kLauncherGroupCount - 1);
+  int16_t tabX = (kScreenW - selectedTabW - otherTabW * (kLauncherGroupCount - 1)) / 2;
+  for (int i = 0; i < kLauncherGroupCount; ++i) {
+    const uint8_t* icon = launcher_icons::kGroups[i];
+    if (i == gLauncherSelection) {
+      d.fillRoundRect(tabX, 0, selectedTabW, kTabH, 6, group.accent);
+      d.drawBitmap(tabX + 3, 2, icon, iconSize, iconSize, black);
+      d.setTextColor(black);
+      d.setCursor(tabX + 21, 3);
+      d.print(group.title);
+      tabX += selectedTabW;
+    } else {
+      d.drawBitmap(tabX + (otherTabW - iconSize) / 2, 2, icon, iconSize, iconSize, kLauncherGroups[i].accent);
+      tabX += otherTabW;
     }
   }
-  d.setFont(&fonts::Font2);
+  d.drawFastHLine(0, kTabH + 1, kScreenW, group.accent);
 
-  d.fillRoundRect(96,25,134,91,7,panel);
-  d.drawRoundRect(96,25,134,91,7,group.accent);
-  d.setFont(&fonts::Font0);d.setTextColor(group.accent,panel);
-  d.setCursor(102,30);d.print(fitCurrentFontToWidth(group.glyph,116));
-
-  constexpr int kVisibleSubRows = 8;
-  int subWindowStart = clampValue<int>(
-      gLauncherSubSelection - kVisibleSubRows + 1, 0,
-      max<int>(0, group.count - kVisibleSubRows));
-  for (int row = 0; row < min<int>(kVisibleSubRows, group.count); ++row) {
-    int i = subWindowStart + row;
-    const int16_t y = 41 + row * 9;
+  const int first = clampValue<int>(gLauncherSubSelection - kVisibleRows + 1, 0,
+                                    max<int>(0, group.count - kVisibleRows));
+  for (int row = 0; row < min<int>(kVisibleRows, group.count); ++row) {
+    const int i = first + row;
+    const int16_t y = kListY + row * kRowH;
     const bool selected = i == gLauncherSubSelection;
-    const uint16_t fill = selected ? rgb565_local(18, 39, 48) : panel;
+    const LauncherSubItem& item = group.items[i];
+    const uint8_t* icon = launcherItemIcon(item);
     if (selected) {
-      d.fillRoundRect(100, y - 1, 121, 9, 3, fill);
+      d.fillRoundRect(1, y, 233, kRowH - 1, 6, group.accent);
     }
-    d.setFont(&fonts::Font0);
-    d.setTextColor(selected ? TFT_WHITE : TFT_LIGHTGREY, fill);
-    d.setCursor(104, y);
-    d.print(fitCurrentFontToWidth(group.items[i].label, 101));
+    d.drawBitmap(7, y + 2, icon ? icon : launcher_icons::kGroups[gLauncherSelection], iconSize, iconSize,
+                 selected ? black : group.accent);
+    d.setFont(&fonts::FreeSansBold9pt7b);
+    d.setTextColor(selected ? black : white);
+    d.setCursor(30, y + 3);
+    d.print(fitCurrentFontToWidth(item.label, kRowNumberX - 34));
+    // Ctrl+this number opens the row.
+    d.setFont(&fonts::Font2);
+    d.setTextColor(selected ? black : muted);
+    d.setCursor(kRowNumberX, y + 3);
+    d.print(String(i + 1));
   }
-  d.setFont(&fonts::Font2);
 
-  d.fillRoundRect(10, 117, 220, 9, 4, panel);
-  drawTinyFooter(panel, muted, "1-8 group  C+1-8 open  arrows", 15, 118, 210);
+  if (group.count > kVisibleRows) {
+    const int16_t trackH = kVisibleRows * kRowH - 1;
+    const int16_t thumbH = trackH * kVisibleRows / group.count;
+    d.fillRect(236, kListY, 3, trackH, scrollTrack);
+    d.fillRect(236, kListY + (trackH - thumbH) * first / (group.count - kVisibleRows), 3, thumbH, group.accent);
+  }
 }
 
 String batteryEtaText() {
