@@ -28,6 +28,9 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <mbedtls/sha256.h>
+#include <mbedtls/gcm.h>
+#include <esp_efuse.h>
+#include <esp_efuse_table.h>
 
 #ifndef RAW_BUFFER_LENGTH
 #define RAW_BUFFER_LENGTH 180
@@ -98,7 +101,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.221-dev"
+#define APP_VERSION "0.2.222-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"

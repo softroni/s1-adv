@@ -208,7 +208,7 @@ std::vector<int> gPendingTextTurns;
 bool gWifiReady=true,gWsReady=false,gResumeWsAfterVoice=false;
 uint32_t gLastWifiReconnectMs=17;
 constexpr bool kUseHubWebSocket=false; // Unrelated legacy WS feature is off in this fixture.
-String gHubHost="fixture.invalid";
+String gHubHost="fixture.invalid",gWifiSsid="fixture network";
 struct Wifi {
  int status(){++f.statusReads;return f.associated?WL_CONNECTED:0;}
  IPAddress localIP(){return f.hasIP?IPAddress(192,0,2,4):IPAddress(0,0,0,0);}
@@ -272,6 +272,9 @@ void busyGuards(){
  f.associated=false;f.now+=network_recovery::Policy::kCooldownMs+1;gLastWifiReconnectMs=0;
  maintainConnectivity();assert(f.reconnectCalls==0 && f.statusReads==0 && gWifiReady);
  gWifiSettingsHolds=false;
+ gWifiSsid="";f.now+=network_recovery::Policy::kCooldownMs+kWifiReconnectIntervalMs+1;
+ maintainConnectivity();assert(f.reconnectCalls==0);
+ gWifiSsid="fixture network";
  std::puts("PASS actual maintainConnectivity: every busy flag, text worker/queue, setup portal and the Wi-Fi settings screen defer without consuming recovery");
 }
 void stalledAssociated(){

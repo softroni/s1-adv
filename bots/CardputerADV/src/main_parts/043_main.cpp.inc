@@ -1192,7 +1192,7 @@ void maintainConnectivity() {
       logf("[WIFI] disconnected");
     }
     uint32_t now = millis();
-    if (now - gLastWifiReconnectMs >= kWifiReconnectIntervalMs && !gSubmitting && !gRecording) {
+    if (now - gLastWifiReconnectMs >= kWifiReconnectIntervalMs && !gSubmitting && !gRecording && !gWifiSsid.isEmpty()) {
       gLastWifiReconnectMs = now;
       logf("[WIFI] background reconnect attempt");
       WiFi.reconnect(); // Driver schedules reconnect; keyboard/render never wait here.

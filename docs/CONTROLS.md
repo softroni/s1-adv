@@ -30,16 +30,28 @@ and the agent, network and provider latency.
 
 To change network, press Tab, open Settings, then Wi-Fi, or type `/wifi`.
 
-- **Pick a network:** the list shows what's nearby, strongest first. `;` and `.` move, and
-  Enter picks. R looks again. The list only shows 2.4 GHz networks.
+- **Pick a network:** saved networks come first, most recently used at the top, then what's
+  nearby, strongest first. `;` and `.` move, and Enter picks. R looks again. Signal bars show
+  what's in range, and only 2.4 GHz networks appear.
+- **Switch:** Enter on a saved network joins it with no password.
+- **Forget:** F on a saved network, then Enter. Its password is deleted. If it's the network
+  you're on, the device moves to the next saved one.
 - **Type a name:** Other network, at the end of the list, is for a hidden network. Capitals
   count. Leave the password blank for an open network.
 - **Password:** type it and press Enter. Fn+`;` shows or hides it. Fn+`` ` `` goes back,
   because `` ` `` and `~` are typed as part of the password here.
 
-The new network is saved only once the device has joined it, which takes up to 20 seconds.
-Esc cancels. If it can't join, the device goes back to the network it was on and keeps what
-you typed, so you can fix it. The bridge has to be reachable from the new network too.
+A network is saved only once the device has joined it, which takes up to 20 seconds. Esc
+cancels. If it can't join, the device goes back to the network it was on and keeps what you
+typed, so you can fix it. If a saved network's password has changed, it asks for the new one.
+The bridge has to be reachable from the new network too.
+
+Saved networks need an SD card, and any network that connects is saved, including one set from
+the setup portal. They're kept in `/wifi/networks.dat`, so they stay through firmware installs.
+The file is encrypted with a key tied to this Cardputer's chip, so the card alone doesn't give
+up a password, and it can't be read on a computer or by another Cardputer. Without a card the
+device still connects to the last network it used, and it asks you to pick when that isn't
+available.
 
 If the setup screen appears because the old network is gone, press Enter on it to do all of
 this on the device. It restarts once it has joined.

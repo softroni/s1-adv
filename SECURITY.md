@@ -5,6 +5,11 @@ devices need separate private storage and bridge instances. Gateway credentials 
 bridge host. Keep the gateway on loopback; remote devices connect to the bridge
 through verified HTTPS/WSS.
 
+Saved Wi-Fi networks are on the SD card in `/wifi/networks.dat`, sealed with AES-256-GCM. The
+key is derived from this chip's factory IDs, so the file is useless on its own, but someone
+holding both the device and the card can recover them. Wi-Fi passwords are also in the device's
+flash, as they always were.
+
 Private firmware builds can embed Wi-Fi passwords and device tokens. Never
 attach provisioned binaries, `.env`, `bridge/config.json`, `data/`, recordings or
 conversation logs to public issues. Rotate any credential that was disclosed.

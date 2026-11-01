@@ -26,6 +26,7 @@ for file, text in [
     ('048_main.cpp.inc', 'handleWifiSettingsKey(key, keys)'),
     ('061_main.cpp.inc', 'renderWifiSettingsUi();'),
     ('061_main.cpp.inc', 'serviceWifiSettings();'),
+    ('061_main.cpp.inc', 'serviceWifiMemory();'),
     ('063_main.cpp.inc', 'case UiMode::WifiSettings:')]:
     assert text in (parts / file).read_text(), (file, text)
 assert 'main_parts/079_main.cpp.inc' in (src / 'main.cpp').read_text()
@@ -41,6 +42,12 @@ for file, body in [
 # The setup portal draws over every mode, so the Wi-Fi screen must be able to get past it.
 assert 'if (gSetupPortalActive && gUiMode != UiMode::WifiSettings) {\n    renderSetupPortalUi();' \
     in (parts / '060_main.cpp.inc').read_text()
+
+# Portal networks reach the saved list by connecting, not through any change to the portal.
+portal = (parts / '040_main.cpp.inc').read_text()
+portal = portal[:portal.index('String captivePortalTemplateValue(')]
+assert 'wifi_store' not in portal and 'WifiSettings' not in portal
+assert 'saveWifiCreds(ssid, password);' in portal
 
 # On the device these bytes are the password. They go to the driver and to Preferences only.
 app = (parts / '079_main.cpp.inc').read_text()
@@ -76,8 +83,10 @@ struct FakeRadio {
   std::vector<Network> found;
   bool isBusy = false, dialing = true, scanRuns = false, refuseScan = false, stale = false;
   bool failScan = false, neverFinish = false;
-  int holds = 0, scans = 0, stops = 0, joins = 0, rejoins = 0, saves = 0;
+  bool failStore = false;
+  int holds = 0, scans = 0, stops = 0, joins = 0, rejoins = 0, saves = 0, stores = 0, replaces = 0;
   std::string lastJoinName, lastJoinPassword;
+  wifi_store::List card;   // What's on the SD card.
 
   bool online() { return !link.empty(); }
   bool busy() { return isBusy; }
@@ -102,13 +111,27 @@ struct FakeRadio {
   }
   bool joined(const std::string& name) { return link == name || stale; }
   bool notFound() { return !lastJoinName.empty() && air.find(lastJoinName) == air.end(); }
-  void rejoinSaved() {
+  void rejoinCurrent() {
     ++rejoins; dialing = true; link.clear(); stale = false;
     auto it = air.find(savedName);
     if (it != air.end() && it->second == savedPassword) link = savedName;
   }
   void save(const std::string& name, const std::string& password) {
     ++saves; savedName = name; savedPassword = password;
+  }
+  bool isCurrent(const std::string& name) { return savedName == name; }
+  bool store(const wifi_store::List& list) {
+    ++stores;
+    if (failStore) return false;
+    card = list;
+    return true;
+  }
+  void replaceCurrent(const wifi_store::List& list) {
+    ++replaces;
+    savedName.clear(); savedPassword.clear(); link.clear();
+    if (list.empty()) { dialing = false; return; }
+    savedName = list.front().ssid; savedPassword = list.front().password;
+    rejoinCurrent();
   }
 };
 
@@ -223,6 +246,8 @@ void joining() {
   assert(r.radio.saves == 1 && r.radio.savedName == "Cafe" && r.radio.savedPassword == "espresso1");
   assert(r.app.screen == Screen::List && r.app.mood == Mood::Good && !r.app.ownsRadio());
   assert(r.app.message == "Connected to Cafe" && r.app.password.empty());
+  assert(r.radio.stores == 1 && r.radio.card.size() == 1 && r.radio.card[0].ssid == "Cafe");
+  assert(r.radio.card[0].password == "espresso1" && r.app.networks[0].saved && r.app.selected == 0);
   std::cout << "PASS a good join: validated, saved after it connects, draft cleared, radio released\n";
 }
 
@@ -380,6 +405,225 @@ void joinDuringScan() {
   std::cout << "PASS joining stops a scan first\n";
 }
 
+wifi_store::List known() { return {{"Home", "homepassword"}, {"Cafe", "espresso1"}}; }
+
+void savedRows() {
+  auto rows = merge({{"Gone", "password1"}, {"Cafe", "espresso1"}, {"Free", ""}},
+                    {{"Strong", -30, true}, {"Cafe", -60, true}, {"Free", -70, false}});
+  assert(rows.size() == 4);
+  assert(rows[0].ssid == "Gone" && rows[0].saved && !rows[0].inRange && rows[0].secured);
+  assert(rows[1].ssid == "Cafe" && rows[1].saved && rows[1].inRange && rows[1].rssi == -60);
+  assert(rows[2].ssid == "Free" && rows[2].saved && !rows[2].secured);
+  assert(rows[3].ssid == "Strong" && !rows[3].saved && rows[3].inRange);
+
+  // The list is there straight away, before any scan.
+  Rig r;
+  r.app.useSaved(known());
+  assert(r.app.networks.size() == 2 && r.app.networks[0].saved && !r.app.networks[0].inRange);
+  assert(r.app.onSavedRow());
+  r.open();
+  assert(r.app.networks.size() == 3 && r.app.networks[0].inRange && !r.app.networks[2].saved);
+  r.app.selected = 2;
+  assert(!r.app.onSavedRow());
+  r.app.selected = 3;
+  assert(!r.app.onSavedRow());
+  std::cout << "PASS the list: saved first, most recent on top, in or out of range, then nearby\n";
+}
+
+void savedJoin() {
+  Rig r;
+  r.app.useSaved(known());
+  r.open();
+  r.pick("Cafe");
+  assert(r.app.screen == Screen::Joining);  // Straight there, with no password screen.
+  assert(r.radio.lastJoinPassword == "espresso1");
+  r.waitPastSettle();
+  assert(r.radio.saves == 1 && r.radio.savedName == "Cafe" && r.radio.savedPassword == "espresso1");
+  assert(r.app.screen == Screen::List && r.app.password.empty() && r.app.mood == Mood::Good);
+  assert(r.radio.card[0].ssid == "Cafe" && r.radio.card[1].ssid == "Home");  // Most recent first.
+  assert(r.app.networks[0].ssid == "Cafe" && r.app.selected == 0);
+
+  r.pick("Home");
+  r.waitPastSettle();
+  assert(r.radio.link == "Home" && r.radio.card[0].ssid == "Home");  // And back again.
+
+  // Open networks are remembered too, and rejoin the same way.
+  Rig open;
+  open.app.useSaved({{"Open", ""}});
+  open.open();
+  open.pick("Open");
+  assert(open.app.screen == Screen::Joining && open.radio.lastJoinPassword.empty());
+
+  Rig already;
+  already.app.useSaved(known());
+  already.open();
+  already.pick("Home");
+  assert(already.radio.joins == 0 && already.app.screen == Screen::List);
+  assert(already.app.message == "Already on Home");
+  std::cout << "PASS switching between saved networks asks for no password, in either direction\n";
+}
+
+void savedFailures() {
+  // The router's password changed. Ask for the new one, and never show the old one.
+  Rig r;
+  r.app.useSaved({{"Home", "homepassword"}, {"Cafe", "oldpassword"}});
+  r.open();
+  r.pick("Cafe");
+  r.waitOut();
+  assert(r.app.screen == Screen::Password && r.app.password.empty() && r.radio.saves == 0);
+  assert(r.app.message.find("Password changed") != std::string::npos);
+  assert(r.radio.rejoins == 1 && r.radio.link == "Home" && !r.app.ownsRadio());
+  r.app.toggleReveal();
+  assert(r.app.password.empty());  // There's nothing for Fn+; to show.
+  assert(r.app.escape(r.radio) && r.app.screen == Screen::List);
+  r.pick("Cafe");
+  r.waitOut();
+  r.typeIn("espresso1");
+  r.app.enter(r.radio, r.now);
+  r.waitPastSettle();
+  assert(r.radio.card[0].ssid == "Cafe" && r.radio.card[0].password == "espresso1");
+  assert(r.radio.card.size() == 2);
+
+  // A typed attempt after that keeps its text on failure, like any other.
+  Rig typed;
+  typed.app.useSaved({{"Cafe", "oldpassword"}});
+  typed.open();
+  typed.pick("Cafe");
+  typed.waitOut();
+  typed.typeIn("stillwrong");
+  typed.app.enter(typed.radio, typed.now);
+  typed.waitOut();
+  assert(typed.app.screen == Screen::Password && typed.app.password == "stillwrong");
+
+  // Out of range: a retyped password wouldn't help, so back to the list.
+  Rig away;
+  away.app.useSaved({{"Far", "farpassword"}});
+  away.open();
+  assert(!away.app.networks[0].inRange);
+  away.pick("Far");
+  away.waitOut();
+  assert(away.app.screen == Screen::List && away.app.password.empty() && away.radio.saves == 0);
+  assert(away.app.message.find("isn't in range") != std::string::npos);
+  assert(away.radio.card.empty() && away.app.saved.size() == 1);  // Still saved, for later.
+
+  Rig cancel;
+  cancel.app.useSaved(known());
+  cancel.open();
+  cancel.pick("Cafe");
+  assert(cancel.app.escape(cancel.radio));
+  assert(cancel.app.screen == Screen::List && cancel.app.password.empty() && cancel.radio.saves == 0);
+
+  Rig busyRig;
+  busyRig.app.useSaved(known());
+  busyRig.open();
+  busyRig.radio.isBusy = true;
+  busyRig.pick("Cafe");
+  assert(busyRig.radio.joins == 0 && busyRig.app.password.empty() && busyRig.app.screen == Screen::List);
+
+  Rig left;
+  left.app.useSaved(known());
+  left.open();
+  left.pick("Cafe");
+  left.app.close(left.radio);
+  assert(left.app.saved.empty() && left.app.password.empty() && left.radio.rejoins == 1);
+
+  // Connected, and the card refused. The network still works, and the screen says what happened.
+  Rig noCard;
+  noCard.radio.failStore = true;
+  noCard.open();
+  noCard.pick("Cafe");
+  noCard.typeIn("espresso1");
+  noCard.app.enter(noCard.radio, noCard.now);
+  noCard.waitPastSettle();
+  assert(noCard.radio.saves == 1 && noCard.radio.link == "Cafe" && noCard.app.mood == Mood::Bad);
+  assert(noCard.app.message.find("not saved to SD") != std::string::npos);
+  std::cout << "PASS saved networks that fail: old password never shown, kept for later, nothing lost\n";
+}
+
+void forgetting() {
+  Rig r;
+  r.app.useSaved(known());
+  r.radio.card = known();
+  r.open();
+  r.app.selected = 1;
+  r.app.askForget();
+  assert(r.app.screen == Screen::Forget && r.app.name == "Cafe" && r.app.takesAllKeys());
+  assert(r.app.escape(r.radio) && r.app.screen == Screen::List && r.radio.stores == 0);
+  assert(r.app.saved.size() == 2);  // Backing out changes nothing.
+  r.app.selected = 1;
+  r.app.askForget();
+  r.app.confirmForget(r.radio);
+  assert(r.radio.card.size() == 1 && r.radio.card[0].ssid == "Home" && r.app.saved.size() == 1);
+  assert(r.radio.link == "Home" && r.radio.replaces == 0 && r.app.message == "Forgot Cafe");
+  assert(r.app.screen == Screen::List && r.app.name.empty());
+  assert(r.app.networks[0].ssid == "Home" && r.app.networks[1].ssid == "Cafe" && !r.app.networks[1].saved);
+
+  // Only saved rows can be forgotten.
+  r.app.selected = 1;
+  r.app.askForget();
+  assert(r.app.screen == Screen::List);
+  r.app.selected = r.app.networks.size();
+  r.app.askForget();
+  assert(r.app.screen == Screen::List);
+
+  // Forgetting the one you're on moves to the next saved one.
+  Rig onIt;
+  onIt.app.useSaved(known());
+  onIt.open();
+  onIt.app.selected = 0;
+  onIt.app.askForget();
+  onIt.app.confirmForget(onIt.radio);
+  assert(onIt.radio.replaces == 1 && onIt.radio.savedName == "Cafe" && onIt.radio.link == "Cafe");
+  assert(onIt.radio.savedPassword == "espresso1" && !onIt.app.ownsRadio());
+  assert(!wifi_store::find(onIt.radio.card, "Home"));
+
+  // And the last one leaves nothing configured, so it can't come back at the next connection.
+  Rig last;
+  last.app.useSaved({{"Home", "homepassword"}});
+  last.open();
+  last.app.selected = 0;
+  last.app.askForget();
+  last.app.confirmForget(last.radio);
+  assert(last.radio.card.empty() && last.radio.savedName.empty() && last.radio.savedPassword.empty());
+  assert(last.radio.link.empty() && last.radio.replaces == 1);
+
+  // Offline and held: forgetting releases the radio.
+  Rig held;
+  held.radio.link.clear();
+  held.app.useSaved(known());
+  held.open();
+  assert(held.app.ownsRadio());
+  held.app.selected = 0;
+  held.app.askForget();
+  held.app.confirmForget(held.radio);
+  assert(!held.app.ownsRadio() && held.radio.rejoins == 1);
+
+  // The card is what counts: if it refuses, nothing else changes.
+  Rig failed;
+  failed.radio.failStore = true;
+  failed.app.useSaved(known());
+  failed.open();
+  failed.app.selected = 0;
+  failed.app.askForget();
+  failed.app.confirmForget(failed.radio);
+  assert(failed.app.saved.size() == 2 && failed.radio.replaces == 0 && failed.radio.savedName == "Home");
+  assert(failed.app.mood == Mood::Bad && failed.app.screen == Screen::List);
+
+  // A running request keeps its link.
+  Rig working;
+  working.app.useSaved(known());
+  working.open();
+  working.radio.isBusy = true;
+  working.app.selected = 0;
+  working.app.askForget();
+  working.app.confirmForget(working.radio);
+  assert(working.app.saved.size() == 2 && working.radio.stores == 0 && working.radio.link == "Home");
+  assert(working.app.screen == Screen::Forget && working.app.mood == Mood::Bad);
+  working.radio.isBusy = false;
+  working.app.selected = 1;
+  std::cout << "PASS forgetting: confirmed first, card updated, the current network handed over\n";
+}
+
 void fields() {
   Rig r;
   r.open();
@@ -429,6 +673,10 @@ int main() {
   backingOut();
   busy();
   joinDuringScan();
+  savedRows();
+  savedJoin();
+  savedFailures();
+  forgetting();
   fields();
 }
 '''

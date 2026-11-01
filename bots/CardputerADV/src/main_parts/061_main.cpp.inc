@@ -447,6 +447,7 @@ void loop() {
   }
 
   serviceWifiSettings();
+  serviceWifiMemory();
   traceUiService("serviceDeferredBoot", [] { serviceDeferredBoot(); });
   if (bootBackgroundAllowsConnectivity()) {
     traceUiService("maintainConnectivity", [] { maintainConnectivity(); });

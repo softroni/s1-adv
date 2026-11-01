@@ -512,6 +512,7 @@ void renderNfcNotesUi();
 void beginWifiSettings();
 void stopWifiSettings();
 void serviceWifiSettings();
+void serviceWifiMemory();
 bool wifiSettingsOwnsRadio();
 bool wifiSettingsTyping();
 bool wifiSettingsTakesAllKeys();
