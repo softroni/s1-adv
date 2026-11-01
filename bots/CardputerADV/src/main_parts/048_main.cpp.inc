@@ -143,6 +143,7 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
   if (gUiMode == UiMode::Checkers && handleCheckersDemoKey(key, keys)) return;
   if (gUiMode == UiMode::Minesweeper && handleMinesweeperKey(key, keys)) return;
   if (gUiMode == UiMode::Snake && handleSnakeKey(key, keys)) return;
+  if (gUiMode == UiMode::AirMusic) return;  // Played by hand. Stray keys shouldn't start a chat.
   if (gUiMode == UiMode::NfcNotes && handleNfcNotesKey(key, keys)) return;
   if (gUiMode == UiMode::Radio && handleInternetRadioKey(key, keys)) return;
   if (gUiMode == UiMode::VlcRemote && handleVlcRemoteKey(key, keys)) return;

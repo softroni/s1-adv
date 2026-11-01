@@ -187,6 +187,7 @@ enum class UiMode : uint8_t {
   Mesh,
   Minesweeper,
   Snake,
+  AirMusic,
   NfcNotes,
   Radio,
   VlcRemote,

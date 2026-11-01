@@ -15,6 +15,7 @@
 - `/settings` opens device settings; `/ota` opens firmware update review.
 - `/calc`, `/alarm`, `/stopwatch`, `/assets` and `/library` open local tools.
 - `/nfc` opens NFC Notes, which reads tags and saves a name or note on them.
+- `/music` opens Air Music, which plays notes as you wave a hand over an ultrasonic unit.
 
 This firmware has evolved across development versions. Prefer the command help
 on your built device for current shortcuts. Specialized IR, RFID and sonar
@@ -32,6 +33,14 @@ NFC Notes is under Tab, Tools, and `/nfc` opens it. It needs the M5Stack NFC uni
   on the unit. The app reads the note back to check it, and says so.
 - Esc cancels a save, then clears what you typed, then leaves the app.
 - Fn with `;` or `.` scrolls a long note.
+
+## Air Music
+
+Air Music is under Tab, Games, and `/music` opens it. It needs the M5Stack I2C ultrasonic
+unit (address 0x57) on the Grove port.
+
+Hold a hand 4 to 44 cm above the sensor. Closer is higher, and there are ten notes, each
+about 4 cm apart. Move away to stop. Esc leaves.
 
 Realtime shows CONNECT, LISTEN, THINK, SPEAK, READY or ERROR above the large eyes.
 MIC ON and the input meter appear only during recording. Connection errors remain

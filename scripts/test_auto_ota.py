@@ -20,7 +20,7 @@ template<class T>bool deferInternetRadioMode(T){return false;}
 #include <string>
 #include <vector>
 struct String:std::string {using std::string::string;String(const std::string&s):std::string(s){}bool isEmpty()const{return empty();}};
-enum class UiMode{Home,ChatFace,Face,Hero,ChatFull,Ota,Clock,Focus,Settings,FocusSettings,ScreenSettings,Nes,Sonar,RfidLab,IrRemote,NfcNotes,Tetris,KeyRush,BrainFlow,Files,Chess,Checkers,Minesweeper,Snake,Radio,VlcRemote};UiMode gUiMode=UiMode::Home;
+enum class UiMode{Home,ChatFace,Face,Hero,ChatFull,Ota,Clock,Focus,Settings,FocusSettings,ScreenSettings,Nes,Sonar,RfidLab,IrRemote,NfcNotes,Tetris,KeyRush,BrainFlow,Files,Chess,Checkers,Minesweeper,Snake,AirMusic,Radio,VlcRemote};UiMode gUiMode=UiMode::Home;
 namespace brainflow {enum class Phase {Menu,Playing,Feedback,Paused,Finished};}
 struct{brainflow::Phase phase=brainflow::Phase::Menu;}gBrainFlow;
 struct{bool running=false;}gKeyRush;
@@ -127,6 +127,7 @@ int main(){
  gUiMode=UiMode::Checkers;assert(!autoInboxPollAllowed());
  gUiMode=UiMode::Minesweeper;assert(!autoInboxPollAllowed());
  gUiMode=UiMode::Snake;assert(!autoInboxPollAllowed());
+ gUiMode=UiMode::AirMusic;assert(!autoInboxPollAllowed());
  gUiMode=UiMode::NfcNotes;assert(!autoInboxPollAllowed());
  // Active games and timing-sensitive peripherals also suppress background work.
  for(auto m:{UiMode::Settings,UiMode::FocusSettings,UiMode::ScreenSettings}){gUiMode=m;assert(autoInboxPollAllowed());}

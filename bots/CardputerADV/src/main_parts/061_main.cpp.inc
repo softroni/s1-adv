@@ -17,6 +17,9 @@
       case UiMode::Snake:
         renderSnakeUi();
         break;
+      case UiMode::AirMusic:
+        renderAirMusicUi();
+        break;
       case UiMode::NfcNotes:
         renderNfcNotesUi();
         break;
@@ -453,6 +456,7 @@ void loop() {
   serviceMinesweeper();
   serviceSnake();
   serviceNfcNotes();
+  serviceAirMusic();  // After NFC Notes, which gives up the Grove port from its service.
   serviceBrainFlow();
   serviceTetris();
   serviceSmartLamp();

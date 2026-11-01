@@ -300,12 +300,15 @@ void setUiMode(UiMode mode) {
     gFileDelete.cancel();
     if (gUiMode == UiMode::Files) std::vector<SdFileEntry>().swap(gFileEntries);
   }
+  // Right away, not from its service, because the next app may want the Grove port.
+  if (modeChanged && gUiMode == UiMode::AirMusic) stopAirMusic();
   gUiMode = mode;
   if (modeChanged && mode == UiMode::Files) refreshFileManager();
   if (modeChanged && mode == UiMode::Chess) beginChessDemo();
   if (modeChanged && mode == UiMode::Checkers) beginCheckersDemo();
   if (modeChanged && mode == UiMode::Minesweeper) beginMinesweeper();
   if (modeChanged && mode == UiMode::Snake) beginSnake();
+  if (modeChanged && mode == UiMode::AirMusic) beginAirMusic();
   if (modeChanged && mode == UiMode::NfcNotes) beginNfcNotes();
   if (modeChanged && mode == UiMode::Radio) beginInternetRadio();
   if (modeChanged && mode == UiMode::VlcRemote) beginVlcRemote();

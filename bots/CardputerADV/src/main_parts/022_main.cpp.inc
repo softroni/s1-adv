@@ -241,6 +241,8 @@ bool mapActionUiMode(String mode, UiMode& out) {
     out = UiMode::Minesweeper;
   } else if (mode == "snake") {
     out = UiMode::Snake;
+  } else if (mode == "air_music" || mode == "music") {
+    out = UiMode::AirMusic;
   } else if (mode == "folders") {
     out = UiMode::AudioFolders;
   } else if (mode == "notes" || mode == "note" || mode == "notepad") {

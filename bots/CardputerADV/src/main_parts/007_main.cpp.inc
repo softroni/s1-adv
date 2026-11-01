@@ -66,6 +66,8 @@ const char* uiModeName(UiMode mode) {
       return "Tetris";
     case UiMode::Snake:
       return "Snake";
+    case UiMode::AirMusic:
+      return "Air Music";
     case UiMode::NfcNotes:
       return "NFC Notes";
     case UiMode::CMatrix:

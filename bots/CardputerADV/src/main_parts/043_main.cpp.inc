@@ -1375,6 +1375,10 @@ bool handleLocalCommand(const String& input) {
     setUiMode(UiMode::NfcNotes);
     return true;
   }
+  if (cmd == "/music") {
+    setUiMode(UiMode::AirMusic);
+    return true;
+  }
 
   if (cmd == "/nes") { setUiMode(UiMode::Nes); return true; }
   if (cmd == "/tetris" || cmd == "/game") {

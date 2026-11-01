@@ -47,6 +47,13 @@ On the Sonar screen, press `M` to switch between the large Proximity view and
 the animated Radar view. Radar plots the measured range on the fixed forward
 bearing; a single stationary HC-SR04 cannot determine left/right angle.
 
+## Air Music
+
+**Air Music** works with the M5Stack I2C ultrasonic unit (RCWL-9620, address 0x57), plugged
+into the Grove port. Open it from Games in the launcher, or type `/music` in chat. It is a
+different sensor from the HC-SR04 that Sonar uses, and only one app can use the Grove port
+at a time. Air Music and NFC Notes each release it when they close.
+
 ## NFC Notes
 
 **NFC Notes** works with the M5Stack NFC unit (ST25R3916), plugged into the Grove port.

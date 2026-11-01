@@ -211,8 +211,13 @@ bool playUpdateChime() {
                                    release_delivery::kChimeRate,false,1,0);
 }
 
+bool focusToneAllowed() {
+  return !(radioBusy() || synthAudioBusy() || gRecording || gSubmitting || gThinking || gPlaybackActive ||
+           gRealtimeActive || gRealtimeExclusiveMode);
+}
+
 void focusTone(uint16_t freq, uint16_t durationMs) {
-  if (radioBusy() || synthAudioBusy() || gRecording || gSubmitting || gThinking || gPlaybackActive || gRealtimeActive || gRealtimeExclusiveMode) {
+  if (!focusToneAllowed()) {
     return;
   }
   M5Cardputer.Speaker.tone(freq, durationMs);
