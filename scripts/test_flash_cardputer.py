@@ -142,7 +142,10 @@ with tempfile.TemporaryDirectory() as temp:
     assert done.writes == 1
     assert '--chip esp32s3' in done.calls and f'write_flash 0x0 {done.flash}/release/{IMAGE}' in done.calls
     assert done.clipboard == TOKEN
-    assert URL in done.output and 'Connected. Firmware 0.2.201-dev' in done.output
+    assert f'Replace the Bridge URL with:  {URL}' in done.output and '$TOKEN_HELP' not in done.output
+    assert 'Device token:                 Paste it from the clipboard' in done.output
+    assert 'bad substitution' not in done.output
+    assert 'Connected. Firmware 0.2.201-dev' in done.output
     assert 'Done. Send this from the Cardputer' in done.output
     assert TOKEN not in (done.flash / 'flash.log').read_text()
     assert stat.S_IMODE((done.flash / 'flash.log').stat().st_mode) == 0o600
@@ -153,12 +156,12 @@ with tempfile.TemporaryDirectory() as temp:
     assert fresh.code == 0, fresh.output
     assert fresh.writes == 1
     assert (fresh.flash / 'release' / IMAGE).read_bytes() == FIRMWARE
-    assert 'https://other.example.com' in fresh.output
+    assert 'Replace the Bridge URL with:  https://other.example.com' in fresh.output
     assert "['device_token']" in fresh.output and fresh.clipboard == ''
     assert 'Waiting for the Cardputer' not in fresh.output
 
     unknown = Case(base, 'unknown', config=False).run()
-    assert unknown.code == 0 and "your bridge's https address" in unknown.output
+    assert unknown.code == 0 and "Replace the Bridge URL with:  your bridge's https address" in unknown.output
 
     noclip = Case(base, 'noclip').run(no_clipboard=True)
     assert noclip.code == 0, noclip.output

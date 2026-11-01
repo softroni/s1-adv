@@ -199,6 +199,9 @@ flash_image() {
 }
 
 show_setup_steps() {
+  # Set here, not in the heredoc: bash 3.2 on macOS breaks on an apostrophe there.
+  local bridge="$BRIDGE_URL"
+  [ -n "$bridge" ] || bridge="your bridge's https address"
   say "Flashed. Finish on the setup page:"
   cat <<EOF
 
@@ -206,7 +209,7 @@ show_setup_steps() {
   2. Join that Wi-Fi network from this computer or your phone.
   3. Open http://192.168.4.1/
   4. Choose your 2.4 GHz Wi-Fi and enter its password.
-  5. Replace the Bridge URL with:  ${BRIDGE_URL:-your bridge's https address}
+  5. Replace the Bridge URL with:  $bridge
   6. Device token:                 $TOKEN_HELP
   7. Click "Save and restart".
   8. Switch this computer back to your normal Wi-Fi.
