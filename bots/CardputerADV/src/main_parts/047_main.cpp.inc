@@ -48,7 +48,7 @@ void cycleAudioLanguage(int delta) {
 }
 
 bool returnToSettingsHub() {
-  if (!isSettingsMode(gUiMode) || gLauncherVisible) return false;
+  if ((!isSettingsMode(gUiMode) && gUiMode != UiMode::WifiSettings) || gLauncherVisible) return false;
   const UiMode previous=gUiMode;
   setUiMode(UiMode::Home);
   syncLauncherToMode(previous);
@@ -2070,6 +2070,7 @@ bool handleKeyRushKey(char key, const Keyboard_Class::KeysState& keys) {
 bool handleGlobalEscape() {
   if (handleMeshEscape()) return true;
   if (gUiMode == UiMode::NfcNotes && !gLauncherVisible && cancelNfcNotes()) return true;
+  if (gUiMode == UiMode::WifiSettings && !gLauncherVisible && wifiSettingsEscape()) return true;
 
   if (gUiMode == UiMode::Files && !gLauncherVisible) {
     return handleFileManagerKey(27, gKeyboardState);

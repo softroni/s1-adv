@@ -167,6 +167,7 @@ enum class UiMode : uint8_t {
   Settings,
   FocusSettings,
   ScreenSettings,
+  WifiSettings,
   Calculator,
   Alarm,
   Stopwatch,

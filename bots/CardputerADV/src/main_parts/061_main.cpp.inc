@@ -85,6 +85,9 @@
       case UiMode::ScreenSettings:
         renderSettingsUi();
         break;
+      case UiMode::WifiSettings:
+        renderWifiSettingsUi();
+        break;
       case UiMode::Calculator:
         renderCalculatorUi();
         break;
@@ -443,6 +446,7 @@ void loop() {
     ESP.restart();
   }
 
+  serviceWifiSettings();
   traceUiService("serviceDeferredBoot", [] { serviceDeferredBoot(); });
   if (bootBackgroundAllowsConnectivity()) {
     traceUiService("maintainConnectivity", [] { maintainConnectivity(); });

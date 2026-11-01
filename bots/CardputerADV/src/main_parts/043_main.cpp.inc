@@ -1150,18 +1150,26 @@ void handleHostSerialInput() {
   }
 }
 
+bool networkWorkIdle() {
+  return !gG0VoicePending && !gRecording &&
+      !gSubmitting && !gThinking && !gPlaybackActive && !gRealtimeActive &&
+      !gPendingRealtimeStart && !gRealtimeDialBusy && !gInboxHttpBusy &&
+      !gVoiceDialBusy && !gVoiceReplySpeechBusy && !gOtaApplyInProgress &&
+      !gTransferUiActive && gTextTurnTaskHandle == nullptr && gPendingTextTurns.empty();
+}
+
 void maintainConnectivity() {
   if (gSetupPortalActive) {
     serviceSetupPortal();
     return;
   }
+  // Holding the radio is the point here: a reconnect would stop the scan or the join.
+  if (wifiSettingsOwnsRadio()) {
+    return;
+  }
 
   bool wifiNow = WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0);
-  const bool idleForRecovery = !gBootBackgroundActive && !gG0VoicePending && !gRecording &&
-      !gSubmitting && !gThinking && !gPlaybackActive && !gRealtimeActive &&
-      !gPendingRealtimeStart && !gRealtimeDialBusy && !gInboxHttpBusy &&
-      !gVoiceDialBusy && !gVoiceReplySpeechBusy && !gOtaApplyInProgress &&
-      !gTransferUiActive && gTextTurnTaskHandle == nullptr && gPendingTextTurns.empty();
+  const bool idleForRecovery = !gBootBackgroundActive && networkWorkIdle();
   if (gNetworkRecovery.takeReconnect(millis(), idleForRecovery, wifiNow)) {
     // A radio can remain associated while all TCP sends time out. Do not
     // treat WL_CONNECTED as proof that this transport still makes progress.
@@ -1243,7 +1251,12 @@ bool handleLocalCommand(const String& input) {
     return true;
   }
 
-  if (cmd == "/setup" || cmd == "setup" || cmd == "setup.portal" || cmd == "/wifi" || cmd == "wifi" ||
+  if (cmd == "/wifi" || cmd == "wifi") {
+    setUiMode(UiMode::WifiSettings);
+    return true;
+  }
+
+  if (cmd == "/setup" || cmd == "setup" || cmd == "setup.portal" ||
       cmd == "/provision" || cmd == "provision") {
     startSetupPortal("local-command");
     setUiMode(UiMode::Home);

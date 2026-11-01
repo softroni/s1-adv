@@ -268,7 +268,11 @@ void busyGuards(){
  reset();gNetworkRecovery.streamLost(0);gSetupPortalActive=true;
  maintainConnectivity();assert(f.portalCalls==1 && f.statusReads==0 && f.reconnectCalls==0);
  gSetupPortalActive=false;maintainConnectivity();assertScheduledOnce();
- std::puts("PASS actual maintainConnectivity: every busy flag, text worker/queue and setup portal defer without consuming recovery");
+ gWifiSettingsHolds=true;gWifiReady=true;gNetworkRecovery.streamLost(f.now);f.statusReads=0;f.reconnectCalls=0;
+ f.associated=false;f.now+=network_recovery::Policy::kCooldownMs+1;gLastWifiReconnectMs=0;
+ maintainConnectivity();assert(f.reconnectCalls==0 && f.statusReads==0 && gWifiReady);
+ gWifiSettingsHolds=false;
+ std::puts("PASS actual maintainConnectivity: every busy flag, text worker/queue, setup portal and the Wi-Fi settings screen defer without consuming recovery");
 }
 void stalledAssociated(){
  reset();threeFailures(gNetworkRecovery,0);f.now=999;
@@ -340,6 +344,8 @@ def main():
     if not interval:
         raise SystemExit('Wi-Fi reconnect interval declaration changed; review the extraction.')
     code = CPP + CPP_INTEGRATION + interval.group() + '\n'
+    code += 'bool gWifiSettingsHolds=false;bool wifiSettingsOwnsRadio(){return gWifiSettingsHolds;}\n'
+    code += extract_function(source, 'bool networkWorkIdle()')
     code += extract_function(source, 'void maintainConnectivity()') + CPP_INTEGRATION_TESTS
     with tempfile.TemporaryDirectory(prefix='s1-network-recovery-') as directory:
         cpp = Path(directory) / 'test.cpp'

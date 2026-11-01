@@ -11,6 +11,18 @@ bool handleFocusShortcut(char lowerKey,const Keyboard_Class::KeysState& keys) {
 
 void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
   char lowerKey = static_cast<char>(tolower(static_cast<unsigned char>(key)));
+  // This screen hides every other mode, so Enter is the way off it from the device.
+  if (gSetupPortalActive && !gSetupPortalSaved && gUiMode != UiMode::WifiSettings &&
+      (keys.enter || key == '\r' || key == '\n')) {
+    setUiMode(UiMode::WifiSettings);
+    return;
+  }
+  // Ahead of the diagnostics and the shortcuts: these keys are a password, and any of them
+  // can be text. Tab stays free, so the menu is still a way out.
+  if (wifiSettingsTakesAllKeys() && !gLauncherVisible && !keys.tab) {
+    handleWifiSettingsKey(key, keys);
+    return;
+  }
   if (gUiMode==UiMode::BrainFlow &&
       (keys.tab || (keys.ctrl && (lowerKey=='l'||lowerKey=='r'||lowerKey=='v')))) pauseBrainFlow();
   setKeyDiag(String("key=") + String(static_cast<int>(key)));
@@ -147,6 +159,7 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
   if (gUiMode == UiMode::Flappy && handleFlappyKey(key, keys)) return;
   if (gUiMode == UiMode::Balloon && handleBalloonKey(key, keys)) return;
   if (gUiMode == UiMode::NfcNotes && handleNfcNotesKey(key, keys)) return;
+  if (gUiMode == UiMode::WifiSettings && handleWifiSettingsKey(key, keys)) return;
   if (gUiMode == UiMode::Radio && handleInternetRadioKey(key, keys)) return;
   if (gUiMode == UiMode::VlcRemote && handleVlcRemoteKey(key, keys)) return;
   if (gUiMode == UiMode::ChessMind && handleChessMindKey(key, keys)) return;
@@ -309,7 +322,10 @@ void pollTyping() {
   }
   char curWordChar = keys.word.empty() ? 0 : keys.word[0];
   bool charDown = !wordSignature.isEmpty() && wordSignature != pWordSignature;
-  bool escDown = (escHeld && !pEsc) || (charDown && (curWordChar == '`' || curWordChar == '~'));
+  // A password can hold these two. Fn+` is still Esc there.
+  const bool backtickIsText = wifiSettingsTyping() && !gLauncherVisible && !keys.fn;
+  bool escDown = (escHeld && !pEsc) ||
+                 (charDown && !backtickIsText && (curWordChar == '`' || curWordChar == '~'));
   bool tabPrevCombo = keys.tab && (leftDown || upDown ||
                                    (charDown && (curWordChar == ',' || curWordChar == ';' || curWordChar == '<')));
   bool tabNextCombo = keys.tab && (rightDown || downDown ||

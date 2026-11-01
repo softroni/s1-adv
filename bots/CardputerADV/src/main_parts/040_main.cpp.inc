@@ -379,6 +379,10 @@ bool ensureWifi() {
 }
 
 bool ensureWifiForHttp(const char* reason, uint32_t timeoutMs) {
+  // Dialing the saved network here would undo a switch that's under way.
+  if (wifiSettingsOwnsRadio()) {
+    return false;
+  }
   if (gWifiSsid.isEmpty()) {
     activateTemporaryMidaWifi("http-missing-wifi");
   }
@@ -549,6 +553,11 @@ void beginDeferredWifi() {
 
 void serviceDeferredBoot() {
   if (!gBootBackgroundActive || gOtaBootApplyMode) {
+    return;
+  }
+  // Someone is choosing a network. Don't dial the saved one or give up on it meanwhile.
+  if (wifiSettingsOwnsRadio() && (gBootBackgroundStep == 6 || gBootBackgroundStep == 7)) {
+    gBootWifiStartMs = millis();
     return;
   }
   switch (gBootBackgroundStep) {

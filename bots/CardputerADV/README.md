@@ -15,6 +15,7 @@ The project began with OmniBot; see [Credits](../../CREDITS.md) for its origin.
 - Firmware: ESP32-S3, 8 MB flash, dual OTA partitions.
 - Transport: your bridge, authenticated HTTP/WebSocket, HTTPS/WSS for remote use.
 - First boot: Wi-Fi setup portal, or your private compile-time provisioning.
+- Later: Settings > Wi-Fi or `/wifi` changes network on the device.
 - Chat: keyboard text and ordinary push-to-talk with bridge-side STT/TTS.
 - Offline: focus timer, notes, calculator, clocks, pet and games.
 

@@ -29,7 +29,7 @@
     moveLauncherSelection(-1);
   } else if (gLauncherVisible && downDown) {
     moveLauncherSelection(1);
-  } else if ((gUiMode == UiMode::Mesh || gUiMode == UiMode::NfcNotes) && (upDown || downDown)) {
+  } else if ((gUiMode == UiMode::Mesh || gUiMode == UiMode::NfcNotes || gUiMode == UiMode::WifiSettings) && (upDown || downDown)) {
     handleTypingKey(upDown ? char(1) : char(2),keys);
   } else if (gUiMode == UiMode::Files && (upDown || downDown || leftDown || rightDown)) {
     handleTypingKey((upDown || leftDown) ? ',' : '.', keys);
@@ -92,7 +92,7 @@
     handleTypingKey('\b', keys);
   } else if (charDown) {
     handleTypingKey(curWordChar, keys);
-  } else if (keys.fn || keys.ctrl || keys.alt || keys.opt) {
+  } else if ((keys.fn || keys.ctrl || keys.alt || keys.opt) && !wifiSettingsTyping()) {
     setKeyDiag("mods=" + keyboardSignatureFromState());
   }
 

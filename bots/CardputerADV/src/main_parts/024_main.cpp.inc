@@ -304,6 +304,7 @@ void setUiMode(UiMode mode) {
   if (modeChanged && gUiMode == UiMode::AirMusic) stopAirMusic();
   if (modeChanged && gUiMode == UiMode::Flappy) stopFlappy();
   if (modeChanged && gUiMode == UiMode::Balloon) stopBalloon();
+  if (modeChanged && gUiMode == UiMode::WifiSettings) stopWifiSettings();
   gUiMode = mode;
   if (modeChanged && mode == UiMode::Files) refreshFileManager();
   if (modeChanged && mode == UiMode::Chess) beginChessDemo();
@@ -314,6 +315,7 @@ void setUiMode(UiMode mode) {
   if (modeChanged && mode == UiMode::Flappy) beginFlappy();
   if (modeChanged && mode == UiMode::Balloon) beginBalloon();
   if (modeChanged && mode == UiMode::NfcNotes) beginNfcNotes();
+  if (modeChanged && mode == UiMode::WifiSettings) beginWifiSettings();
   if (modeChanged && mode == UiMode::Radio) beginInternetRadio();
   if (modeChanged && mode == UiMode::VlcRemote) beginVlcRemote();
   if (modeChanged && mode == UiMode::ChessMind) beginChessMind();

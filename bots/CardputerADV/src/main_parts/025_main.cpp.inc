@@ -57,6 +57,11 @@ bool setupKeyboardInput() {
 void refreshKeyboardState() {
   // M5Cardputer.update() has already advanced the built-in keyboard reader.
   gKeyboardState = M5Cardputer.Keyboard.keysState();
+  // The key log can be uploaded, and this would write a password into it.
+  if (wifiSettingsTakesAllKeys()) {
+    gLastKeySignature = "";
+    return;
+  }
   String sig = keyboardSignatureFromState();
   if (sig != gLastKeySignature) {
     gLastKeySignature = sig;

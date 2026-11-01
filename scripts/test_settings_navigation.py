@@ -40,8 +40,12 @@ code+=r'''
 int main(){
  int settingsGroups=0,settingsEntries=0;
  for(const auto&g:kLauncherGroups){for(int i=0;i<g.count;++i)if(isSettingsMode(g.items[i].mode)){++settingsEntries;assert(std::strcmp(g.title,"Settings")==0);}
- if(std::strcmp(g.title,"Settings")==0){++settingsGroups;assert(g.count==3);}}
+ if(std::strcmp(g.title,"Settings")==0){++settingsGroups;assert(g.count==4);}}
  assert(settingsGroups==1&&settingsEntries==3&&kLauncherMaxSubItems==8);
+ gUiMode=UiMode::WifiSettings;gLauncherVisible=false;
+ assert(!isSettingsMode(gUiMode)&&!handleSettingsNavigation(false,false,true,false)&&adjusted==0);
+ assert(returnToSettingsHub()&&gUiMode==UiMode::Home&&lastHub==UiMode::WifiSettings&&gLauncherVisible);
+ gLauncherVisible=false;
  for(auto m:{UiMode::Settings,UiMode::ScreenSettings,UiMode::FocusSettings}){
   gUiMode=m;gLauncherVisible=false;gSelectedSetting=0;adjusted=0;
   assert(handleSettingsNavigation(true,false,false,false)&&gSelectedSetting==10);
@@ -61,4 +65,4 @@ with tempfile.TemporaryDirectory(prefix='s1-settings-') as d:
  out=Path(d);(out/'test.cpp').write_text(code)
  subprocess.run([os.environ.get('CXX','c++'),'-std=c++17','-Wall','-Wextra','-Werror',str(out/'test.cpp'),'-o',str(out/'test')],check=True)
  subprocess.run([str(out/'test')],check=True)
-print('PASS actual Settings hub: exactly one registry, three sections, arrows select/edit consistently, Esc returns to hub; SmartLamp retains the same controls')
+print('PASS actual Settings hub: exactly one registry, four sections, arrows select/edit consistently, Esc returns to hub; SmartLamp retains the same controls')

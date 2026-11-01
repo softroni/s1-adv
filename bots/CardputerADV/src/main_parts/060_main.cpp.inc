@@ -322,7 +322,7 @@ void renderSetupPortalUi() {
   d.setFont(&fonts::Font0);
   d.setTextColor(rgb565_local(132, 157, 171), panel);
   d.setCursor(18, 112);
-  d.print(gSetupPortalSaved ? "saved, restarting" : "Wi-Fi + bridge credentials");
+  d.print(gSetupPortalSaved ? "saved, restarting" : "Enter: join Wi-Fi from here");
   presentUiFrame();
 }
 
@@ -344,7 +344,7 @@ void render() {
     // scene does not repaint even a footer or network indicator over a menu.
     return;
   }
-  if (gSetupPortalActive) {
+  if (gSetupPortalActive && gUiMode != UiMode::WifiSettings) {
     renderSetupPortalUi();
     return;
   }

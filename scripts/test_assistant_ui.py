@@ -28,7 +28,7 @@ struct String:std::string {
 };
 bool handleMeshEscape(){return false;}
 bool cancelNfcNotes(){return false;}
-enum class UiMode {Home,Clock,Face,Hero,ChatFull,ChatFace,Nes,Files,NfcNotes};
+enum class UiMode {Home,Clock,Face,Hero,ChatFull,ChatFace,Nes,Files,NfcNotes,WifiSettings};
 UiMode gUiMode=UiMode::Home;
 String gInputBuffer,gActiveTextTurn,gStatusText,lastUser;
 std::deque<String> gPendingTextTurns;
@@ -78,6 +78,7 @@ struct{bool helpVisible=false;}gFocus;String gQueuedVoiceReplySpeech,gNoteInputB
 enum class NotesMode{List,Edit};NotesMode gNotesMode=NotesMode::List;
 int gChatScrollOffset=0,gLogScrollOffset=0,gNoteScrollOffset=0,gNoteListScrollOffset=0;
 bool returnToSettingsHub(){return false;}
+bool wifiSettingsEscape(){return false;}
 bool handleVoiceRequestEscape(){return false;}void dismissVoiceNotice(){gVoiceNoticeVisible=false;}
 void dismissAlarm(const char*){gAlarmRinging=false;}void stopPlaybackStream(){}
 enum class FaceMode{Idle};void setFaceMode(FaceMode){}void setKeyDiag(const char*){}

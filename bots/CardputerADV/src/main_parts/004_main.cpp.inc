@@ -162,9 +162,9 @@ constexpr LauncherGroup kLauncherGroups[kLauncherGroupCount] = {
       {"Pocket Synth", UiMode::PocketSynth}}},
     {"Games", "PLAY", "Keyboard and board games", rgb565_local(157, 102, 255), 8,
      {{"Tetris", UiMode::Tetris}, {"NES", UiMode::Nes}, {"Checkers", UiMode::Checkers}, {"Minesweeper", UiMode::Minesweeper}, {"Snake", UiMode::Snake}, {"Air Music", UiMode::AirMusic}, {"Flappy Bird", UiMode::Flappy}, {"Hot Air Balloon", UiMode::Balloon}}},
-    {"Settings", "SET", "All device settings", rgb565_local(203, 216, 226), 3,
+    {"Settings", "SET", "All device settings", rgb565_local(203, 216, 226), 4,
      {{"Device", UiMode::Settings}, {"Display", UiMode::ScreenSettings},
-      {"Pomodoro", UiMode::FocusSettings}}},
+      {"Wi-Fi", UiMode::WifiSettings}, {"Pomodoro", UiMode::FocusSettings}}},
     {"System", "SYS", "Firmware and diagnostics", rgb565_local(180, 150, 255), 3,
      {{"Firmware", UiMode::Ota}, {"Logs", UiMode::Logs}, {"C-Matrix", UiMode::CMatrix}}},
 };

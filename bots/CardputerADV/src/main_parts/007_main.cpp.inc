@@ -42,6 +42,8 @@ const char* uiModeName(UiMode mode) {
       return "Pomodoro";
     case UiMode::ScreenSettings:
       return "Screensaver";
+    case UiMode::WifiSettings:
+      return "Wi-Fi";
     case UiMode::Calculator:
       return "Calc";
     case UiMode::Alarm:

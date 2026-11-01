@@ -11,7 +11,8 @@
 - On **Big Eyes, Chat Eyes and Realtime**, **[ / ]** also selects the previous/next animal, including while the mic is listening. In Full Chat, plain brackets remain text.
 - **Ctrl+L** also opens the app menu. `/help` shows command help.
 - `/status` shows connection and device information.
-- `/setup` or `/wifi` opens the Wi-Fi and bridge setup portal.
+- `/wifi` opens Wi-Fi settings, to change network on the device. See [Wi-Fi](#wi-fi).
+- `/setup` opens the setup portal, which sets Wi-Fi and the bridge from a phone or laptop.
 - `/settings` opens device settings; `/ota` opens firmware update review.
 - `/calc`, `/alarm`, `/stopwatch`, `/assets` and `/library` open local tools.
 - `/nfc` opens NFC Notes, which reads tags and saves a name or note on them.
@@ -24,6 +25,24 @@ on your built device for current shortcuts. Specialized IR, RFID and sonar
 tools require compatible extra hardware; see the retained target documentation.
 Voice quality and response time depend on your bridge's STT/TTS configuration
 and the agent, network and provider latency.
+
+## Wi-Fi
+
+To change network, press Tab, open Settings, then Wi-Fi, or type `/wifi`.
+
+- **Pick a network:** the list shows what's nearby, strongest first. `;` and `.` move, and
+  Enter picks. R looks again. The list only shows 2.4 GHz networks.
+- **Type a name:** Other network, at the end of the list, is for a hidden network. Capitals
+  count. Leave the password blank for an open network.
+- **Password:** type it and press Enter. Fn+`;` shows or hides it. Fn+`` ` `` goes back,
+  because `` ` `` and `~` are typed as part of the password here.
+
+The new network is saved only once the device has joined it, which takes up to 20 seconds.
+Esc cancels. If it can't join, the device goes back to the network it was on and keeps what
+you typed, so you can fix it. The bridge has to be reachable from the new network too.
+
+If the setup screen appears because the old network is gone, press Enter on it to do all of
+this on the device. It restarts once it has joined.
 
 ## NFC Notes
 

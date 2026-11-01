@@ -117,7 +117,8 @@ void applyCompileTimeDefaults() {
   if (gWifiSsid.isEmpty() && strlen(DEFAULT_WIFI_SSID) > 0) {
     gWifiSsid = DEFAULT_WIFI_SSID;
   }
-  if (gWifiPassword.isEmpty() && strlen(DEFAULT_WIFI_PASSWORD) > 0) {
+  // A different network with no password is an open one, and the default isn't for it.
+  if (gWifiPassword.isEmpty() && gWifiSsid == DEFAULT_WIFI_SSID && strlen(DEFAULT_WIFI_PASSWORD) > 0) {
     gWifiPassword = DEFAULT_WIFI_PASSWORD;
   }
   if (gWifiSsid.isEmpty()) {

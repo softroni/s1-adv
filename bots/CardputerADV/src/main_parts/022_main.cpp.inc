@@ -265,6 +265,8 @@ bool mapActionUiMode(String mode, UiMode& out) {
              mode == "saver_settings" || mode == "display_settings" || mode == "display" ||
              mode == "screensaver") {
     out = UiMode::ScreenSettings;
+  } else if (mode == "wifi_settings" || mode == "wifi") {
+    out = UiMode::WifiSettings;
   } else if (mode == "calculator" || mode == "calc") {
     out = UiMode::Calculator;
   } else if (mode == "alarm" || mode == "wake" || mode == "wake_up" || mode == "clock_alarm") {

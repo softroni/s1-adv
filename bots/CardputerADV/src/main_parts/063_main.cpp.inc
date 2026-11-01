@@ -28,6 +28,7 @@ bool appAllowsBackgroundNetwork() {
     case UiMode::Sonar:
     case UiMode::RfidLab:
     case UiMode::NfcNotes:
+    case UiMode::WifiSettings: // A join would pull the link out from under any request.
     case UiMode::IrRemote: return false;
     case UiMode::Tetris: return !gTetrisStarted || gTetrisPaused || gTetrisGameOver;
     case UiMode::KeyRush: return !gKeyRush.running;
