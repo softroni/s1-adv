@@ -15,8 +15,11 @@ void ballRedraw() {
 void ballSounds() {
   const uint8_t events = gBall.events;
   gBall.events = 0;
-  if ((events & ball_catch::kMissed) && gBall.lives == 0) gBalloonAudio.buzz(420, 60, 0.9f, balloon_audio::kCrashLevel);
+  const bool lostHeart = events & (ball_catch::kMissed | ball_catch::kBombed);
+  if (lostHeart && gBall.lives == 0) gBalloonAudio.buzz(420, 60, 0.9f, balloon_audio::kCrashLevel);
+  else if (events & ball_catch::kBombed) gBalloonAudio.buzz(320, 90, 0.5f, balloon_audio::kCrashLevel);
   else if (events & ball_catch::kMissed) gBalloonAudio.buzz(240, 150, 0.35f, balloon_audio::kBuzzLevel);
+  else if (events & ball_catch::kDodged) gBalloonAudio.chime(659, 523);
   else if (events & ball_catch::kLevelUp) gBalloonAudio.chime(1047, 1568);
   else if (events & ball_catch::kCaught) gBalloonAudio.chime(1047, 1319);
 }
@@ -77,8 +80,10 @@ void renderBallCatchUi() {
   auto& d = gCanvas;
   constexpr uint8_t kBalls[6][3] = {{236, 60, 72},  {255, 136, 64}, {255, 214, 64},
                                     {88, 240, 141}, {47, 227, 255}, {157, 102, 255}};
-  const uint16_t sky = rgb565_local(150, 216, 240), grass = rgb565_local(96, 200, 72);
+  const uint16_t sky = gBall.flashSteps ? rgb565_local(255, 120, 70) : rgb565_local(150, 216, 240);
+  const uint16_t grass = rgb565_local(96, 200, 72), amber = rgb565_local(255, 176, 64);
   const uint16_t rail = rgb565_local(112, 170, 196), shadow = rgb565_local(60, 130, 56);
+  const uint16_t bombBody = rgb565_local(30, 32, 40);
   const uint16_t wood = rgb565_local(170, 112, 60), rim = rgb565_local(120, 76, 40);
   const uint16_t gold = rgb565_local(255, 214, 64), red = rgb565_local(236, 60, 72);
   const uint16_t panel = rgb565_local(8, 13, 22);
@@ -88,13 +93,24 @@ void renderBallCatchUi() {
   const int basketX = gBall.basketX >> 8, half = gBall.basketWidth() / 2;
 
   d.fillScreen(sky);
-  d.fillRect(0, ball_catch::kTrackY + ball_catch::kBallRadius + 1, 240, 2, rail);
+  const int railY = ball_catch::kTrackY + ball_catch::kBallRadius + 1;
+  d.fillRect(0, railY, 240, 2, rail);
+  // The rail runs out as the ball's time on it does.
+  if (gBall.phase == ball_catch::Phase::Playing && !gBall.falling) {
+    const int limit = gBall.waitLimit();
+    d.fillRect(0, railY, max<int>(1, (limit - gBall.waited) * 240 / limit), 2, amber);
+  }
   d.fillRect(0, ball_catch::kGroundY, 240, 135 - ball_catch::kGroundY, grass);
-  // The ball's shadow shows where it will land.
   d.fillEllipse(ballX, ball_catch::kGroundY + 3, ball_catch::kBallRadius, 2, shadow);
 
-  d.fillCircle(ballX, ballY, ball_catch::kBallRadius, ball);
-  d.fillCircle(ballX - 2, ballY - 2, 2, TFT_WHITE);
+  if (gBall.bomb) {
+    d.fillCircle(ballX, ballY, ball_catch::kBallRadius, bombBody);
+    d.drawLine(ballX + 1, ballY - 5, ballX + 3, ballY - 7, amber);
+    d.fillCircle(ballX + 3, ballY - 7, 1, rgb565_local(255, 70, 50));
+  } else {
+    d.fillCircle(ballX, ballY, ball_catch::kBallRadius, ball);
+    d.fillCircle(ballX - 2, ballY - 2, 2, TFT_WHITE);
+  }
 
   const int top = ball_catch::kRimY, left = basketX - half, right = basketX + half - 1;
   d.fillTriangle(left, top, right, top, left + 6, ball_catch::kGroundY - 1, wood);

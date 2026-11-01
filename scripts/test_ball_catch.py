@@ -44,6 +44,7 @@ code = r'''
 #include <string>
 #include <type_traits>
 #include <vector>
+using std::max;
 struct String:std::string {
  using std::string::string;String(std::string s):std::string(s){}
  template<class T,typename=std::enable_if_t<std::is_integral_v<T>>>String(T n):std::string(std::to_string(n)){}
@@ -61,6 +62,7 @@ struct Canvas{
  void fillCircle(int xx,int yy,int r,uint16_t){onScreen(xx-r,yy-r);onScreen(xx+r,yy+r);}
  void fillEllipse(int xx,int yy,int rx,int ry,uint16_t){onScreen(xx-rx,yy-ry);onScreen(xx+rx,yy+ry);}
  void fillTriangle(int a,int b,int c,int d,int e,int f,uint16_t){onScreen(a,b);onScreen(c,d);onScreen(e,f);}
+ void drawLine(int a,int b,int c,int e,uint16_t){onScreen(a,b);onScreen(c,e);}
  void setFont(const int*f){font=f;}void setTextSize(int){}
  void setTextColor(uint16_t){}void setTextColor(uint16_t,uint16_t){}
  void setCursor(int xx,int yy){x=xx;y=yy;}
@@ -88,8 +90,8 @@ void renderLauncherOverlay(){}void renderDebugOverlay(){}
 ''' + (parts / '080_main.cpp.inc').read_text() + r'''
 using namespace ball_catch;
 void key(char k){Keyboard_Class::KeysState keys;keys.enter=k=='\n';assert(handleBallCatchKey(k,keys));}
-// Line the basket up, then drop it straight in.
-void aimAndDrop(Game&g,int offset=0){g.basketX=g.ballX+offset*kOne;g.drop();}
+// Line the basket up, then drop a real ball straight in.
+void aimAndDrop(Game&g,int offset=0){g.bomb=false;g.basketX=g.ballX+offset*kOne;g.drop();g.driftVx=0;}
 void land(Game&g){for(int i=0;i<400&&g.falling&&g.phase!=Phase::Over;++i){const int32_t b=g.basketX;g.step(0);g.basketX=b;}}
 int main(){
  // The launcher's number keys reach the new group, and nothing past it.
@@ -105,16 +107,42 @@ int main(){
  // Random starts land everywhere, in both directions.
  {int low=0,high=0,leftward=0;for(uint32_t s=1;s<=200;++s){Game r;r.reset(s*2654435761U);low+=(r.ballX>>8)<80;high+=(r.ballX>>8)>160;leftward+=r.ballVx<0;}
   assert(low>20&&high>20&&leftward>20&&leftward<180);}
- // A press drops it straight down, faster and faster, and a second press does nothing.
- g.reset(5);const int32_t x=g.ballX;g.drop();assert(g.falling&&g.phase==Phase::Playing);
- int32_t lastY=g.ballY,lastGap=0;for(int i=0;i<10;++i){g.drop();g.step(0);assert(g.ballX==x&&g.falling);assert(g.ballY-lastY>lastGap);lastGap=g.ballY-lastY;lastY=g.ballY;}
+ // A press drops it, faster and faster, still moving the way it slid, and a second press does nothing.
+ g.reset(5);g.ballX=120*kOne;const int32_t x=g.ballX;g.drop();assert(g.falling&&g.phase==Phase::Playing&&g.driftVx==g.ballVx*g.speed()/kCarryDivisor);
+ int32_t lastY=g.ballY,lastGap=0;for(int i=0;i<10;++i){const int32_t drift=g.driftVx;g.drop();assert(g.driftVx==drift);g.step(0);assert(g.falling);assert(g.ballY-lastY>lastGap);lastGap=g.ballY-lastY;lastY=g.ballY;}
+ assert(g.ballX==x+10*g.driftVx);
+ // A drifting ball bounces off the walls and stays on screen.
+ g.reset(5);g.ballX=(kWidth-kBallRadius-2)*kOne;g.ballVx=1;g.drop();
+ {bool bounced=false;for(int i=0;i<40&&g.falling;++i){g.step(0);bounced|=g.driftVx<0;assert((g.ballX>>8)>=kBallRadius&&(g.ballX>>8)<=kWidth-kBallRadius);}assert(bounced);}
+ // Gusts start at the second level, stay within their strength, and blow both ways.
+ g.reset(5);g.caught=4;assert(g.gust()==0);g.caught=5;assert(g.gust()==kGustStep);g.caught=60000;assert(g.gust()==kStrongestGust);
+ {int up=0,down=0;g.caught=50;for(int i=0;i<300;++i){g.falling=false;g.phase=Phase::Playing;g.ballVx=1;g.drop();
+   const int32_t blown=g.driftVx-g.speed()/kCarryDivisor;assert(std::abs(blown)<=g.gust());up+=blown>0;down+=blown<0;}assert(up>50&&down>50);}
+ // Bombs: none at first, then more with each level, up to a limit, and they do come.
+ g.reset(5);assert(g.bombChance()==0);g.caught=kSafeCatches-1;assert(g.bombChance()==0);g.caught=kSafeCatches;assert(g.bombChance()==kFirstBombChance);
+ g.caught=5;assert(g.bombChance()==kFirstBombChance+kBombChanceStep);g.caught=60000;assert(g.bombChance()==kMostBombChance);
+ {int bombs=0,balls=0;Game r;r.reset(77);r.caught=500;r.phase=Phase::Playing;
+  for(int i=0;i<40000;++i){bool was=r.falling;r.lives=kLives;r.step(0);if(was&&!r.falling){++balls;bombs+=r.bomb;}}
+  assert(balls>200&&bombs*100>balls*25&&bombs*100<balls*55);}
+ // A bomb in the basket costs a heart and flashes, and scores nothing.
+ g.reset(5);g.ballX=120*kOne;g.basketX=g.ballX;g.drop();g.driftVx=0;g.bomb=true;land(g);
+ assert(g.caught==0&&g.lives==kLives-1&&(g.events&kBombed)&&g.flashSteps==kFlashSteps&&!(g.events&kMissed));
+ for(int i=0;i<kFlashSteps;++i)g.step(0);assert(g.flashSteps==0);
+ // A bomb that misses costs nothing, and scores nothing.
+ g.reset(5);g.ballX=30*kOne;g.basketX=200*kOne;g.drop();g.driftVx=0;g.bomb=true;land(g);
+ assert(g.caught==0&&g.lives==kLives&&(g.events&kDodged)&&!(g.events&kMissed));
+ // A ball can't wait forever once the game is on, and the wait gets shorter, to a limit.
+ g.reset(5);for(int i=0;i<1000;++i)g.step(0);assert(g.phase==Phase::Ready&&!g.falling);
+ g.phase=Phase::Playing;for(int i=0;i<g.waitLimit()-1;++i)g.step(0);assert(!g.falling);g.step(0);assert(g.falling);
+ g.caught=0;assert(g.waitLimit()==kLongestWait);g.caught=5;assert(g.waitLimit()==kLongestWait-kWaitStep);g.caught=60000;assert(g.waitLimit()==kShortestWait);
+ g.reset(5);g.phase=Phase::Playing;g.waited=40;aimAndDrop(g);land(g);assert(g.waited==0);
  // A catch scores, keeps every heart and brings a new ball.
  g.reset(5);aimAndDrop(g);land(g);assert(g.caught==1&&g.best==1&&g.lives==kLives&&(g.events&kCaught)&&!g.falling&&g.ballY==kTrackY*kOne);
  // The basket's edge counts, and just past it doesn't.
  g.reset(5);{const int half=g.basketWidth()/2;aimAndDrop(g,half);land(g);assert(g.caught==1);
   g.reset(5);g.best=0;g.ballX=120*kOne;aimAndDrop(g,half+1);land(g);assert(g.caught==0&&g.lives==kLives-1&&(g.events&kMissed));}
  // Three misses end it, then the score shows, then a new game is ready and the best stays.
- g.reset(5);g.caught=7;g.best=7;for(int i=0;i<kLives;++i){g.ballX=30*kOne;g.basketX=200*kOne;g.drop();land(g);}
+ g.reset(5);g.caught=7;g.best=7;for(int i=0;i<kLives;++i){g.bomb=false;g.ballX=30*kOne;g.basketX=200*kOne;g.drop();g.driftVx=0;land(g);}
  assert(g.phase==Phase::Over&&g.lives==0);g.events=0;
  for(int i=0;i<kOverSteps-1;++i){g.drop();g.nudge(1);g.step(100);assert(g.phase==Phase::Over&&g.caught==7&&!g.falling);}
  g.step(0);assert(g.phase==Phase::Ready&&g.caught==0&&g.lives==kLives&&g.best==7);
@@ -131,17 +159,28 @@ int main(){
  for(int caught:{0,50}){g.caught=uint16_t(caught);for(int i=0;i<300;++i)g.step(127);assert(g.basketX==(kWidth-g.basketWidth()/2)*kOne);
   for(int i=0;i<300;++i)g.step(-128);assert(g.basketX==(g.basketWidth()/2)*kOne);}
  g.reset(5);g.nudge(1);for(int i=0;i<kNudgeSteps+5;++i)g.step(0);assert(g.basketX==(kWidth/2)*kOne+kNudgeSteps*kNudgeSpeed);
- // Real play: a player can reach any landing spot, right up to top speed.
- int lowest=100000;
- for(uint32_t s=1;s<=100;++s){Game r;r.reset(s*2654435761U);
-  for(int frame=0;frame<30000&&r.phase!=Phase::Over&&r.caught<200;++frame){
-   const int gap=(r.ballX-r.basketX)>>8;
-   const int stick=gap>6?127:gap<-6?-127:0;
-   if(!r.falling&&gap>=-2&&gap<=2)r.drop();
+ // Real play stays possible: a player who looks ahead gets a long way, and one who never moves
+ // the basket doesn't, however well they time the drop.
+ int lowest=100000,total=0,lazy=0;
+ for(uint32_t s=1;s<=40;++s){Game r;r.reset(s*2654435761U);
+  for(int frame=0;frame<9000&&r.phase!=Phase::Over&&r.caught<60;++frame){
+   Game look=r;if(!look.falling)look.drop();
+   int landing=look.ballX>>8;
+   for(int i=0;i<200&&look.falling;++i){landing=look.ballX>>8;look.step(0);}
+   const int target=r.bomb?(landing<120?landing+80:landing-80):landing;
+   const int gap=target-(r.basketX>>8);
+   const int stick=gap>3?127:gap<-3?-127:0;
+   if(!r.falling&&(r.bomb||std::abs(gap)<70))r.drop();
    r.step(stick);
    assert((r.basketX>>8)-r.basketWidth()/2>=0&&(r.basketX>>8)+r.basketWidth()/2<=kWidth);}
-  lowest=std::min(lowest,int(r.best));}
- assert(lowest>=50);
+  lowest=std::min(lowest,int(r.best));total+=r.best;
+  Game still;still.reset(s*2654435761U);
+  for(int frame=0;frame<9000&&still.phase!=Phase::Over;++frame){
+   const int gap=(still.ballX-still.basketX)>>8;
+   if(!still.falling&&std::abs(gap)<8)still.drop();
+   still.step(0);}
+  lazy+=still.best;}
+ assert(lowest>=20&&total/40>=40);assert(lazy/40<total/40/2);
  // Production service: a press drops once, however long it's held, and the stick moves the basket.
  beginBallCatch();assert(gBall.phase==Phase::Ready&&!gBalloonAudio.music);
  serviceBallCatch();assert(gAirSensor.opens==1&&audioRuns==1);
@@ -167,6 +206,9 @@ int main(){
  // Each event has its own sound, and the last miss is the worst.
  gBalloonAudio.reset();gBall.lives=1;gBall.events=kMissed|kCaught;ballSounds();const uint32_t buzz=gBalloonAudio.buzzLeft;assert(buzz>0&&gBall.events==0&&gBalloonAudio.chimeWait==0);
  gBalloonAudio.reset();gBall.lives=0;gBall.events=kMissed;ballSounds();assert(gBalloonAudio.buzzLeft>buzz*2);
+ gBalloonAudio.reset();gBall.lives=1;gBall.events=kBombed;ballSounds();assert(gBalloonAudio.buzzLeft>buzz&&gBalloonAudio.buzzer.target==balloon_audio::kCrashLevel);
+ gBalloonAudio.reset();gBall.lives=0;gBall.events=kBombed;ballSounds();assert(gBalloonAudio.buzzLeft>buzz*2);gBall.lives=1;
+ gBalloonAudio.reset();gBall.events=kDodged;ballSounds();assert(gBalloonAudio.chimeHz==523);
  gBalloonAudio.reset();gBall.events=kLevelUp;ballSounds();assert(gBalloonAudio.chimeHz==1568);
  gBalloonAudio.reset();gBall.events=kCaught;ballSounds();assert(gBalloonAudio.chimeHz==1319);
  // Leaving frees the port and stops the sound.
@@ -175,9 +217,10 @@ int main(){
  // The renderer stays on screen in every phase, with the ball and basket anywhere.
  for(int phase=0;phase<3;++phase)for(int caught:{0,4,5,7,50,999})for(int lives=0;lives<=kLives;++lives)for(int i=0;i<40;++i){
   gBall.reset(3);gBall.phase=Phase(phase);gBall.caught=uint16_t(caught);gBall.best=9999;gBall.lives=uint8_t(lives);
-  gBall.ballX=(kBallRadius+i*5)*kOne;gBall.ballY=(kTrackY+(i%2)*80)*kOne;
+  gBall.ballX=(kBallRadius+i*(kBallRightX-kBallRadius)/39)*kOne;gBall.ballY=(kTrackY+(i%2)*80)*kOne;
+  gBall.bomb=i%3==0;gBall.flashSteps=uint8_t(i%2);gBall.falling=i%2;gBall.waited=uint16_t(i*4);
   const int half=gBall.basketWidth()/2;gBall.basketX=(i%2?half:kWidth-half)*kOne;renderBallCatchUi();}
- std::cout<<"PASS Ball Catch: sliding, dropping, catching, edges, hearts, levels, speed and basket limits, a player reached "<<lowest<<" catches or more on 100 games, timing, menu freeze, no joystick, sounds, port handover, renderer bounds\n";
+ std::cout<<"PASS Ball Catch: sliding, drifting, bombs, gusts, the rail timer, edges, hearts, levels and limits, a careful player averaged "<<total/40<<" catches (worst "<<lowest<<") and a still one "<<lazy/40<<", timing, menu freeze, no joystick, sounds, port handover, renderer bounds\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-ball-catch-') as directory:

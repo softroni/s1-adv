@@ -120,9 +120,12 @@ port, or play on the keyboard.
 
 - A ball slides along the top. Press the joystick's button, or Space, to drop it.
 - Move the basket underneath with the joystick, or with A and D or the arrow keys.
-- The ball's shadow shows where it will land. A catch scores a point, and a miss costs one
-  of three hearts.
-- The ball speeds up as you score, and the basket shrinks every 5 catches.
+- A falling ball keeps some of its slide, so aim ahead of it. Gusts push it harder at higher
+  levels. A catch scores a point, and a miss costs one of three hearts.
+- Let black bombs fall past the basket. Catching one costs a heart.
+- The rail runs out while a ball waits. When it's gone, the ball drops by itself.
+- The ball speeds up as you score, and every 5 catches the basket shrinks, bombs get more
+  common and the rail gets shorter.
 
 Realtime shows CONNECT, LISTEN, THINK, SPEAK, READY or ERROR above the large eyes.
 MIC ON and the input meter appear only during recording. Connection errors remain
