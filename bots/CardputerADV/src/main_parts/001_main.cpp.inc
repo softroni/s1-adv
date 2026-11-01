@@ -16,6 +16,8 @@
 #include <base64.h>
 #include <WiFiClient.h>
 #include <Wire.h>
+#include <M5UnitUnified.h>
+#include <M5UnitUnifiedNFC.h>
 #include <Update.h>
 #include <MFRC522.h>
 #include <esp_heap_caps.h>
@@ -53,6 +55,7 @@
 #include "checkers_demo.h"
 #include "minesweeper.h"
 #include "snake.h"
+#include "nfc_notes.h"
 #include "radio_catalog.h"
 #include "internet_radio_transport.h"
 #include "vlc_remote.h"
@@ -90,7 +93,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.213-dev"
+#define APP_VERSION "0.2.214-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"

@@ -14,12 +14,24 @@
 - `/setup` or `/wifi` opens the Wi-Fi and bridge setup portal.
 - `/settings` opens device settings; `/ota` opens firmware update review.
 - `/calc`, `/alarm`, `/stopwatch`, `/assets` and `/library` open local tools.
+- `/nfc` opens NFC Notes, which reads tags and saves a name or note on them.
 
 This firmware has evolved across development versions. Prefer the command help
 on your built device for current shortcuts. Specialized IR, RFID and sonar
 tools require compatible extra hardware; see the retained target documentation.
 Voice quality and response time depend on your bridge's STT/TTS configuration
 and the agent, network and provider latency.
+
+## NFC Notes
+
+NFC Notes is under Tab, Tools, and `/nfc` opens it. It needs the M5Stack NFC unit
+(ST25R3916) on the Grove port.
+
+- **Read:** hold a tag on the unit. Its note, tag type and ID appear.
+- **Save:** type a name or note, up to 200 letters, and press Enter. Then hold a tag
+  on the unit. The app reads the note back to check it, and says so.
+- Esc cancels a save, then clears what you typed, then leaves the app.
+- Fn with `;` or `.` scrolls a long note.
 
 Realtime shows CONNECT, LISTEN, THINK, SPEAK, READY or ERROR above the large eyes.
 MIC ON and the input meter appear only during recording. Connection errors remain

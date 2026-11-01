@@ -271,9 +271,10 @@ bool mapActionUiMode(String mode, UiMode& out) {
   } else if (mode == "sonar" || mode == "proximity" || mode == "ultrasonic" ||
              mode == "hc_sr04" || mode == "hcsr04") {
     out = UiMode::Sonar;
-  } else if (mode == "rfid" || mode == "rfid_lab" || mode == "rc522" || mode == "mfrc522" ||
-             mode == "nfc") {
+  } else if (mode == "rfid" || mode == "rfid_lab" || mode == "rc522" || mode == "mfrc522") {
     out = UiMode::RfidLab;
+  } else if (mode == "nfc" || mode == "nfc_notes") {
+    out = UiMode::NfcNotes;
   } else if (mode == "nes" || mode == "honkeypong") {
     out = UiMode::Nes;
   } else if (mode == "tetris" || mode == "game" || mode == "blocks") {

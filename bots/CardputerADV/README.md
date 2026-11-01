@@ -47,6 +47,24 @@ On the Sonar screen, press `M` to switch between the large Proximity view and
 the animated Radar view. Radar plots the measured range on the fixed forward
 bearing; a single stationary HC-SR04 cannot determine left/right angle.
 
+## NFC Notes
+
+**NFC Notes** works with the M5Stack NFC unit (ST25R3916), plugged into the Grove port.
+Open it from Tools in the launcher, or type `/nfc` in chat. Hold a tag on the unit to read
+it. To save a name or note, type it, press Enter, then hold a tag on the unit. Saving
+replaces what the tag holds, and the note is read back to check it. A save that isn't
+finished in 30 seconds is cancelled.
+
+| Tag | What happens |
+| --- | --- |
+| NTAG 213/215/216, Ultralight, other NFC Forum tags | Stored as a standard NDEF text record, so a phone can read it too. |
+| MIFARE Classic with the default key | Stored from block 4 in this app's own format, so only this app can read it. |
+| MIFARE Classic with other data or a private key | Left alone. The app only writes to a blank card or one of its own notes. |
+| A tag that isn't NDEF formatted | Left alone. Formatting can be permanent, so the app doesn't do it. |
+
+An NTAG 213 holds 134 letters, and an original Ultralight holds 38. The Grove port is only
+in use while the app is open, and the radio is only on for a moment at each check.
+
 ## RFID Lab wiring
 
 The current firmware uses an **MFRC522/RC522 SPI module**, usually the board

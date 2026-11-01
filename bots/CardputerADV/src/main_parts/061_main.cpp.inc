@@ -17,6 +17,9 @@
       case UiMode::Snake:
         renderSnakeUi();
         break;
+      case UiMode::NfcNotes:
+        renderNfcNotesUi();
+        break;
       case UiMode::Mesh:
         renderMeshUi();
         break;
@@ -449,6 +452,7 @@ void loop() {
   serviceCheckersDemo();
   serviceMinesweeper();
   serviceSnake();
+  serviceNfcNotes();
   serviceBrainFlow();
   serviceTetris();
   serviceSmartLamp();

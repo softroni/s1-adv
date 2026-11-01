@@ -29,7 +29,7 @@
     moveLauncherSelection(-1);
   } else if (gLauncherVisible && downDown) {
     moveLauncherSelection(1);
-  } else if (gUiMode == UiMode::Mesh && (upDown || downDown)) {
+  } else if ((gUiMode == UiMode::Mesh || gUiMode == UiMode::NfcNotes) && (upDown || downDown)) {
     handleTypingKey(upDown ? char(1) : char(2),keys);
   } else if (gUiMode == UiMode::Files && (upDown || downDown || leftDown || rightDown)) {
     handleTypingKey((upDown || leftDown) ? ',' : '.', keys);

@@ -143,6 +143,7 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
   if (gUiMode == UiMode::Checkers && handleCheckersDemoKey(key, keys)) return;
   if (gUiMode == UiMode::Minesweeper && handleMinesweeperKey(key, keys)) return;
   if (gUiMode == UiMode::Snake && handleSnakeKey(key, keys)) return;
+  if (gUiMode == UiMode::NfcNotes && handleNfcNotesKey(key, keys)) return;
   if (gUiMode == UiMode::Radio && handleInternetRadioKey(key, keys)) return;
   if (gUiMode == UiMode::VlcRemote && handleVlcRemoteKey(key, keys)) return;
   if (gUiMode == UiMode::ChessMind && handleChessMindKey(key, keys)) return;

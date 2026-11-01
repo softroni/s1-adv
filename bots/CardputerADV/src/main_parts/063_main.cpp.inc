@@ -24,6 +24,7 @@ bool appAllowsBackgroundNetwork() {
     case UiMode::Nes: // The emulator owns RAM, audio and Wi-Fi until it exits.
     case UiMode::Sonar:
     case UiMode::RfidLab:
+    case UiMode::NfcNotes:
     case UiMode::IrRemote: return false;
     case UiMode::Tetris: return !gTetrisStarted || gTetrisPaused || gTetrisGameOver;
     case UiMode::KeyRush: return !gKeyRush.running;

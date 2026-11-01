@@ -1367,8 +1367,12 @@ bool handleLocalCommand(const String& input) {
     return true;
   }
 
-  if (cmd == "/rfid" || cmd == "/rc522" || cmd == "/mfrc522" || cmd == "/nfc") {
+  if (cmd == "/rfid" || cmd == "/rc522" || cmd == "/mfrc522") {
     setUiMode(UiMode::RfidLab);
+    return true;
+  }
+  if (cmd == "/nfc") {
+    setUiMode(UiMode::NfcNotes);
     return true;
   }
 
