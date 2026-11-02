@@ -20,6 +20,8 @@ constexpr uint32_t kLabRedrawMs = 100, kLabSampleMs = 250, kLabAwakeMs = 1000;
 constexpr uint32_t kLabWireCheckMs = 400, kLabRescanMs = 3000;
 constexpr uint16_t kLabBusHighRaw = 3900;  // Above any part's own output: I2C pull-ups hold it here.
 constexpr uint8_t kLabSilentChecks = 3;  // In a row, because a knob near the logic threshold can fool one.
+constexpr uint8_t kLabSonicFailsToLose = 4;  // Bad transfers in a row. One lost echo isn't an unplugged unit.
+constexpr uint32_t kLabSonicRetryMs = 150;
 constexpr uint32_t kLabPullSettleUs = 30;
 constexpr uint32_t kLabFarthestMm = 4500;
 constexpr uint32_t kLabDLightLuxForFull = 1000;
@@ -37,6 +39,7 @@ void serviceLabTests();
 void serviceLabSay();
 void labEnterView(UiMode mode);
 bool labRescanAllowed();
+bool labBusWanted();
 void labSaveBook();
 
 enum class LabStripTest : uint8_t { Solid, Rainbow, Chase, Count };
@@ -93,6 +96,7 @@ bool gLabPartUsed[lab::kPartCount] = {};  // Opened since the Lab started, so it
 uint8_t gLabQuietProbes = 0;
 uint8_t gLabWhiteSilent = 0;
 uint32_t gLabWireCheckMs = 0, gLabRescanMs = 0;
+uint8_t gLabSonicFails = 0;
 rmt_obj_t* gLabRmt = nullptr;
 uint8_t gLabStripRgb[lab::kStripLeds][3];
 rmt_data_t gLabStripBits[lab::kStripLeds * lab::kStripBits];
@@ -171,6 +175,7 @@ void labUnitLost(lab::Unit unit) {
   const uint8_t index = static_cast<uint8_t>(unit);
   if (!gLabFound[index]) return;
   gLabFound[index] = false;
+  logf("[LAB] lost %s", lab::kUnitNames[index]);
   switch (unit) {
     case lab::Unit::Ultrasonic:
       gLabSonicWaiting = false;
@@ -211,20 +216,41 @@ void labHubStart() {
   labForgetOutputs();
   gLabHubReady = true;
 }
+// The ultrasonic's small chip only has to acknowledge a real command, so an empty message can
+// miss it entirely, and it can't answer anything while it measures. Asking means starting a
+// measurement, the same way Air Music does, and once found, its readings are the proof it's there.
+bool labAsk(lab::Unit unit) {
+  if (unit == lab::Unit::Ultrasonic) return gAirSensor.trigger();
+  return gLabBus.ping(lab::kUnitAddresses[static_cast<uint8_t>(unit)]);
+}
 void labProbeNext(uint32_t now) {
   if (now - gLabProbeMs < kLabProbeMs) return;
   gLabProbeMs = now;
-  const lab::Unit unit = static_cast<lab::Unit>(gLabProbe);
-  const bool here = gLabBus.ping(lab::kUnitAddresses[gLabProbe]);
-  // Only a whole round of silence counts, or a unit swap could look like an empty port.
-  if (here) {
-    gLabFound[gLabProbe] = true;
+  const uint8_t index = gLabProbe;
+  const lab::Unit unit = static_cast<lab::Unit>(index);
+  gLabProbe = (gLabProbe + 1) % lab::kUnitCount;
+  if (unit == lab::Unit::Ultrasonic && gLabFound[index]) {
     gLabQuietProbes = 0;
+    return;
+  }
+  // Only a whole round of silence counts, or a unit swap could look like an empty port.
+  if (labAsk(unit)) {
+    if (!gLabFound[index]) logf("[LAB] found %s", lab::kUnitNames[index]);
+    gLabFound[index] = true;
+    gLabQuietProbes = 0;
+    if (unit == lab::Unit::Ultrasonic) {
+      gLabSonicWaiting = true;
+      gLabSonicMs = now;
+      gLabSonicFails = 0;
+    }
   } else {
     labUnitLost(unit);
     if (gLabQuietProbes < lab::kUnitCount) ++gLabQuietProbes;
   }
-  gLabProbe = (gLabProbe + 1) % lab::kUnitCount;
+}
+void labSonicFailed(uint32_t now) {
+  gLabSonicMs = now;
+  if (++gLabSonicFails >= kLabSonicFailsToLose) labUnitLost(lab::Unit::Ultrasonic);
 }
 void labReadSonic(uint32_t now) {
   if (!labFound(lab::Unit::Ultrasonic)) return;
@@ -233,17 +259,23 @@ void labReadSonic(uint32_t now) {
     gLabSonicWaiting = false;
     uint32_t micrometers = 0;
     if (!gAirSensor.read(micrometers)) {
-      labUnitLost(lab::Unit::Ultrasonic);
+      labSonicFailed(now);
       return;
     }
+    gLabSonicFails = 0;
     const uint32_t mm = micrometers / 1000;
     // Nothing in range reads as zero or as far past the sensor's reach.
     if (mm == 0 || mm > kLabFarthestMm) gLabInputs.lose(lab::Sig::Distance);
     else gLabInputs.set(lab::Sig::Distance, static_cast<int16_t>((mm + 5) / 10), now);
+  } else if (gLabSonicFails && now - gLabSonicMs < kLabSonicRetryMs) {
+    return;
   }
-  gLabSonicMs = now;
-  if (gAirSensor.trigger()) gLabSonicWaiting = true;
-  else labUnitLost(lab::Unit::Ultrasonic);
+  if (gAirSensor.trigger()) {
+    gLabSonicMs = now;
+    gLabSonicWaiting = true;
+  } else {
+    labSonicFailed(now);
+  }
 }
 void labReadEnv(uint32_t now) {
   if (!labFound(lab::Unit::Env)) return;
@@ -423,7 +455,7 @@ void labRescanBus() {
   labWiresOff();
   gAirSensor.open();
   bool found = false;
-  for (uint8_t address : lab::kUnitAddresses) found = gLabBus.ping(address) || found;
+  for (uint8_t i = 0; i < lab::kUnitCount; ++i) found = labAsk(static_cast<lab::Unit>(i)) || found;
   gAirSensor.close();
   labWiresOn();
   if (found) labGiveUpWires();
@@ -470,7 +502,12 @@ bool labShouldLookAtBus() {
   return pinned || nothingToDisturb;
 }
 // With nothing on the bus, whatever was last used on the wires gets them back.
-void serviceLabWires(uint32_t now, bool rescanAllowed) {
+void serviceLabWires(uint32_t now, bool rescanAllowed, bool busWanted) {
+  // On an I2C unit's own screen the bus is the point, whatever was last used on the wires.
+  if (busWanted) {
+    if (gLabOnWires) labGiveUpWires();
+    return;
+  }
   if (!gLabOnWires) {
     if (gLabBook.direct.any() && gLabQuietProbes >= lab::kUnitCount && !labAnyUnit()) labTakeWires();
     return;
@@ -822,7 +859,7 @@ void serviceLab() {
   // A poll stops the main loop for a moment, and the mic and the speaker run on that loop.
   if (gRecording || gRealtimeActive || gPlaybackActive) return;
   const uint32_t now = millis();
-  serviceLabWires(now, labRescanAllowed());
+  serviceLabWires(now, labRescanAllowed(), labBusWanted());
   if (gLabOnWires) {
     labReadWires(now);
   } else {

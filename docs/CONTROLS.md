@@ -192,12 +192,13 @@ I/O hub at all:
 | Both | 2 relays |
 
 That's enough for the Mini Angle to drive the servo. I2C units use both wires, so an Ultrasonic,
-ENV III, Joystick 2 or NFC unit can't share the port with these. If one is plugged in, those
-screens say so.
+ENV III, Joystick 2 or NFC unit can't share the port with these, even through the 1-to-3 hub: a
+Mini Angle on the same hub stops them answering at all. If an I2C unit is plugged in, those screens
+say so.
 
 To use more parts at once, plug the I/O hub into the Grove port, and use any of its six ports for
-any of these parts, one or all of them. To add I2C units as well, put the 1-to-3 hub in front of
-it: its other two sockets take any two of them.
+any of these parts, one or all of them. I2C units can't go on those ports, so to add them, put the
+1-to-3 hub in front of it: its other two sockets take any two of them.
 
 You can switch between these whenever you like, even with a part's screen open. The Lab notices
 the I/O hub or an I2C unit arriving or leaving, and the part follows. Rules work the same way

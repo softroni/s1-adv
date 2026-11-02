@@ -216,6 +216,10 @@ bool labUnitOf(Dev dev, Unit& unit) {
   }
 }
 bool labLightIsDigital() { return labFound(Unit::DLight); }
+bool labBusWanted() {
+  Unit unit;
+  return gLabUi.view == LabView::Device && labUnitOf(static_cast<Dev>(gLabUi.devRow), unit);
+}
 // Looking at the bus only makes sense while nothing is being driven through those wires.
 bool labRescanAllowed() {
   if (gLabUi.view == LabView::Devices) return true;
@@ -667,7 +671,10 @@ void renderLabMissing(Dev dev) {
   }
   if (!others) labTextAt(&fonts::Font0, 8, y, "Nothing", kLabMuted);
   d.fillRoundRect(3, 93, 234, 29, 5, kLabPanel);
-  if (others && viaHub) {
+  if (labFound(Unit::Hub) && direct) {
+    labTextAt(&fonts::Font0, 8, 97, "The port is fine, so check this cable.", kLabAmber);
+    labTextAt(&fonts::Font0, 8, 108, "I/O hub ports can't carry this unit.", kLabAmber);
+  } else if (others && viaHub) {
     labTextAt(&fonts::Font0, 8, 97, "Plug in the I/O hub, or unplug these", kLabAmber);
     labTextAt(&fonts::Font0, 8, 108, "to use this part on Grove by itself.", kLabAmber);
   } else if (others) {

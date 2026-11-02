@@ -149,6 +149,9 @@ struct Units {
   std::set<uint8_t> present{0x57, 0x44, 0x63, 0x50};
   uint32_t um = 240000; uint16_t rawTemp = 26000, rawHumid = 27000; int8_t stickX = 47, stickY = -15; uint8_t stickButton = 1;
   uint16_t lux = 600; int commands = 0;
+  // The RCWL-9620 is a small chip running its own I2C. It can't answer while it measures, and it
+  // only needs to acknowledge a real command, so these make the simulated one as awkward.
+  bool sonicBusyWhileMeasuring = false, sonicIgnoresEmptyMessage = false; uint32_t sonicBusyUntil = 0;
 } gUnits;
 // The Grove wires themselves, for parts with no I2C. G1 is white and G2 is yellow.
 constexpr int INPUT = 1, OUTPUT = 2, INPUT_PULLUP = 3, INPUT_PULLDOWN = 4, LOW = 0, HIGH = 1;
@@ -191,6 +194,11 @@ struct WireClass {
     held = !stop; ++gUnits.commands; assert(gBusOpen);
     const bool here = address == pbhub::kAddress ? gHubUnit.here : gUnits.present.count(address) > 0;
     if (!here) return 2;
+    if (address == 0x57) {
+      if (gUnits.sonicBusyWhileMeasuring && nowMs < gUnits.sonicBusyUntil) return 2;
+      if (gUnits.sonicIgnoresEmptyMessage && out.empty()) return 2;
+      if (!out.empty()) gUnits.sonicBusyUntil = nowMs + 100;
+    }
     if (address == pbhub::kAddress && !out.empty()) { assert(stop); gHubUnit.receive(out); }
     if (address == 0x63 && !out.empty()) assert(!stop);
     return 0;
@@ -214,7 +222,7 @@ struct AirSensor {
   void open() { if (!open_) ++opens; open_ = true; gBusOpen = true; }
   void close() { if (open_) ++closes; open_ = false; gBusOpen = false; }
   bool trigger() { Wire.beginTransmission(0x57); Wire.write(uint8_t(1)); return Wire.endTransmission() == 0; }
-  bool read(uint32_t& um) { if (!gUnits.present.count(0x57)) return false; um = gUnits.um; return true; }
+  bool read(uint32_t& um) { if (!gUnits.present.count(0x57)) return false; if (gUnits.sonicBusyWhileMeasuring && nowMs < gUnits.sonicBusyUntil) return false; um = gUnits.um; return true; }
 } gAirSensor;
 struct EnvSensors {
   bool envTrigger() { return gUnits.present.count(0x44) > 0; }
@@ -872,6 +880,44 @@ void testGrove() {
   setUiMode(UiMode::LabDevices); run(100); labDriveSet(Out::Led, 120); run(100); assert(gLed.g > 0); labDriveClear(); run(100); assert(gLed.g == 0); setUiMode(UiMode::LabRules); run(1500);
 }
 
+// The owner's report: the ultrasonic always says "Nothing at 0x57", after using the knob directly.
+bool sonicOnGrove(bool busy, bool deaf, bool knobRemembered) {
+  lab::Book book; book.count = 1; book.rules[0] = lab::starterRule();
+  if (knobRemembered) book.direct.claim(lab::Part::Knob);
+  gLabBook = book; gLabBookRead = true; gLabUi = LabUi{}; gDisk.files.clear();
+  gUnits.sonicBusyWhileMeasuring = busy; gUnits.sonicIgnoresEmptyMessage = deaf; gUnits.sonicBusyUntil = 0;
+  plugOnly({0x57}); gUnits.um = 240000;
+  setUiMode(UiMode::LabDevices); fingers();
+  gLabUi.devRow = int(Dev::Ultrasonic); key(ENTER);
+  int seen = 0;
+  for (int i = 0; i < 600; ++i) { run(10); seen += labFound(Unit::Ultrasonic) && gLabInputs.get(Sig::Distance).value == 24; }
+  std::fprintf(stderr, "sonic busy=%d deaf=%d knob=%d: live %d%% of the time, wires=%d found=%d\n", busy, deaf, knobRemembered, seen / 6, gLabOnWires, labFound(Unit::Ultrasonic));
+  show("sonic-grove");
+  const bool good = !gLabOnWires && labFound(Unit::Ultrasonic) && gLabInputs.get(Sig::Distance).value == 24 && seen >= 500 && !gCanvas.shows("Nothing at 0x57") && gCanvas.shows("ANSWERING");
+  esc(); setUiMode(UiMode::Home);
+  gUnits.sonicBusyWhileMeasuring = false; gUnits.sonicIgnoresEmptyMessage = false;
+  return good;
+}
+void testSonic() {
+  int bad = 0;
+  for (int busy = 0; busy < 2; ++busy) for (int deaf = 0; deaf < 2; ++deaf) for (int knob = 0; knob < 2; ++knob) bad += !sonicOnGrove(busy, deaf, knob);
+  assert(bad == 0);
+  // Swapping the knob for the ultrasonic with the Lab open: its screen takes the bus back at once,
+  // and a lost echo or two doesn't drop it.
+  gUnits.sonicBusyWhileMeasuring = true; gUnits.sonicIgnoresEmptyMessage = true;
+  lab::Book book; book.count = 1; book.rules[0] = lab::starterRule(); book.direct.claim(lab::Part::Knob); gLabBook = book; gLabUi = LabUi{};
+  plugOnly(); gGrove = Grove{}; gGrove.adc = 1400; setUiMode(UiMode::LabDevices); run(1500); assert(gLabOnWires);
+  gUnits.present.insert(0x57); gUnits.um = 240000; pickDevice(Dev::Ultrasonic); run(2000); assert(!gLabOnWires && labFound(Unit::Ultrasonic) && gLabInputs.get(Sig::Distance).value == 24);
+  gUnits.present.erase(0x57); run(300); assert(labFound(Unit::Ultrasonic)); gUnits.present.insert(0x57); run(500); assert(labFound(Unit::Ultrasonic) && gLabSonicFails == 0);
+  // Really unplugged, it goes, and the screen says so. Then it comes back by itself.
+  gUnits.present.erase(0x57); run(1500); assert(!labFound(Unit::Ultrasonic)); show("sonic-gone"); assert(gCanvas.shows("Nothing at 0x57"));
+  gUnits.present.insert(0x57); run(1500); assert(labFound(Unit::Ultrasonic) && gLabInputs.get(Sig::Distance).value == 24);
+  // With the I/O hub found, it says this unit can't go on the hub's ports.
+  gUnits.present.erase(0x57); gHubUnit.here = true; fingers(); run(1500); show("sonic-on-hub"); assert(gCanvas.shows("can't carry this unit"));
+  esc(); gUnits.sonicBusyWhileMeasuring = false; gUnits.sonicIgnoresEmptyMessage = false; setUiMode(UiMode::Home);
+  setUiMode(UiMode::Home); plugOnly({0x57, 0x44, 0x63, 0x50}, true); gLabUi = LabUi{};
+}
+
 void testGuards() {
   // Keys with Ctrl and the like are left alone, and the voice path keeps the bus quiet.
   gLabUi.view = LabView::Rules; gLabUi.ruleRow = 0; Keyboard_Class::KeysState ctrl; ctrl.ctrl = true; assert(handleLabKey('.', ctrl)); assert(gLabUi.ruleRow == 0);
@@ -895,7 +941,7 @@ void testGuards() {
 int main(int argc, char** argv) {
   if (argc > 1) gDump = std::fopen(argv[1], "w");
   for (bool& live : gLabHistoryLive) live = false;
-  testDevices(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); setUiMode(UiMode::LabRules); run(1500); testGuards();
+  testDevices(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); setUiMode(UiMode::LabRules); run(1500); testGuards();
   if (gDump) std::fclose(gDump);
   std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, the lamp and AC guards, units leaving and returning, saving and damage, and every screen stays on the display");
 }
