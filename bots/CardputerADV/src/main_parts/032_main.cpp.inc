@@ -233,6 +233,7 @@ void handleRecordingStorageFailure() {
   showVoiceRequestError(error);
   setStatus("SD write failed; retry G0", 10000);
   logf("[VOICE] record failed; mic stopped; connection canceled; retained=%s", retainedPath.c_str());
+  voiceToolRecordingEnded();
 }
 
 void flushCompletedRecordChunksToFile(size_t completedCount) {

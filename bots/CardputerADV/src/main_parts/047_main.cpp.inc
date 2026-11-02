@@ -350,6 +350,7 @@ void cancelRecordingDiscard() {
     return;
   }
   gRecording = false;
+  voiceToolRecordingDropped();
   stopMic();
   if (gRecordingToFile) {
     auto captureFileLock = lockVoiceCaptureFile();

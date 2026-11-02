@@ -45,6 +45,7 @@
 // A 2xx response alone must never leave the device on THINK indefinitely.
 bool finishVoiceSubmission(bool transportOk, int statusCode, const String& response,
                            const String& pcmUploadPath, size_t dataSize) {
+  if (voiceToolAwaitsAnswer()) return finishVoiceToolSubmission(transportOk, statusCode, response);
   if (!transportOk || statusCode <= 0) {
     String transportError = gLastHttpDiag;
     if (transportError.isEmpty()) {

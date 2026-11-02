@@ -100,6 +100,8 @@ bool stopRecordingAndSend() {
   if (!gRecording) {
     return false;
   }
+  // Every way out before the bridge answers has to free a voice tool that's waiting.
+  struct VoiceToolScope { ~VoiceToolScope() { voiceToolRecordingEnded(); } } voiceToolScope;
   gRecording = false;
   logf("[VOICE][LAT] release t=%u", static_cast<unsigned>(millis()));
   gVoiceRequestPhase=VoiceRequestPhase::Sending;

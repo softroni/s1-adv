@@ -283,6 +283,7 @@ Type `/status` on the device to see its connection and version. There's much mor
 | [The Lab](docs/LAB.md) | A picture guide to connecting parts, testing them and building rules |
 | [Everyday controls](docs/CONTROLS.md) | Every key, every status sound, and the Lab in full |
 | [Use your Claude subscription](docs/CLAUDE-CODE.md) | The bridge, memory, voice, web access and firmware updates |
+| [Voice tools](docs/VOICE-TOOLS.md) | Give any screen the chat's recorder, for your words or Claude's answer |
 | [Build and flash](docs/FLASHING.md) | Every way to flash, plus building with your own settings |
 | [Mesh](docs/MESH.md) · [NES](docs/NES.md) · [Focus audio](docs/FOCUS-AUDIO.md) | The optional extras |
 | [OpenClaw](docs/OPENCLAW.md) | Using the bridge with your own OpenClaw agent |

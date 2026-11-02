@@ -21,12 +21,18 @@ export const CLAUDE_CODE_DEFAULTS = Object.freeze({
   model: "claude-opus-5-5",
   effort: "xhigh",
   turnTimeoutMs: 600000,
+  // For a quick question beside the chat, where someone is watching the screen.
+  askModel: "claude-haiku-5-5",
+  askEffort: "low",
   projectDir: null,
   firmwareUpdates: false,
   webAccess: false
 });
 
 const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,127}$/;
+// The device stops waiting 65 s after its upload, and transcribing comes first.
+const ASK_TIMEOUT_MS = 50000;
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const MAX_FINISHED_RUNS = 256;
 const SESSION_ID = /^[A-Za-z0-9_-]{8,128}$/;
@@ -116,10 +122,14 @@ export function claudeCodeSettings(config) {
   const settings = { ...CLAUDE_CODE_DEFAULTS, ...(config?.upstream?.claudeCode || {}) };
   if (typeof settings.command !== "string" || !settings.command.trim() || settings.command.includes("\0"))
     throw new Error("upstream.claudeCode.command must name the claude program");
-  if (typeof settings.model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,127}$/.test(settings.model))
+  if (typeof settings.model !== "string" || !MODEL_NAME.test(settings.model))
     throw new Error("upstream.claudeCode.model is not a valid model name");
+  if (typeof settings.askModel !== "string" || !MODEL_NAME.test(settings.askModel))
+    throw new Error("upstream.claudeCode.askModel is not a valid model name");
   if (!EFFORTS.has(settings.effort))
     throw new Error("upstream.claudeCode.effort must be low, medium, high, xhigh or max");
+  if (!EFFORTS.has(settings.askEffort))
+    throw new Error("upstream.claudeCode.askEffort must be low, medium, high, xhigh or max");
   if (!Number.isInteger(settings.turnTimeoutMs) || settings.turnTimeoutMs < 5000 || settings.turnTimeoutMs > 3600000)
     throw new Error("upstream.claudeCode.turnTimeoutMs must be 5000..3600000");
   if (settings.projectDir !== undefined && settings.projectDir !== null) {
@@ -184,6 +194,12 @@ export function claudeTurnArgs(settings, { appendSystemPrompt = "", sessionId = 
     ...(appendSystemPrompt ? ["--append-system-prompt", appendSystemPrompt] : []),
     ...(sessionId ? ["--resume", sessionId] : [])
   ];
+}
+
+// The owner's project stays out of this even when the chat can reach it.
+export function claudeAskArgs(settings, system) {
+  return ["-p", "--output-format", "json", "--model", settings.askModel, "--effort", settings.askEffort,
+    ...ISOLATION_ARGS, "--no-session-persistence", "--tools", "", "--system-prompt", system];
 }
 
 // A streamed turn runs for minutes and most of its lines are thrown away, so the
@@ -308,6 +324,7 @@ export class ClaudeCodeClient extends EventEmitter {
     this.retryDelayMs = retryDelayMs;
     const root = path.join(config.stateDir, "claude-code");
     this.workspace = this.settings.projectDir || path.join(root, "workspace");
+    this.askDir = path.join(root, "ask");
     this.sessionsPath = path.join(root, "sessions.json");
     // Its own folder, so tools given this path reach nothing else in private state.
     // Outside the project, so saved notes can never be committed or pushed.
@@ -331,6 +348,7 @@ export class ClaudeCodeClient extends EventEmitter {
 
   async start() {
     await mkdir(this.workspace, { recursive: true, mode: 0o700 });
+    await mkdir(this.askDir, { recursive: true, mode: 0o700 });
     await mkdir(this.memoryDir, { recursive: true, mode: 0o700 });
     await this.loadSessions();
     await this.watchLogin();
@@ -486,6 +504,25 @@ export class ClaudeCodeClient extends EventEmitter {
       if (tracked) this.children.delete(tracked);
       return parseClaudeResult({ ...result, stdout: finalLine });
     });
+  }
+
+  // One question beside the conversation. It has no tools, notes or history, it can run while a
+  // chat turn does, and it leaves nothing behind.
+  async ask({ system, message }) {
+    await this.firstCheck;
+    if (!this.connected) throw new Error(FAILURE_REPLIES.auth);
+    let tracked;
+    const result = await runClaude(this.trackedSpawn(child => { tracked = child; }), this.settings.command,
+      claudeAskArgs(this.settings, system), { cwd: this.askDir, env: claudeEnv(this.env), input: message,
+        timeoutMs: ASK_TIMEOUT_MS });
+    if (tracked) this.children.delete(tracked);
+    const outcome = parseClaudeResult(result);
+    if (outcome.category === "auth") {
+      this.connected = false;
+      void this.watchLogin();
+    }
+    if (!outcome.text) throw new Error(FAILURE_REPLIES[outcome.category] || "Claude couldn't answer. Try again.");
+    return outcome.text;
   }
 
   trackedSpawn(onSpawn) {

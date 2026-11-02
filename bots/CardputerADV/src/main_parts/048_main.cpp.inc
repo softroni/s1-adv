@@ -35,6 +35,9 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
     handleFileManagerKey(key, keys); return;
   }
   if (key == '`' || key == '~' || key == 27 || hasHidKey(keys, kHidKeyEscape)) {
+    if (voiceToolEscape()) {
+      return;
+    }
     if (routeBrainFlowEscape()) {
       return;
     }
@@ -102,7 +105,8 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
     return;
   }
   if (gRecording) {
-    setStatus("Recording: Esc cancel, Alt send",900);
+    if (voiceToolOnScreen() && (keys.enter || key == '\r' || key == '\n')) toggleVoiceByTap();
+    else setStatus("Recording: Esc cancel, Alt send",900);
     return;
   }
   if (gPlaybackActive && (key == '-' || key == '_')) {

@@ -58,7 +58,7 @@ constexpr uint16_t TFT_BLACK = 0, TFT_WHITE = 0xffff;
 // --- The canvas, which checks every draw and can write them down -------------------------------
 namespace lgfx { struct IFont { int id; int charWidth; int height; }; }
 namespace fonts {
-const lgfx::IFont Font0{0, 6, 8}, Font2{2, 7, 16}, Font4{4, 14, 26}, Font6{6, 27, 48}, FreeSansBold9pt7b{9, 9, 18};
+const lgfx::IFont Font0{0, 6, 8}, Font2{2, 7, 16}, Font4{4, 14, 26}, Font6{6, 27, 48}, FreeSansBold9pt7b{9, 9, 18}, efontCN_12{12, 6, 12};
 }
 std::string gScene;
 std::vector<std::string> gOps;
@@ -275,9 +275,22 @@ enum class UiMode { Home, NfcNotes, Mesh, SmartLamp, IrRemote, LabDevices, LabRu
 UiMode gUiMode = UiMode::Home;
 bool gLauncherVisible = false, gRecording = false, gRealtimeActive = false, gPlaybackActive = false, gToneAllowed = true;
 bool gSubmitting = false, gThinking = false, gWifiReady = true;
-String gHubHost = "bridge", gDeferredDeviceActionsJson;
+String gHubHost = "bridge";
 int gVoiceTaps = 0;
 void toggleVoiceByTap() { ++gVoiceTaps; if (gRecording) { gRecording = false; gThinking = true; } else gRecording = true; }
+// The module itself runs in test_voice_tool.py. This is what a tool's screen sees of it.
+struct VoiceToolAnswer { bool ok = false; String heard, reply, actionsJson, problem; };
+bool gVoiceStarting = false;
+bool voiceToolStarting() { return gVoiceStarting; }
+bool voiceToolListening() { return gRecording; }
+bool voiceToolWorking() { return gThinking; }
+bool gActionsRun = false;
+bool executeDeviceActionsJson(const String& json) { return !std::string(json).empty() && gActionsRun; }
+std::vector<String> wrapText(const String& raw, int) {
+  std::vector<String> lines; std::string text = raw;
+  for (size_t at = 0; at < text.size(); at += 38) lines.push_back(String(text.substr(at, 38).c_str()));
+  return lines;
+}
 struct { bool power = false, online = false; uint8_t brightness = 0; } gSmartLamp;
 std::vector<std::string> gLampSent;
 void smartLampSendControl(const String& packet, const String&) { gLampSent.push_back(packet); }
@@ -670,7 +683,9 @@ void testSay() {
   goToRow(gLabBook.count + 1); key(ENTER); assert(gLabUi.view == LabView::Say); show("say"); assert(gCanvas.shows("Tell Claude"));
   // Talk, stop, wait, and the rule comes back to look at.
   const int taps = gVoiceTaps;
-  key(ENTER); assert(gRecording && gVoiceTaps == taps + 1); run(50); show("say-listening"); assert(gCanvas.shows("Listening"));
+  // When something is already on the network the mic takes a moment, and the screen says so.
+  gVoiceStarting = true; show("say-starting"); assert(gCanvas.shows("Getting ready...") && gCanvas.shows("ESC cancel") && gCanvas.shows("STARTING")); gVoiceStarting = false; show("say");
+  assert(gCanvas.shows("ALT talk")); key(ENTER); assert(gRecording && gVoiceTaps == taps + 1); run(50); show("say-listening"); assert(gCanvas.shows("Listening") && gCanvas.shows("ALT send  ESC cancel"));
   key(ENTER); assert(!gRecording && gThinking); run(50); show("say-writing"); assert(gCanvas.shows("Claude is writing it"));
   key(ENTER); assert(gVoiceTaps == taps + 2);  // A press while it's writing does nothing.
   lab::Draft d; d.name("Wave red"); d.addCond("distance", "under", 30); d.addSet("strip_color", 0); d.addFollow("servo", "knob", false); assert(d.usable());
@@ -683,9 +698,17 @@ void testSay() {
   // E walks the steps, and saves as a new rule.
   labOfferRule(d.rule); key('e'); assert(gLabUi.view == LabView::Wizard && gLabWizard.index < 0 && gLabWizard.rule.cond[0].value == 30); for (int i = 0; i < 40 && gLabUi.view == LabView::Wizard; ++i) key(ENTER);
   assert(gLabBook.count == count + 1 && gLabBook.rules[count].actions == 2); key('x'); key('x'); assert(gLabBook.count == count);
-  // A reply with no rule says so, and it can be tried again.
-  goToRow(gLabBook.count + 1); key(ENTER); key(ENTER); run(20); key(ENTER); run(20); gThinking = false; gRecording = false; run(50); assert(gLabUi.sayFailed); show("say-failed"); assert(gCanvas.shows("No rule came back"));
-  key(ENTER); assert(gRecording && !gLabUi.sayFailed); key(ENTER); gThinking = false; run(50); esc(); assert(gLabUi.view == LabView::Rules); run(100);
+  // A reply with no rule shows what Claude needs and what it heard, and it can be tried again.
+  assert(!labSayOnScreen()); goToRow(gLabBook.count + 1); key(ENTER); assert(labSayOnScreen()); key(ENTER); run(20); key(ENTER); run(20); gThinking = false;
+  { VoiceToolAnswer a; a.ok = true; a.heard = "turn it on"; a.reply = "Which sensor should I watch?"; labSayAnswered(a); }
+  run(50); assert(gLabUi.sayFailed); show("say-failed"); assert(gCanvas.shows("No rule came back") && gCanvas.shows("Which sensor should I watch?") && gCanvas.shows("Heard: turn it on") && gCanvas.shows("ALT try again"));
+  // An action Claude sent that the device refused counts as no rule.
+  { VoiceToolAnswer a; a.ok = true; a.actionsJson = "[{}]"; labSayAnswered(a); assert(gLabUi.sayFailed); renderLabUi(); assert(gCanvas.shows("Try again, naming a sensor")); }
+  // A rule that was taken leaves this alone, because the offer has already opened.
+  { gLabUi.sayFailed = false; gActionsRun = true; VoiceToolAnswer a; a.ok = true; a.actionsJson = "[{}]"; labSayAnswered(a); assert(!gLabUi.sayFailed); gActionsRun = false; }
+  // When it never reached Claude it says why.
+  { VoiceToolAnswer a; a.problem = "Couldn't reach the bridge."; labSayAnswered(a); renderLabUi(); assert(gCanvas.shows("Couldn't reach the bridge.") && !gCanvas.shows("Heard:")); }
+  key(ENTER); assert(gRecording); key(ENTER); gThinking = false; run(50); esc(); assert(gLabUi.view == LabView::Rules); run(100);
   // With no Wi-Fi it says so instead of trying.
   key(ENTER); gWifiReady = false; show("say-offline"); assert(gCanvas.shows("Needs Wi-Fi")); { const int t = gVoiceTaps; key(ENTER); assert(gVoiceTaps == t); } gWifiReady = true; esc();
   // A rule arriving elsewhere still reaches this screen, and stops rules that are playing.

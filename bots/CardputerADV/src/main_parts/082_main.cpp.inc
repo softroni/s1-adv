@@ -36,7 +36,8 @@ struct LabUi {
   int playRule = 0;             // Which rule the flow is showing.
   bool practicing = false;
   int practiceCond = 0;
-  bool sayAsked = false, sayHeard = false, sayFailed = false;
+  bool sayFailed = false;
+  String sayNote, sayHeard;  // What to show when no rule came back.
   // The test screens.
   int servoAngle = 90, stripHue = 200, stripBright = 40, stripLed = 0, ledHue = 120, toneHz = 880;
   bool sweeping = false, sweepUp = true, ledOn = false, relays[2] = {false, false};
@@ -752,13 +753,18 @@ void renderLabRecipes() {
   labKeys(String(kLabArrowUpDown) + " pick  ENTER add  ESC back");
 }
 void renderLabSay() {
-  const bool working = gSubmitting || gThinking || gPlaybackActive || !gDeferredDeviceActionsJson.isEmpty();
-  const char* chip = gRecording ? "LISTENING" : working ? "WRITING" : "READY";
-  labHead("Say a rule", launcher_icons::kMic, kLabLime, chip, gRecording ? kLabGreen : working ? kLabAmber : kLabSoft);
-  if (gRecording) {
+  const bool listening = voiceToolListening(), working = voiceToolWorking();
+  const bool starting = voiceToolStarting();
+  const char* chip = listening ? "LISTENING" : working ? "WRITING" : starting ? "STARTING" : "READY";
+  labHead("Say a rule", launcher_icons::kMic, kLabLime, chip, listening ? kLabGreen : working || starting ? kLabAmber : kLabSoft);
+  if (starting) {
+    labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Getting ready...", TFT_WHITE);
+    labTextAt(&fonts::Font0, 6, 52, "Talk when it says Listening.", kLabSoft);
+    labKeys("ESC cancel");
+  } else if (listening) {
     labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Listening...", kLabGreen);
     labTextAt(&fonts::Font0, 6, 52, "Say what to watch and what to do.", kLabSoft);
-    labKeys("ENTER done  ESC back");
+    labKeys("ALT send  ESC cancel");
   } else if (working) {
     labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Claude is writing it", TFT_WHITE);
     labTextAt(&fonts::Font0, 6, 52, "You'll see it before it's saved.", kLabSoft);
@@ -767,12 +773,22 @@ void renderLabSay() {
     labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Needs Wi-Fi", TFT_WHITE);
     labTextAt(&fonts::Font0, 6, 52, "Claude writes this on the bridge.", kLabSoft);
     labKeys("ESC back");
+  } else if (gLabUi.sayFailed) {
+    labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "No rule came back", TFT_WHITE);
+    gCanvas.setFont(&fonts::efontCN_12);
+    const auto lines = wrapText(gLabUi.sayNote.isEmpty() ? String("Try again, naming a sensor and what it should do.") : gLabUi.sayNote, 228);
+    for (size_t i = 0; i < lines.size() && i < 3; ++i) labTextAt(&fonts::efontCN_12, 6, 50 + static_cast<int>(i) * 14, lines[i], kLabSoft);
+    if (!gLabUi.sayHeard.isEmpty()) {
+      gCanvas.setFont(&fonts::efontCN_12);
+      labTextAt(&fonts::efontCN_12, 6, 96, fitCurrentFontToWidth("Heard: " + gLabUi.sayHeard, 228), kLabCyan);
+    }
+    labKeys("ALT try again  ESC back");
   } else {
-    labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, gLabUi.sayFailed ? "No rule came back" : "Tell Claude what you want", TFT_WHITE);
-    labTextAt(&fonts::Font0, 6, 52, gLabUi.sayFailed ? "Try again, naming a sensor and what" : "For example:", kLabSoft);
-    labTextAt(&fonts::Font0, 6, 63, gLabUi.sayFailed ? "it should do." : "\"When I wave my hand, turn the strip", gLabUi.sayFailed ? kLabSoft : kLabCyan);
-    if (!gLabUi.sayFailed) labTextAt(&fonts::Font0, 6, 74, "red and move the servo.\"", kLabCyan);
-    labKeys("ENTER talk  ESC back");
+    labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Tell Claude what you want", TFT_WHITE);
+    labTextAt(&fonts::Font0, 6, 52, "For example:", kLabSoft);
+    labTextAt(&fonts::Font0, 6, 63, "\"When I wave my hand, turn the strip", kLabCyan);
+    labTextAt(&fonts::Font0, 6, 74, "red and move the servo.\"", kLabCyan);
+    labKeys("ALT talk  ESC back");
   }
 }
 void renderLabOffer() {
@@ -1465,22 +1481,19 @@ void labPlayKey(char key, char lower, bool left, bool right, bool up, bool down)
     if (gLabPaused) labReleaseOutputs();
   }
 }
-// Noticing that Claude replied with no rule. A rule that does come changes the screen itself.
-void serviceLabSay() {
+bool labSayOnScreen() { return labMode(gUiMode) && gLabUi.view == LabView::Say; }
+// A rule changes the screen by itself. Anything else is Claude saying what it needs.
+void labSayAnswered(const VoiceToolAnswer& answer) {
+  if (answer.ok && executeDeviceActionsJson(answer.actionsJson)) return;
   LabUi& ui = gLabUi;
-  if (ui.view != LabView::Say || !ui.sayAsked) return;
-  if (gRecording) ui.sayHeard = true;
-  if (!ui.sayHeard || gRecording || gSubmitting || gThinking || gPlaybackActive || !gDeferredDeviceActionsJson.isEmpty()) return;
-  ui.sayAsked = false;
-  ui.sayHeard = false;
   ui.sayFailed = true;
+  ui.sayNote = answer.ok ? answer.reply : answer.problem;
+  ui.sayHeard = answer.heard;
   labRedraw();
 }
 // A rule from Claude waits here until someone presses Enter, because rules can switch mains.
 void labOfferRule(const lab::Rule& rule) {
   gLabOffer = rule;
-  gLabUi.sayAsked = false;
-  gLabUi.sayHeard = false;
   if (!labMode(gUiMode)) setUiMode(UiMode::LabRules);
   labStopPlaying();
   gLabUi.view = LabView::Offer;
@@ -1550,11 +1563,7 @@ bool handleLabKey(char key, const Keyboard_Class::KeysState& keys) {
       }
       break;
     case LabView::Say:
-      if (enter && gWifiReady && !gSubmitting && !gThinking) {
-        ui.sayAsked = true;
-        ui.sayFailed = false;
-        toggleVoiceByTap();
-      }
+      if (enter && gWifiReady && !gSubmitting && !gThinking) toggleVoiceByTap();
       break;
     case LabView::Offer:
       if (lower == 'e') {
@@ -1593,12 +1602,7 @@ bool routeLabEscape() {
       ui.view = gUiMode == UiMode::LabDevices ? LabView::Devices : LabView::Rules;
       break;
     case LabView::Wizard: labWizardBack(); break;
-    case LabView::Recipes: case LabView::Offer: ui.view = LabView::Rules; break;
-    case LabView::Say:
-      ui.sayAsked = false;
-      ui.sayHeard = false;
-      ui.view = LabView::Rules;
-      break;
+    case LabView::Recipes: case LabView::Offer: case LabView::Say: ui.view = LabView::Rules; break;
     default:
       if (ui.practicing) {
         ui.practicing = false;

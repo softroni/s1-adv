@@ -52,6 +52,7 @@ import { CARDPUTER_EXECUTION_POLICY, voiceThinking, unwrapCardputerEnvelope, aud
 import { DurableTurnOutbox } from "./turn-outbox.mjs";
 import { SemanticFront, frontPrompt, FRONT_RECEIPT, validateModelRouting } from './semantic-front.mjs';
 import { decodeVoiceUpload } from "./voice-upload-codec.mjs";
+import { LAB_RULE_POLICY, VOICE_TOOLS, answerVoiceTool } from "./voice-tools.mjs";
 import { RealtimePacingBudget, REALTIME_MAX_AUDIO_LEAD_MS } from "./realtime-pacing-budget.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -366,23 +367,7 @@ const CARDPUTER_FIRMWARE_CAPABILITIES = {
   ]
 };
 
-// The sensor and output names must match kSigs and kOuts in bots/CardputerADV/src/lab.h.
-export const LAB_RULE_POLICY =
-  "When the user describes something the Cardputer's sensors should do, like \"when I wave, turn the strip red\", " +
-  "reply briefly and append one lab.rule action. Example: " +
-  "[[cardputer_actions:[{\"type\":\"lab.rule\",\"name\":\"Wave red\",\"any\":true,\"hold_ms\":2000," +
-  "\"when\":[{\"sensor\":\"distance\",\"test\":\"under\",\"value\":30}]," +
-  "\"do\":[{\"output\":\"strip_color\",\"set\":0},{\"output\":\"servo\",\"follow\":\"knob\"}]}]]] " +
-  "Sensors: distance (cm), temperature (C), humidity (%), knob (%), light (%), tilt (degrees), satellites, " +
-  "stick_x and stick_y (-100 to 100), and motion and stick_button, which are on or off. " +
-  "A test is under or over with a value, on or off for the on or off sensors, or changes. " +
-  "Outputs with their set values: servo (0 to 180), strip_color and led (hue: red 0, orange 30, yellow 60, green 120, cyan 180, blue 240, purple 280, pink 330), " +
-  "strip_bright and lamp_bright (0 to 100), strip_length (0 to 30), speaker (200 to 2000 Hz), " +
-  "and relay_1, relay_2, lamp_power, ac_tcl and ac_daikin (1 or 0). " +
-  "Each do line has set, or follow or oppose with a sensor name, except the 1 or 0 outputs, which can only set. " +
-  "Use at most 3 when lines and 3 do lines, any false when all must be true, and a name of 15 letters at most. " +
-  "A wave or a hand means distance under 30. hold_ms is how long it keeps going afterwards, up to 30000. " +
-  "The owner reviews every rule before it is saved, so never say it is running.";
+export { LAB_RULE_POLICY };
 
 const DEVICE_ACTION_TYPES = new Set(DEVICE_ACTION_CATALOG.map((action) => action.type));
 
@@ -5204,6 +5189,17 @@ class BridgeRuntime {
     return response;
   }
 
+  // A tool's turn stays out of the chat, so it never touches the topic or its history.
+  answerVoiceTool(name, transcript) {
+    return answerVoiceTool(name, transcript, {
+      ask: this.upstream instanceof ClaudeCodeClient ? request => this.upstream.ask(request) : null,
+      readReply: text => {
+        const { visibleText, actions } = extractDeviceActionsFromText(text);
+        return { reply: stripMarkdownForDevice(visibleText), actions };
+      }
+    });
+  }
+
   async appendDeviceLogs(device, payload) {
     const deviceId = safeSlug(device?.device_id || "unknown-device", "unknown-device", 64);
     const logPath = path.join(this.config.assets.logsDir, `${deviceId}.jsonl`);
@@ -6685,6 +6681,12 @@ async function main() {
           ? Buffer.concat([createWavHeader(audioBytesRaw.length, sampleRate), audioBytesRaw])
           : audioBytesRaw;
 
+      const voiceTool = String(req.headers["x-voice-tool"] || "").trim();
+      if (voiceTool && !VOICE_TOOLS.has(voiceTool)) {
+        requestError(res, 400, "unknown_voice_tool");
+        return;
+      }
+
       try {
         audioBytes = decodeVoiceUpload(audioBytes, config.maxUploadBytes);
         const transcript = await transcribeDeviceAudio(config, {
@@ -6698,6 +6700,11 @@ async function main() {
           return;
         }
         console.info(`[voice-raw] transcript device=${device.device_id} turn=${turnId || "-"} chars=${transcript.length}`);
+        if (voiceTool) {
+          console.info(`[voice-tool] device=${device.device_id} turn=${turnId || "-"} tool=${voiceTool}`);
+          json(res, 200, await runtime.answerVoiceTool(voiceTool, transcript));
+          return;
+        }
         const commandResult = await runtime.handleOmnibotCommand(device, transcript);
         if (commandResult) {
           console.info(`[voice-raw] command device=${device.device_id} turn=${turnId || "-"}`);

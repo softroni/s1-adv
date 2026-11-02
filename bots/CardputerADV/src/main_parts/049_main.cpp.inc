@@ -1,5 +1,5 @@
   if (escDown) {
-    if (!routeBrainFlowEscape() && !routeLabEscape()) {
+    if (!voiceToolEscape() && !routeBrainFlowEscape() && !routeLabEscape()) {
       handleGlobalEscape();
     }
   } else if (gChatCommandsVisible) {
@@ -11,7 +11,7 @@
   } else if (isAssistantUi() && !gLauncherVisible && keys.ctrl && (leftDown || rightDown)) {
     runChatCommand(leftDown?2:3);
 
-  } else if (altVoiceTap && isAssistantUi() && !gLauncherVisible) {
+  } else if (altVoiceTap && (isAssistantUi() || voiceToolOnScreen()) && !gLauncherVisible) {
     toggleVoiceByTap();
   } else if (optionViewToggle) {
     togglePulseChatDisplay();

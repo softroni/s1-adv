@@ -13,7 +13,7 @@ import { planModelRoles } from "./model-roles.mjs";
 import { BridgeRuntime, cleanupTranscriptText, loadConfig } from "./server.mjs";
 import { voiceReplyWaitMs } from "./turn-delivery-policy.mjs";
 import {
-  CLAUDE_CODE_DEFAULTS, ClaudeCodeClient, claudeCodeSettings, claudeEnv, claudeTurnArgs, parseClaudeResult,
+  CLAUDE_CODE_DEFAULTS, ClaudeCodeClient, claudeAskArgs, claudeCodeSettings, claudeEnv, claudeTurnArgs, parseClaudeResult,
   projectSettings, readClaudeLogin, recoveredConversation, resolveUpstreamProvider, validateClaudeCodeConfig
 } from "./claude-code-client.mjs";
 
@@ -125,6 +125,25 @@ test("settings reject values that could become flags or cannot run", () => {
   assert.throws(() => settings({ command: "" }), /command/);
   assert.throws(() => validateClaudeCodeConfig({ upstream: {}, modelRouting: { enabled: true } }), /OpenClaw/);
   assert.throws(() => validateClaudeCodeConfig({ upstream: {}, firmwareAutomation: { enabled: true } }), /OpenClaw/);
+});
+
+test("a quick question beside the chat is locked down like the chat and keeps nothing", () => {
+  const args = claudeAskArgs(claudeCodeSettings({ upstream: { claudeCode: { projectDir: "/srv/project" } } }), "the rules");
+  for (const flag of ["--restricted", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence"])
+    assert.ok(args.includes(flag), flag);
+  assert.equal(args[args.indexOf("--tools") + 1], "");
+  assert.equal(args[args.indexOf("--system-prompt") + 1], "the rules");
+  assert.equal(args[args.indexOf("--model") + 1], CLAUDE_CODE_DEFAULTS.askModel);
+  assert.equal(args[args.indexOf("--effort") + 1], "low");
+  // The project and web access belong to the chat.
+  assert.ok(!args.includes("--settings") && !args.includes("--add-dir") && !args.includes("--allowedTools"));
+  assert.ok(!args.includes("--resume"));
+});
+
+test("the quick model can be changed, but not into a flag", () => {
+  assert.equal(claudeCodeSettings({ upstream: { claudeCode: { askModel: "claude-sonnet-5-5", askEffort: "medium" } } }).askModel, "claude-sonnet-5-5");
+  assert.throws(() => claudeCodeSettings({ upstream: { claudeCode: { askModel: "--dangerous" } } }), /askModel/);
+  assert.throws(() => claudeCodeSettings({ upstream: { claudeCode: { askEffort: "turbo" } } }), /askEffort/);
 });
 
 test("the child environment cannot select API billing or see host secrets", () => {
@@ -570,11 +589,12 @@ async function startBridge(t, fake, shim = {}, { reuse = false } = {}) {
   const turn = message => fetch(`${base}/api/device-text-turn`, { method: "POST", headers,
     body: JSON.stringify({ device_id: config.devices[0].device_id, message }) }).then(response => response.json());
   // The same request the firmware makes, including its 1 s wait.
-  const voice = (turnId, seconds = 1) => fetch(`${base}/api/device-audio-turn-raw`, { method: "POST",
+  const voice = (turnId, seconds = 1, extra = {}) => fetch(`${base}/api/device-audio-turn-raw`, { method: "POST",
     headers: { Authorization: headers.Authorization, "content-type": "application/octet-stream", "x-audio-sample-rate": "16000",
-      "x-turn-id": turnId, "x-client-msg-id": turnId, "x-reply-audio": "false", "x-save-reply-audio": "false", "x-voice-wait-ms": "1000" },
+      "x-turn-id": turnId, "x-client-msg-id": turnId, "x-reply-audio": "false", "x-save-reply-audio": "false", "x-voice-wait-ms": "1000", ...extra },
     body: Buffer.alloc(32000 * seconds) }).then(response => response.json());
-  return { turn, voice, sessionsPath: path.join(config.stateDir, "claude-code", "sessions.json") };
+  const waiting = () => fetch(`${base}/api/cardputer/device-events/pending?limit=10`, { headers }).then(response => response.json());
+  return { turn, voice, waiting, sessionsPath: path.join(config.stateDir, "claude-code", "sessions.json") };
 }
 
 test("full bridge: device text turns reach Claude Code and replies, context and actions return", async t => {
@@ -638,6 +658,120 @@ require("fs").writeFileSync(args[args.indexOf("-of") + 1] + ".txt", "What is the
   assert.equal(reply.reply, "Paris is the capital.");
   const [call] = await fake.calls();
   assert.equal(call.stdin, "[Voice]\nWhat is the capital of France?");
+});
+
+async function hearing(fake, words) {
+  const whisper = path.join(fake.dir, "whisper-cli");
+  await writeFile(whisper, `#!${process.execPath}
+const args = process.argv.slice(2);
+require("fs").writeFileSync(args[args.indexOf("-of") + 1] + ".txt", ${JSON.stringify(`${words}\n`)});
+`);
+  await chmod(whisper, 0o755);
+  return { sttLocalBin: whisper, sttLocalModel: path.join(fake.dir, "model.bin") };
+}
+
+test("a quick question runs beside a chat turn and shares nothing with it", async t => {
+  const fake = await makeFake(t, { steps: [{ ...success("Chat reply"), delayMs: 600 }, success("Side answer", NEXT_ID)] });
+  const { client, events } = makeClient(fake);
+  await client.start();
+  await send(client, "a long job", "run-1");
+  await until(async () => (await fake.calls()).length === 1);
+  const started = Date.now();
+  assert.equal(await client.ask({ system: "The rules.", message: "spoken words" }), "Side answer");
+  assert.ok(Date.now() - started < 500, "it must not wait for the chat");
+  assert.equal(events.length, 0, "the answer isn't a chat reply");
+  await finished(client, "run-1");
+  assert.equal(events.length, 1);
+  assert.equal(replyText(events[0]), "Chat reply");
+
+  const [, side] = await fake.calls();
+  assert.equal(side.stdin, "spoken words");
+  assert.ok(!side.argv.includes("spoken words"), "what was said stays out of the process list");
+  assert.equal(side.argv[side.argv.indexOf("--system-prompt") + 1], "The rules.");
+  assert.equal(path.basename(side.cwd), "ask");
+  assert.ok(!side.env.includes("ANTHROPIC_API_KEY"));
+  assert.ok(![...client.sessions.values()].includes(NEXT_ID), "nothing to resume");
+});
+
+test("a project folder stays out of a quick question", async t => {
+  const fake = await makeFake(t, { steps: [success("Side answer")] });
+  const project = path.join(fake.dir, "project");
+  await mkdir(project);
+  const { client } = makeClient(fake, { projectDir: project });
+  await client.start();
+  await client.ask({ system: "The rules.", message: "words" });
+  const [call] = await fake.calls();
+  assert.notEqual(realpathSync(call.cwd), realpathSync(project));
+  assert.equal(call.argv[call.argv.indexOf("--tools") + 1], "");
+});
+
+test("a quick question that fails says why, and signing out stops it running at all", async t => {
+  const fake = await makeFake(t, { steps: [failure("You've hit your usage limit"), failure("not logged in")] });
+  const { client } = makeClient(fake);
+  await client.start();
+  await assert.rejects(client.ask({ system: "s", message: "m" }), /plan limit/);
+  await assert.rejects(client.ask({ system: "s", message: "m" }), /not signed in/);
+  assert.equal(client.connected, false, "the login is checked again");
+  const signedOut = await makeFake(t, { auth: { loggedIn: false } });
+  const { client: other } = makeClient(signedOut);
+  void other.start();  // It keeps checking until someone signs in.
+  t.after(() => other.stop());
+  await assert.rejects(other.ask({ system: "s", message: "m" }), /not signed in/);
+  assert.equal((await signedOut.calls()).length, 0);
+});
+
+test("full bridge: transcribing gives back the words and nothing else happens", async t => {
+  const fake = await makeFake(t, { steps: [success("must not be used")] });
+  const { voice, waiting, sessionsPath } = await startBridge(t, fake, await hearing(fake, "Buy more milk"));
+  const answer = await voice("voice-tool-1", 1, { "x-voice-tool": "transcribe" });
+  assert.deepEqual(answer, { ok: true, voice_tool: "transcribe", transcript: "Buy more milk" });
+  assert.equal((await fake.calls()).length, 0);
+  assert.deepEqual((await waiting()).items, []);
+  await assert.rejects(stat(sessionsPath), { code: "ENOENT" });
+});
+
+test("full bridge: a tool asks Claude on its own and stays out of the chat", async t => {
+  const rule = { type: "lab.rule", name: "Wave red", any: true, hold_ms: 2000,
+    when: [{ sensor: "distance", test: "under", value: 30 }], do: [{ output: "strip_color", set: 0 }] };
+  const steps = [success(`Here it is. [[cardputer_actions:${JSON.stringify([rule, { type: "ota.apply" }])}]]`), success("Hello from the chat")];
+  const fake = await makeFake(t, { steps });
+  const { voice, turn, waiting, sessionsPath } = await startBridge(t, fake, await hearing(fake, "When I wave turn the strip red"));
+  const answer = await voice("voice-tool-2", 1, { "x-voice-tool": "lab.rule" });
+  assert.equal(answer.ok, true);
+  assert.equal(answer.pending, undefined, "the device waits for this on the same request");
+  assert.equal(answer.voice_tool, "lab.rule");
+  assert.equal(answer.transcript, "When I wave turn the strip red");
+  assert.equal(answer.reply, "Here it is.");
+  assert.deepEqual(answer.device_actions.map(action => action.type), ["lab.rule"], "only what the tool lists");
+  assert.equal(answer.device_actions[0].do[0].output, "strip_color");
+
+  const [call] = await fake.calls();
+  assert.equal(call.stdin, "When I wave turn the strip red");
+  assert.ok(call.argv.includes("--no-session-persistence"));
+  assert.match(call.argv[call.argv.indexOf("--system-prompt") + 1], /lab\.rule/);
+  assert.deepEqual((await waiting()).items, []);
+  await assert.rejects(stat(sessionsPath), { code: "ENOENT" });
+
+  // The chat carries on as if it never happened.
+  assert.equal((await turn("hello")).reply, "Hello from the chat");
+  const [, chat] = await fake.calls();
+  assert.equal(chat.stdin, "hello");
+  assert.ok(!chat.argv.includes("--resume"));
+});
+
+test("full bridge: a tool's problems come back as errors the device can show", async t => {
+  const fake = await makeFake(t, { steps: [failure("You've hit your usage limit")] });
+  const { voice } = await startBridge(t, fake, await hearing(fake, "Wave"));
+  assert.match((await voice("voice-tool-3", 1, { "x-voice-tool": "lab.rule" })).error, /plan limit/);
+  assert.equal((await voice("voice-tool-4", 1, { "x-voice-tool": "delete.everything" })).error, "unknown_voice_tool");
+  assert.equal((await fake.calls()).length, 1);
+});
+
+test("full bridge: a tool hears nothing from a silent clip and Claude isn't asked", async t => {
+  const fake = await makeFake(t, { steps: [success("must not be used")] });
+  const { voice } = await startBridge(t, fake, await hearing(fake, "[BLANK_AUDIO]"));
+  assert.equal((await voice("voice-tool-5", 1, { "x-voice-tool": "lab.rule" })).error, "could not transcribe speech");
+  assert.equal((await fake.calls()).length, 0);
 });
 
 test("Whisper's non-speech tags are never treated as the user's words", () => {

@@ -140,6 +140,8 @@ These live under `upstream.claudeCode` in `config.json`:
 | `model` | `claude-opus-5-5` | Claude Code model name or alias |
 | `effort` | `xhigh` | `low`, `medium`, `high`, `xhigh` or `max` |
 | `turnTimeoutMs` | `600000` | Longest a single reply can run before it is stopped |
+| `askModel` | `claude-haiku-5-5` | Model for quick questions from [voice tools](VOICE-TOOLS.md), like Say a rule |
+| `askEffort` | `low` | Effort for those questions |
 
 Restart the bridge after changing them. Lower effort gives faster replies and uses
 less of your plan.
@@ -318,6 +320,9 @@ session is locked down so that token reaches as little as possible:
   are limited as described in [Let Claude work in a folder](#let-claude-work-in-a-folder).
 - If `claude auth status` doesn't show a subscription login, the bridge refuses
   turns instead of falling back to anything else.
+- [Voice tools](VOICE-TOOLS.md) ask Claude one question at a time, in their own empty
+  folder. Each has no tools, notes or project folder, even if the chat does, and no
+  transcript is kept.
 
 If a token leaks, someone could chat in that conversation, read it and use up your
 plan limits, and change your project folder if you've set one. Generate a new token and

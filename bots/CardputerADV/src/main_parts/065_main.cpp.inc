@@ -708,6 +708,7 @@ void beginVoiceCaptureUpload() {
       "\r\nX-Firmware-Version: " + kAppVersion + "\r\nX-Conversation-Key: " + currentConversationKey() +
       "\r\nX-Client-Msg-Id: " + capture->turnId + "\r\nX-Turn-Id: " + capture->turnId +
       "\r\nX-Reply-Audio: false\r\nX-Save-Reply-Audio: false\r\nX-Voice-Wait-Ms: 1000\r\nX-Activity-Status: 1\r\n";
+  headers += voiceToolHeader();
   if (!gDeviceToken.isEmpty()) headers += "Authorization: Bearer " + gDeviceToken + "\r\nX-Device-Token: " + gDeviceToken + "\r\n";
   headers += "\r\n";
   gVoiceCaptureUpload = capture; gVoiceReadyStreamed = false; gVoiceDialBusy = true;

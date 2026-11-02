@@ -23,15 +23,15 @@ def function(signature):
     return joined[start:end] + '\n'
 
 
-# A tap is Alt with nothing else down, on the press, so it reaches the assistant screens only.
+# A tap is Alt with nothing else down, on the press, so it reaches the assistant and voice tool screens.
 tap = re.search(r'bool altVoiceTap = (.*?);', joined, re.S)[1]
 for held in ['keys.opt', 'keys.ctrl', 'keys.fn', 'keys.shift', 'keys.tab', 'keys.enter', 'keys.del', 'keys.space',
              'upHeld', 'downHeld', 'leftHeld', 'rightHeld']:
     assert f'!{held}' in tap, held
 assert tap.startswith('altDown') and 'wordSignature.isEmpty()' in tap
 assert 'bool altDown = keys.alt && !pAlt;' in joined and 'pAlt = keys.alt;' in joined
-assert '} else if (altVoiceTap && isAssistantUi() && !gLauncherVisible) {\n    toggleVoiceByTap();' in joined
-assert joined.index('altVoiceTap && isAssistantUi()') < joined.index('} else if (optionViewToggle) {')
+assert '} else if (altVoiceTap && (isAssistantUi() || voiceToolOnScreen()) && !gLauncherVisible) {\n    toggleVoiceByTap();' in joined
+assert joined.index('altVoiceTap && (isAssistantUi()') < joined.index('} else if (optionViewToggle) {')
 # It has to count as input, or it wouldn't wake the screen.
 assert 'rightDown || optDown || altDown || charDown || escDown;' in joined
 assert 'gVoiceStartLatched = false;\n  gPendingOtaCheckAction' in joined, 'Esc must drop a waiting start'

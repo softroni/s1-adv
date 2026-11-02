@@ -353,7 +353,7 @@ void stopMic(bool restart){assert(!restart);++micStops;}void cancelVoicePreconne
 void endVoiceWifiPerformance(){++wifiRestores;}void initSpeaker(){++speakerStarts;}
 void setVoiceDiag(const char*){}void setFaceMode(FaceMode){}void setStatus(const char*,int){}
 void pushLine(const char*,const String& s,LineKind){lastError=s;}
-void showVoiceRequestError(const String&){++notices;}void logf(const char*,...){}
+void showVoiceRequestError(const String&){++notices;}void logf(const char*,...){}void voiceToolRecordingEnded(){}
 """
 storage+='\n'+function('033_main.cpp.inc','void writeWavHeader(')
 storage+='\n'+function('032_main.cpp.inc','size_t writeRecordedBytes(')

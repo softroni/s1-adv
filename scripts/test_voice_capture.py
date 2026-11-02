@@ -67,7 +67,7 @@ struct {struct {bool record(int16_t*,size_t,uint32_t){return queueAvailable;}} M
 auto& M5=M5Cardputer;
 int starts=0,stops=0,networkCalls=0,frames=0,queued=0,wakes=0,captureUis=0,startErrors=0;bool sleeping=false;
 String status;std::vector<String> frameLabels;
-void setStatus(const char*s,int=0){status=s;}void logf(const char*,...){}void setVoiceDiag(const char*){}
+void setStatus(const char*s,int=0){status=s;}void logf(const char*,...){}void setVoiceDiag(const char*){}void voiceToolRecordingStarted(){}
 void setFaceMode(FaceMode){}void pushError(const char*){}void releaseTtsBuffer(){}
 void dismissVoiceNotice(){}void cancelVoicePreconnect(){}
 bool remountSdStorage(const char*){return true;}void showVoiceNotice(const char*,bool){}

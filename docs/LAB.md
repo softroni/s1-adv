@@ -221,13 +221,13 @@ With [Claude connected](../README.md#3-connect-claude), you can just describe wh
 
 <table>
 <tr>
-<td width="33%"><img src="assets/lab/say.png" alt="Say a rule, with an example sentence" width="100%"><br><sub><b>1.</b> Open <b>Say a rule</b> and press Enter.</sub></td>
-<td width="33%"><img src="assets/lab/say-listening.png" alt="Say a rule, listening" width="100%"><br><sub><b>2.</b> Say what to watch and what to do, then press Enter.</sub></td>
+<td width="33%"><img src="assets/lab/say.png" alt="Say a rule, with an example sentence" width="100%"><br><sub><b>1.</b> Open <b>Say a rule</b> and tap Alt.</sub></td>
+<td width="33%"><img src="assets/lab/say-listening.png" alt="Say a rule, listening" width="100%"><br><sub><b>2.</b> Say what to watch and what to do, then tap Alt. Esc cancels.</sub></td>
 <td width="33%"><img src="assets/lab/say-offer.png" alt="Claude wrote this, showing the rule it built" width="100%"><br><sub><b>3.</b> Check it. Enter saves it, E walks through it in the steps, and Esc drops it.</sub></td>
 </tr>
 </table>
 
-Nothing happens until you've looked at it. A rule you ask for in chat arrives the same way.
+Nothing happens until you've looked at it. If Claude can't make a rule from what it heard, the screen says what it needs. A rule you ask for in chat arrives the same way.
 
 ## If a part doesn't answer
 

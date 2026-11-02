@@ -36,7 +36,6 @@ constexpr const char* kLabPath = "/lab/rules.dat";
 constexpr const char* kLabNewPath = "/lab/rules.new";
 
 void serviceLabTests();
-void serviceLabSay();
 void labEnterView(UiMode mode);
 bool labRescanAllowed();
 bool labBusWanted();
@@ -841,11 +840,10 @@ void labKeepAwake(uint32_t now) {
   handleScreensaverWake();
 }
 // Rules react to sensors, so nothing else should hold up the loop while they play. Before that
-// the Lab has to stay reachable, because a spoken rule comes back as a reply.
+// the Lab has to stay reachable, because a rule asked for in the chat comes back as a reply.
 bool labAllowsNetwork() { return !gLabPlaying; }
 void serviceLab() {
   if (!labMode(gUiMode) || !gLabOpen) return;
-  serviceLabSay();
   // Nothing should move behind the menu, where it can't be seen or stopped.
   if (gLauncherVisible) {
     if (!gLabBehindMenu) {

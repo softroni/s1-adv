@@ -51,6 +51,7 @@ enum class FaceMode{Idle,Thinking,Error};void setFaceMode(FaceMode){}
 void pushError(String){++errors;}void pushSystem(String){}void pushUser(String s){userText=s;}
 std::vector<String> history;unsigned cursorAtStorage=0;
 void appendAssistantReply(String s){cursorAtStorage=gInboxLastSeq;replyText=s;history.push_back(s);}void setStatus(String,int){}
+bool voiceToolAwaitsAnswer(){return false;}bool finishVoiceToolSubmission(bool,int,const String&){return false;}
 void setVoiceDiag(String){}void setHttpDiag(String s){gLastHttpDiag=s;}
 void executeOrDeferDeviceActionsJson(String){++actions;}
 #include "assistant_activity.h"

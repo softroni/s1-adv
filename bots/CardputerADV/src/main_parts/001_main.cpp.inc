@@ -69,6 +69,7 @@
 #include "lab.h"
 #include "lab_gps.h"
 #include "lab_json.h"
+#include "voice_tool.h"
 #include "activity_cue.h"
 #include "assistant_activity.h"
 #include "weather_view.h"
@@ -109,7 +110,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.240-dev"
+#define APP_VERSION "0.2.241-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"

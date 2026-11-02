@@ -1,7 +1,7 @@
 # Everyday controls
 
 - Type a question and press Enter in chat.
-- Tap **Alt** on Pulse, AI Chat or the other assistant screens to start listening, then tap it again to send. Tapping it while Claude is talking stops the reply and listens. Esc cancels.
+- Tap **Alt** on Pulse, AI Chat, the other assistant screens or [Say a rule](#lab) to start listening, then tap it again to send. Tapping it while Claude is talking stops the reply and listens. Esc cancels.
 - You can also hold **G0**, speak and release, or use **Ctrl+V** or double **Ctrl**.
 - **Tab** opens the app menu from Home, chat and Realtime. The arrow keys pick a row and switch group, and Enter opens. A letter jumps straight to a group: **A** AI Agent, **M** Media, **F** Focus, **T** Tools, **G** Games, **R** Arcade, **S** Settings, **Y** System, **L** Lab. The selected tab underlines its letter. **1-9** also jumps to a group, and **Ctrl+1-8** opens that row. The menu opens on what you last used, even after a restart.
 - **Ctrl+K** opens assistant commands. R selects Realtime, C AI Chat.
@@ -280,9 +280,11 @@ drops any lines after that point.
 rule like any other.
 
 **Say a rule** lets you tell Claude what you want, for example "when I wave my hand, turn the strip
-red". Enter starts and stops listening. Claude's rule comes back to look at before anything
-happens: Enter saves it, E walks through it in the steps, and Esc drops it. A rule that's asked for
-in chat arrives the same way. It needs Wi-Fi and the bridge.
+red". Tap Alt to listen and tap it again to send, the same as in the chat, and Esc cancels. Claude's
+rule comes back to look at before anything happens: Enter saves it, E walks through it in the steps,
+and Esc drops it. If it can't make a rule, the screen says what it needs and what it heard. This stays
+out of the chat, though a rule that's asked for in chat arrives the same way. It needs Wi-Fi and the
+bridge.
 
 Rules are kept on the SD card in `/lab/rules.dat`, with the hub wiring, so they survive a firmware
 install. With no card they last until the next restart.

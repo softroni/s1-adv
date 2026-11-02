@@ -119,6 +119,7 @@ void endVoiceWifiPerformance(){++fixture.perfEnd;}
 bool ensureWifiForHttp(const char*,unsigned){return fixture.wifi;}
 void setHttpDiag(const String& value){fixture.diag=value.value;}
 void setStatus(const String&){}
+String voiceToolHeader(){return "";}
 void render(){}
 void clearEmojiCache(){}
 bool hubUsesTls(){return fixture.tls;}
