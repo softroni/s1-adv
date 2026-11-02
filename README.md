@@ -1,183 +1,304 @@
-<p align="center"><img src="docs/assets/s1-adv-hero.jpg" alt="S1-ADV for Cardputer ADV: voice, AI and firmware" width="100%"></p>
+<p align="center"><img src="docs/assets/s1-adv-banner.png" alt="S1-ADV for the M5Stack Cardputer ADV. Talk to it, play on it, wire it up, teach it new tricks. Shown with its Pulse, app menu and Lab screens." width="100%"></p>
 
 <p align="center">
-<a href="docs/MESH.md#source-and-licensing"><img alt="Firmware GPL-3.0; original source MIT" src="https://img.shields.io/badge/firmware-GPL--3.0-a7f3d0?style=flat-square"></a>
-<img alt="Hardware M5Stack Cardputer ADV" src="https://img.shields.io/badge/hardware-Cardputer_ADV-67e8f9?style=flat-square">
-<img alt="ESP32-S3 8MB" src="https://img.shields.io/badge/ESP32--S3-8MB_flash-c4b5fd?style=flat-square">
+<img alt="Hardware M5Stack Cardputer ADV" src="https://img.shields.io/badge/hardware-Cardputer_ADV-a7f3d0?style=flat-square">
+<img alt="ESP32-S3 with 8 MB flash" src="https://img.shields.io/badge/ESP32--S3-8MB_flash-c4b5fd?style=flat-square">
 <img alt="Status experimental" src="https://img.shields.io/badge/status-experimental-fde68a?style=flat-square">
+<a href="#credits-and-license"><img alt="Source MIT, firmware image GPL-3.0" src="https://img.shields.io/badge/license-MIT_%2F_GPL--3.0-f9a8d4?style=flat-square"></a>
 </p>
 
-# S1-ADV for Cardputer ADV
+# S1-ADV
 
-Security: [bridge hardening](docs/SECURITY-REVIEW-2026-10-23.md) · [public history audit](docs/SECURITY-REVIEW-2026-10-22.md).
+**A pocket computer you can talk to, play on, wire up and teach new tricks.**
 
-**S1-ADV** turns a M5Stack Cardputer ADV into a pocket workspace for **Claude**,
-through your own Claude subscription, or for your **OpenClaw** agent: keyboard,
-voice, local tools and firmware you can extend. Type a question, hold the talk
-button, check a reply, or use the offline apps. The assistant runs on your computer
-or server; the Cardputer runs this firmware.
+S1-ADV is free, open-source firmware for the [M5Stack Cardputer ADV](https://docs.m5stack.com/en/products/sku/K132-Adv), a credit-card-sized computer that costs about $30 and already has a keyboard, color screen, speaker, microphone, battery and Wi-Fi.
 
-**Video walkthrough:** [I Built an AI OS That Evolves on Demand](https://www.youtube.com/watch?v=_0f9UTwefmo).
+Put S1-ADV on it and you get a menu of more than 40 apps: an AI assistant that runs on your own Claude subscription, games you play by waving your hand, a lab for testing sensors and joining them with rules, and everyday tools that need no account at all.
 
-S1-ADV is experimental firmware built on Arduino/FreeRTOS, with an included
-bridge for Claude Code and OpenClaw. See [Credits](CREDITS.md) for the project origin and cover details.
+**Never flashed a device or plugged in a sensor? This page is for you.** There's no soldering, you don't need to code to start, and if anything goes wrong, a USB cable brings it back.
 
-[Get started](docs/GETTING-STARTED.md) · [Use your Claude subscription](docs/CLAUDE-CODE.md) · [Flash firmware](docs/FLASHING.md) · [Connect OpenClaw](docs/OPENCLAW.md) · [Install the OpenClaw plugin on ClawHub](https://clawhub.ai/plugins/openclaw-s1-adv) · [Troubleshooting](docs/TROUBLESHOOTING.md)
+[See it](#see-it) · [New to this?](#new-to-this) · [What to buy](#what-to-buy) · [Set it up](#set-it-up) · [Things to try](#things-to-try) · [Good to know](#good-to-know) · [Help](#if-something-goes-wrong)
 
-**Current firmware: [0.2.201-dev](https://github.com/s1z0v/s1-adv/releases/tag/v0.2.201-dev)**
-includes Internet Radio, Mesh, Chess, Checkers, Minesweeper and direct Focus
-lamp presets. [Release notes](docs/RELEASE-0.2.201.md) ·
-[Internet Radio and controls](docs/RELEASE-0.2.200.md).
-Use a credential-free release image or build with your own settings.
+## See it
 
-## What you can do
+<table>
+<tr>
+<td width="33%"><img src="docs/assets/screens/pulse.png" alt="The Pulse screen: a spinning orb, a large clock and a CODING badge" width="100%"><br><sub><b>Pulse.</b> The clock, plus what Claude is doing right now.</sub></td>
+<td width="33%"><img src="docs/assets/screens/chat.png" alt="AI Chat showing a short conversation and a yellow Coding bar" width="100%"><br><sub><b>AI Chat.</b> Type or talk. Every kind of work has its own color and sound.</sub></td>
+<td width="33%"><img src="docs/assets/screens/menu.png" alt="The app menu open on the Arcade tab with Flappy Bird selected" width="100%"><br><sub><b>App menu.</b> Nine tabs, one letter key each.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/assets/screens/lab-devices.png" alt="The Lab Devices list with live readings from an ultrasonic sensor, ENV III, joystick, Mini Angle and light sensor" width="100%"><br><sub><b>Lab: Devices.</b> Plug a part in and see it respond.</sub></td>
+<td><img src="docs/assets/screens/lab-flow.png" alt="A Lab rule firing, with a knob and a distance sensor driving an LED strip and a servo" width="100%"><br><sub><b>Lab: Rules.</b> "If this, then that" with real parts, no code.</sub></td>
+<td><img src="docs/assets/screens/balloon.png" alt="Hot Air Balloon at sunset, with birds, clouds and stars" width="100%"><br><sub><b>Hot Air Balloon.</b> Blow on a sensor to rise. Yes, really.</sub></td>
+</tr>
+</table>
 
-| On the Cardputer | What powers it |
+<sub>These are real screens: the firmware's own drawing code, run on a computer with sample data. They're shown three times their actual size.</sub>
+
+## What it does
+
+**Talk to Claude from your pocket.** Type a question, or tap Alt and speak. The answer appears on screen and can be read aloud. It remembers your conversation across restarts, and you can tell it to remember things for good.
+
+**Watch it work.** While Claude thinks, the screen and speaker show what it's up to: searching, reading, coding, building, testing. Each one has its own color, icon and sound.
+
+**Ask it to build things.** Point it at this code, say "add a snake game and send it to me", and Claude edits the firmware, builds it and offers it to your Cardputer over Wi-Fi. You review it and press install.
+
+**Play.** Tetris, Chess, Checkers, Minesweeper, Snake, and an NES emulator for your own game files. Wave a hand over a sensor to fly Flappy Bird or play notes in the air.
+
+**Connect the real world.** Plug in sensors, lights, motors and switches. The Lab tests each one, then joins them with rules you build step by step, or just say aloud: "when I wave my hand, turn the strip red."
+
+**Use it every day.** Focus timer, alarms, calendar, notes, calculator, weather, Internet radio, a synth you play on the keyboard, an infrared remote for TCL and Daikin air conditioners.
+
+<details>
+<summary><b>Every app, by menu tab</b></summary>
+
+| Tab | Key | Apps |
+| --- | --- | --- |
+| AI Agent | A | Realtime, Pulse, AI Chat, Chat Eyes, Big Eyes, AI Pet |
+| Media | M | Library, Folders, Voice Notes, Notes, Assets, Files, Internet Radio, VLC Remote |
+| Focus | F | Pomodoro, Alarm, Stopwatch, Calendar, Chess Mind, Chess, BrainFlow, KeyRush |
+| Tools | T | Calculator, NFC Notes, RFID Lab, IR Remote, smartLamp, Sonar, Mesh, Pocket Synth |
+| Games | G | Tetris, NES, Checkers, Minesweeper, Snake |
+| Arcade | R | Air Music, Flappy Bird, Hot Air Balloon, Ball Catch |
+| Settings | S | Device, Display, Wi-Fi, Pomodoro |
+| System | Y | Firmware, Logs, C-Matrix |
+| Lab | L | Devices, Rules |
+
+</details>
+
+## New to this?
+
+Here's the whole hobby in a minute.
+
+A **microcontroller** is a small, cheap computer that runs one program and nothing else. There's no Windows and no app store. That one program is called **firmware**, and copying it onto the device is called **flashing**. Flash different firmware and the same hardware becomes a different machine. That's the fun of it, and it's why you can't really break anything: you can always flash again.
+
+Most people start with a bare circuit board, a bag of wires and a lot of troubleshooting. The Cardputer skips all of that. The screen, keyboard, battery, speaker and microphone are already in the case, and add-on parts connect with one plug-in cable.
+
+S1-ADV gives you a working device on day one. Then you go as deep as you like: play with it, add a sensor, build rules, change a line of code, or let Claude change it for you.
+
+<details>
+<summary><b>Words you'll run into</b></summary>
+
+| Word | What it means |
 | --- | --- |
-| Keyboard chat and push-to-talk voice | Claude Code on your subscription, or your OpenClaw agent, through the included bridge |
-| One configured conversation and its history | Authenticated HTTP and WebSocket feed |
-| Spoken replies and an SD audio library | Server-side STT/TTS and device audio playback |
-| Firmware updates over Wi-Fi | Your bridge's authenticated OTA manifest |
-| Internet Radio with genre and language filters | Public MP3 streams over Wi-Fi; no AI account required |
-| Focus timer, notes, calculator, clocks, pet and games | Local firmware, with no model required |
-| Optional Focus audio | English cues delivered to SD; [Russian audio is a separate download](extras/focus-audio/README.md). [Setup](docs/FOCUS-AUDIO.md) |
-| NES game library on SD | Nofrendo, mapper 0/4; your own ROM files |
-| Optional Meshtastic public-channel text and nodes heard | [Cap LoRa-1262, foreground leaf mode](docs/MESH.md); SD pauses while active |
+| **Firmware** | The program that runs on the device |
+| **Flash** | Copy firmware onto the device, usually over USB |
+| **OTA** | "Over the air": a firmware update sent over Wi-Fi |
+| **ESP32-S3** | The chip inside the Cardputer |
+| **Bridge** | A small program from this repository that runs on your computer and carries messages between the Cardputer and Claude |
+| **Device token** | A long password that proves to your bridge that this is your Cardputer |
+| **Grove** | M5Stack's four-wire plug for add-on parts: power, ground and two signal wires |
+| **I²C** | How several sensors share those two signal wires, each with its own address |
+| **Hub** | A splitter that lets more parts share the one Grove port |
+| **LoRa** | A long-range, low-power radio for short messages, with no internet involved |
+| **Meshtastic** | A community project that passes LoRa text messages from radio to radio |
+| **2.4 GHz** | The only Wi-Fi band this chip can use. A router's 5 GHz network won't appear |
 
-The interface and assistant replies default to English. Russian input and
-Cyrillic rendering are supported; ask explicitly for a Russian reply.
-[NES games stay on SD](docs/NES.md), separate from firmware updates.
+</details>
 
-Realtime voice is an optional experimental mode with separate provider setup.
-Start with text, then add ordinary push-to-talk voice.
+## What to buy
 
-## How it fits together
+**To start, you need one thing: a Cardputer ADV.** Prices below are rough, so check before you order.
 
-```text
-                                                     +--->  claude -p   (default)
-Cardputer ADV  <--- Wi-Fi --->  Cardputer bridge  ---+      your Claude subscription
-keyboard / mic / speaker       Node.js on your host  |
-                                                     +--->  OpenClaw    (optional)
-                                                            your agent
-```
+| Item | About | Notes |
+| --- | --- | --- |
+| [M5Stack Cardputer ADV](https://docs.m5stack.com/en/products/sku/K132-Adv) | $30 | Sold by M5Stack and many electronics shops, as model K132-Adv. Buy the **ADV**: S1-ADV targets it and its 8 MB of flash, and the original Cardputer is untested |
+| USB-C data cable | You may own one | Some cables only charge, and those can't flash. If your computer doesn't see the device, try another cable first |
+| microSD card | $5 to $10 | Optional at first. Saved Wi-Fi networks, voice notes, audio, NES games and Lab rules live on it |
 
-The repository includes both sides: [firmware](bots/CardputerADV) and
-[bridge](bridge). By default the bridge runs each message through the `claude`
-program on your computer, under your own login and with no tools. With OpenClaw,
-install it as a plugin with setup/doctor commands, or run the same bridge as a
-standalone service. The included [setup skill](skills/s1-adv) guides an OpenClaw
-agent through the reviewed configuration; no personal server settings or model
-account are bundled.
+**For the AI features**, you also need a Claude subscription and a Mac or Linux computer that stays on. Games, tools, Internet Radio and the Lab work without them.
 
-Use one device identity per bridge instance, with separate private storage for
-each device. With OpenClaw, start with a restricted chat agent and enable
-firmware-building rights only when you deliberately need them. Read the
-[security model](SECURITY.md).
+**Then add parts as you get curious.** Most Grove units cost $7 to $10, and the games below also play on the keyboard, so none of these are required.
 
-## What you need
+| Part | What it unlocks |
+| --- | --- |
+| **Ultrasonic unit** (Unit Sonic I2C, RCWL-9620) | Air Music, hand-flown Flappy Bird, distance rules. **The best first buy** |
+| **ENV III** | Blowing on the sensor in Hot Air Balloon, temperature and humidity rules |
+| **Joystick 2** | Steering in Hot Air Balloon and Ball Catch |
+| **NFC Universal unit** (ST25R3916) | NFC Notes: read tags and save notes on them |
+| **1-to-3 hub** | Two units or more on the one Grove port |
+| **I/O hub** (Unit PbHub) | Puts a Mini Angle, Light, PIR, relays, a servo and an LED strip in the Lab. [Wiring layout](docs/CONTROLS.md#wiring) |
+| **Cap LoRa-1262** (about $15) | Mesh text and GPS. Read the [Mesh note](#good-to-know) first. M5Stack also sells it with the Cardputer as a Mesh Kit |
+| **Grove IR receiver** | Teaching the IR Remote new buttons. Sending needs nothing extra |
 
-- **M5Stack Cardputer ADV**, with ESP32-S3 and 8 MB flash. Other Cardputer models are untested.
-- A USB data cable and a 2.4 GHz Wi-Fi network.
-- A computer for the first USB flash: Python 3. [The flashing script](docs/FLASHING.md) installs the rest. Building from source needs PlatformIO.
-- Node.js 22+ for the bridge, and either [Claude Code signed in with a Claude subscription](docs/CLAUDE-CODE.md) or an existing OpenClaw installation with its supported Node.js runtime.
-- A reachable bridge address. Use HTTPS/WSS for remote access. The firmware trusts ISRG Root X1 by default.
-- For voice: FFmpeg, an STT backend and a TTS backend on the bridge host. [`setup.mjs voice`](docs/CLAUDE-CODE.md#add-voice) sets up local ones.
-- Optional microSD for saved audio and extra assets.
+RFID Lab (an RC522 reader) and Sonar (a trigger-and-echo ultrasonic sensor) use parts wired to the EXT header instead of the Grove port, and they can't share it with the Cap.
 
-New microphone recordings are saved as WAV files in `/recordings/YYYYMMDD/` on
-microSD to keep recording startup fast as the archive grows. Voice Notes metadata
-and older recordings remain in `/voice`; existing files do not need migration.
+## Set it up
 
-## Start here
+Steps 1 and 2 give you a working Cardputer. Steps 3 and 4 add Claude and your voice, and you can come back to them any time.
 
-To use your Claude subscription, follow [the Claude Code guide](docs/CLAUDE-CODE.md):
+### 1. Put the firmware on
+
+You need Git and Python 3 on your computer. Plug in the Cardputer, turn it on, then run:
 
 ```bash
 git clone https://github.com/softroni/s1-adv.git
-cd s1-adv/bridge
-npm ci
-node scripts/setup.mjs init --public-url https://YOUR_BRIDGE --apply
-```
-
-Then plug in the Cardputer and flash it with one command, on macOS or Linux. It
-downloads what it needs, so you can run it from any computer:
-
-```bash
-cd ..
-./scripts/flash-cardputer.sh
-```
-
-See [Build and flash](docs/FLASHING.md) for the details and the manual route.
-
-Two things that catch people out on the first flash:
-
-- **Unplug the Cardputer and plug it back in after flashing.** It can stay in flashing
-  mode with a blank or unchanged screen until you do. It then shows a setup Wi-Fi
-  name and password.
-- **Join the Cardputer's own Wi-Fi before opening the setup page.** `http://192.168.4.1/`
-  only works on that network. On your home Wi-Fi you may reach your router instead.
-  eero routers use the same address and show a `blocked.eero.com` page.
-
-To add push-to-talk, see [Add voice](docs/CLAUDE-CODE.md#add-voice). To let Claude
-change a project from the Cardputer, see [Let Claude work in a folder](docs/CLAUDE-CODE.md#let-claude-work-in-a-folder).
-Claude keeps your conversation across restarts and can save lasting notes. See
-[How Claude remembers](docs/CLAUDE-CODE.md#how-claude-remembers). It can also change and
-build the firmware and offer it to the device for you to approve. See
-[Update firmware from the Cardputer](docs/CLAUDE-CODE.md#update-firmware-from-the-cardputer).
-
-Chat and voice replies too small? Open **Display** settings and change **Text size**.
-
-To use OpenClaw, the community bridge is published in
-[ClawHub](https://clawhub.ai/plugins/openclaw-s1-adv). On a current OpenClaw host:
-
-```bash
-openclaw plugins install clawhub:openclaw-s1-adv@0.3.11
-```
-
-Review its native security/capability report, then follow the
-[setup guide](docs/OPENCLAW.md) for your agent, private device key and HTTPS
-address. Firmware automation stays off by default. Installation is not a hosted
-server or a completed device setup.
-
-For the OpenClaw firmware source and manual installation route:
-
-```bash
-git clone https://github.com/s1z0v/s1-adv.git
 cd s1-adv
+python3 -m venv .venv
+source .venv/bin/activate
+pip install platformio==6.1.19
+python scripts/cardputer.py build
+python scripts/cardputer.py upload
 ```
 
-1. [Set up the bridge and generate your device token](docs/OPENCLAW.md).
-2. [Build and flash the firmware over USB](docs/FLASHING.md).
-3. Send one short text on the Cardputer and confirm the answer on its screen.
+The first build downloads about 3 GB of tools, so give it a while. On Windows, activate with `.venv\Scripts\Activate.ps1` instead.
 
-Prefer asking your OpenClaw agent to help? Copy the
-[installation prompt](docs/OPENCLAW.md#give-this-to-your-openclaw-agent).
+**If the upload can't connect:** hold the **G0** button, press **Reset**, release G0, and run the upload again. `python scripts/cardputer.py ports` lists your ports, and `upload --port YOUR_PORT` picks one.
 
-## Project status
+**When it finishes, unplug the Cardputer and plug it back in.** It can sit in flashing mode with a blank screen until you do.
 
-S1-ADV is an independent experimental project. Its firmware began with
-OmniBot; [Credits](CREDITS.md) records that origin and the retained notices.
-The exact source version is defined in
-[platformio.ini](bots/CardputerADV/platformio.ini). The UI includes an app menu,
-assistant commands, visible Realtime microphone states, one configured chat,
-an SD game library and a compact Home battery gauge. See
-[controls](docs/CONTROLS.md) and [validation](docs/VALIDATION.md).
-The public security fixes are retained. Public builds have not yet been tested
-on a freshly provisioned physical device.
+<details>
+<summary><b>Prefer not to build anything?</b></summary>
 
-Personal provisioned binaries are deliberately excluded: Wi-Fi credentials and
-device tokens may be embedded in them. Build locally with your own settings.
-There is no shared hosted bridge, subscription, or bundled model account.
+On macOS or Linux, `./scripts/flash-cardputer.sh` flashes a ready-made public image with one command, and it needs only Python 3. It's quick, but that image is **0.2.201**, so it has no Lab, no Arcade and none of the newer features on this page. Use the setup page in [step 3](#3-connect-claude) to get it online, and build from source when you want everything. See [Build and flash](docs/FLASHING.md).
 
-| Directory | Contents |
+</details>
+
+### 2. Get it on Wi-Fi
+
+The Cardputer starts on a setup screen. Press **Enter**, pick your 2.4 GHz network, type the password and press Enter. It restarts once it has joined.
+
+Press **Tab** and you're in. Games, tools, Internet Radio and the Lab all work from here with no account and no bridge. If that's all you want, you're done.
+
+### 3. Connect Claude
+
+You'll need [Node.js 22+](https://nodejs.org), [FFmpeg](https://ffmpeg.org) and [Claude Code](https://code.claude.com/docs) signed in to your subscription. Check with `claude auth status`.
+
+The Cardputer talks to the bridge over HTTPS, so the bridge needs a public address. [Tailscale](https://tailscale.com) Funnel is the shortest route. It puts the bridge on the internet, protected by your device token. It also takes over the port it uses, so run `tailscale serve status` first to check nothing else is on it. Port 443 is the default, and [the Funnel notes](docs/CLAUDE-CODE.md#tailscale-funnel) cover what to do if it's taken.
+
+Run these one at a time. Funnel prints your public address, which goes in the `init` line, and it can take a few minutes to start working.
+
+```bash
+cd bridge
+npm ci
+tailscale funnel --bg 31889
+node scripts/setup.mjs init --public-url https://YOUR-MACHINE.YOUR-TAILNET.ts.net --apply
+CARDPUTER_BRIDGE_CONFIG=~/.s1-adv/config.json npm start
+```
+
+Leave the bridge running, and print your device token in a second terminal:
+
+```bash
+python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.s1-adv/config.json')))['devices'][0]['device_token'])"
+```
+
+Then finish on the Cardputer:
+
+1. Type `/setup` in AI Chat and press Enter. The screen shows a Wi-Fi name and password.
+2. **Join that Wi-Fi** from your phone or laptop. The setup page only exists on the Cardputer's own network.
+3. Open `http://192.168.4.1/`.
+4. Fill in **every field**: your Wi-Fi name and password again, your bridge address and your device token. Then save.
+5. Switch your computer back to your normal Wi-Fi.
+6. On the Cardputer, type `Reply with: ready` in AI Chat and press Enter.
+
+**Seeing that reply on the Cardputer is the real test.** The computer has to stay on and awake while you use it, and replies count against your Claude plan limits.
+
+Want a different address, or to run it after you close the terminal? See [Use your Claude subscription](docs/CLAUDE-CODE.md). Already run [OpenClaw](https://github.com/openclaw/openclaw)? The bridge works with that too: see the [OpenClaw guide](docs/OPENCLAW.md).
+
+### 4. Add your voice
+
+On a Mac:
+
+```bash
+brew install whisper-cpp espeak-ng ffmpeg
+cd bridge
+node scripts/setup.mjs voice --config ~/.s1-adv/config.json --apply
+```
+
+This downloads speech models of about 260 MB. Restart the bridge, tap **Alt** on the Cardputer, speak, and tap **Alt** to send. Your audio stays on your computer, and only the transcribed text goes to Claude. Linux steps are in [Add voice](docs/CLAUDE-CODE.md#add-voice).
+
+## Things to try
+
+First, the keys. On the Cardputer, the arrows are the `;` `.` `,` `/` keys, and Esc is the top-left key.
+
+| Key | What it does |
 | --- | --- |
-| `bots/CardputerADV/` | ESP32-S3 firmware, partition layouts and host tests |
-| `bridge/` | OpenClaw adapter, examples and synthetic smoke tests |
-| `skills/s1-adv/` | Optional OpenClaw setup skill |
-| `docs/` | Setup, flashing, architecture and troubleshooting |
-| `CREDITS.md` | Project origin, upstream acknowledgements and image provenance |
+| **Tab** | Open the app menu |
+| **A letter** in the menu | Jump to a tab: **G** Games, **R** Arcade, **L** Lab and so on |
+| **Enter** / **Esc** | Open / go back |
+| **Alt** | Tap to talk, tap again to send |
+| **G0 button** | Hold to talk, release to send |
+| `/help` `/status` `/ota` | Type in chat for help, connection details and firmware updates |
 
-## Development
+Then work your way down this list. Each step needs a little more than the last.
+
+1. **Play something.** Tab, G, Tetris. Then Tab, R, Flappy Bird, where Space flaps.
+2. **Turn on the radio.** Tab, M, Internet Radio, then pick a genre.
+3. **Say hello to Claude.** Open AI Chat, ask anything, then try it with your voice.
+4. **Plug in a sensor.** Connect the ultrasonic unit, then Tab, L, Devices. Move your hand and watch the number change. Now open Air Music and play it like a theremin.
+5. **Make your first rule.** Tab, L, Rules, then Recipes. Add **Air theremin** and press P to play it. When that works, try **+ New rule**, or **Say a rule** with Claude connected.
+6. **Change the code.** Open `bots/CardputerADV/src/flappy.h`, raise `kLargestGap` from 60 to 80, and run `python scripts/cardputer.py upload`. You've just made Flappy Bird easier, and that's real firmware development.
+7. **Let Claude change it for you.** Give it [one project folder](docs/CLAUDE-CODE.md#let-claude-work-in-a-folder), turn on [firmware updates](docs/CLAUDE-CODE.md#update-firmware-from-the-cardputer), and ask from the Cardputer for the app you want. Read the risks in those guides first.
+
+## How it works
+
+```text
+ Cardputer ADV   <--- HTTPS over Wi-Fi --->   Bridge on your computer   --->   Claude
+ keyboard, mic, screen, speaker               Node.js, runs `claude`           your subscription
+```
+
+**No AI runs on the Cardputer.** It's the keyboard, screen, microphone and speaker. Each message goes to the bridge on your computer, which hands it to the `claude` program under your own login and sends the answer back.
+
+**There's no shared server and no account with this project.** The bridge never reads or stores your Claude login, and it refuses to use anything else if that login is missing.
+
+**By default Claude has no tools here.** It can chat, but it can't read your files, run commands or browse the web until you turn each of those on, and then the operating system's sandbox limits what it can reach. See [privacy and isolation](docs/CLAUDE-CODE.md#privacy-and-isolation).
+
+Offline apps run entirely on the Cardputer.
+
+## Good to know
+
+S1-ADV is a fast-moving, experimental project. Some of it is set up for one owner's Cardputer, so here's what to expect.
+
+- **The Lab has only run against simulated parts so far.** If a real part misbehaves, that's a likely first. The Light test has F to flip its reading, and the LED strip test has T to try other timing.
+- **Grove power has limits.** M5Stack doesn't publish one for this port. A full-white 30-LED strip can draw 1 A and a stalled servo 750 mA, so keep the strip's limit low. If the Cardputer restarts, give the strip its own 5 V supply and join the grounds.
+- **The clock is fixed to US Central time.** To change it, edit `kDeviceTz` in `bots/CardputerADV/src/main_parts/001_main.cpp.inc` and rebuild.
+- **Weather comes through the bridge and covers US places only.** Set your city in Settings, Device, Weather city.
+- **Mesh is fixed to Meshtastic's Thailand settings, 923.875 MHz.** Anywhere else you probably won't hear your local mesh (the US default is 906.875 MHz), and transmitting there may not be legal. The setting is in `bots/CardputerADV/src/mesh_cap_radio.h`, so check your local rules before changing it. Always fit the antenna before powering the Cap.
+- **NES games aren't included**, apart from a free homebrew sample in `third_party/honkeypong/bin`. Only mappers 0 and 4 work, and some games run below full speed. See [NES games](docs/NES.md).
+- **Realtime voice is a separate, experimental mode.** It's off by default and needs its own provider setup.
+- **Your device token is a password.** Anyone who has it can chat as you and use up your plan. Never commit `.env`, `~/.s1-adv/` or a firmware image built with your settings. Read [SECURITY.md](SECURITY.md).
+- **Run your own bridge, for yourself.** Don't host one for other people on your subscription. See [Terms and plan limits](docs/CLAUDE-CODE.md#terms-and-plan-limits).
+- **Some guides are still in Russian**, including Pocket Synth, VLC Remote and Chess Mind. The device itself defaults to English, and Russian typing works too.
+
+## If something goes wrong
+
+| What you see | What to try |
+| --- | --- |
+| Your computer doesn't see the Cardputer | Check its power switch, then try another cable. Charge-only cables don't work |
+| Upload can't connect | Hold G0, press Reset, release G0, then upload again |
+| Blank or frozen screen after flashing | It's still in flashing mode. Unplug it and plug it back in |
+| `192.168.4.1` shows your router or a `blocked.eero.com` page | You're not on the Cardputer's Wi-Fi yet. If you are, unplug any Ethernet cable for a moment or use a phone |
+| Your Wi-Fi isn't listed | It's probably 5 GHz. The Cardputer only sees 2.4 GHz |
+| Wi-Fi stopped working after using the setup page | Leaving its password box blank wipes the saved password. Press Enter on the setup screen and join your network again |
+| `Claude Code is not signed in...` | Run `claude auth login` on the bridge computer |
+| Text works but voice doesn't | Run `node scripts/setup.mjs doctor --config ~/.s1-adv/config.json --no-probe` in `bridge/` to see what's missing |
+
+Type `/status` on the device to see its connection and version. There's much more in [Troubleshooting](docs/TROUBLESHOOTING.md).
+
+## Go deeper
+
+| Guide | What's in it |
+| --- | --- |
+| [Everyday controls](docs/CONTROLS.md) | Every key, every status sound, and the Lab in full |
+| [Use your Claude subscription](docs/CLAUDE-CODE.md) | The bridge, memory, voice, web access and firmware updates |
+| [Build and flash](docs/FLASHING.md) | Every way to flash, plus building with your own settings |
+| [Mesh](docs/MESH.md) · [NES](docs/NES.md) · [Focus audio](docs/FOCUS-AUDIO.md) | The optional extras |
+| [OpenClaw](docs/OPENCLAW.md) | Using the bridge with your own OpenClaw agent |
+| [Architecture](docs/ARCHITECTURE.md) | How the firmware and bridge fit together |
+| [Security](SECURITY.md) | What to keep private, and the trust model |
+
+## Inside the repository
+
+| Folder | What's there |
+| --- | --- |
+| `bots/CardputerADV/` | The firmware: C++ on Arduino and FreeRTOS, built with PlatformIO |
+| `bots/CardputerADV/src/*.h` | Most games and tools keep their rules here, away from the hardware, so they're a good place to start reading |
+| `bridge/` | The Node.js bridge and its tests |
+| `scripts/` | Build and flash tools, plus host tests that run the real game and screen code on your computer |
+| `docs/` | Guides and release notes |
+
+Changes are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) lists the checks to run:
 
 ```bash
 cd bridge
@@ -186,32 +307,10 @@ npm run test:security
 npm run smoke
 ```
 
-The smoke test uses a local mock gateway and generated tone fixtures. Install
-FFmpeg first. See [contributing](CONTRIBUTING.md) and [security](SECURITY.md).
+## Credits and license
 
-## Support the project
+S1-ADV comes from [s1z0v/s1-adv](https://github.com/s1z0v/s1-adv) by Sergey Sizov, which grew out of [OmniBot](https://github.com/nazirlouis/OmniBot) by Naz Louis and its contributors. It's built on [M5Stack's libraries](https://github.com/m5stack/M5Cardputer), [Meshtastic](https://meshtastic.org) leaf code, Nofrendo and more. [CREDITS.md](CREDITS.md) has the full list.
 
-S1-ADV is free and open source. You can support continued development with a
-[one-time donation on Ko-fi](https://ko-fi.com/s1adv) or an
-[optional monthly Patreon membership](https://www.patreon.com/s1adv).
+The source is under the [MIT license](LICENSE). The firmware image links [libmeshtastic-leaf](https://github.com/Meshtastic-Solutions/libmeshtastic-leaf), so it's distributed under GPL-3.0-only, and other dependencies keep their own licenses. See [Mesh licensing](docs/MESH.md#source-and-licensing).
 
-## AI and automation consultations
-
-For help planning AI workflows, development pipelines or business process
-automation, [book a 90-minute session with Sergey Sizov](https://cal.com/s1z0v/automation-strategy)
-for **US$150**. Bring a specific task to work through a technical direction
-and a practical starting plan.
-
-## Creator and credits
-
-S1-ADV is maintained by **Sergey Sizov**.
-
-[Instagram @s1z0v](https://www.instagram.com/s1z0v/) ·
-[YouTube @s1z0v](https://www.youtube.com/@s1z0v) ·
-[GitHub s1z0v](https://github.com/s1z0v)
-
-Originally based on [nazirlouis/OmniBot](https://github.com/nazirlouis/OmniBot).
-Thanks to its authors, [M5Stack](https://github.com/m5stack/M5Cardputer),
-[OpenClaw](https://github.com/openclaw/openclaw) and the other dependency authors.
-See [Credits](CREDITS.md), the retained [MIT license](LICENSE), and
-[Mesh firmware licensing](docs/MESH.md#source-and-licensing) for attribution.
+This is an independent hobby project, not affiliated with M5Stack or Anthropic.
