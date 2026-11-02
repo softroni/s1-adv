@@ -2,7 +2,9 @@
 
 **Plug in a part, watch it respond, then make parts work together. No code.**
 
-The Lab turns your Cardputer into a test bench. **Devices** shows everything it can reach, live. **Rules** joins sensors to lights, motors and switches with "if this, then that", built one question at a time on the little screen. **Sequences** are steps that run in order, with waits between them.
+The Lab turns your Cardputer into a test bench. **Devices** shows everything it can reach, live, and most parts have extra pages with graphs, games and tools. **Rules** joins sensors to lights, motors and switches with "if this, then that", built one question at a time on the little screen. **Sequences** are steps that run in order, with waits between them.
+
+With Claude connected, you can also [talk to it](#talk-to-it): say a rule, change one, have it speak, or ask why it didn't fire.
 
 <table>
 <tr>
@@ -16,7 +18,7 @@ To open it, press **Tab**, then **L**. You can also type `/lab`, `/rules` or `/s
 
 On the Cardputer, the arrow keys are `;` up, `.` down, `,` left and `/` right, and Esc is the top-left key.
 
-[Try it with no parts](#try-it-with-no-parts) · [Connect a part](#connect-a-part) · [Test a part](#test-a-part) · [Build a rule](#build-a-rule) · [Play it](#play-it) · [Sequences](#sequences) · [Shortcuts](#shortcuts) · [If a part doesn't answer](#if-a-part-doesnt-answer) · [Good to know](#good-to-know)
+[Try it with no parts](#try-it-with-no-parts) · [Connect a part](#connect-a-part) · [Test a part](#test-a-part) · [Build a rule](#build-a-rule) · [Play it](#play-it) · [Sequences](#sequences) · [Talk to it](#talk-to-it) · [If a part doesn't answer](#if-a-part-doesnt-answer) · [Good to know](#good-to-know)
 
 > The Lab needs firmware built from source, as in step 1 of the [README](../README.md#set-it-up). The older one-command flash doesn't have it.
 
@@ -30,7 +32,12 @@ You don't need to buy anything to see how a rule works.
 
 The boxes turn green, the dots start moving, and the rule fires. Press Esc to end Practice.
 
-Devices also has three things built into the Cardputer: **Tilt**, **Cardputer LED** and **Speaker**.
+More that needs nothing plugged in:
+
+- **A sequence.** Open **Sequences**, pick **Hello** and press **P**. It plays on the Cardputer's own LED and speaker.
+- **Tilt.** Open it in **Devices** and turn the page for a spirit level and a ball to roll into a hole.
+- **Speaker.** Open it in **Devices** and press **N** for a piano.
+- **Cardputer LED.** Open it in **Devices** and change its color.
 
 ## Connect a part
 
@@ -101,7 +108,7 @@ The dot beside each device tells you what the Lab knows:
 <tr>
 <td><img src="assets/lab/knob.png" alt="Mini Angle screen with a dial at 67%" width="100%"><br><sub><b>Mini Angle.</b> Turn it end to end once so it learns its range.</sub></td>
 <td><img src="assets/lab/light.png" alt="Light screen showing 50%" width="100%"><br><sub><b>Light.</b> Cover it to test it. If it reads backwards, F flips it.</sub></td>
-<td><img src="assets/lab/motion.png" alt="PIR screen showing Motion" width="100%"><br><sub><b>PIR.</b> Wave at it. It stays on for about 2 seconds after you stop.</sub></td>
+<td><img src="assets/lab/motion.png" alt="PIR screen showing Motion" width="100%"><br><sub><b>PIR motion.</b> Wave at it. It stays on for about 2 seconds after you stop.</sub></td>
 </tr>
 <tr>
 <td><img src="assets/lab/servo.png" alt="Servo screen with a gauge at 112 degrees" width="100%"><br><sub><b>Servo.</b> Left and right turn it 5°, A and D turn it 1°, C centers it and S sweeps it.</sub></td>
@@ -112,6 +119,16 @@ The dot beside each device tells you what the Lab knows:
 <td><img src="assets/lab/hub.png" alt="I/O hub screen listing what's on each port" width="100%"><br><sub><b>I/O hub.</b> What's on each port, and its firmware.</sub></td>
 <td><img src="assets/lab/tilt.png" alt="Tilt screen showing 30 degrees" width="100%"><br><sub><b>Tilt.</b> Built in. Tip the Cardputer to see it move.</sub></td>
 <td><img src="assets/lab/gps.png" alt="GPS screen with satellites, speed, latitude and longitude" width="100%"><br><sub><b>LoRa Cap GPS.</b> Satellites, position and speed. M opens Mesh.</sub></td>
+</tr>
+<tr>
+<td><img src="assets/lab/led.png" alt="Cardputer LED screen, on and green" width="100%"><br><sub><b>Cardputer LED.</b> Built in. Left and right change the color, and Space turns it off or on.</sub></td>
+<td><img src="assets/lab/speaker.png" alt="Speaker screen at 930 Hz" width="100%"><br><sub><b>Speaker.</b> Built in. Left and right change the pitch, and Enter beeps.</sub></td>
+<td><img src="assets/lab/lamp.png" alt="smartLamp screen saying it's found" width="100%"><br><sub><b>smartLamp.</b> It looks for one on your Wi-Fi. Enter opens the smartLamp app.</sub></td>
+</tr>
+<tr>
+<td><img src="assets/lab/ac.png" alt="IR air conditioner screen" width="100%"><br><sub><b>IR for AC.</b> Rules can turn a TCL or Daikin air conditioner on and off. Enter opens IR Remote.</sub></td>
+<td><img src="assets/lab/nfc.png" alt="NFC unit found screen" width="100%"><br><sub><b>NFC.</b> Enter opens NFC Notes, which is its full test.</sub></td>
+<td></td>
 </tr>
 </table>
 
@@ -124,7 +141,7 @@ Most parts have more than one page. The dots under the title show where you are.
 <table>
 <tr>
 <td width="33%"><img src="assets/lab/dashboard.png" alt="The Dashboard, with a live value and small graph for six sensors" width="100%"><br><sub><b>Dashboard.</b> Press <b>D</b> on Devices to see everything live, with its last minute.</sub></td>
-<td width="33%"><img src="assets/lab/graph.png" alt="A full-screen graph of distance with low, average and high" width="100%"><br><sub><b>Graph.</b> The last 30 seconds, scaled to what it saw, with low, average and high.</sub></td>
+<td width="33%"><img src="assets/lab/graph.png" alt="A full-screen graph of distance with low, average and high" width="100%"><br><sub><b>Graph.</b> The last 30 seconds, scaled to what it saw, with low, average and high. On the ENV III, <b>T</b> swaps temperature and humidity.</sub></td>
 <td width="33%"><img src="assets/lab/parking.png" alt="A parking sensor at 6 cm, with every bar lit and the word Stop" width="100%"><br><sub><b>Ultrasonic: parking.</b> Bars fill as you get closer. <b>B</b> adds beeps that speed up.</sub></td>
 </tr>
 <tr>
@@ -135,15 +152,15 @@ Most parts have more than one page. The dots under the title show where you are.
 <tr>
 <td width="33%"><img src="assets/lab/steady.png" alt="A dot inside a moving green zone" width="100%"><br><sub><b>Mini Angle: steady hand.</b> Follow the moving zone with the knob.</sub></td>
 <td width="33%"><img src="assets/lab/sky.png" alt="A sun in the sky at 55 percent light" width="100%"><br><sub><b>Light: sky.</b> The sky follows the reading, from stars to full sun.</sub></td>
-<td width="33%"><img src="assets/lab/guard.png" alt="A red panel saying Motion" width="100%"><br><sub><b>PIR: guard.</b> <b>G</b> arms it, gives you 5 seconds to leave, then sounds the alarm.</sub></td>
+<td width="33%"><img src="assets/lab/guard.png" alt="A red panel saying Motion" width="100%"><br><sub><b>PIR: guard.</b> <b>G</b> arms it, gives you 5 seconds to leave, then sounds the alarm until you press <b>G</b> again.</sub></td>
 </tr>
 <tr>
 <td width="33%"><img src="assets/lab/level.png" alt="A spirit level with the bubble off center" width="100%"><br><sub><b>Tilt: level.</b> A spirit level for both directions.</sub></td>
 <td width="33%"><img src="assets/lab/roll.png" alt="A ball and a hole" width="100%"><br><sub><b>Tilt: roll.</b> Tip the Cardputer to roll the ball into the hole.</sub></td>
-<td width="33%"><img src="assets/lab/moves.png" alt="A list of servo moves: Sweep, Wave and Tick" width="100%"><br><sub><b>Servo: moves.</b> Press <b>N</b> for ready-made motions at three speeds.</sub></td>
+<td width="33%"><img src="assets/lab/moves.png" alt="A list of servo moves: Sweep, Wave and Tick" width="100%"><br><sub><b>Servo: moves.</b> Press <b>N</b>. Up and down pick a motion, left and right pick one of three speeds, and Enter starts it.</sub></td>
 </tr>
 <tr>
-<td width="33%"><img src="assets/lab/piano.png" alt="Eight piano keys with one pressed" width="100%"><br><sub><b>Speaker: piano.</b> Press <b>N</b>, then play the number keys.</sub></td>
+<td width="33%"><img src="assets/lab/piano.png" alt="Eight piano keys with one pressed" width="100%"><br><sub><b>Speaker: piano.</b> Press <b>N</b>, then play keys 1 to 8.</sub></td>
 </tr>
 </table>
 
@@ -198,6 +215,27 @@ Relays, lamp power and the air conditioners are simply on or off, so they can on
 
 You can save up to 8 rules.
 
+### Recipes
+
+Open **Recipes** from the Rules list. Enter adds one, and it's then a rule like any other, so you can change it.
+
+<img src="assets/lab/recipes.png" alt="The Recipes list with Knob to servo selected" width="360">
+
+| Recipe | What it does | Parts |
+| --- | --- | --- |
+| Knob to servo | Turn the knob and the servo follows | Mini Angle, servo |
+| Stick steers | Push the joystick to aim the servo | Joystick 2, servo |
+| Distance bar | Closer lights more of the strip | Ultrasonic, LED strip |
+| **Air theremin** | Move your hand to change the pitch | Ultrasonic |
+| Night light | Warm strip when the room goes dark | Light, LED strip |
+| Motion alarm | Someone moves: red strip and a beep | PIR, LED strip |
+| Fan for damp | Humid air closes relay 1 | ENV III, relays |
+| Tilt to servo | Tip the Cardputer to turn the servo | Servo |
+| Dark lamp | Dark room turns the smartLamp on | Light, smartLamp |
+| Hot room | Over 28 °C turns the TCL AC on | ENV III, TCL air conditioner |
+
+**Air theremin** is the cheapest place to start, because it needs one sensor and uses the Cardputer's own speaker.
+
 ## Play it
 
 <table>
@@ -216,6 +254,7 @@ You can save up to 8 rules.
 | Left, right | Change rule. The dots at the bottom right stand for every rule, so you can see one firing on another page |
 | **T** | Start Practice |
 | Space | Pause, or carry on |
+| Alt | [Call a rule by name](#call-a-rule-by-name) |
 | Esc | Stop. Everything turns off, and opening the menu does the same |
 
 Rules only run on this screen, because the Grove port can't be shared with other apps. The screen stays on while they play.
@@ -281,7 +320,7 @@ When you build a rule, choose **Sequence** under What should it do, then pick on
 | **Once** | It finishes anyway |
 | **Over and over** | It stops too |
 
-For a sequence you can call by voice, give the rule **Its name** to watch. Then tap Alt on the Playing screen and say the name.
+To start a sequence by voice, give the rule **Its name** to watch, then [call it by name](#call-a-rule-by-name).
 
 ### How they share
 
@@ -292,32 +331,23 @@ For a sequence you can call by voice, give the rule **Its name** to watch. Then 
 
 Every step goes through the same limits as rules: the strip's power limit, and how often relays and air conditioners can switch.
 
-## Shortcuts
+## Talk to it
 
-### Recipes
+With [Claude connected](../README.md#3-connect-claude), you can do most of the Lab by talking. Tap **Alt** to start listening and tap it again to send, and Esc cancels. The G0 button and Ctrl+V work the same way. The screen you're on decides what your words are for.
 
-Open **Recipes** from the Rules list. Enter adds one, and it's then a rule like any other, so you can change it.
+| On this screen | Alt lets you |
+| --- | --- |
+| **Say a rule**, in the Rules list | [Describe a new rule](#say-a-rule) |
+| A saved rule, in the Rules list | [Change that rule](#change-a-rule) |
+| Playing | [Call a rule by name](#call-a-rule-by-name) |
+| Servo, LED strip, Cardputer LED or Speaker | [Set the part](#set-a-part-by-voice), or ask about it |
+| Devices, Dashboard, any other part, wiring or Sequences | [Ask the Lab](#ask-the-lab) |
 
-<img src="assets/lab/recipes.png" alt="The Recipes list with Knob to servo selected" width="360">
-
-| Recipe | What it does | Parts |
-| --- | --- | --- |
-| Knob to servo | Turn the knob and the servo follows | Mini Angle, servo |
-| Stick steers | Push the joystick to aim the servo | Joystick 2, servo |
-| Distance bar | Closer lights more of the strip | Ultrasonic, LED strip |
-| **Air theremin** | Move your hand to change the pitch | Ultrasonic |
-| Night light | Warm strip when the room goes dark | Light, LED strip |
-| Motion alarm | Someone moves: red strip and a beep | PIR, LED strip |
-| Fan for damp | Humid air closes relay 1 | ENV III, relays |
-| Tilt to servo | Tip the Cardputer to turn the servo | Servo |
-| Dark lamp | Dark room turns the smartLamp on | Light, smartLamp |
-| Hot room | Over 28 °C turns the TCL AC on | ENV III, TCL air conditioner |
-
-**Air theremin** is the cheapest place to start, because it needs one sensor and uses the Cardputer's own speaker.
+All of this needs Wi-Fi and the bridge, and everything except calling a rule by name also needs Claude. If the screen says **Restart the bridge to use this**, your bridge is older than your firmware, so restart it.
 
 ### Say a rule
 
-With [Claude connected](../README.md#3-connect-claude), you can just describe what you want.
+Describe what you want, and Claude writes the rule.
 
 <table>
 <tr>
@@ -327,31 +357,74 @@ With [Claude connected](../README.md#3-connect-claude), you can just describe wh
 </tr>
 </table>
 
-Nothing happens until you've looked at it. If Claude can't make a rule from what it heard, the screen says what it needs. A rule you ask for in chat arrives the same way.
+Nothing happens until you've looked at it. If Claude can't make a rule from what it heard, the screen says what it needs and what it heard. A rule you ask for in chat arrives the same way.
 
 A rule you say can play a saved sequence: "when someone walks in, play Welcome". Claude can't write the sequence itself, so build that first.
 
-A rule can speak too. Say "when someone walks in, say welcome back", and the Cardputer says it each time the rule starts firing. The speech is saved on the SD card, so it works with no network. Sensors and rules wait while it speaks.
+### Rules that talk
 
-You can call a rule by name while rules are playing. Ask for "when I say movie time, turn the strip blue", then tap Alt on the Playing screen and say "movie time". Say it again to switch it off. Rules wait while it listens.
+A rule can speak. Say "when someone walks in, say welcome back", and the Cardputer says it each time the rule starts firing.
 
-To change a rule, pick it in the list and tap Alt, then say what should be different, like "make it stay on longer" or "only when it's dark". You see what changed before anything is saved.
+<img src="assets/lab/talk-rule.png" alt="Claude wrote this: if Motion is on, say welcome back and set the strip color" width="360">
+
+A phrase can be up to 40 letters, once in a rule. Its speech is made when you save the rule and kept on the SD card, so it plays with no network, and a rule can't speak without a card. Sensors and rules wait while it speaks, and anything already on stays on. The steps can keep or remove a phrase, but only speech can add one.
+
+### Call a rule by name
+
+Ask for "when I say movie time, turn the strip blue", and you get a rule called Movie time that listens for its name. You can also build one in the steps, by choosing **Its name** under What should it watch.
+
+<table>
+<tr>
+<td width="33%"><img src="assets/lab/name-waiting.png" alt="The rule Movie time waiting, with its name not yet said" width="100%"><br><sub><b>1.</b> Play your rules. This one is waiting to hear its name.</sub></td>
+<td width="33%"><img src="assets/lab/name-listening.png" alt="Say its name, listening" width="100%"><br><sub><b>2.</b> Tap Alt, say "movie time" and tap Alt again.</sub></td>
+<td width="33%"><img src="assets/lab/name-on.png" alt="Movie time firing, with the strip color blue" width="100%"><br><sub><b>3.</b> It's on. Say the name again to switch it off.</sub></td>
+</tr>
+</table>
+
+This only needs your words, so it skips Claude. Rules wait while it listens, and what's on stays on. Only rules that listen for their name can be called, and stopping the rules forgets what was said. In Practice, you can fake saying it.
+
+### Change a rule
+
+<table>
+<tr>
+<td width="33%"><img src="assets/lab/change-pick.png" alt="The Rules list with Wave lights selected, showing ALT change" width="100%"><br><sub><b>1.</b> Pick a rule in the list and tap Alt.</sub></td>
+<td width="33%"><img src="assets/lab/change-listening.png" alt="Wave lights, listening" width="100%"><br><sub><b>2.</b> Say what should be different, like "make it stay on longer" or "only when it's dark".</sub></td>
+<td width="33%"><img src="assets/lab/change-offer.png" alt="Claude changed this, with the changed line bright and the rest grey" width="100%"><br><sub><b>3.</b> What changed stands out, and the rest is grey.</sub></td>
+</tr>
+</table>
+
+Enter replaces the old rule, E walks through it in the steps, and Esc keeps the rule you had.
 
 ### Ask the Lab
 
-Stuck? Tap Alt on Devices, on a part's screen or on Sequences and just ask. Claude can see what's plugged in, the live readings and your rules.
+Stuck? Claude can see what's plugged in, the live readings and your rules, so it answers about your own setup. Tap Alt on Devices, the Dashboard, a part's screen, the wiring screen or Sequences, or open **Ask the Lab** at the bottom of the Rules list.
 
 - "Why didn't my rule fire?"
 - "Why won't the strip light up?"
 - "What can I make with these parts?"
-
 - "Was there motion last night?"
 
-The answer shows on the screen and is read aloud. When it suggests rules, you get up to three to choose from.
+<table>
+<tr>
+<td width="33%"><img src="assets/lab/ask.png" alt="Ask the Lab, with example questions" width="100%"><br><sub><b>1.</b> Tap Alt and ask.</sub></td>
+<td width="33%"><img src="assets/lab/ask-answer.png" alt="An answer saying why a rule didn't fire" width="100%"><br><sub><b>2.</b> The answer shows on the screen and is read aloud.</sub></td>
+<td width="33%"><img src="assets/lab/ask-offers.png" alt="Claude wrote this, the first of three suggested rules" width="100%"><br><sub><b>Or pick a rule.</b> It can suggest up to three. Left and right move between them, Enter saves the one showing, and Esc drops them all.</sub></td>
+</tr>
+</table>
 
-That last one works because the Lab keeps a diary while rules play, one line an hour, in `/lab/diary.txt` on the SD card. Leave rules playing overnight and ask in the morning. About the last day goes to Claude when you ask, and at no other time.
+### Set a part by voice
 
-On the Servo, LED strip, Cardputer LED and Speaker screens you can also say what to do, like "set it to 90" or "make it blue and a bit brighter". Relays, the lamp and the air conditioner stay on their keys, because speech can be misheard and they can switch mains.
+On the Servo, LED strip, Cardputer LED and Speaker screens you can say what to do, so your hands stay on the parts. Try "set it to 90", "make it blue and a bit brighter" or "a bit more".
+
+<img src="assets/lab/servo-say.png" alt="The Servo screen, with ALT say it at the bottom" width="360">
+
+A spoken setting only moves the part whose screen is open. Relays, the lamp and the air conditioner stay on their keys, because speech can be misheard and they can switch mains.
+
+### The diary
+
+The Lab keeps a diary while rules play: one line an hour with how many times motion was seen, how many times rules fired, and each sensor's lowest and highest reading. Leave rules playing overnight, then ask "was there motion last night?" or "how hot did it get?".
+
+It's in `/lab/diary.txt` on the SD card. About the last day goes to Claude when you ask, and at no other time. Nothing is recorded while rules aren't playing, or if the clock hasn't been set. Delete the file to clear it.
 
 ## If a part doesn't answer
 
@@ -378,7 +451,7 @@ To see what the Lab finds as it happens, connect USB and run `python scripts/car
 ## Good to know
 
 - **Watch the power.** The strip and the servo run off the Cardputer's Grove power, and M5Stack doesn't publish a limit for it. At full white, 30 LEDs can draw 1 A, and a stalled servo 750 mA. The strip's limit starts at 25%, so keep it low. If the Cardputer restarts, give the strip its own 5 V supply and join the grounds.
-- **Rules live on the SD card**, in `/lab/rules.dat`, along with your hub wiring, and sequences in `/lab/seqs.dat`. They survive a firmware install. With no card they last until the next restart.
+- **Rules live on the SD card**, in `/lab/rules.dat`, along with your hub wiring. Sequences are in `/lab/seqs.dat`, and rules' speech is in `/lab/say`. They survive a firmware install. With no card, rules and sequences last until the next restart.
 - **When two rules want the same output**, the lower one in the list wins.
 - **A relay can switch about three times a second at most**, however much a sensor flickers.
 - **The smartLamp and air conditioner are left alone until a rule asks.** When that rule ends or you stop, an "on" that it sent is undone. An air conditioner changes at most every 3 seconds. It sends by infrared, so point the Cardputer at it.

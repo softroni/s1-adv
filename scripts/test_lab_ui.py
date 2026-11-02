@@ -1246,6 +1246,19 @@ void testGuards() {
 }
 
 
+// The pictures in docs/LAB.md's Talk to it section, using the examples it gives.
+void testGuidePictures() {
+  gDisk.files.clear(); gLabBook = lab::Book{}; freshBoot(); setUiMode(UiMode::LabRules); run(1500);
+  { lab::Draft d; d.name("Welcome back"); d.addCond("motion", "on", 0); d.addSay("welcome back"); d.addSet("strip_color", 30); assert(d.usable());
+    labOfferRule(d.rule); show("doc-offer-say"); assert(gCanvas.shows("Say \"welcome back\"") && gCanvas.shows("Strip color to 30")); esc(); }
+  { lab::Draft a, b, c; a.name("Hand lights"); a.addCond("distance", "under", 30); a.addSet("strip_color", 120); b.name("Too humid"); b.addCond("humidity", "over", 60); b.addSet("relay_1", 1); c.name("Dark room"); c.addCond("light", "under", 20); c.addSet("strip_bright", 40);
+    gLabOfferCount = 0; gLabOfferBatch = true; labOfferRule(a.rule); labOfferRule(b.rule); labOfferRule(c.rule); gLabOfferBatch = false; show("doc-ask-offers"); assert(gCanvas.shows("1 OF 3") && gCanvas.shows("Name: Hand lights")); esc(); }
+  { lab::Draft m; m.name("Movie time"); m.addCond("spoken", "on", 0); m.addSet("strip_color", 240); assert(m.usable()); gLabBook.rules[0] = m.rule; gLabBook.count = 1; gLabUi.ruleRow = 0; gLabUi.view = LabView::Rules;
+    keys("p"); run(200); show("doc-name-waiting"); assert(gCanvas.shows("ALT and say its name") && gCanvas.shows("not yet"));
+    VoiceToolAnswer heard; heard.ok = true; heard.heard = "movie time"; labCommandAnswered(heard); run(200); show("doc-name-on"); assert(gCanvas.shows("Movie time on") && gLabStates[0].active); esc(); }
+  gLabBook = lab::Book{}; gDisk.files.clear(); setUiMode(UiMode::Home); freshBoot();
+}
+
 // --- Sequences -----------------------------------------------------------------------------------
 void seqPick(int row) { for (int i = 0; i < 40 && gLabSeqEdit.askRow != row; ++i) key(DOWN); assert(gLabSeqEdit.askRow == row); key(ENTER); }
 void seqRowTo(int row) { for (int i = 0; i < 40 && gLabSeqEdit.row != row; ++i) key(DOWN); assert(gLabSeqEdit.row == row); }
@@ -1390,7 +1403,7 @@ void testSequences() {
 int main(int argc, char** argv) {
   if (argc > 1) gDump = std::fopen(argv[1], "w");
   for (bool& live : gLabHistoryLive) live = false;
-  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testSequences(); setUiMode(UiMode::LabRules); run(1500); testGuards();
+  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testGuidePictures(); testSequences(); setUiMode(UiMode::LabRules); run(1500); testGuards();
   if (gDump) std::fclose(gDump);
   std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, sequences on their own and from a rule, the lamp and AC guards, units leaving and returning, saving and damage, and every screen stays on the display");
 }

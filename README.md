@@ -46,7 +46,7 @@ Put S1-ADV on it and you get a menu of more than 40 apps: an AI assistant that r
 
 **Play.** Tetris, Chess, Checkers, Minesweeper, Snake, and an NES emulator for your own game files. Wave a hand over a sensor to fly Flappy Bird or play notes in the air.
 
-**Connect the real world.** Plug in sensors, lights, motors and switches. The Lab tests each one, then joins them with rules you build step by step, or just say aloud: "when I wave my hand, turn the strip red." Then talk to it: change a rule by voice, ask why one didn't fire, or have rules speak. The [Lab guide](docs/LAB.md) shows how it all works.
+**Connect the real world.** Plug in sensors, lights, motors and switches. The Lab tests each one, then joins them with rules you build step by step, or just say aloud: "when I wave my hand, turn the strip red." Line up timed steps as sequences, and let a rule start them. Then talk to it: change a rule by voice, ask why one didn't fire, or have rules speak. The [Lab guide](docs/LAB.md) shows how it all works.
 
 **Use it every day.** Focus timer, alarms, calendar, notes, calculator, weather, Internet radio, a synth you play on the keyboard, an infrared remote for TCL and Daikin air conditioners.
 
@@ -280,7 +280,7 @@ Type `/status` on the device to see its connection and version. There's much mor
 
 | Guide | What's in it |
 | --- | --- |
-| [The Lab](docs/LAB.md) | A picture guide to connecting parts, testing them and building rules |
+| [The Lab](docs/LAB.md) | A picture guide to connecting parts, testing them, building rules and sequences, and talking to the Lab |
 | [Everyday controls](docs/CONTROLS.md) | Every key, every status sound, and the Lab in full |
 | [Use your Claude subscription](docs/CLAUDE-CODE.md) | The bridge, memory, voice, web access and firmware updates |
 | [Voice tools](docs/VOICE-TOOLS.md) | Give any screen the chat's recorder, for your words or Claude's answer |

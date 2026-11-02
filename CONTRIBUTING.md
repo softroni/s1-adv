@@ -25,6 +25,8 @@ python3 scripts/cardputer.py build
 ```
 
 Keep changes focused and update user-facing instructions when behavior changes.
+Anything that changes the Lab updates [the Lab guide](docs/LAB.md) in the same commit, including
+its pictures, and `scripts/test_lab_guide.py` checks the parts of that it can.
 Preserve original source and license notices. Never commit private provisioning,
 provider credentials, runtime state, recordings or provisioned firmware binaries.
 Distinguish compilation and mock checks from observed physical-device behavior.
