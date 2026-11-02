@@ -7,13 +7,19 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 source = (root / 'bots/CardputerADV/src/main_parts/058_main.cpp.inc').read_text()
-start = source.index('void drawHomeBatteryStatus(')
+start = source.index('void drawHomeBolt(')
 brace = source.index('{', start)
 depth, end = 1, brace + 1
 while depth:
     depth += (source[end] == '{') - (source[end] == '}')
     end += 1
-renderer = source[start:end]
+bolt_end = end
+brace = source.index('{', source.index('void drawHomeBatteryStatus(', bolt_end))
+depth, end = 1, brace + 1
+while depth:
+    depth += (source[end] == '{') - (source[end] == '}')
+    end += 1
+renderer = source[start:bolt_end] + '\n' + source[source.index('void drawHomeBatteryStatus(', bolt_end):end]
 code = r'''
 #include <algorithm>
 #include <cassert>
@@ -22,6 +28,7 @@ code = r'''
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "battery_power.h"
 using std::min;
 namespace fonts { const int Font0=0, Font2=2; }
 constexpr uint16_t rgb565_local(int r,int g,int b) {
@@ -32,8 +39,12 @@ struct Canvas {
  std::vector<Line> lines;
  std::string label;
  const int* font=nullptr;
- int outlines=0,terminals=0,cursors=0,textSizes=0;
- uint16_t textColor=0;
+ int outlines=0,terminals=0,cursors=0,textSizes=0,boltParts=0;
+ uint16_t textColor=0,boltColor=0;
+ void fillTriangle(int x0,int y0,int x1,int y1,int x2,int y2,uint16_t c) {
+  for(auto [x,y]:{std::pair<int,int>{x0,y0},{x1,y1},{x2,y2}}) assert(x>=143 && x<=152 && y>=122 && y<=133);
+  ++boltParts;boltColor=c;
+ }
  void drawRoundRect(int x,int y,int w,int h,int r,uint16_t) {
   assert(x==154 && y==125 && w==34 && h==6 && r==1); ++outlines;
  }
@@ -56,7 +67,7 @@ int main() {
  const uint16_t cyan=rgb565_local(47,227,255), amber=rgb565_local(255,136,64);
  const uint16_t red=rgb565_local(255,63,85),dim=rgb565_local(23,48,59);
  for(int raw: {-1,INT_MIN,0,1,15,16,20,21,30,31,40,41,60,61,80,81,99,100,101,INT_MAX}) {
-  gCanvas=Canvas{}; drawHomeBatteryStatus(raw);
+  gCanvas=Canvas{}; drawHomeBatteryStatus(raw,battery_power::State::Battery,1234);
   const bool known=raw>=0;
   const int level=known ? min(raw,100) : 0;
   const int lit=known ? (level*5+99)/100 : 0;
@@ -67,6 +78,7 @@ int main() {
   assert(gCanvas.label==(known ? std::to_string(level)+"%" : "--%"));
   assert(gCanvas.textColor==(known ? accent : rgb565_local(130,145,155)));
   assert(gCanvas.lines.size()==20);
+  assert(gCanvas.boltParts==0);
   for(int i=0;i<5;++i) for(int row=0;row<4;++row) {
    const auto& line=gCanvas.lines[i*4+row];
    assert(line.w==4 && line.y==126+row);
@@ -80,12 +92,44 @@ int main() {
    }
   }
  }
+ using State=battery_power::State;
+ const uint16_t green=rgb565_local(88,240,141);
+ const auto stroke=[](int i){return gCanvas.lines[i*4].color;};
+ // Charging: green, a bolt, and the stroke being filled blinks while the rest hold.
+ gCanvas=Canvas{};drawHomeBatteryStatus(71,State::Charging,0);
+ assert(gCanvas.label=="71%"&&gCanvas.textColor==green&&gCanvas.boltParts==2&&gCanvas.boltColor==green);
+ for(int i=0;i<4;++i)assert(stroke(i)==green);
+ assert(stroke(4)==green);
+ gCanvas=Canvas{};drawHomeBatteryStatus(71,State::Charging,500);
+ for(int i=0;i<4;++i)assert(stroke(i)==green);
+ assert(stroke(4)==dim);
+ gCanvas=Canvas{};drawHomeBatteryStatus(10,State::Charging,500);
+ assert(stroke(0)==green&&stroke(1)==dim);
+ gCanvas=Canvas{};drawHomeBatteryStatus(10,State::Charging,0);
+ assert(stroke(0)==green&&stroke(1)==green&&stroke(2)==dim);
+ // The reading hits 100 long before the battery does.
+ gCanvas=Canvas{};drawHomeBatteryStatus(100,State::Charging,0);assert(gCanvas.label=="99%");
+ gCanvas=Canvas{};drawHomeBatteryStatus(-1,State::Charging,0);assert(gCanvas.label=="--%");
+ // Done and still.
+ for(uint32_t at:{0u,500u,1700u}) {
+  gCanvas=Canvas{};drawHomeBatteryStatus(96,State::Full,at);
+  assert(gCanvas.label=="100%"&&gCanvas.textColor==green&&gCanvas.boltParts==2);
+  for(int i=0;i<5;++i)assert(stroke(i)==green);
+ }
+ // Not taking charge: keeps the charge colors and doesn't move.
+ const uint16_t held=amber;
+ for(uint32_t at:{0u,500u}) {
+  gCanvas=Canvas{};drawHomeBatteryStatus(22,State::NotCharging,at);
+  assert(gCanvas.label=="22%"&&gCanvas.textColor==held&&gCanvas.boltParts==2&&gCanvas.boltColor==amber);
+  assert(stroke(0)==held&&stroke(1)==held&&stroke(2)==dim);
+ }
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-home-battery-') as directory:
     path = Path(directory)
     (path / 'test.cpp').write_text(code)
     subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++17', '-Wall', '-Wextra',
-                    '-Werror', str(path / 'test.cpp'), '-o', str(path / 'test')], check=True)
+                    '-Werror', '-I', str(root / 'bots/CardputerADV/src'),
+                    str(path / 'test.cpp'), '-o', str(path / 'test')], check=True)
     subprocess.run([str(path / 'test')], check=True)
-print('PASS actual Home battery renderer: five broad strokes, compact bounds, gaps, thresholds, labels, font restoration')
+print('PASS actual Home battery renderer: five broad strokes, compact bounds, gaps, thresholds, labels, font restoration, charging blink, full and not charging still')

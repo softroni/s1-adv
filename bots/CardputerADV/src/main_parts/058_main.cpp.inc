@@ -103,11 +103,20 @@ void drawHomeReadyStatus(bool updateReady, bool pressed) {
   d.setFont(&fonts::Font2);
 }
 
-void drawHomeBatteryStatus(int32_t rawLevel) {
+void drawHomeBolt(int16_t x, int16_t y, uint16_t ink) {
+  gCanvas.fillTriangle(x+5,y,x,y+6,x+4,y+6,ink);
+  gCanvas.fillTriangle(x+3,y+4,x+7,y+4,x+2,y+10,ink);
+}
+
+void drawHomeBatteryStatus(int32_t rawLevel, battery_power::State power, uint32_t nowMs) {
+  using battery_power::State;
   auto& d=gCanvas;
-  const bool known=rawLevel>=0;
-  const int level=known ? min<int32_t>(100,rawLevel) : 0;
-  const uint16_t accent=known && level<=15 ? rgb565_local(255,63,85) :
+  const int shown=battery_power::shownLevel(rawLevel,power);
+  const bool known=shown>=0;
+  const int level=known ? shown : 0;
+  const bool charged=power==State::Charging || power==State::Full;
+  const uint16_t accent=charged ? rgb565_local(88,240,141) :
+      known && level<=15 ? rgb565_local(255,63,85) :
       known && level<=30 ? rgb565_local(255,136,64) : rgb565_local(47,227,255);
   const uint16_t dim=rgb565_local(23,48,59),edge=rgb565_local(28,65,77);
   d.drawRoundRect(154,125,34,6,1,edge);
@@ -115,10 +124,15 @@ void drawHomeBatteryStatus(int32_t rawLevel) {
   // Five broad diagonal strokes stay inside the original compact outline.
   constexpr int strokes=5;
   const int lit=known ? (level*strokes+99)/100 : 0;
+  // The stroke being filled blinks. Only charging moves, so stillness always means it isn't.
+  const int filling=power==State::Charging ? min(lit,strokes-1) : -1;
+  const bool blinkOn=(nowMs/500)%2==0;
   for(int i=0;i<strokes;++i) {
+    const bool on=i==filling ? blinkOn : i<lit;
     for(int row=0;row<4;++row)
-      d.drawFastHLine(156+i*6+(3-row)*2/3,126+row,4,i<lit ? accent : dim);
+      d.drawFastHLine(156+i*6+(3-row)*2/3,126+row,4,on ? accent : dim);
   }
+  if(power!=State::Battery) drawHomeBolt(144,123,battery_power::look(power).accent);
   char percent[5];
   if(known) snprintf(percent,sizeof(percent),"%d%%",level);
   else snprintf(percent,sizeof(percent),"--%%");
@@ -126,6 +140,42 @@ void drawHomeBatteryStatus(int32_t rawLevel) {
   d.setTextColor(known ? accent : rgb565_local(130,145,155),rgb565_local(2,7,10));
   d.setCursor(193,124);d.print(percent);
   d.setFont(&fonts::Font2);
+}
+
+// What the power is doing, in place of the idle bars. The meter is those same bars. While charging a
+// pulse sweeps along them and fills them behind it, then it rests on the true level before the next.
+void drawHomeChargeCard(int32_t rawLevel, battery_power::State power, uint32_t nowMs) {
+  using battery_power::State;
+  auto& d = gCanvas;
+  const battery_power::Look look = battery_power::look(power);
+  constexpr int16_t kLeft = 121, kBase = 101, kHeight = 9;
+  constexpr int kBars = 15;
+  const bool bolt = power != State::Battery;
+  if (bolt) drawHomeBolt(kLeft, 75, look.accent);
+  d.setFont(&fonts::Font2);
+  d.setTextColor(look.accent);
+  d.setCursor(kLeft + (bolt ? 12 : 0), 72);
+  d.print(look.word);
+  if (look.hint) {
+    d.setFont(&fonts::Font0);
+    d.setTextColor(rgb565_local(150, 165, 175));
+    d.setCursor(kLeft, 92);
+    d.print(look.hint);
+    d.setFont(&fonts::Font2);
+    return;
+  }
+  const int shown = battery_power::shownLevel(rawLevel, power);
+  const int lit = shown >= 0 ? (shown * kBars + 99) / 100 : 0;
+  // Fifteen bars and five steps' rest, then it starts again.
+  const int head = look.moving ? static_cast<int>((nowMs % 2000U) / 100U) : -9;
+  for (int i = 0; i < kBars; ++i) {
+    const int away = abs(i - head);
+    const int lift = away == 0 ? 5 : away == 1 ? 3 : 0;
+    const bool filled = i < lit || (head < kBars && i <= head) || away == 1;
+    const uint16_t ink = away == 0 ? rgb565_local(205, 255, 225)
+        : filled ? look.accent : rgb565_local(23, 48, 59);
+    d.fillRoundRect(kLeft - 1 + i * 7, kBase - kHeight - lift, 3, kHeight + lift, 1, ink);
+  }
 }
 
 // What an update brings, in place of the idle bars, so it reads without opening anything.

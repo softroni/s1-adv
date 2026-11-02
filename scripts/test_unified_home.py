@@ -33,6 +33,7 @@ code = r'''
 #include <vector>
 #include "firmware_job_display.h"
 #include "assistant_activity.h"
+#include "battery_power.h"
 #include "release_delivery.h"
 using std::min;using std::max;
 struct String:std::string {
@@ -58,6 +59,7 @@ void drawHomeWeather(){++weatherPanels;}
 firmware_job_display::State gFirmwareJobState=firmware_job_display::State::Idle;
 struct{bool clockTwelveHour=false;uint8_t minBatteryForUpdate=25;}gDeviceSettings;
 struct{int level=72;}gBatterySnapshot;
+battery_power::Tracker gBatteryPower;
 uint8_t gVoiceLevel8=64;
 constexpr const char*kAppVersion="0.2.178-dev";
 namespace fonts{int Font0=0,Font2=2,Font4=4,Font7=7,efontCN_12=12;}
@@ -84,7 +86,7 @@ struct Canvas {
 }gCanvas;
 int badges=0,batteries=0,meters=0;
 void drawHomeReadyStatus(bool,bool){++badges;}
-void drawHomeBatteryStatus(int32_t){++batteries;}
+void drawHomeBatteryStatus(int32_t,battery_power::State,uint32_t){++batteries;}
 void drawAssistantPulseArc(int,int,int,int,float a,float b,uint16_t c){gCanvas.arcs.push_back(c);gCanvas.shapes.push_back({int(a*1000),int(b*1000)});}
 void renderLauncherOverlay(){}void renderDebugOverlay(){}void ensureDeviceTimezone(){}
 String fitCurrentFontToWidth(const String&s,int w){return s.substr(0,w/6);}
@@ -115,7 +117,7 @@ void drawBigRow(int row,const String&l,const String&v,bool,uint16_t,uint16_t=0,u
 void drawBigScrollbar(int,int,uint16_t){}
 void drawBigNotice(const String&t,uint16_t){gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,114);gCanvas.print(fitCurrentFontToWidth(t,220));}
 '''
-for signature in ['void drawHomeUpdateNote()', 'AssistantPulseState assistantPulseState()', 'void drawAssistantPulseButton(', 'void renderAssistantPulseChatHint()',
+for signature in ['void drawHomeBolt(', 'void drawHomeChargeCard(', 'void drawHomeUpdateNote()', 'AssistantPulseState assistantPulseState()', 'void drawAssistantPulseButton(', 'void renderAssistantPulseChatHint()',
                   'bool assistantPulseWorking(', 'void renderAssistantPulseUi()', 'void renderOtaUi()']:
     code += function(signature) + '\n'
 code += r'''
@@ -141,8 +143,56 @@ void checkMotion(){
  gFirmwareJobState=State::Working;gRecording=true;frame(20000,64);assert(meters==1);gRecording=false;gFirmwareJobState=State::Idle;
  assert(still());gVoiceLevel8=64;
 }
+void checkPower(){
+ using Tracker=battery_power::Tracker;using State=battery_power::State;
+ const auto show=[]{reset();renderAssistantPulseUi();};
+ const auto top=[](uint32_t from,int seconds,int mv,bool computer){for(int i=1;i<=seconds;++i)gBatteryPower.update(from+i*1000u,int16_t(mv),computer);};
+ // On battery Home is unchanged, and it holds still.
+ show();const size_t idleShapes=gCanvas.shapes.size();
+ assert(!printed("Charging")&&!printed("On battery")&&!printed("Fully charged")&&!printed("Not charging"));
+ gBatteryPower=Tracker{};gBatteryPower.update(1000,3900,true);assert(gBatteryPower.state()==State::Charging);
+ // Charging says so where the bars were, and moves though nothing else does.
+ show();assert(printed("Charging")&&gCanvas.clockRects==1&&gCanvas.chatRects==1&&badges==1&&batteries==1);
+ assert(!still());
+ // A pulse only: the rest of the picture is the idle one, in the same place.
+ const auto pulseAt=[](uint32_t at){frame(at,64);std::vector<int> tall;for(const auto&s:gCanvas.shapes)if(s.size()==4&&s[2]==3)tall.push_back(s[3]);return tall;};
+ const auto early=pulseAt(100),later=pulseAt(1500);
+ assert(early.size()==15&&later.size()==15&&early!=later);
+ for(const auto&s:gCanvas.shapes)if(s.size()==4&&s[2]==3)assert(s[0]>=120&&s[0]+s[2]<=222&&s[1]>=71&&s[1]+s[3]<=102);
+ // Each sweep ends in a rest, with every bar back at the same height.
+ const auto rest=pulseAt(1800);for(int h:rest)assert(h==9);
+ // Anything the assistant is doing, an update's words and the boot marker keep their place.
+ gThinking=true;show();assert(!printed("Charging")&&batteries==1);gThinking=false;
+ gRecording=true;show();assert(!printed("Charging")&&batteries==0);gRecording=false;
+ gBootBackgroundActive=true;gBootBackgroundLabel="wifi";show();assert(!printed("Charging"));gBootBackgroundActive=false;
+ gOtaManifest.notes="Bigger screens, menu letters";candidateAvailable=true;show();
+ assert(printed("menu letters")&&!printed("Charging"));gOtaManifest.notes="";candidateAvailable=false;
+ // Full is green words and a meter that doesn't move.
+ gBatteryPower=Tracker{};top(1000,16*60,4200,true);assert(gBatteryPower.state()==State::Full);
+ show();assert(printed("Fully charged")&&!printed("Charging"));assert(still());
+ // Not charging says what to check instead of showing a meter.
+ gBatteryPower=Tracker{};
+ for(int i=1;i<=40;++i)gBatteryPower.update(i*1000u,int16_t(4050+(i*i*53)%150),true);
+ assert(gBatteryPower.state()==State::NotCharging);
+ show();assert(printed("Not charging")&&printed("Power switch on?"));assert(still());
+ std::vector<std::vector<int>> shapes=gCanvas.shapes;
+ for(const auto&s:shapes)assert(!(s.size()==4&&s[2]==3));
+ // Pulling the cable says so for a moment, then Home is as it was.
+ gBatteryPower=Tracker{};
+ uint32_t at=100000;
+ for(int i=0;i<60;++i)gBatteryPower.update(at+=1000,3800,false);
+ for(int i=0;i<30;++i)gBatteryPower.update(at+=1000,3900,true);
+ for(int i=0;i<4;++i)gBatteryPower.update(at+=1000,3800,false);
+ assert(gBatteryPower.state()==State::Battery);
+ const uint32_t pulled=at;
+ frame(pulled,64);assert(printed("On battery"));
+ frame(pulled+battery_power::kUnpluggedNoteMs+1,64);assert(!printed("On battery"));
+ assert(gCanvas.shapes.size()==idleShapes);
+ gBatteryPower=Tracker{};
+}
 int main(){
  checkMotion();
+ checkPower();
  // An update says what it brings, while Pulse is idle, and only when there are words to show.
  gOtaManifest.notes="Bigger screens, menu letters";candidateAvailable=true;reset();renderAssistantPulseUi();
  assert(printed("Bigger screens,")&&printed("menu letters"));
@@ -196,4 +246,4 @@ with tempfile.TemporaryDirectory(prefix='s1-unified-home-') as directory:
                     '-I', str(root / 'bots/CardputerADV/src'), str(p / 'test.cpp'),
                     '-o', str(p / 'test')], check=True)
     subprocess.run([str(p / 'test')], check=True)
-print('PASS actual Home/OTA renderers: one scene, red recording, clock/timer, hidden draft/battery, compact progress, one Enter action, still unless thinking or working')
+print('PASS actual Home/OTA renderers: one scene, red recording, clock/timer, hidden draft/battery, compact progress, one Enter action, still unless thinking, working or charging')

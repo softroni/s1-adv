@@ -197,6 +197,9 @@
   } else if (working && (micRecording || realtime)) {
     mic_input_meter::draw(d, 121, 77, 96, gMicInputMeter.visibleLevel(micRecording, nowMs),
                           rgb565_local(45, 32, 40), c1, c2);
+  } else if (state == AssistantPulseState::Ready && !working && !gBootBackgroundActive &&
+             gBatteryPower.noteVisible(nowMs)) {
+    drawHomeChargeCard(gBatterySnapshot.level, gBatteryPower.state(), nowMs);
   } else for (int i = 0; i < bars; ++i) {
     int16_t bx = waveX + i * 7;
     if (state == AssistantPulseState::Thinking || (realtime && gRealtimeAwaiting)) {
@@ -228,7 +231,7 @@
   if(state==AssistantPulseState::Ready || state==AssistantPulseState::Thinking) {
     drawHomeReadyStatus(homeFirmwareUpdateAvailable() || millis()<gHomeUpdatePreviewUntilMs,
                         millis()<gAssistantPulsePressUntilMs);
-    drawHomeBatteryStatus(gBatterySnapshot.level);
+    drawHomeBatteryStatus(gBatterySnapshot.level, gBatteryPower.state(), nowMs);
   } else drawAssistantPulseButton(154, 105, 62, 21, label, c1, millis() < gAssistantPulsePressUntilMs);
   if (realtime) {
     d.setFont(&fonts::Font2);

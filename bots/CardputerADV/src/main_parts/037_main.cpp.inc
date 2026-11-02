@@ -58,6 +58,16 @@ bool batteryExternalPowerPresent() {
          gBatterySnapshot.charging == m5::Power_Class::is_charging;
 }
 
+// A computer sends a USB frame every millisecond. The counter is 11 bits, so reads a second apart only
+// match by chance, and one miss changes nothing because the voltage has to agree.
+bool usbFramesArriving() {
+  static int32_t last = -1;
+  const int32_t frame = USB_SERIAL_JTAG.fram_num.sof_frame_index;
+  const bool moved = last >= 0 && frame != last;
+  last = frame;
+  return moved;
+}
+
 int32_t estimateBatteryLevelFromVoltage(int16_t voltageMv) {
   if (voltageMv <= 0) {
     return -1;
@@ -185,6 +195,11 @@ void updateBatterySnapshot(bool force) {
   gBatterySnapshot.vbusMv = vbusMv;
   gBatterySnapshot.currentMa = M5.Power.getBatteryCurrent();
   gBatterySnapshot.charging = M5.Power.isCharging();
+  const bool computer = usbFramesArriving();
+  if (gBatteryPower.update(now, voltageMv, computer)) {
+    logf("[POWER] %s mv=%d computer=%d", battery_power::name(gBatteryPower.state()),
+         static_cast<int>(voltageMv), static_cast<int>(computer));
+  }
   recordBatteryHistorySample(now, force);
 }
 

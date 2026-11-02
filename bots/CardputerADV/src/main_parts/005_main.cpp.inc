@@ -331,6 +331,7 @@ uint32_t gAssistantPulsePressUntilMs = 0;
 uint8_t gVoiceEqBars[kPlaybackSpectrumBands] = {};
 uint8_t gVoiceEqPeaks[kPlaybackSpectrumBands] = {};
 BatterySnapshot gBatterySnapshot;
+battery_power::Tracker gBatteryPower;
 BatteryHistorySample gBatteryHistory[kBatteryHistoryCapacity];
 uint8_t gBatteryHistoryCount = 0;
 uint8_t gBatteryHistoryHead = 0;

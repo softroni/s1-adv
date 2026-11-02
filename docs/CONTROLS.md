@@ -420,6 +420,31 @@ microphone is off. REC and the live input meter appear after recording starts.
 A compact battery gauge with five broad diagonal strokes and a percentage sits
 below READY; amber and red indicate low charge. Unknown telemetry displays --%.
 
+While it's plugged in, a bolt appears beside the gauge and the idle bars become a
+line of words over a meter:
+
+| Home shows | What it means |
+|---|---|
+| **Charging**, green, with bars filling in a sweep | The battery is charging. Only charging moves, so a still screen means it isn't |
+| **Fully charged**, green, with all the bars lit | The charger has finished. Full is shown once the voltage stops rising, so give it about 15 minutes at the top |
+| **Not charging**, amber, with "Power switch on?" | It's plugged in, but the battery isn't taking charge. It runs from USB with the switch off, but the battery only charges with the switch on |
+| **On battery**, for a few seconds | You just unplugged it. Home then goes back to the normal idle bars |
+
+While charging, the percent stops at 99 until the battery is full. It reads high on
+USB, and it drops a few points when you unplug.
+
+The Cardputer ADV can't be asked whether it's charging: the charger chip's status
+pins aren't connected to anything, and no pin senses USB power. It works it out
+instead, so it isn't always sure:
+
+- **On a computer** it knows it's plugged in from the USB traffic, within a second or two
+- **On a wall charger or power bank** it judges from the battery voltage. That takes a few seconds when you plug in, and can take half an hour or so if it starts up already on the charger
+- **With the switch off on a wall charger**, it can't tell it's plugged in at all
+
+`dbg` and `battery.status` report what it decided as `power=`, and each change is
+logged as `[POWER]` with the reading behind it. `battery.status` also opens the
+Battery screen.
+
 The interface and default assistant replies are English, including replies to
 Russian input. Explicit requests such as "Reply in Russian" are respected.
 Russian keyboard input and Cyrillic rendering remain available. See [NES games](NES.md) for SD game installation.

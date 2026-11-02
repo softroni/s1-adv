@@ -72,6 +72,8 @@
 #include "voice_tool.h"
 #include "activity_cue.h"
 #include "assistant_activity.h"
+#include "battery_power.h"
+#include "soc/usb_serial_jtag_struct.h"
 #include "weather_view.h"
 #include "radio_catalog.h"
 #include "internet_radio_transport.h"
@@ -110,7 +112,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.252-dev"
+#define APP_VERSION "0.2.254-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"
@@ -261,7 +263,7 @@ constexpr uint8_t kClockFaceCount = 1;
 constexpr uint8_t kHidKeyEscape = 0x29;
 constexpr float kPi = 3.14159265358979323846f;
 constexpr uint32_t kClockTickMs = 1000;
-constexpr uint32_t kBatterySampleIntervalMs = 2000;
+constexpr uint32_t kBatterySampleIntervalMs = 1000;
 constexpr uint32_t kBatteryHistorySampleIntervalMs = 30000;
 constexpr uint32_t kBatteryDrainMinWindowMs = 5UL * 60UL * 1000UL;
 constexpr uint8_t kBatteryHistoryCapacity = 120;
