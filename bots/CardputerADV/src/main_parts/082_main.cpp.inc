@@ -12,8 +12,8 @@ constexpr uint16_t kLabRed = rgb565_local(255, 73, 85), kLabPanel = rgb565_local
 constexpr uint16_t kLabPanel2 = rgb565_local(0, 36, 85), kLabDim = rgb565_local(73, 73, 85);
 constexpr uint16_t kLabMuted = rgb565_local(146, 146, 170), kLabSoft = rgb565_local(182, 182, 170);
 constexpr uint16_t kLabGraph = rgb565_local(0, 109, 170);
-constexpr int kLabListRows = 5, kLabRowH = 21, kLabListY = 20, kLabCardRows = 6, kLabCardRowH = 17;
-constexpr int kLabWizardRows = 4;
+constexpr int kLabListRows = 5, kLabRowH = 21, kLabListY = 20, kLabWizardRows = 4, kLabRecipeRows = 4;
+constexpr int kLabTrailSteps = 32;    // More than the longest walk through a rule.
 constexpr int kLabGraphTop = 75, kLabGraphH = 48;
 constexpr const char kLabArrowUpDown[] = "\x18\x19", kLabArrowLeftRight[] = "\x1b\x1a";
 constexpr const char kLabDeg[] = "\xf8";
@@ -23,41 +23,44 @@ constexpr uint32_t kLabBeepMs = 400;
 constexpr int kLabLastPort = pbhub::kPorts - 1;
 constexpr int kLabLedMilliamps = 33;  // M5 rates this strip at 2 A a meter, with 60 LEDs a meter.
 
-enum class LabView : uint8_t { Devices, Device, Wiring, Rules, Rule, Wizard, Play };
-enum class LabStep : uint8_t { Sig, Op, Value, Out, How, OutValue, Source };
-enum class LabLine : uint8_t { Name, Join, Cond, AddCond, Then, Action, AddAction, Hold, Delete };
-struct LabCardRow {
-  LabLine line;
-  uint8_t index;
-};
-constexpr int kLabMostCardRows = lab::kMaxConds + lab::kMaxActions + 7;
+enum class LabView : uint8_t { Devices, Device, Wiring, Rules, Wizard, Play, Recipes, Say, Offer };
+enum class LabStep : uint8_t { Sig, Op, Value, MoreConds, Join, Out, How, OutValue, Source, MoreActions, Hold, Name };
 
 struct LabUi {
   LabView view = LabView::Devices;
   int devRow = 0, devTop = 0;
   int wiringRow = 0;
   int ruleRow = 0, ruleTop = 0;
-  int ruleIndex = 0;            // The rule open in the card, and being edited in the wizard.
-  int cardRow = 1, cardTop = 0;
   bool deleteArmed = false;
-  int playPage = 0;             // 0 is the board, and after it one page per rule.
-  int boardTop = 0;
+  int recipeRow = 0, recipeTop = 0;
+  int playRule = 0;             // Which rule the flow is showing.
+  bool practicing = false;
+  int practiceCond = 0;
+  bool sayAsked = false, sayHeard = false, sayFailed = false;
   // The test screens.
   int servoAngle = 90, stripHue = 200, stripBright = 40, stripLed = 0, ledHue = 120, toneHz = 880;
   bool sweeping = false, sweepUp = true, ledOn = false, relays[2] = {false, false};
   uint32_t sweepMs = 0, beepUntilMs = 0;
 } gLabUi;
 
+struct LabTrail {
+  LabStep step;
+  uint8_t cond, action;
+};
+// One walk through a rule, on a copy, so Esc can leave without changing anything saved.
 struct LabWizard {
   lab::Rule rule;
-  bool fresh = false;           // A new rule, so it goes on from the condition to the action.
-  int8_t condAt = -1, actionAt = -1;  // The line being replaced, or -1 to add one.
+  int index = -1;               // Which saved rule this replaces, or -1 for a new one.
+  uint8_t cond = 0, action = 0; // The line being asked about.
+  uint8_t keepConds = 1, keepActions = 1;
   LabStep step = LabStep::Sig;
   int row = 0, top = 0;
-  lab::Cond cond;
-  lab::Action action;
   bool teaching = true;         // The value follows the live reading until a key nudges it.
+  bool nameTouched = false;
+  LabTrail trail[kLabTrailSteps];
+  uint8_t depth = 0;
 } gLabWizard;
+lab::Rule gLabOffer;            // A rule from Claude, waiting for Enter.
 
 // --- Words ------------------------------------------------------------------------------------
 String labNumberText(int value, const char* unit, const char* degree) {
@@ -96,9 +99,9 @@ String labActionText(const lab::Action& action) {
   return text + " to " + labOutText(action.out, action.value);
 }
 String labHoldText(uint16_t ms) {
-  if (!ms) return "Stop right away after";
+  if (!ms) return "Stop at once";
   const int tenths = ms / 100;
-  return String("Keep going ") + String(tenths / 10) + (tenths % 10 ? String(".") + String(tenths % 10) : String("")) + " sec after";
+  return String(tenths / 10) + (tenths % 10 ? String(".") + String(tenths % 10) : String("")) + " sec";
 }
 
 // --- Drawing pieces ---------------------------------------------------------------------------
@@ -118,10 +121,13 @@ void labHead(const char* title, const uint8_t* icon, uint16_t accent, const Stri
   d.setTextSize(1);
   d.setTextWrap(false);
   d.drawBitmap(3, 1, icon, launcher_icons::kSize, launcher_icons::kSize, accent);
+  // A long name gives way to the chip, which is what changes while you watch.
+  d.setFont(&fonts::Font0);
+  const int chipWidth = chip.isEmpty() ? 0 : d.textWidth(chip) + 14;
   d.setFont(&fonts::FreeSansBold9pt7b);
   d.setTextColor(TFT_WHITE);
   d.setCursor(23, 1);
-  d.print(title);
+  d.print(fitCurrentFontToWidth(title, 238 - 23 - chipWidth));
   if (!chip.isEmpty()) labChip(chip, chipColor);
   d.drawFastHLine(0, 18, 240, accent);
 }
@@ -194,6 +200,8 @@ const uint8_t* labDevIcon(Dev dev) {
     case Dev::Tilt: return kPlane;
     case Dev::Led: return kDisplay;
     case Dev::Speaker: return kMusic;
+    case Dev::Lamp: return kBulb;
+    case Dev::Ac: return kRemote;
     default: return kChip;
   }
 }
@@ -243,6 +251,8 @@ String labDevValue(Dev dev) {
     case Dev::Nfc: return "found";
     case Dev::Gps: return String(gLabGps.fix.satellites) + " sats";
     case Dev::Tilt: return number(Sig::Tilt);
+    case Dev::Lamp: return gSmartLamp.online ? "online" : "searching";
+    case Dev::Ac: return "sends only";
     default: return "built in";
   }
 }
@@ -498,13 +508,33 @@ void renderLabWiring() {
   }
   labKeys(String(kLabArrowUpDown) + " pick  " + kLabArrowLeftRight + " change  ESC save");
 }
+// These already have an app that is their full test, so the Lab points there.
+void renderLabHandOver(Dev dev, const char* title, const char* place, const char* line1, const char* line2, const char* keys) {
+  labDrawAnswering(dev);
+  labTextAt(&fonts::FreeSansBold9pt7b, 6, 28, title, TFT_WHITE);
+  labTextAt(&fonts::Font0, 6, 52, place, kLabMuted);
+  labTextAt(&fonts::Font0, 6, 68, line1, kLabSoft);
+  labTextAt(&fonts::Font0, 6, 79, line2, kLabSoft);
+  labKeys(keys);
+}
 void renderLabNfc() {
-  labDrawAnswering(Dev::Nfc);
-  labTextAt(&fonts::FreeSansBold9pt7b, 6, 28, "NFC unit found", TFT_WHITE);
-  labTextAt(&fonts::Font0, 6, 52, "Grove 0x50", kLabMuted);
-  labTextAt(&fonts::Font0, 6, 68, "NFC Notes reads and writes tags, and", kLabSoft);
-  labTextAt(&fonts::Font0, 6, 79, "it is the full test for this unit.", kLabSoft);
-  labKeys("ENTER open NFC Notes  ESC back");
+  renderLabHandOver(Dev::Nfc, "NFC unit found", "Grove 0x50", "NFC Notes reads and writes tags, and", "it is the full test for this unit.",
+                    "ENTER open NFC Notes  ESC back");
+}
+void renderLabLamp() {
+  labDrawHeadFor(Dev::Lamp, kLabLime, gSmartLamp.online ? "ONLINE" : "SEARCHING", gSmartLamp.online ? kLabGreen : kLabAmber);
+  labTextAt(&fonts::FreeSansBold9pt7b, 6, 28, gSmartLamp.online ? "smartLamp found" : "Looking on Wi-Fi", TFT_WHITE);
+  labTextAt(&fonts::Font0, 6, 52, "Rules can switch it and set brightness", kLabSoft);
+  labTextAt(&fonts::Font0, 6, 63, "while it's on the same Wi-Fi.", kLabSoft);
+  labKeys("ENTER open smartLamp  ESC back");
+}
+void renderLabAc() {
+  labDrawHeadFor(Dev::Ac, kLabLime, "BUILT IN", kLabSoft);
+  labTextAt(&fonts::FreeSansBold9pt7b, 6, 28, "IR air conditioner", TFT_WHITE);
+  labTextAt(&fonts::Font0, 6, 52, "Rules can turn a TCL or Daikin AC on", kLabSoft);
+  labTextAt(&fonts::Font0, 6, 63, "and off. IR can't hear back, so point", kLabSoft);
+  labTextAt(&fonts::Font0, 6, 74, "the Cardputer at it and watch.", kLabSoft);
+  labKeys("ENTER open IR Remote  ESC back");
 }
 void renderLabGps() {
   const uint32_t now = millis();
@@ -600,24 +630,28 @@ void renderLabDevice() {
     case Dev::Hub: renderLabHub(); break;
     case Dev::Nfc: renderLabNfc(); break;
     case Dev::Tilt: renderLabTilt(); break;
+    case Dev::Lamp: renderLabLamp(); break;
+    case Dev::Ac: renderLabAc(); break;
     case Dev::Led: renderLabLed(); break;
     default: renderLabSpeaker(); break;
   }
 }
 
-// --- Rules list and card -----------------------------------------------------------------------
-int labRuleRows() { return gLabBook.count + (gLabBook.count < lab::kMaxRules ? 1 : 0); }
+// --- Rules list --------------------------------------------------------------------------------
+int labRuleRows() { return gLabBook.count < lab::kMaxRules ? gLabBook.count + 3 : gLabBook.count; }
 void renderLabRules() {
   auto& d = gCanvas;
   labHead("Rules", launcher_icons::kFlow, kLabLime, String(int(gLabBook.count)) + " SAVED", gLabSaved ? kLabSoft : kLabAmber);
+  static constexpr const char* kExtras[3] = {"+ New rule", "Say a rule", "Recipes"};
   const int rows = labRuleRows();
   for (int row = 0; row < min(kLabListRows, rows); ++row) {
     const int i = gLabUi.ruleTop + row;
     const int y = kLabListY + row * kLabRowH;
     const bool chosen = i == gLabUi.ruleRow;
     if (chosen) labRowBar(y, 233, kLabLime);
-    if (i == gLabBook.count) {
-      labTextAt(&fonts::FreeSansBold9pt7b, 21, y + 2, "+ New rule", chosen ? TFT_BLACK : kLabLime);
+    if (i >= gLabBook.count) {
+      labTextAt(&fonts::FreeSansBold9pt7b, 21, y + 2, kExtras[i - gLabBook.count], chosen ? TFT_BLACK : i == gLabBook.count ? kLabLime : kLabCyan);
+      if (i == gLabBook.count + 2) labTextRight(&fonts::Font0, 228, y + 6, String(lab::kRecipeCount) + " ready to go", chosen ? TFT_BLACK : kLabMuted);
       continue;
     }
     const lab::Rule& rule = gLabBook.rules[i];
@@ -627,80 +661,69 @@ void renderLabRules() {
     labTextRight(&fonts::Font0, 228, y + 6, String(int(rule.conds)) + " in " + String(int(rule.actions)) + " out", chosen ? TFT_BLACK : kLabMuted);
   }
   labScrollBar(gLabUi.ruleTop, kLabListRows, rows, kLabListY, kLabListRows * kLabRowH - 1);
-  labKeys("ENTER edit  SPACE on/off  P play");
+  if (gLabUi.deleteArmed) labKeys("X again deletes this rule");
+  else labKeys("ENTER edit  SPACE on/off  P play  X del");
 }
-int labCardList(const lab::Rule& rule, LabCardRow* rows) {
-  int count = 0;
-  const auto add = [&](LabLine line, uint8_t index) {
-    rows[count].line = line;
-    rows[count].index = index;
-    ++count;
-  };
-  add(LabLine::Name, 0);
-  add(LabLine::Join, 0);
-  for (uint8_t i = 0; i < rule.conds; ++i) add(LabLine::Cond, i);
-  if (rule.conds < lab::kMaxConds) add(LabLine::AddCond, 0);
-  add(LabLine::Then, 0);
-  for (uint8_t i = 0; i < rule.actions; ++i) add(LabLine::Action, i);
-  if (rule.actions < lab::kMaxActions) add(LabLine::AddAction, 0);
-  add(LabLine::Hold, 0);
-  add(LabLine::Delete, 0);
-  return count;
-}
-String labCardText(const lab::Rule& rule, const LabCardRow& row) {
-  switch (row.line) {
-    case LabLine::Name: return String("Name: ") + rule.name;
-    case LabLine::Join: return rule.any ? "WHEN ANY OF THESE" : "WHEN ALL OF THESE";
-    case LabLine::Cond: return labCondText(rule.cond[row.index]);
-    case LabLine::AddCond: return "+ Add a condition";
-    case LabLine::Then: return "DO ALL OF THESE";
-    case LabLine::Action: return labActionText(rule.action[row.index]);
-    case LabLine::AddAction: return "+ Add an action";
-    case LabLine::Hold: return labHoldText(rule.holdMs);
-    default: return gLabUi.deleteArmed ? "ENTER again to delete" : "Delete this rule";
-  }
-}
-void renderLabRule() {
+void renderLabRecipes() {
   auto& d = gCanvas;
-  const lab::Rule& rule = gLabBook.rules[gLabUi.ruleIndex];
-  labHead(rule.name[0] ? rule.name : "Rule", launcher_icons::kFlow, kLabLime, rule.on ? "ON" : "OFF", rule.on ? kLabGreen : kLabMuted);
-  LabCardRow rows[kLabMostCardRows];
-  const int count = labCardList(rule, rows);
-  for (int row = 0; row < min(kLabCardRows, count); ++row) {
-    const int i = gLabUi.cardTop + row;
-    const int y = 20 + row * kLabCardRowH;
-    const bool chosen = i == gLabUi.cardRow;
-    const LabLine line = rows[i].line;
-    const bool label = line == LabLine::Join || line == LabLine::Then;
-    if (chosen) d.fillRoundRect(2, y, 233, kLabCardRowH - 1, 5, kLabLime);
-    else if (line == LabLine::Cond || line == LabLine::Action) d.fillRoundRect(2, y, 233, kLabCardRowH - 1, 5, kLabPanel);
-    const uint16_t ink = chosen ? TFT_BLACK : label ? (line == LabLine::Then ? kLabLime : kLabCyan)
-                       : line == LabLine::Delete ? kLabRed
-                       : line == LabLine::Cond || line == LabLine::Action || line == LabLine::Name ? TFT_WHITE : kLabSoft;
-    const lgfx::IFont* font = label ? static_cast<const lgfx::IFont*>(&fonts::Font0) : &fonts::Font2;
-    d.setFont(font);
-    labTextAt(font, 8, y + (label ? 4 : 0), fitCurrentFontToWidth(labCardText(rule, rows[i]), line == LabLine::Cond ? 170 : 218), ink);
-    if (line == LabLine::Cond) {
-      const lab::Reading& reading = gLabInputs.get(rule.cond[rows[i].index].sig);
-      if (reading.live) labTextRight(&fonts::Font2, 231, y, labValueText(rule.cond[rows[i].index].sig, reading.value), chosen ? TFT_BLACK : kLabGreen);
-    }
+  labHead("Recipes", launcher_icons::kFlow, kLabLime, "ADD ONE", kLabSoft);
+  for (int row = 0; row < kLabRecipeRows; ++row) {
+    const int i = gLabUi.recipeTop + row;
+    const int y = 20 + row * 22;
+    const bool chosen = i == gLabUi.recipeRow;
+    if (chosen) d.fillRoundRect(1, y, 233, 21, 6, kLabLime);
+    labTextAt(&fonts::FreeSansBold9pt7b, 8, y + 2, lab::kRecipes[i].name, chosen ? TFT_BLACK : TFT_WHITE);
   }
-  labScrollBar(gLabUi.cardTop, kLabCardRows, count, 20, kLabCardRows * kLabCardRowH - 1);
-  const LabLine line = rows[gLabUi.cardRow].line;
-  if (line == LabLine::Name) labKeys("Type a name  ESC save");
-  else if (line == LabLine::Hold) labKeys(String(kLabArrowLeftRight) + " change  ESC save");
-  else if (line == LabLine::Cond || line == LabLine::Action) labKeys("ENTER change  X remove  ESC save");
-  else labKeys("ENTER choose  P play  ESC save");
+  labScrollBar(gLabUi.recipeTop, kLabRecipeRows, lab::kRecipeCount, 20, kLabRecipeRows * 22 - 1);
+  labTextAt(&fonts::Font0, 4, 113, lab::kRecipes[gLabUi.recipeRow].about, kLabAmber);
+  labKeys(String(kLabArrowUpDown) + " pick  ENTER add  ESC back");
+}
+void renderLabSay() {
+  const bool working = gSubmitting || gThinking || gPlaybackActive || !gDeferredDeviceActionsJson.isEmpty();
+  const char* chip = gRecording ? "LISTENING" : working ? "WRITING" : "READY";
+  labHead("Say a rule", launcher_icons::kMic, kLabLime, chip, gRecording ? kLabGreen : working ? kLabAmber : kLabSoft);
+  if (gRecording) {
+    labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Listening...", kLabGreen);
+    labTextAt(&fonts::Font0, 6, 52, "Say what to watch and what to do.", kLabSoft);
+    labKeys("ENTER done  ESC back");
+  } else if (working) {
+    labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Claude is writing it", TFT_WHITE);
+    labTextAt(&fonts::Font0, 6, 52, "You'll see it before it's saved.", kLabSoft);
+    labKeys("ESC back");
+  } else if (!gWifiReady || gHubHost.isEmpty()) {
+    labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Needs Wi-Fi", TFT_WHITE);
+    labTextAt(&fonts::Font0, 6, 52, "Claude writes this on the bridge.", kLabSoft);
+    labKeys("ESC back");
+  } else {
+    labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, gLabUi.sayFailed ? "No rule came back" : "Tell Claude what you want", TFT_WHITE);
+    labTextAt(&fonts::Font0, 6, 52, gLabUi.sayFailed ? "Try again, naming a sensor and what" : "For example:", kLabSoft);
+    labTextAt(&fonts::Font0, 6, 63, gLabUi.sayFailed ? "it should do." : "\"When I wave my hand, turn the strip", gLabUi.sayFailed ? kLabSoft : kLabCyan);
+    if (!gLabUi.sayFailed) labTextAt(&fonts::Font0, 6, 74, "red and move the servo.\"", kLabCyan);
+    labKeys("ENTER talk  ESC back");
+  }
+}
+void renderLabOffer() {
+  const lab::Rule& rule = gLabOffer;
+  labHead("Claude wrote this", launcher_icons::kFlow, kLabLime, rule.conds > 1 ? (rule.any ? "ANY" : "ALL") : "", kLabSoft);
+  int y = 20;
+  gCanvas.setFont(&fonts::Font2);
+  for (uint8_t i = 0; i < rule.conds; ++i, y += 15) labTextAt(&fonts::Font2, 6, y, fitCurrentFontToWidth(String(!i ? "If " : rule.any ? "or " : "and ") + labCondText(rule.cond[i]), 228), kLabCyan);
+  for (uint8_t i = 0; i < rule.actions; ++i, y += 15) labTextAt(&fonts::Font2, 6, y, fitCurrentFontToWidth(labActionText(rule.action[i]), 228), kLabLime);
+  labTextAt(&fonts::Font0, 6, 117, String("Name: ") + rule.name, kLabMuted);
+  labKeys("ENTER save  E edit  ESC drop it");
 }
 
-// --- Rule wizard -------------------------------------------------------------------------------
+// --- The steps -----------------------------------------------------------------------------------
+lab::Cond& labWizardCond() { return gLabWizard.rule.cond[gLabWizard.cond]; }
+lab::Action& labWizardAction() { return gLabWizard.rule.action[gLabWizard.action]; }
 int labWizardRowCount() {
   const LabWizard& w = gLabWizard;
   switch (w.step) {
     case LabStep::Sig: case LabStep::Source: return lab::kSigCount;
-    case LabStep::Op: return lab::info(w.cond.sig).onOff ? 2 : 3;
+    case LabStep::Op: return lab::info(w.rule.cond[w.cond].sig).onOff ? 2 : 3;
     case LabStep::Out: return lab::kOutCount;
-    case LabStep::How: return lab::info(w.action.out).onOff ? 2 : 3;
+    case LabStep::How: return lab::info(w.rule.action[w.action].out).onOff ? 2 : 3;
+    case LabStep::MoreConds: case LabStep::MoreActions: case LabStep::Join: return 2;
     default: return 0;
   }
 }
@@ -709,74 +732,275 @@ String labWizardRow(int i) {
   switch (w.step) {
     case LabStep::Sig: case LabStep::Source: return lab::kSigs[i].name;
     case LabStep::Op: {
-      if (lab::info(w.cond.sig).onOff) return i == 0 ? "turns on" : "turns off";
+      if (lab::info(w.rule.cond[w.cond].sig).onOff) return i == 0 ? "turns on" : "turns off";
       static constexpr const char* kOps[3] = {"goes under", "goes over", "changes at all"};
       return kOps[i];
     }
     case LabStep::Out: return lab::kOuts[i].name;
     case LabStep::How: {
-      if (lab::info(w.action.out).onOff) return i == 0 ? "turn on" : "turn off";
+      if (lab::info(w.rule.action[w.action].out).onOff) return i == 0 ? "turn on" : "turn off";
       static constexpr const char* kHows[3] = {"set to a value", "follow a sensor", "do the opposite"};
       return kHows[i];
     }
+    case LabStep::MoreConds: return i == 0 ? "That's all" : "Watch something else";
+    case LabStep::MoreActions: return i == 0 ? "That's all" : "Do something else";
+    case LabStep::Join: return i == 0 ? "any of them" : "all of them";
     default: return "";
   }
 }
-int labWizardStepNumber() {
-  switch (gLabWizard.step) {
-    case LabStep::Sig: return 1;
-    case LabStep::Op: return 2;
-    case LabStep::Value: return 3;
-    case LabStep::Out: return 4;
-    case LabStep::How: return 5;
-    default: return 6;
+// A step opens on the answer already there, so changing a rule is mostly pressing Enter.
+void labWizardPreselect() {
+  LabWizard& w = gLabWizard;
+  const lab::Cond& cond = w.rule.cond[w.cond];
+  const lab::Action& action = w.rule.action[w.action];
+  w.top = 0;
+  switch (w.step) {
+    case LabStep::Sig: w.row = static_cast<int>(cond.sig); break;
+    case LabStep::Op:
+      if (lab::info(cond.sig).onOff) w.row = cond.op == lab::Op::Above ? 0 : 1;
+      else w.row = cond.op == lab::Op::Below ? 0 : cond.op == lab::Op::Above ? 1 : 2;
+      break;
+    case LabStep::Out: w.row = static_cast<int>(action.out); break;
+    case LabStep::How:
+      if (lab::info(action.out).onOff) w.row = action.value ? 0 : 1;
+      else w.row = static_cast<int>(action.how);
+      break;
+    case LabStep::Source: w.row = static_cast<int>(action.source); break;
+    case LabStep::MoreConds: w.row = w.cond + 1 < w.rule.conds ? 1 : 0; break;
+    case LabStep::MoreActions: w.row = w.action + 1 < w.rule.actions ? 1 : 0; break;
+    case LabStep::Join: w.row = w.rule.any ? 0 : 1; break;
+    default: w.row = 0; break;
+  }
+  labKeepRowShown(w.row, w.top, kLabWizardRows);
+}
+void labWizardGo(LabStep step) {
+  LabWizard& w = gLabWizard;
+  if (w.depth < kLabTrailSteps) w.trail[w.depth++] = LabTrail{w.step, w.cond, w.action};
+  w.step = step;
+  labWizardPreselect();
+}
+void labWizardStart(int index, const lab::Rule* from) {
+  LabWizard& w = gLabWizard;
+  w = LabWizard{};
+  w.index = index;
+  if (from) w.rule = *from;
+  else if (index >= 0) w.rule = gLabBook.rules[index];
+  w.teaching = !w.rule.conds;
+  w.nameTouched = w.rule.name[0] != '\0';
+  w.step = LabStep::Sig;
+  labWizardPreselect();
+  gLabUi.view = LabView::Wizard;
+}
+// One step back, and out of the wizard from the first one. Nothing was saved, so nothing is lost.
+void labWizardBack() {
+  LabWizard& w = gLabWizard;
+  if (!w.depth) {
+    gLabUi.view = LabView::Rules;
+    return;
+  }
+  const LabTrail last = w.trail[--w.depth];
+  w.step = last.step;
+  w.cond = last.cond;
+  w.action = last.action;
+  labWizardPreselect();
+}
+void labWizardFinish() {
+  LabWizard& w = gLabWizard;
+  w.rule.conds = w.keepConds;
+  w.rule.actions = w.keepActions;
+  if (!w.rule.name[0]) snprintf(w.rule.name, sizeof(w.rule.name), "Rule %d", gLabBook.count + 1);
+  if (w.index >= 0) {
+    gLabBook.rules[w.index] = w.rule;
+    gLabUi.ruleRow = w.index;
+  } else if (gLabBook.count < lab::kMaxRules) {
+    gLabBook.rules[gLabBook.count] = w.rule;
+    gLabUi.ruleRow = gLabBook.count;
+    ++gLabBook.count;
+  }
+  labSaveBook();
+  gLabUi.ruleTop = 0;
+  labKeepRowShown(gLabUi.ruleRow, gLabUi.ruleTop, kLabListRows);
+  gLabUi.view = LabView::Rules;
+}
+void labWizardCondsDone() {
+  gLabWizard.keepConds = gLabWizard.cond + 1;
+  labWizardGo(gLabWizard.keepConds > 1 ? LabStep::Join : LabStep::Out);
+}
+void labWizardCondLine() {
+  LabWizard& w = gLabWizard;
+  if (w.rule.conds < w.cond + 1) w.rule.conds = w.cond + 1;
+  if (w.cond + 1 < lab::kMaxConds) labWizardGo(LabStep::MoreConds);
+  else labWizardCondsDone();
+}
+void labWizardActionLine() {
+  LabWizard& w = gLabWizard;
+  if (w.rule.actions < w.action + 1) w.rule.actions = w.action + 1;
+  if (w.action + 1 < lab::kMaxActions) {
+    labWizardGo(LabStep::MoreActions);
+  } else {
+    w.keepActions = w.action + 1;
+    labWizardGo(LabStep::Hold);
+  }
+}
+void labWizardPick() {
+  LabWizard& w = gLabWizard;
+  lab::Cond& cond = labWizardCond();
+  lab::Action& action = labWizardAction();
+  const int pick = w.row;
+  switch (w.step) {
+    case LabStep::Sig:
+      if (static_cast<int>(cond.sig) != pick) w.teaching = true;
+      cond.sig = static_cast<Sig>(pick);
+      labWizardGo(LabStep::Op);
+      break;
+    case LabStep::Op:
+      if (lab::info(cond.sig).onOff) {
+        lab::setOnOff(cond, pick == 0);
+        labWizardCondLine();
+      } else if (pick == 2) {
+        cond.op = lab::Op::Changes;
+        labWizardCondLine();
+      } else {
+        cond.op = pick == 0 ? lab::Op::Below : lab::Op::Above;
+        labWizardGo(LabStep::Value);
+      }
+      break;
+    case LabStep::Value:
+      labWizardCondLine();
+      break;
+    case LabStep::MoreConds:
+      if (pick == 0) {
+        labWizardCondsDone();
+      } else {
+        ++w.cond;
+        if (w.cond >= w.rule.conds) w.rule.cond[w.cond] = lab::Cond{};
+        w.teaching = w.cond >= w.rule.conds;
+        labWizardGo(LabStep::Sig);
+      }
+      break;
+    case LabStep::Join:
+      w.rule.any = pick == 0;
+      labWizardGo(LabStep::Out);
+      break;
+    case LabStep::Out: {
+      action.out = static_cast<Out>(pick);
+      const lab::OutInfo& info = lab::info(action.out);
+      action.value = lab::clampTo<int16_t>(action.value, info.lo, info.hi);
+      labWizardGo(LabStep::How);
+      break;
+    }
+    case LabStep::How:
+      if (lab::info(action.out).onOff) {
+        action.how = lab::How::Set;
+        action.value = pick == 0 ? 1 : 0;
+        labWizardActionLine();
+      } else if (pick == 0) {
+        action.how = lab::How::Set;
+        labWizardGo(LabStep::OutValue);
+      } else {
+        action.how = pick == 1 ? lab::How::Follow : lab::How::FollowBack;
+        labWizardGo(LabStep::Source);
+      }
+      break;
+    case LabStep::OutValue:
+      labWizardActionLine();
+      break;
+    case LabStep::Source:
+      action.source = static_cast<Sig>(pick);
+      labWizardActionLine();
+      break;
+    case LabStep::MoreActions:
+      if (pick == 0) {
+        w.keepActions = w.action + 1;
+        labWizardGo(LabStep::Hold);
+      } else {
+        ++w.action;
+        if (w.action >= w.rule.actions) w.rule.action[w.action] = lab::Action{};
+        labWizardGo(LabStep::Out);
+      }
+      break;
+    case LabStep::Hold:
+      labWizardGo(LabStep::Name);
+      break;
+    default:
+      labWizardFinish();
+      break;
   }
 }
 void labTeachValue() {
   LabWizard& w = gLabWizard;
-  const lab::Reading& reading = gLabInputs.get(w.cond.sig);
-  if (w.teaching && reading.live) w.cond.value = reading.value;
+  const lab::Reading& reading = gLabInputs.get(labWizardCond().sig);
+  if (w.teaching && reading.live) labWizardCond().value = reading.value;
+}
+String labWizardChip() {
+  const LabWizard& w = gLabWizard;
+  switch (w.step) {
+    case LabStep::Sig: case LabStep::Op: case LabStep::Value: case LabStep::MoreConds: case LabStep::Join:
+      return String("WATCH ") + String(w.cond + 1);
+    case LabStep::Hold: case LabStep::Name: return "FINISH";
+    default: return String("DO ") + String(w.action + 1);
+  }
 }
 void renderLabWizard() {
   auto& d = gCanvas;
   LabWizard& w = gLabWizard;
-  const bool asksInput = w.step == LabStep::Sig || w.step == LabStep::Op || w.step == LabStep::Value;
-  const String chip = w.fresh ? String("STEP ") + String(labWizardStepNumber()) + " OF 6" : String(asksInput ? "WHEN" : "DO");
-  labHead(w.fresh ? "New rule" : "Change", launcher_icons::kFlow, kLabLime, chip, kLabSoft);
+  labHead(w.index >= 0 ? w.rule.name : "New rule", launcher_icons::kFlow, kLabLime, labWizardChip(), kLabSoft);
   if (w.step == LabStep::Value) {
     labTeachValue();
-    const lab::SigInfo& info = lab::info(w.cond.sig);
+    const lab::Cond& cond = labWizardCond();
+    const lab::SigInfo& info = lab::info(cond.sig);
     labTextAt(&fonts::Font2, 4, 20, String("Show me: ") + info.name, kLabCyan);
-    labTextCenter(&fonts::Font6, 120, 36, String(w.cond.value), TFT_WHITE);
-    const int position = lab::mapRange(w.cond.value, info.lo, info.hi, 0, 100);
+    labTextCenter(&fonts::Font6, 120, 36, String(cond.value), TFT_WHITE);
+    const int position = lab::mapRange(cond.value, info.lo, info.hi, 0, 100);
     labBar(8, 87, 224, 9, position, kLabCyan);
     d.fillRect(8 + 224 * position / 100 - 1, 84, 3, 15, TFT_WHITE);
-    labTextCenter(&fonts::Font0, 120, 104, labValueText(w.cond.sig, w.cond.value, kLabDeg), TFT_WHITE);
-    labTextCenter(&fonts::Font0, 120, 114, w.teaching ? "Set it up, then press ENTER" : "Press ENTER to use this", kLabAmber);
+    labTextCenter(&fonts::Font0, 120, 104, labValueText(cond.sig, cond.value, kLabDeg), TFT_WHITE);
+    labTextCenter(&fonts::Font0, 120, 114, w.teaching ? "Set it up, then press ENTER" : "SPACE goes back to the live reading", kLabAmber);
     labKeys(String(kLabArrowLeftRight) + " nudge  ENTER use it  ESC back");
     return;
   }
   if (w.step == LabStep::OutValue) {
-    const lab::OutInfo& info = lab::info(w.action.out);
+    const lab::Action& action = labWizardAction();
+    const lab::OutInfo& info = lab::info(action.out);
     labTextAt(&fonts::Font2, 4, 20, String("Set ") + info.name + " to", kLabCyan);
-    labTextCenter(&fonts::Font6, 120, 36, String(w.action.value), TFT_WHITE);
-    if (w.action.out == Out::StripColor || w.action.out == Out::Led) d.fillRoundRect(8, 90, 224, 16, 5, labHueColor(w.action.value));
-    else labBar(8, 90, 224, 9, lab::mapRange(w.action.value, info.lo, info.hi, 0, 100), kLabLime);
+    labTextCenter(&fonts::Font6, 120, 36, String(action.value), TFT_WHITE);
+    if (action.out == Out::StripColor || action.out == Out::Led) d.fillRoundRect(8, 90, 224, 16, 5, labHueColor(action.value));
+    else labBar(8, 90, 224, 9, lab::mapRange(action.value, info.lo, info.hi, 0, 100), kLabLime);
     labKeys(String(kLabArrowLeftRight) + " change  ENTER use it  ESC back");
     return;
   }
-  const char* question = "";
+  if (w.step == LabStep::Hold) {
+    labTextAt(&fonts::Font2, 4, 20, "After it stops being true", kLabCyan);
+    labTextCenter(&fonts::Font4, 120, 48, labHoldText(w.rule.holdMs), TFT_WHITE);
+    labTextCenter(&fonts::Font0, 120, 88, "How long the rule keeps going", kLabSoft);
+    labKeys(String(kLabArrowLeftRight) + " change  ENTER next  ESC back");
+    return;
+  }
+  if (w.step == LabStep::Name) {
+    labTextAt(&fonts::Font2, 4, 20, "Give it a name", kLabCyan);
+    d.fillRoundRect(4, 46, 232, 28, 6, kLabPanel);
+    const String name = w.rule.name[0] || w.nameTouched ? String(w.rule.name) : String("Rule ") + String(gLabBook.count + 1);
+    labTextAt(&fonts::FreeSansBold9pt7b, 12, 51, name + (w.nameTouched ? "_" : ""), w.nameTouched ? TFT_WHITE : kLabMuted);
+    labTextAt(&fonts::Font0, 6, 84, String(int(w.keepConds)) + " to watch, " + String(int(w.keepActions)) + " to do", kLabSoft);
+    labKeys("Type a name  ENTER save  ESC back");
+    return;
+  }
+  String question;
   switch (w.step) {
-    case LabStep::Sig: question = "What should it watch?"; break;
-    case LabStep::Op: question = lab::info(w.cond.sig).name; break;
-    case LabStep::Out: question = "What should it do?"; break;
-    case LabStep::How: question = lab::info(w.action.out).name; break;
+    case LabStep::Sig: question = w.cond ? "And what else?" : "What should it watch?"; break;
+    case LabStep::Op: question = lab::info(labWizardCond().sig).name; break;
+    case LabStep::MoreConds: question = "Anything else to watch?"; break;
+    case LabStep::Join: question = "Fire when it's"; break;
+    case LabStep::Out: question = w.action ? "And what else?" : "What should it do?"; break;
+    case LabStep::How: question = lab::info(labWizardAction().out).name; break;
+    case LabStep::MoreActions: question = "Anything else to do?"; break;
     default: question = "Follow which sensor?"; break;
   }
   labTextAt(&fonts::Font2, 4, 20, question, kLabCyan);
   if (w.step == LabStep::Op) {
-    const lab::Reading& reading = gLabInputs.get(w.cond.sig);
-    labTextRight(&fonts::Font2, 236, 20, reading.live ? String("now ") + labValueText(w.cond.sig, reading.value) : String("no reading"), reading.live ? kLabGreen : kLabMuted);
+    const Sig sig = labWizardCond().sig;
+    const lab::Reading& reading = gLabInputs.get(sig);
+    labTextRight(&fonts::Font2, 236, 20, reading.live ? String("now ") + labValueText(sig, reading.value) : String("no reading"), reading.live ? kLabGreen : kLabMuted);
   }
   const int rows = labWizardRowCount();
   for (int row = 0; row < min(kLabWizardRows, rows); ++row) {
@@ -784,7 +1008,8 @@ void renderLabWizard() {
     const int y = 37 + row * 22;
     const bool chosen = i == w.row;
     if (chosen) d.fillRoundRect(1, y, 233, 21, 6, kLabLime);
-    labTextAt(&fonts::FreeSansBold9pt7b, 8, y + 2, fitCurrentFontToWidth(labWizardRow(i), 150), chosen ? TFT_BLACK : TFT_WHITE);
+    gCanvas.setFont(&fonts::FreeSansBold9pt7b);
+    labTextAt(&fonts::FreeSansBold9pt7b, 8, y + 2, fitCurrentFontToWidth(labWizardRow(i), w.step == LabStep::Sig || w.step == LabStep::Source ? 150 : 218), chosen ? TFT_BLACK : TFT_WHITE);
     if (w.step == LabStep::Sig || w.step == LabStep::Source) {
       const Sig sig = static_cast<Sig>(i);
       const lab::Reading& reading = gLabInputs.get(sig);
@@ -795,49 +1020,7 @@ void renderLabWizard() {
   labKeys(String(kLabArrowUpDown) + " pick  ENTER next  ESC back");
 }
 
-// --- Playing -----------------------------------------------------------------------------------
-int labPlayPages() { return 1 + gLabBook.count; }
-void labBoardRow(int y, int i) {
-  auto& d = gCanvas;
-  const lab::Rule& rule = gLabBook.rules[i];
-  const lab::RuleState& state = gLabStates[i];
-  const bool follows = rule.actions && rule.action[0].how != lab::How::Set;
-  const uint16_t back = !rule.on ? kLabPanel2 : state.active ? (follows ? kLabPanel : kLabLime) : kLabPanel2;
-  const bool bright = back == kLabLime;
-  d.fillRoundRect(2, y, 233, 34, 6, back);
-  labTextAt(&fonts::FreeSansBold9pt7b, 8, y + 1, fitCurrentFontToWidth(rule.name, 150), bright ? TFT_BLACK : rule.on ? TFT_WHITE : kLabMuted);
-  const char* word = !rule.on ? "OFF" : state.active ? (follows ? "FOLLOWING" : "FIRING") : "WAITING";
-  const uint16_t wordColor = bright ? TFT_BLACK : !rule.on ? kLabMuted : state.active ? kLabCyan : kLabAmber;
-  labTextRight(&fonts::Font0, 230, y + 5, word, wordColor);
-  if (state.active && rule.actions) {
-    String line;
-    for (uint8_t a = 0; a < rule.actions; ++a) {
-      int16_t value = 0;
-      const bool known = lab::actionValue(rule.action[a], gLabInputs, value);
-      if (a) line = line + ", ";
-      line = line + lab::info(rule.action[a].out).name + " " + (known ? labOutText(rule.action[a].out, value, kLabDeg) : String("--"));
-    }
-    gCanvas.setFont(&fonts::Font0);
-    labTextAt(&fonts::Font0, 8, y + 22, fitCurrentFontToWidth(line, 218), bright ? TFT_BLACK : kLabSoft);
-    return;
-  }
-  if (!rule.conds) return;
-  const lab::Cond& cond = rule.cond[0];
-  const lab::Reading& reading = gLabInputs.get(cond.sig);
-  const lab::SigInfo& info = lab::info(cond.sig);
-  String line = info.name;
-  if (reading.live) line = line + " " + labValueText(cond.sig, reading.value, kLabDeg);
-  else line = line + " no reading";
-  gCanvas.setFont(&fonts::Font0);
-  labTextAt(&fonts::Font0, 8, y + 22, fitCurrentFontToWidth(line, 124), kLabSoft);
-  if (reading.live && cond.op != lab::Op::Changes && !info.onOff) labBar(136, y + 22, 92, 7, lab::closeness(cond, reading.value), kLabAmber);
-}
-void renderLabBoard() {
-  labHead("Playing", launcher_icons::kFlow, kLabLime, gLabPaused ? "PAUSED" : "RUNNING", gLabPaused ? kLabAmber : kLabGreen);
-  for (int row = 0; row < min<int>(3, gLabBook.count); ++row) labBoardRow(20 + row * 35, gLabUi.boardTop + row);
-  labScrollBar(gLabUi.boardTop, 3, gLabBook.count, 20, 104);
-  labKeys(String(kLabArrowLeftRight) + " view  SPACE pause  ESC stop");
-}
+// --- Playing -------------------------------------------------------------------------------------
 void labCurve(int x0, int y0, int x1, int y1, uint16_t color, int dot) {
   auto& d = gCanvas;
   constexpr int kSegments = 12;
@@ -850,43 +1033,65 @@ void labCurve(int x0, int y0, int x1, int y1, uint16_t color, int dot) {
   for (int i = 0; i < kSegments; ++i) d.drawLine(pointX(i), pointY(i), pointX(i + 1), pointY(i + 1), color);
   if (dot >= 0) d.fillCircle(pointX(dot % kSegments), pointY(dot % kSegments), 2, TFT_WHITE);
 }
+// Boxes in a column share the height between the flow's header and footer.
+int labFlowBoxH(int count) { return count > 2 ? 28 : 40; }
+int labFlowBoxY(int index, int count) {
+  if (count == 1) return 47;
+  return count == 2 ? 23 + index * 47 : 22 + index * 31;
+}
 void renderLabFlow(int index) {
   auto& d = gCanvas;
   const lab::Rule& rule = gLabBook.rules[index];
   const lab::RuleState& state = gLabStates[index];
-  const uint16_t live = state.active ? kLabGreen : kLabDim;
-  labHead(rule.name, launcher_icons::kFlow, kLabLime, String(state.active ? "FIRING " : "WAITING ") + String(index + 1) + "/" + String(int(gLabBook.count)), state.active ? kLabGreen : kLabAmber);
-  constexpr int kLeft = 2, kRight = 160, kBoxW = 78, kBoxH = 40, cx = 120, cy = 67, kCircle = 17;
-  const int conds = min<int>(2, rule.conds), actions = min<int>(2, rule.actions);
-  const int dot = state.active ? static_cast<int>(millis() / 80) : -1;
-  for (int i = 0; i < conds; ++i) {
+  const bool practicing = gLabUi.practicing;
+  // Paused or switched off, nothing is being driven, so nothing should look driven.
+  const bool firing = state.active && rule.on && !gLabPaused;
+  const uint16_t live = firing ? kLabGreen : kLabDim;
+  const char* word = gLabPaused ? "PAUSED " : practicing ? "PRACTICE " : !rule.on ? "OFF " : firing ? "FIRING " : "WAITING ";
+  const String tag = String(word) + String(index + 1) + "/" + String(int(gLabBook.count));
+  labHead(rule.name, launcher_icons::kFlow, kLabLime, tag, gLabPaused || practicing ? kLabAmber : firing ? kLabGreen : kLabSoft);
+  constexpr int kLeft = 2, kRight = 160, kBoxW = 78, cx = 120, cy = 67, kCircle = 17;
+  const int dot = firing ? static_cast<int>(millis() / 80) : -1;
+  const uint32_t now = millis();
+  for (int i = 0; i < rule.conds; ++i) {
     const lab::Cond& cond = rule.cond[i];
-    const int y = conds == 1 ? 47 : 23 + i * 47;
-    const bool holds = lab::condHolds(cond, gLabInputs, millis());
-    labCurve(kLeft + kBoxW, y + kBoxH / 2, cx - kCircle, cy, holds ? kLabGreen : kLabDim, holds ? dot : -1);
-    d.fillRoundRect(kLeft, y, kBoxW, kBoxH, 5, kLabPanel);
-    if (holds) d.drawRoundRect(kLeft, y, kBoxW, kBoxH, 5, kLabGreen);
+    const int h = labFlowBoxH(rule.conds), y = labFlowBoxY(i, rule.conds);
+    const bool holds = lab::condHolds(cond, gLabSeen, now);
+    const bool picked = practicing && i == gLabUi.practiceCond;
+    labCurve(kLeft + kBoxW, y + h / 2, cx - kCircle, cy, holds ? kLabGreen : kLabDim, holds ? dot : -1);
+    d.fillRoundRect(kLeft, y, kBoxW, h, 5, kLabPanel);
+    if (picked) d.drawRoundRect(kLeft, y, kBoxW, h, 5, kLabAmber);
+    else if (holds) d.drawRoundRect(kLeft, y, kBoxW, h, 5, kLabGreen);
     gCanvas.setFont(&fonts::Font0);
-    labTextAt(&fonts::Font0, kLeft + 5, y + 3, fitCurrentFontToWidth(lab::info(cond.sig).name, kBoxW - 6), holds ? kLabGreen : kLabMuted);
-    const lab::Reading& reading = gLabInputs.get(cond.sig);
-    labTextAt(&fonts::Font2, kLeft + 5, y + 17, reading.live ? labValueText(cond.sig, reading.value) : String("--"), TFT_WHITE);
+    labTextAt(&fonts::Font0, kLeft + 5, y + 3, fitCurrentFontToWidth(lab::info(cond.sig).name, kBoxW - 6), picked ? kLabAmber : holds ? kLabGreen : kLabMuted);
+    const lab::Reading& reading = gLabSeen.get(cond.sig);
+    labTextAt(&fonts::Font2, kLeft + 5, y + (h > 30 ? 17 : 11), reading.live ? labValueText(cond.sig, reading.value) : String("--"), TFT_WHITE);
   }
-  for (int i = 0; i < actions; ++i) {
+  for (int i = 0; i < rule.actions; ++i) {
     const lab::Action& action = rule.action[i];
-    const int y = actions == 1 ? 47 : 23 + i * 47;
-    labCurve(cx + kCircle, cy, kRight, y + kBoxH / 2, live, dot);
-    d.fillRoundRect(kRight, y, kBoxW, kBoxH, 5, kLabPanel);
+    const int h = labFlowBoxH(rule.actions), y = labFlowBoxY(i, rule.actions);
+    labCurve(cx + kCircle, cy, kRight, y + h / 2, live, dot);
+    d.fillRoundRect(kRight, y, kBoxW, h, 5, kLabPanel);
     gCanvas.setFont(&fonts::Font0);
     labTextAt(&fonts::Font0, kRight + 5, y + 3, fitCurrentFontToWidth(lab::info(action.out).name, kBoxW - 6), kLabMuted);
     int16_t value = 0;
-    const bool known = state.active && lab::actionValue(action, gLabInputs, value);
-    if (known && (action.out == Out::StripColor || action.out == Out::Led)) d.fillRoundRect(kRight + 5, y + 16, kBoxW - 10, 16, 3, labHueColor(value));
-    else labTextAt(&fonts::Font2, kRight + 5, y + 17, known ? labOutText(action.out, value) : String("--"), TFT_WHITE);
+    const bool known = firing && lab::actionValue(action, gLabSeen, value);
+    if (known && (action.out == Out::StripColor || action.out == Out::Led)) d.fillRoundRect(kRight + 5, y + (h > 30 ? 16 : 12), kBoxW - 10, h > 30 ? 16 : 12, 3, labHueColor(value));
+    else labTextAt(&fonts::Font2, kRight + 5, y + (h > 30 ? 17 : 11), known ? labOutText(action.out, value) : String("--"), TFT_WHITE);
   }
   d.fillCircle(cx, cy, kCircle, live);
-  labTextCenter(&fonts::Font2, cx, cy - 7, rule.any ? "ANY" : "ALL", state.active ? TFT_BLACK : kLabSoft);
-  labTextCenter(&fonts::Font0, 120, 115, state.fires == 1 ? String("Fired once") : String("Fired ") + String(int(state.fires)) + " times", kLabSoft);
-  labKeys(String(kLabArrowLeftRight) + " view  SPACE pause  ESC stop");
+  labTextCenter(&fonts::Font2, cx, cy - 7, rule.conds > 1 ? (rule.any ? "ANY" : "ALL") : "IF", firing ? TFT_BLACK : kLabSoft);
+  labTextAt(&fonts::Font0, 4, 116, state.fires == 1 ? String("Fired once") : String("Fired ") + String(int(state.fires)) + " times", kLabSoft);
+  // Every rule at a glance, so a rule firing on another page still shows.
+  const int count = gLabBook.count;
+  for (int i = 0; i < count; ++i) {
+    const int x = 236 - (count - 1 - i) * 9;
+    const bool on = gLabBook.rules[i].on && gLabStates[i].active && !gLabPaused;
+    d.fillCircle(x - 2, 119, 3, on ? kLabGreen : kLabPanel);
+    if (i == index) d.drawCircle(x - 2, 119, 3, TFT_WHITE);
+  }
+  if (practicing) labKeys(String(kLabArrowUpDown) + " change  " + kLabArrowLeftRight + " sensor  ESC end practice");
+  else labKeys(String(kLabArrowLeftRight) + " rule T practice SPACE pause ESC stop");
 }
 void renderLabUi() {
   switch (gLabUi.view) {
@@ -894,18 +1099,17 @@ void renderLabUi() {
     case LabView::Device: renderLabDevice(); break;
     case LabView::Wiring: renderLabWiring(); break;
     case LabView::Rules: renderLabRules(); break;
-    case LabView::Rule: renderLabRule(); break;
     case LabView::Wizard: renderLabWizard(); break;
-    default:
-      if (gLabUi.playPage == 0) renderLabBoard();
-      else renderLabFlow(gLabUi.playPage - 1);
-      break;
+    case LabView::Recipes: renderLabRecipes(); break;
+    case LabView::Say: renderLabSay(); break;
+    case LabView::Offer: renderLabOffer(); break;
+    default: renderLabFlow(gLabUi.playRule); break;
   }
   renderLauncherOverlay();
   renderDebugOverlay();
 }
 
-// --- Keys --------------------------------------------------------------------------------------
+// --- Keys ----------------------------------------------------------------------------------------
 void labOpenDevice(Dev dev) {
   gLabUi.view = LabView::Device;
   gLabUi.sweeping = false;
@@ -1002,6 +1206,12 @@ void labDeviceKey(char key, char lower, bool left, bool right, bool up, bool dow
     case Dev::Gps:
       if (lower == 'm') setUiMode(UiMode::Mesh);
       return;
+    case Dev::Lamp:
+      if (enter) setUiMode(UiMode::SmartLamp);
+      return;
+    case Dev::Ac:
+      if (enter) setUiMode(UiMode::IrRemote);
+      return;
     case Dev::Led:
       if (key == ' ') gLabUi.ledOn = !gLabUi.ledOn;
       else if (left || right) {
@@ -1036,212 +1246,155 @@ void serviceLabTests() {
   if (gLabUi.servoAngle <= 0) gLabUi.sweepUp = true;
   labServoGoTo(gLabUi.servoAngle + (gLabUi.sweepUp ? 2 : -2));
 }
-void labWizardGo(LabStep step) {
-  LabWizard& w = gLabWizard;
-  w.step = step;
-  w.row = 0;
-  w.top = 0;
-  w.teaching = true;
-}
-void labWizardStart(bool fresh, int condAt, int actionAt, bool forAction) {
-  LabWizard& w = gLabWizard;
-  w.rule = fresh ? lab::Rule{} : gLabBook.rules[gLabUi.ruleIndex];
-  w.fresh = fresh;
-  w.condAt = static_cast<int8_t>(condAt);
-  w.actionAt = static_cast<int8_t>(actionAt);
-  w.cond = condAt >= 0 ? w.rule.cond[condAt] : lab::Cond{};
-  w.action = actionAt >= 0 ? w.rule.action[actionAt] : lab::Action{};
-  gLabUi.view = LabView::Wizard;
-  labWizardGo(forAction ? LabStep::Out : LabStep::Sig);
-}
-void labOpenRule(int index) {
-  gLabUi.ruleIndex = index;
-  gLabUi.cardRow = 1;
-  gLabUi.cardTop = 0;
-  gLabUi.deleteArmed = false;
-  gLabUi.view = LabView::Rule;
-}
-void labWizardFinish() {
-  LabWizard& w = gLabWizard;
-  if (w.fresh) {
-    int number = gLabBook.count + 1;
-    snprintf(w.rule.name, sizeof(w.rule.name), "Rule %d", number);
-    gLabBook.rules[gLabBook.count] = w.rule;
-    gLabUi.ruleIndex = gLabBook.count;
-    ++gLabBook.count;
-  } else {
-    gLabBook.rules[gLabUi.ruleIndex] = w.rule;
-  }
-  labSaveBook();
-  labOpenRule(gLabUi.ruleIndex);
-}
-void labWizardCondDone() {
-  LabWizard& w = gLabWizard;
-  if (w.condAt >= 0) w.rule.cond[w.condAt] = w.cond;
-  else w.rule.cond[w.rule.conds++] = w.cond;
-  if (w.fresh) labWizardGo(LabStep::Out);
-  else labWizardFinish();
-}
-void labWizardActionDone() {
-  LabWizard& w = gLabWizard;
-  if (w.actionAt >= 0) w.rule.action[w.actionAt] = w.action;
-  else w.rule.action[w.rule.actions++] = w.action;
-  labWizardFinish();
-}
-void labWizardPick() {
-  LabWizard& w = gLabWizard;
-  const int pick = w.row;
-  switch (w.step) {
-    case LabStep::Sig:
-      w.cond.sig = static_cast<Sig>(pick);
-      labWizardGo(LabStep::Op);
-      break;
-    case LabStep::Op:
-      if (lab::info(w.cond.sig).onOff) {
-        lab::setOnOff(w.cond, pick == 0);
-        labWizardCondDone();
-      } else if (pick == 2) {
-        w.cond.op = lab::Op::Changes;
-        labWizardCondDone();
-      } else {
-        w.cond.op = pick == 0 ? lab::Op::Below : lab::Op::Above;
-        labWizardGo(LabStep::Value);
-      }
-      break;
-    case LabStep::Value:
-      labWizardCondDone();
-      break;
-    case LabStep::Out: {
-      w.action.out = static_cast<Out>(pick);
-      const lab::OutInfo& info = lab::info(w.action.out);
-      w.action.value = lab::clampTo<int16_t>(w.action.value, info.lo, info.hi);
-      labWizardGo(LabStep::How);
-      break;
-    }
-    case LabStep::How:
-      if (lab::info(w.action.out).onOff) {
-        w.action.how = lab::How::Set;
-        w.action.value = pick == 0 ? 1 : 0;
-        labWizardActionDone();
-      } else if (pick == 0) {
-        w.action.how = lab::How::Set;
-        labWizardGo(LabStep::OutValue);
-      } else {
-        w.action.how = pick == 1 ? lab::How::Follow : lab::How::FollowBack;
-        labWizardGo(LabStep::Source);
-      }
-      break;
-    case LabStep::OutValue:
-      labWizardActionDone();
-      break;
-    default:
-      w.action.source = static_cast<Sig>(pick);
-      labWizardActionDone();
-      break;
-  }
-}
-// One step back, and out to where the wizard started from the first step.
-void labWizardBack() {
-  LabWizard& w = gLabWizard;
-  switch (w.step) {
-    case LabStep::Op: labWizardGo(LabStep::Sig); return;
-    case LabStep::Value: labWizardGo(LabStep::Op); return;
-    case LabStep::How: labWizardGo(LabStep::Out); return;
-    case LabStep::OutValue: case LabStep::Source: labWizardGo(LabStep::How); return;
-    case LabStep::Out:
-      if (w.fresh) {
-        // The condition is already in the working rule, so it's taken back out to be asked again.
-        if (w.rule.conds) --w.rule.conds;
-        labWizardGo(LabStep::Sig);
-        return;
-      }
-      break;
-    default: break;
-  }
-  if (w.fresh) gLabUi.view = LabView::Rules;
-  else gLabUi.view = LabView::Rule;
-}
-void labCardMove(const lab::Rule& rule, int delta) {
-  LabCardRow rows[kLabMostCardRows];
-  const int count = labCardList(rule, rows);
-  gLabUi.deleteArmed = false;
-  int row = gLabUi.cardRow;
-  do {
-    row = (row + delta + count) % count;
-  } while (rows[row].line == LabLine::Then);
-  gLabUi.cardRow = row;
-  labKeepRowShown(row, gLabUi.cardTop, kLabCardRows);
-}
 void labRemoveRule(int index) {
   for (int i = index; i + 1 < gLabBook.count; ++i) gLabBook.rules[i] = gLabBook.rules[i + 1];
   --gLabBook.count;
   labSaveBook();
   gLabUi.ruleRow = lab::clampTo(gLabUi.ruleRow, 0, labRuleRows() - 1);
   gLabUi.ruleTop = 0;
-  gLabUi.view = LabView::Rules;
+  labKeepRowShown(gLabUi.ruleRow, gLabUi.ruleTop, kLabListRows);
 }
-// Removing a line can shorten the card, or leave the cursor on the DO label.
-void labCardSettle(const lab::Rule& rule) {
-  LabCardRow rows[kLabMostCardRows];
-  const int count = labCardList(rule, rows);
-  int row = min(gLabUi.cardRow, count - 1);
-  if (rows[row].line == LabLine::Then) ++row;
-  gLabUi.cardRow = row;
-  labKeepRowShown(row, gLabUi.cardTop, kLabCardRows);
+void labStartPlaying() {
+  gLabUi.playRule = 0;
+  gLabUi.practicing = false;
+  gLabUi.practiceCond = 0;
+  labPlay();
+  gLabUi.view = LabView::Play;
 }
-void labRuleCardKey(char key, char lower, bool left, bool right, bool up, bool down, bool enter, bool del) {
-  lab::Rule& rule = gLabBook.rules[gLabUi.ruleIndex];
-  LabCardRow rows[kLabMostCardRows];
-  labCardList(rule, rows);
-  const LabCardRow chosen = rows[gLabUi.cardRow];
-  if (up || down) { labCardMove(rule, up ? -1 : 1); return; }
-  if (chosen.line == LabLine::Name) {
-    const size_t length = strlen(rule.name);
-    if (del && length) rule.name[length - 1] = '\0';
-    else if (length < lab::kNameChars && (isalnum(static_cast<unsigned char>(key)) || key == ' ')) {
-      rule.name[length] = key;
-      rule.name[length + 1] = '\0';
+void labRulesKey(char key, char lower, bool up, bool down, bool enter) {
+  LabUi& ui = gLabUi;
+  const int rows = labRuleRows();
+  const bool onRule = ui.ruleRow < gLabBook.count;
+  if (lower != 'x') ui.deleteArmed = false;
+  if (up || down) {
+    ui.ruleRow = (ui.ruleRow + (up ? rows - 1 : 1)) % rows;
+    labKeepRowShown(ui.ruleRow, ui.ruleTop, kLabListRows);
+  } else if (enter && onRule) {
+    labWizardStart(ui.ruleRow, nullptr);
+  } else if (enter && ui.ruleRow == gLabBook.count) {
+    labWizardStart(-1, nullptr);
+  } else if (enter && ui.ruleRow == gLabBook.count + 1) {
+    ui.sayFailed = false;
+    ui.view = LabView::Say;
+  } else if (enter) {
+    ui.view = LabView::Recipes;
+  } else if (key == ' ' && onRule) {
+    gLabBook.rules[ui.ruleRow].on = !gLabBook.rules[ui.ruleRow].on;
+    labSaveBook();
+  } else if (lower == 'p' && gLabBook.count) {
+    labStartPlaying();
+  } else if (lower == 'x' && onRule) {
+    if (ui.deleteArmed) labRemoveRule(ui.ruleRow);
+    ui.deleteArmed = !ui.deleteArmed;
+  }
+}
+void labWizardKey(char key, bool left, bool right, bool up, bool down, bool enter, bool del) {
+  LabWizard& w = gLabWizard;
+  switch (w.step) {
+    case LabStep::Value: {
+      const lab::SigInfo& info = lab::info(labWizardCond().sig);
+      if (key == ' ') {
+        w.teaching = !w.teaching;
+      } else if (left || right) {
+        labTeachValue();
+        w.teaching = false;
+        labWizardCond().value = lab::clampTo<int16_t>(labWizardCond().value + (right ? 1 : -1), info.lo, info.hi);
+      } else if (enter) {
+        labWizardPick();
+      }
+      break;
+    }
+    case LabStep::OutValue: {
+      const lab::OutInfo& info = lab::info(labWizardAction().out);
+      lab::Action& action = labWizardAction();
+      if (left || right) action.value = lab::clampTo<int16_t>(action.value + (right ? info.step : -info.step), info.lo, info.hi);
+      else if (enter) labWizardPick();
+      break;
+    }
+    case LabStep::Hold:
+      if (left || right) {
+        const int ms = w.rule.holdMs + (right ? lab::kHoldStepMs : -static_cast<int>(lab::kHoldStepMs));
+        w.rule.holdMs = static_cast<uint16_t>(lab::clampTo<int>(ms, 0, lab::kMaxHoldMs));
+      } else if (enter) {
+        labWizardPick();
+      }
+      break;
+    case LabStep::Name: {
+      if (enter) {
+        labWizardPick();
+        break;
+      }
+      // Typing over the suggestion replaces it. Enter alone keeps it.
+      const size_t length = strlen(w.rule.name);
+      if (del) {
+        w.nameTouched = true;
+        if (length) w.rule.name[length - 1] = '\0';
+      } else if (isalnum(static_cast<unsigned char>(key)) || key == ' ') {
+        w.nameTouched = true;
+        if (length < lab::kNameChars) {
+          w.rule.name[length] = key;
+          w.rule.name[length + 1] = '\0';
+        }
+      }
+      break;
+    }
+    default:
+      if (up || down) {
+        const int rows = labWizardRowCount();
+        w.row = (w.row + (up ? rows - 1 : 1)) % rows;
+        labKeepRowShown(w.row, w.top, kLabWizardRows);
+      } else if (enter) {
+        labWizardPick();
+      }
+      break;
+  }
+}
+void labPlayKey(char key, char lower, bool left, bool right, bool up, bool down) {
+  LabUi& ui = gLabUi;
+  const lab::Rule& rule = gLabBook.rules[ui.playRule];
+  if (ui.practicing) {
+    if (lower == 't') {
+      ui.practicing = false;
+      gLabPractice.clear();
+    } else if ((left || right) && rule.conds) {
+      ui.practiceCond = (ui.practiceCond + (right ? 1 : rule.conds - 1)) % rule.conds;
+    } else if ((up || down) && rule.conds) {
+      gLabPractice.nudge(rule.cond[ui.practiceCond].sig, up ? 1 : -1, gLabInputs, millis());
+      gLabSeen = gLabInputs;
+      gLabPractice.overlay(gLabSeen);
     }
     return;
   }
-  if (lower == 'p') {
-    labSaveBook();
-    labPlay();
-    gLabUi.view = LabView::Play;
-    gLabUi.playPage = 0;
-    gLabUi.boardTop = 0;
-    return;
+  if (left || right) {
+    ui.playRule = (ui.playRule + (right ? 1 : gLabBook.count - 1)) % gLabBook.count;
+  } else if (lower == 't') {
+    ui.practicing = true;
+    ui.practiceCond = 0;
+  } else if (key == ' ') {
+    gLabPaused = !gLabPaused;
+    if (gLabPaused) labReleaseOutputs();
   }
-  if (chosen.line == LabLine::Hold && (left || right)) {
-    const int ms = rule.holdMs + (right ? lab::kHoldStepMs : -static_cast<int>(lab::kHoldStepMs));
-    rule.holdMs = static_cast<uint16_t>(lab::clampTo<int>(ms, 0, lab::kMaxHoldMs));
-    return;
-  }
-  if (lower == 'x' && chosen.line == LabLine::Cond && rule.conds > 1) {
-    for (int i = chosen.index; i + 1 < rule.conds; ++i) rule.cond[i] = rule.cond[i + 1];
-    --rule.conds;
-    labCardSettle(rule);
-    return;
-  }
-  if (lower == 'x' && chosen.line == LabLine::Action && rule.actions > 1) {
-    for (int i = chosen.index; i + 1 < rule.actions; ++i) rule.action[i] = rule.action[i + 1];
-    --rule.actions;
-    labCardSettle(rule);
-    return;
-  }
-  if (!enter) return;
-  switch (chosen.line) {
-    case LabLine::Join: rule.any = !rule.any; break;
-    case LabLine::Cond: labWizardStart(false, chosen.index, -1, false); break;
-    case LabLine::AddCond: labWizardStart(false, -1, -1, false); break;
-    case LabLine::Action: labWizardStart(false, -1, chosen.index, true); break;
-    case LabLine::AddAction: labWizardStart(false, -1, -1, true); break;
-    case LabLine::Delete:
-      if (gLabUi.deleteArmed) labRemoveRule(gLabUi.ruleIndex);
-      else gLabUi.deleteArmed = true;
-      break;
-    default: break;
-  }
+}
+// Noticing that Claude replied with no rule. A rule that does come changes the screen itself.
+void serviceLabSay() {
+  LabUi& ui = gLabUi;
+  if (ui.view != LabView::Say || !ui.sayAsked) return;
+  if (gRecording) ui.sayHeard = true;
+  if (!ui.sayHeard || gRecording || gSubmitting || gThinking || gPlaybackActive || !gDeferredDeviceActionsJson.isEmpty()) return;
+  ui.sayAsked = false;
+  ui.sayHeard = false;
+  ui.sayFailed = true;
+  labRedraw();
+}
+// A rule from Claude waits here until someone presses Enter, because rules can switch mains.
+void labOfferRule(const lab::Rule& rule) {
+  gLabOffer = rule;
+  gLabUi.sayAsked = false;
+  gLabUi.sayHeard = false;
+  if (!labMode(gUiMode)) setUiMode(UiMode::LabRules);
+  labStopPlaying();
+  gLabUi.view = LabView::Offer;
+  labRedraw();
 }
 bool handleLabKey(char key, const Keyboard_Class::KeysState& keys) {
   if (keys.ctrl || keys.alt || keys.opt) return true;
@@ -1269,62 +1422,51 @@ bool handleLabKey(char key, const Keyboard_Class::KeysState& keys) {
       if (up || down) ui.wiringRow = (ui.wiringRow + (up ? kLabLastPort : 1)) % pbhub::kPorts;
       else if (left || right) gLabBook.wiring.cycle(ui.wiringRow, right ? 1 : -1);
       break;
-    case LabView::Rules: {
-      const int rows = labRuleRows();
+    case LabView::Rules:
+      labRulesKey(key, lower, up, down, enter);
+      break;
+    case LabView::Wizard:
+      labWizardKey(key, left, right, up, down, enter, del);
+      break;
+    case LabView::Recipes:
       if (up || down) {
-        ui.ruleRow = (ui.ruleRow + (up ? rows - 1 : 1)) % rows;
-        labKeepRowShown(ui.ruleRow, ui.ruleTop, kLabListRows);
-      } else if (enter) {
-        if (ui.ruleRow == gLabBook.count) labWizardStart(true, -1, -1, false);
-        else labOpenRule(ui.ruleRow);
-      } else if (key == ' ' && ui.ruleRow < gLabBook.count) {
-        gLabBook.rules[ui.ruleRow].on = !gLabBook.rules[ui.ruleRow].on;
+        ui.recipeRow = (ui.recipeRow + (up ? lab::kRecipeCount - 1 : 1)) % lab::kRecipeCount;
+        labKeepRowShown(ui.recipeRow, ui.recipeTop, kLabRecipeRows);
+      } else if (enter && gLabBook.count < lab::kMaxRules) {
+        gLabBook.rules[gLabBook.count] = lab::recipeRule(ui.recipeRow);
+        ui.ruleRow = gLabBook.count;
+        ++gLabBook.count;
         labSaveBook();
-      } else if (lower == 'p' && gLabBook.count) {
-        labPlay();
-        ui.view = LabView::Play;
-        ui.playPage = 0;
-        ui.boardTop = 0;
+        ui.ruleTop = 0;
+        labKeepRowShown(ui.ruleRow, ui.ruleTop, kLabListRows);
+        ui.view = LabView::Rules;
+        setStatus("Added to your rules", 1200);
       }
       break;
-    }
-    case LabView::Rule:
-      labRuleCardKey(key, lower, left, right, up, down, enter, del);
+    case LabView::Say:
+      if (enter && gWifiReady && !gSubmitting && !gThinking) {
+        ui.sayAsked = true;
+        ui.sayFailed = false;
+        toggleVoiceByTap();
+      }
       break;
-    case LabView::Wizard: {
-      LabWizard& w = gLabWizard;
-      if (w.step == LabStep::Value) {
-        const lab::SigInfo& info = lab::info(w.cond.sig);
-        if (left || right) {
-          labTeachValue();
-          w.teaching = false;
-          w.cond.value = lab::clampTo<int16_t>(w.cond.value + (right ? 1 : -1), info.lo, info.hi);
-        } else if (enter) {
-          labWizardPick();
-        }
-      } else if (w.step == LabStep::OutValue) {
-        const lab::OutInfo& info = lab::info(w.action.out);
-        if (left || right) w.action.value = lab::clampTo<int16_t>(w.action.value + (right ? info.step : -info.step), info.lo, info.hi);
-        else if (enter) labWizardPick();
-      } else if (up || down) {
-        const int rows = labWizardRowCount();
-        w.row = (w.row + (up ? rows - 1 : 1)) % rows;
-        labKeepRowShown(w.row, w.top, kLabWizardRows);
+    case LabView::Offer:
+      if (lower == 'e') {
+        labWizardStart(-1, &gLabOffer);
+      } else if (enter && gLabBook.count < lab::kMaxRules) {
+        gLabBook.rules[gLabBook.count] = gLabOffer;
+        ui.ruleRow = gLabBook.count;
+        ++gLabBook.count;
+        labSaveBook();
+        ui.ruleTop = 0;
+        labKeepRowShown(ui.ruleRow, ui.ruleTop, kLabListRows);
+        ui.view = LabView::Rules;
       } else if (enter) {
-        labWizardPick();
+        setStatus("Rules are full: delete one first", 1500);
       }
       break;
-    }
     case LabView::Play:
-      if (left || right) {
-        const int pages = labPlayPages();
-        ui.playPage = (ui.playPage + (right ? 1 : pages - 1)) % pages;
-      } else if ((up || down) && ui.playPage == 0) {
-        ui.boardTop = lab::clampTo(ui.boardTop + (up ? -1 : 1), 0, max<int>(0, gLabBook.count - 3));
-      } else if (key == ' ') {
-        gLabPaused = !gLabPaused;
-        if (gLabPaused) labReleaseOutputs();
-      }
+      labPlayKey(key, lower, left, right, up, down);
       break;
   }
   labRedraw();
@@ -1343,12 +1485,19 @@ bool routeLabEscape() {
       labSaveBook();
       ui.view = gUiMode == UiMode::LabDevices ? LabView::Devices : LabView::Rules;
       break;
-    case LabView::Rule:
-      labSaveBook();
+    case LabView::Wizard: labWizardBack(); break;
+    case LabView::Recipes: case LabView::Offer: ui.view = LabView::Rules; break;
+    case LabView::Say:
+      ui.sayAsked = false;
+      ui.sayHeard = false;
       ui.view = LabView::Rules;
       break;
-    case LabView::Wizard: labWizardBack(); break;
     default:
+      if (ui.practicing) {
+        ui.practicing = false;
+        gLabPractice.clear();
+        break;
+      }
       labStopPlaying();
       ui.view = LabView::Rules;
       break;

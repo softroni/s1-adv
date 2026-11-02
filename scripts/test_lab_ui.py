@@ -231,9 +231,20 @@ struct SdClass {
 bool gSdReady = true, gImuEnabled = true;
 bool ensureDirRecursive(SdClass&, const char*) { return !gDisk.broken; }
 struct Keyboard_Class { struct KeysState { bool ctrl = false, alt = false, opt = false, enter = false, del = false; }; };
-enum class UiMode { Home, NfcNotes, Mesh, LabDevices, LabRules };
+enum class UiMode { Home, NfcNotes, Mesh, SmartLamp, IrRemote, LabDevices, LabRules };
 UiMode gUiMode = UiMode::Home;
 bool gLauncherVisible = false, gRecording = false, gRealtimeActive = false, gPlaybackActive = false, gToneAllowed = true;
+bool gSubmitting = false, gThinking = false, gWifiReady = true;
+String gHubHost = "bridge", gDeferredDeviceActionsJson;
+int gVoiceTaps = 0;
+void toggleVoiceByTap() { ++gVoiceTaps; if (gRecording) { gRecording = false; gThinking = true; } else gRecording = true; }
+struct { bool power = false, online = false; uint8_t brightness = 0; } gSmartLamp;
+std::vector<std::string> gLampSent;
+void smartLampSendControl(const String& packet, const String&) { gLampSent.push_back(packet); }
+String smartLampControlPacket(uint8_t command) { return String("power") + String(int(command)); }
+bool gTclPower = false, gDaikinPower = false; int gTclSends = 0, gDaikinSends = 0;
+void sendTclAcState(const String&) { ++gTclSends; }
+void sendDaikinAcState(const String&) { ++gDaikinSends; }
 uint32_t gLastRenderMs = 1;
 struct { int changes = 0; void invalidate() { ++changes; } } gUiFramePolicy;
 String gStatus; int gWakes = 0;
@@ -376,6 +387,10 @@ void testDevices() {
   assert(gLabInputs.get(Sig::Satellites).value == 8);
   esc();
 
+  // The smartLamp and the AC point at the apps that test them fully.
+  pickDevice(Dev::Lamp); show("lamp-searching"); assert(gCanvas.shows("SEARCHING")); gSmartLamp.online = true; show("lamp"); assert(gCanvas.shows("smartLamp found"));
+  key(ENTER); assert(gUiMode == UiMode::SmartLamp); setUiMode(UiMode::LabDevices); fingers(); run(1500);
+  pickDevice(Dev::Ac); show("ac"); assert(gCanvas.shows("IR air conditioner")); key(ENTER); assert(gUiMode == UiMode::IrRemote); setUiMode(UiMode::LabDevices); fingers(); run(1500);
   // NFC hands over to the app that does the real test, and that releases the bus and the GPS.
   const int opens = gAirSensor.closes;
   pickDevice(Dev::Nfc); show("nfc"); key(ENTER); assert(gUiMode == UiMode::NfcNotes && !gLabOpen && !Serial1.open && gAirSensor.closes == opens + 1);
@@ -428,90 +443,127 @@ void testWiring() {
   esc(); gLabBook.wiring = lab::Wiring{}; gLabHubReady = false; run(300);
 }
 
-void testBuildAndPlay() {
+bool same(const lab::Rule& a, const lab::Rule& b) {
+  lab::Book x, y; x.count = y.count = 1; x.rules[0] = a; y.rules[0] = b;
+  uint8_t l[lab::kFileBytes], r[lab::kFileBytes]; const size_t n = lab::encode(x, l); return n == lab::encode(y, r) && !std::memcmp(l, r, n);
+}
+void goToRow(int row) { for (int i = 0; i < 40 && gLabUi.ruleRow != row; ++i) key(DOWN); assert(gLabUi.ruleRow == row); }
+void pickRow(int row) { for (int i = 0; i < 40 && gLabWizard.row != row; ++i) key(DOWN); assert(gLabWizard.row == row); key(ENTER); }
+LabStep stepNow() { return gLabWizard.step; }
+
+void testBuildRule() {
   setUiMode(UiMode::LabRules); fingers(); run(1500);
   assert(gLabUi.view == LabView::Rules && gLabBook.count == 1 && !std::strcmp(gLabBook.rules[0].name, "Wave lights"));
-  show("rules");  assert(gCanvas.shows("Wave lights") && gCanvas.shows("+ New rule"));
-  // Open the starter and look at the card.
-  key(ENTER); assert(gLabUi.view == LabView::Rule); gUnits.um = 240000; run(300); show("rule-card");
-  assert(gCanvas.shows("Knob changes") && gCanvas.shows("Distance under 30 cm") && gCanvas.shows("WHEN ANY OF THESE"));
-  // Every line can be reached, and the DO label can't.
-  for (int i = 0; i < 24; ++i) { key(DOWN); LabCardRow rows[kLabMostCardRows]; labCardList(gLabBook.rules[0], rows); assert(rows[gLabUi.cardRow].line != LabLine::Then); show("rule-card-scroll"); }
-  for (int i = 0; i < 24; ++i) { key(UP); LabCardRow rows[kLabMostCardRows]; labCardList(gLabBook.rules[0], rows); assert(rows[gLabUi.cardRow].line != LabLine::Then); }
-  // ANY and ALL, and the hold time.
-  gLabUi.cardRow = 1; key(ENTER); assert(!gLabBook.rules[0].any); key(ENTER); assert(gLabBook.rules[0].any);
-  while (true) { LabCardRow rows[kLabMostCardRows]; labCardList(gLabBook.rules[0], rows); if (rows[gLabUi.cardRow].line == LabLine::Hold) break; key(DOWN); }
-  key(RIGHT); assert(gLabBook.rules[0].holdMs == 2500); key(LEFT); show("rule-hold");
-  for (int i = 0; i < 80; ++i) key(LEFT); assert(gLabBook.rules[0].holdMs == 0); show("rule-hold-zero"); for (int i = 0; i < 80; ++i) key(RIGHT); assert(gLabBook.rules[0].holdMs == lab::kMaxHoldMs);
-  gLabBook.rules[0].holdMs = 2000;
-  // Rename it from the keyboard.
-  gLabUi.cardRow = 0; for (int i = 0; i < 20; ++i) key('\b'); assert(!gLabBook.rules[0].name[0]); show("rule-no-name");
-  for (const char* c = "Wave lights!!!!!!!!"; *c; ++c) key(*c); assert(!std::strcmp(gLabBook.rules[0].name, "Wave lights"));
-  esc(); assert(gLabUi.view == LabView::Rules && gDisk.files.count("/lab/rules.dat"));
-
-  // Build a new rule by the steps: when it gets close, relay 1 closes.
-  key(DOWN); assert(gLabUi.ruleRow == 1); key(ENTER); assert(gLabUi.view == LabView::Wizard && gLabWizard.fresh); show("step-sig");
+  show("rules"); assert(gCanvas.shows("Wave lights") && gCanvas.shows("+ New rule") && gCanvas.shows("Say a rule") && gCanvas.shows("Recipes"));
+  // The steps, from the top, for "if something's close and the knob turns, close relay 1 and turn the LED blue".
+  goToRow(1); key(ENTER); assert(gLabUi.view == LabView::Wizard && gLabWizard.index < 0 && stepNow() == LabStep::Sig); show("step-sig");
   for (int i = 0; i < lab::kSigCount; ++i) { key(DOWN); show("step-sig-scroll"); } assert(gLabWizard.row == 0);
-  key(ENTER); assert(gLabWizard.step == LabStep::Op); show("step-op");
-  key(ENTER); assert(gLabWizard.step == LabStep::Value); gUnits.um = 270000; run(300); show("step-teach"); assert(gLabWizard.cond.value == 27);
-  // Stepping out and back loses nothing.
-  esc(); assert(gLabWizard.step == LabStep::Op); key(ENTER); run(100); key(RIGHT); key(RIGHT); assert(gLabWizard.cond.value == 29 && !gLabWizard.teaching);
-  gUnits.um = 500000; run(300); show("step-teach-held"); assert(gLabWizard.cond.value == 29); gUnits.um = 240000; run(300);
-  key(ENTER); assert(gLabWizard.step == LabStep::Out); show("step-out");
+  key(ENTER); assert(stepNow() == LabStep::Op); show("step-op");
+  key(ENTER); assert(stepNow() == LabStep::Value); gUnits.um = 270000; run(300); show("step-teach"); assert(gLabWizard.rule.cond[0].value == 27);
+  // Esc walks back a step and forward again loses nothing.
+  esc(); assert(stepNow() == LabStep::Op); key(ENTER); run(100); key(RIGHT); key(RIGHT); assert(gLabWizard.rule.cond[0].value == 29 && !gLabWizard.teaching);
+  gUnits.um = 500000; run(300); show("step-teach-held"); assert(gLabWizard.rule.cond[0].value == 29);
+  key(' '); run(100); assert(gLabWizard.teaching); show("step-teach"); assert(gLabWizard.rule.cond[0].value == 50);
+  key(' '); key(LEFT); assert(gLabWizard.rule.cond[0].value == 49 && !gLabWizard.teaching); gUnits.um = 240000; run(300); for (int i = 0; i < 20; ++i) key(LEFT); assert(gLabWizard.rule.cond[0].value == 29);
+  key(ENTER); assert(stepNow() == LabStep::MoreConds && gLabWizard.row == 0); show("step-more-conds");
+  // A second thing to watch.
+  key(DOWN); key(ENTER); assert(stepNow() == LabStep::Sig && gLabWizard.cond == 1); show("step-sig-second");
+  pickRow(int(Sig::Knob)); assert(stepNow() == LabStep::Op); pickRow(2); assert(stepNow() == LabStep::MoreConds && gLabWizard.rule.cond[1].op == lab::Op::Changes);
+  // "That's all", then ANY or ALL, which only comes up with two.
+  key(ENTER); assert(stepNow() == LabStep::Join); show("step-join"); key(DOWN); key(ENTER); assert(!gLabWizard.rule.any && stepNow() == LabStep::Out && gLabWizard.keepConds == 2); show("step-out");
   for (int i = 0; i < lab::kOutCount; ++i) { key(DOWN); show("step-out-scroll"); }
-  while (gLabWizard.row != int(Out::Relay1)) key(DOWN);
-  key(ENTER); assert(gLabWizard.step == LabStep::How); show("step-how-relay");
-  key(ENTER); assert(gLabUi.view == LabView::Rule && gLabBook.count == 2);
-  const lab::Rule& made = gLabBook.rules[1];
-  assert(!std::strcmp(made.name, "Rule 2") && made.conds == 1 && made.cond[0].sig == Sig::Distance && made.cond[0].op == lab::Op::Below && made.cond[0].value == 29);
-  assert(made.actions == 1 && made.action[0].out == Out::Relay1 && made.action[0].how == lab::How::Set && made.action[0].value == 1);
-  show("rule-made");
-  // Add an action through the card: the servo set to a value.
-  { LabCardRow rows[kLabMostCardRows]; const int n = labCardList(gLabBook.rules[1], rows); for (int i = 0; i < n; ++i) if (rows[i].line == LabLine::AddAction) gLabUi.cardRow = i; }
-  key(ENTER); assert(gLabWizard.step == LabStep::Out && !gLabWizard.fresh); show("change-out"); key(ENTER); key(ENTER); assert(gLabWizard.step == LabStep::OutValue);
-  key(RIGHT); key(RIGHT); show("step-value"); assert(gLabWizard.action.value == 100); key(ENTER); assert(gLabBook.rules[1].actions == 2 && gLabBook.rules[1].action[1].value == 100);
-  // And one that follows, backwards.
-  { LabCardRow rows[kLabMostCardRows]; const int n = labCardList(gLabBook.rules[1], rows); for (int i = 0; i < n; ++i) if (rows[i].line == LabLine::AddAction) gLabUi.cardRow = i; }
-  key(ENTER); key(DOWN); key(ENTER); assert(gLabWizard.action.out == Out::StripColor); key(DOWN); key(DOWN); show("step-how"); key(ENTER); assert(gLabWizard.step == LabStep::Source); show("step-source");
-  while (gLabWizard.row != int(Sig::Knob)) key(DOWN);
-  key(ENTER); assert(gLabBook.rules[1].actions == 3 && gLabBook.rules[1].action[2].how == lab::How::FollowBack);
-  // Change a line that's already there, and take one away. The last of a kind stays.
-  { LabCardRow rows[kLabMostCardRows]; const int n = labCardList(gLabBook.rules[1], rows); for (int i = 0; i < n; ++i) if (rows[i].line == LabLine::Cond) gLabUi.cardRow = i; }
-  key(ENTER); assert(gLabWizard.condAt == 0); while (gLabWizard.row != int(Sig::Motion)) key(DOWN); key(ENTER); show("step-op-onoff"); key(ENTER);
-  assert(gLabBook.rules[1].conds == 1 && gLabBook.rules[1].cond[0].sig == Sig::Motion && gLabBook.rules[1].cond[0].op == lab::Op::Above);
-  gLabBook.rules[1].cond[0] = {Sig::Distance, lab::Op::Below, 29};
-  { LabCardRow rows[kLabMostCardRows]; const int n = labCardList(gLabBook.rules[1], rows); for (int i = 0; i < n; ++i) if (rows[i].line == LabLine::Cond) gLabUi.cardRow = i; }
-  key('x'); assert(gLabBook.rules[1].conds == 1);
-  { LabCardRow rows[kLabMostCardRows]; const int n = labCardList(gLabBook.rules[1], rows); for (int i = n - 1; i >= 0; --i) if (rows[i].line == LabLine::Action) gLabUi.cardRow = i; }
-  key('x'); assert(gLabBook.rules[1].actions == 2 && gLabBook.rules[1].action[0].how == lab::How::Set && gLabBook.rules[1].action[0].out == Out::Servo);
-  { LabCardRow rows[kLabMostCardRows]; const int n = labCardList(gLabBook.rules[1], rows); assert(gLabUi.cardRow < n && rows[gLabUi.cardRow].line != LabLine::Then); }
-  key('x'); key(ENTER); esc(); esc();  // Backs out of the wizard unchanged.
-  if (gLabUi.view != LabView::Rules) esc();
-  assert(gLabUi.view == LabView::Rules);
-  gLabBook.rules[1].action[0] = lab::Action{}; gLabBook.rules[1].action[0].out = Out::Relay1; gLabBook.rules[1].action[0].how = lab::How::Set; gLabBook.rules[1].action[0].value = 1;
-  gLabBook.rules[1].action[1] = lab::Action{}; gLabBook.rules[1].action[1].out = Out::Led; gLabBook.rules[1].action[1].how = lab::How::Set; gLabBook.rules[1].action[1].value = 240;
-  gLabBook.rules[1].actions = 2; gLabBook.rules[1].holdMs = 0;
+  // Back from the first action reaches the join, and forward again.
+  esc(); assert(stepNow() == LabStep::Join && gLabWizard.row == 1); key(ENTER);
+  pickRow(int(Out::Relay1)); assert(stepNow() == LabStep::How); show("step-how-relay");
+  key(ENTER); assert(stepNow() == LabStep::MoreActions && gLabWizard.rule.action[0].value == 1); show("step-more-actions");
+  key(DOWN); key(ENTER); assert(stepNow() == LabStep::Out && gLabWizard.action == 1);
+  pickRow(int(Out::Led)); assert(stepNow() == LabStep::How); show("step-how"); key(ENTER); assert(stepNow() == LabStep::OutValue);
+  key(RIGHT); key(RIGHT); show("step-value"); assert(gLabWizard.rule.action[1].value == 120); key(ENTER); assert(stepNow() == LabStep::MoreActions);
+  key(ENTER); assert(stepNow() == LabStep::Hold && gLabWizard.keepActions == 2); show("step-hold");
+  for (int i = 0; i < 80; ++i) key(LEFT); assert(gLabWizard.rule.holdMs == 0); show("step-hold-zero"); for (int i = 0; i < 80; ++i) key(RIGHT); assert(gLabWizard.rule.holdMs == lab::kMaxHoldMs); show("step-hold-long");
+  for (int i = 0; i < 60; ++i) key(LEFT); assert(gLabWizard.rule.holdMs == 0);
+  key(ENTER); assert(stepNow() == LabStep::Name); show("step-name");
+  // Typing replaces the suggestion, and a name can't run past its room.
+  for (const char* c = "Close and turn!!!!!!!"; *c; ++c) key(*c); show("step-name-typed"); assert(!std::strcmp(gLabWizard.rule.name, "Close and turn"));
+  // Nothing is saved until the last Enter, and walking out drops it all.
+  assert(gLabBook.count == 1); for (int i = 0; i < 40 && gLabUi.view == LabView::Wizard; ++i) esc(); assert(gLabUi.view == LabView::Rules && gLabBook.count == 1);
+}
 
-  // Play: the owner's example, end to end through the hub.
+// Walking a rule with Enter alone changes nothing.
+void enterThrough(int index) {
+  gLabUi.ruleRow = index; key(ENTER); assert(gLabUi.view == LabView::Wizard && gLabWizard.index == index);
+  for (int i = 0; i < 60 && gLabUi.view == LabView::Wizard; ++i) key(ENTER);
+  assert(gLabUi.view == LabView::Rules);
+}
+void addRuleByHand() {
+  // The same walk as above, all the way to the end.
+  goToRow(gLabBook.count); key(ENTER); key(ENTER); key(ENTER); run(100); key(' '); for (int i = 0; i < 80; ++i) key(RIGHT); for (int i = 0; i < 71; ++i) key(LEFT); assert(gLabWizard.rule.cond[0].value == 29);
+  key(ENTER); key(DOWN); key(ENTER); pickRow(int(Sig::Knob)); pickRow(2); key(ENTER); key(ENTER); assert(stepNow() == LabStep::Out && gLabWizard.rule.any);
+  pickRow(int(Out::Relay1)); key(ENTER); key(DOWN); key(ENTER); pickRow(int(Out::Led)); key(ENTER); key(RIGHT); key(RIGHT); key(ENTER); key(ENTER);
+  assert(stepNow() == LabStep::Hold); for (int i = 0; i < 60; ++i) key(LEFT); key(ENTER);
+  for (const char* c = "Close and turn"; *c; ++c) key(*c);
+  key(ENTER); assert(gLabUi.view == LabView::Rules && gLabBook.count == 2 && gLabUi.ruleRow == 1 && gLabSaved && gDisk.files.count("/lab/rules.dat"));
+  const lab::Rule& made = gLabBook.rules[1];
+  assert(!std::strcmp(made.name, "Close and turn") && made.conds == 2 && made.any && made.holdMs == 0);
+  assert(made.cond[0].sig == Sig::Distance && made.cond[0].op == lab::Op::Below && made.cond[0].value == 29 && made.cond[1].sig == Sig::Knob && made.cond[1].op == lab::Op::Changes);
+  assert(made.actions == 2 && made.action[0].out == Out::Relay1 && made.action[0].value == 1 && made.action[1].out == Out::Led && made.action[1].how == lab::How::Set && made.action[1].value == 120);
+  show("rules-two");
+}
+void testEditRule() {
+  addRuleByHand();
+  // Enter on a rule walks the same steps with every answer already picked.
+  const lab::Rule before = gLabBook.rules[1], first = gLabBook.rules[0];
+  enterThrough(1); assert(same(gLabBook.rules[1], before)); enterThrough(0); assert(same(gLabBook.rules[0], first));
+  // The steps open on what's there, including the second line.
+  gLabUi.ruleRow = 1; key(ENTER); assert(stepNow() == LabStep::Sig && gLabWizard.row == int(Sig::Distance)); show("edit-sig"); assert(gCanvas.shows("Close and turn"));
+  key(ENTER); assert(gLabWizard.row == 0); key(ENTER); assert(stepNow() == LabStep::Value && !gLabWizard.teaching);
+  // A stored number stays put, whatever the sensor is doing now.
+  gUnits.um = 700000; run(300); assert(gLabWizard.rule.cond[0].value == 29); gUnits.um = 240000; run(300);
+  key(ENTER); assert(stepNow() == LabStep::MoreConds && gLabWizard.row == 1); show("edit-more"); key(ENTER); assert(gLabWizard.cond == 1 && gLabWizard.row == int(Sig::Knob)); key(ENTER); assert(gLabWizard.row == 2);
+  // Changing a line partway keeps the rest.
+  esc(); esc(); esc(); assert(stepNow() == LabStep::Value); key(RIGHT); key(ENTER); key(ENTER); key(ENTER); key(ENTER); assert(stepNow() == LabStep::MoreConds);
+  // "That's all" here drops the lines after it, but only once the walk is finished.
+  for (int i = 0; i < 60 && gLabUi.view == LabView::Wizard; ++i) key(ENTER); assert(gLabBook.rules[1].cond[0].value == 30 && gLabBook.rules[1].conds == 2);
+  gLabUi.ruleRow = 1; key(ENTER); key(ENTER); key(ENTER); key(ENTER); assert(stepNow() == LabStep::MoreConds); key(UP); key(ENTER);
+  assert(stepNow() == LabStep::Out && gLabWizard.keepConds == 1 && gLabBook.rules[1].conds == 2);  // Not even a Join step for one line.
+  for (int i = 0; i < 60 && gLabUi.view == LabView::Wizard; ++i) key(ENTER); assert(gLabBook.rules[1].conds == 1);
+  // Esc leaves a rule exactly as it was, whatever was changed on the way.
+  const lab::Rule kept = gLabBook.rules[1]; gLabUi.ruleRow = 1; key(ENTER); pickRow(int(Sig::Light)); key(ENTER); key(ENTER);
+  for (int i = 0; i < 40 && gLabUi.view == LabView::Wizard; ++i) esc(); assert(same(gLabBook.rules[1], kept));
+  // Three of each is the most, and then the steps stop asking.
+  gLabUi.ruleRow = 1; key(ENTER); key(ENTER); key(ENTER); key(ENTER); key(DOWN); key(ENTER);  // Second line.
+  pickRow(int(Sig::Motion)); key(ENTER); assert(stepNow() == LabStep::MoreConds); key(DOWN); key(ENTER); pickRow(int(Sig::Tilt)); pickRow(2); assert(stepNow() == LabStep::Join && gLabWizard.keepConds == 3);
+  key(ENTER); key(ENTER); assert(stepNow() == LabStep::How); key(ENTER); assert(stepNow() == LabStep::MoreActions); key(ENTER); assert(stepNow() == LabStep::OutValue || stepNow() == LabStep::Out || stepNow() == LabStep::MoreActions || stepNow() == LabStep::Hold);
+  for (int i = 0; i < 60 && gLabUi.view == LabView::Wizard; ++i) key(ENTER); assert(gLabBook.rules[1].conds == 3);
+  // Back to the shape the play test uses.
+  gLabBook.rules[1] = kept; gLabBook.rules[1].holdMs = 0; gLabBook.rules[1].cond[0] = {Sig::Distance, lab::Op::Below, 29}; gLabBook.rules[1].conds = 1;
+  // On and off, and two presses to delete. Moving away cancels the first.
+  gLabUi.ruleRow = 1; keys(" "); assert(!gLabBook.rules[1].on); keys(" "); assert(gLabBook.rules[1].on);
+  key('x'); assert(gLabUi.deleteArmed && gLabBook.count == 2); show("rules-delete"); assert(gCanvas.shows("X again")); key(DOWN); assert(!gLabUi.deleteArmed); key(UP);
+  key('x'); key('p'); assert(!gLabUi.deleteArmed || gLabPlaying); if (gLabPlaying) esc();
+  assert(gLabBook.count == 2);
+}
+
+void testPlay() {
+  // The owner's example, end to end through the hub.
   const int servo = ports(lab::Part::Servo), strip = ports(lab::Part::Strip), relay = ports(lab::Part::Relay);
   gUnits.um = 800000; gHubUnit.analog[ports(lab::Part::Knob)] = 1000; run(1200);
-  keys("p"); assert(gLabPlaying && gLabUi.view == LabView::Play); run(800); show("board-waiting");
+  gLabUi.ruleRow = 0; keys("p"); assert(gLabPlaying && gLabUi.view == LabView::Play && gLabUi.playRule == 0); run(800); show("flow-waiting");
   assert(gCanvas.shows("WAITING") && !gLabStates[0].active && gHubUnit.written[relay][0] == 0);
   gHubUnit.angle[servo][1] = -1;
   // Turn the knob: the rule fires, the servo moves with it, and the strip lights.
   gHubUnit.analog[ports(lab::Part::Knob)] = 1500; run(300);
   assert(gLabStates[0].active && gHubUnit.angle[servo][1] == 135 && sumLeds(strip) == 30);
-  show("board-firing"); gLabUi.playPage = 1; show("flow-firing"); gLabUi.playPage = 0;
-  assert(gLabStates[0].fires == 1);
+  show("flow-firing"); assert(gCanvas.shows("FIRING 1/2") && gCanvas.shows("Knob") && gCanvas.shows("135") && gCanvas.shows("Fired once"));
   // It holds for 2 seconds after, then lets the strip go. The servo stays where it was put.
   run(3000); assert(!gLabStates[0].active && sumLeds(strip) == 0 && gHubUnit.pulses[servo][1] == 1);
   // A hand close: the other condition, and the second rule's relay and LED.
   gUnits.um = 200000; run(300); assert(gLabStates[0].active && gLabStates[0].fires == 2 && gLabStates[1].active);
-  assert(gHubUnit.written[relay][0] == 1 && M5.Led.b > 0); show("board-both"); gLabUi.playPage = 2; show("flow-two"); gLabUi.playPage = 0;
-  // Both views, and paging wraps.
-  keys("/"); assert(gLabUi.playPage == 1); keys("/"); assert(gLabUi.playPage == 2); keys("/"); assert(gLabUi.playPage == 0); keys(","); assert(gLabUi.playPage == 2); keys("/");
+  assert(gHubUnit.written[relay][0] == 1 && M5.Led.g > 0); show("flow-again"); assert(gCanvas.shows("Fired 2 times"));
+  // Paging wraps, and shows the rule that's on each page.
+  keys("/"); assert(gLabUi.playRule == 1); show("flow-two"); assert(gCanvas.shows("Close and turn") || gCanvas.shows("2/2")); keys("/"); assert(gLabUi.playRule == 0); keys(","); assert(gLabUi.playRule == 1);
   // Pause stops everything at once and resumes.
-  assert(gLabPlaying); keys(" "); assert(gLabPaused && gHubUnit.written[relay][0] == 0 && sumLeds(strip) == 0); show("board-paused"); assert(gCanvas.shows("PAUSED"));
+  keys(" "); assert(gLabPaused && gHubUnit.written[relay][0] == 0 && sumLeds(strip) == 0); show("flow-paused"); assert(gCanvas.shows("PAUSED") && !gCanvas.shows("Built-in LED--") && gCanvas.shows("--"));
   run(500); assert(gHubUnit.written[relay][0] == 0);
   keys(" "); run(500); assert(!gLabPaused && gHubUnit.written[relay][0] == 1);
   // Playing keeps the screen on, because the screensaver would stop the rules.
@@ -520,7 +572,7 @@ void testBuildAndPlay() {
   gLauncherVisible = true; { auto before = gHubUnit.log.size(); run(500); assert(gHubUnit.written[relay][0] == 0 && sumLeds(strip) == 0); const auto after = gHubUnit.log.size(); run(2000); assert(gHubUnit.log.size() == after && after > before); }
   gLauncherVisible = false; run(100); assert(gLabPaused); keys(" "); run(500); assert(gHubUnit.written[relay][0] == 1);
   // A rule that is off stays out of it.
-  gLabBook.rules[1].on = false; run(500); assert(gHubUnit.written[relay][0] == 0); show("board-off"); assert(gCanvas.shows("OFF")); gLabUi.playPage = 2; show("flow-off"); gLabUi.playPage = 0; gLabBook.rules[1].on = true;
+  gLabBook.rules[1].on = false; run(500); assert(gHubUnit.written[relay][0] == 0); show("flow-off"); assert(gCanvas.shows("OFF 2/2") && !gCanvas.shows("FIRING")); gLabBook.rules[1].on = true;
   // No flicker reaches the relay: a sensor bouncing across the line can't chatter it.
   { auto before = gHubUnit.log.size(); for (int i = 0; i < 100; ++i) { gUnits.um = i % 2 ? 200000 : 800000; run(130); }
     int toggles = 0; for (size_t i = before; i < gHubUnit.log.size(); ++i) { auto& b = gHubUnit.log[i]; if (b.size() == 2 && (b[0] >> 4) == pbhub::channel(uint8_t(relay)) >> 4 && (b[0] & 15) == 0) ++toggles; } assert(toggles <= 13000 / int(lab::kRelayGapMs) + 1); }
@@ -528,19 +580,114 @@ void testBuildAndPlay() {
   gUnits.um = 200000; run(300); gHubUnit.here = false; run(1500); assert(!labFound(Unit::Hub) && gLabPlaying);
   gHubUnit.here = true; std::memset(gHubUnit.ledRgb, 0, sizeof(gHubUnit.ledRgb)); fingers(); run(1500); assert(labFound(Unit::Hub) && gHubUnit.written[relay][0] == 1 && sumLeds(strip) == 30);
   // Leaving: relays open, strip off, servo limp, and the port is free.
-  esc(); assert(!gLabPlaying && gLabUi.view == LabView::Rules && gHubUnit.written[relay][0] == 0 && sumLeds(strip) == 0 && gHubUnit.pulses[servo][1] == 0 && M5.Led.b == 0);
+  esc(); assert(!gLabPlaying && gLabUi.view == LabView::Rules && gHubUnit.written[relay][0] == 0 && sumLeds(strip) == 0 && gHubUnit.pulses[servo][1] == 0 && M5.Led.g == 0);
   const int closes = gAirSensor.closes;
   keys("p"); run(300); assert(gLabPlaying);
   setUiMode(UiMode::Home); assert(!gLabOpen && !gLabPlaying && gHubUnit.written[relay][0] == 0 && sumLeds(strip) == 0 && gAirSensor.closes == closes + 1 && !Serial1.open);
   { const auto before = gUnits.commands; run(500); assert(gUnits.commands == before); }  // Nothing touches the bus once it's closed.
 }
 
+void testPractice() {
+  // Nothing plugged in at all, and a rule can still be tried from the keyboard.
+  gUnits.present.clear(); gHubUnit.here = false; gLabInputs = lab::Inputs{};
+  setUiMode(UiMode::LabRules); run(1500); gLabUi.ruleRow = 0; keys("p"); run(200); assert(gLabPlaying && !gLabStates[0].active);
+  show("practice-none"); assert(gCanvas.shows("--") && gCanvas.shows("T practice"));
+  keys("t"); assert(gLabUi.practicing && gLabUi.practiceCond == 0); show("practice-start"); assert(gCanvas.shows("PRACTICE"));
+  // Up changes the first sensor. The Wave lights knob "changes", so the rule fires, and its servo follows.
+  keys(";"); run(50); assert(gLabPractice.faking(Sig::Knob) && gLabStates[0].active); show("practice-knob"); assert(gCanvas.shows("55%") && gCanvas.shows("FIRING") == false);
+  assert(gLabDrive[uint8_t(Out::Servo)].on && gLabDrive[uint8_t(Out::Servo)].value == 99);
+  // Across to the next sensor, down to under 30 cm.
+  keys("/"); assert(gLabUi.practiceCond == 1); for (int i = 0; i < 12; ++i) keys("."); run(50);
+  assert(gLabPractice.faking(Sig::Distance) && gLabSeen.get(Sig::Distance).value < 30); show("practice-distance");
+  assert(lab::condHolds(gLabBook.rules[0].cond[1], gLabSeen, nowMs));
+  // A real sensor showing up doesn't disturb the faked one.
+  gUnits.present.insert(0x57); gUnits.um = 900000; run(1500); assert(gLabInputs.get(Sig::Distance).value == 90 && gLabSeen.get(Sig::Distance).value < 30);
+  // Esc ends practice first, and the next Esc stops. The real reading comes back.
+  esc(); assert(!gLabUi.practicing && gLabPlaying && !gLabPractice.any()); run(100); assert(gLabSeen.get(Sig::Distance).value == 90);
+  keys("t"); keys("t"); assert(!gLabUi.practicing && gLabPlaying);
+  esc(); assert(!gLabPlaying); gUnits.present = {0x57, 0x44, 0x63, 0x50}; gHubUnit.here = true; gUnits.um = 240000; run(1500); fingers(); run(100);
+  // Left and right only change rules outside practice.
+  keys("p"); keys("/"); assert(gLabUi.playRule == 1); keys("t"); const int rule = gLabUi.playRule; keys("/"); assert(gLabUi.playRule == rule); esc(); esc();
+}
+
+void testRecipes() {
+  const int count = gLabBook.count;
+  goToRow(count + 2); show("rules-recipes"); assert(gCanvas.shows("10 ready to go"));
+  key(ENTER); assert(gLabUi.view == LabView::Recipes); show("recipes"); assert(gCanvas.shows("Knob to servo") && gCanvas.shows("Turn the knob"));
+  for (int i = 0; i < lab::kRecipeCount; ++i) { char name[16]; std::snprintf(name, 16, "recipe-%d", i); show(name); assert(gCanvas.shows(lab::kRecipes[gLabUi.recipeRow].about)); key(DOWN); }
+  assert(gLabUi.recipeRow == 0);
+  key(UP); assert(gLabUi.recipeRow == lab::kRecipeCount - 1); key(DOWN);
+  esc(); assert(gLabUi.view == LabView::Rules && gLabBook.count == count);  // Looking adds nothing.
+  key(ENTER); key(DOWN); key(ENTER); assert(gLabBook.count == count + 1 && !std::strcmp(gLabBook.rules[count].name, "Stick steers") && gLabUi.view == LabView::Rules && gLabUi.ruleRow == count);
+  assert(gLabSaved); show("rules-added");
+  // A recipe is then a rule like any other.
+  enterThrough(count); assert(!std::strcmp(gLabBook.rules[count].name, "Stick steers"));
+  key('x'); key('x'); assert(gLabBook.count == count);
+}
+
+void testSay() {
+  goToRow(gLabBook.count + 1); key(ENTER); assert(gLabUi.view == LabView::Say); show("say"); assert(gCanvas.shows("Tell Claude"));
+  // Talk, stop, wait, and the rule comes back to look at.
+  const int taps = gVoiceTaps;
+  key(ENTER); assert(gRecording && gVoiceTaps == taps + 1); run(50); show("say-listening"); assert(gCanvas.shows("Listening"));
+  key(ENTER); assert(!gRecording && gThinking); run(50); show("say-writing"); assert(gCanvas.shows("Claude is writing it"));
+  key(ENTER); assert(gVoiceTaps == taps + 2);  // A press while it's writing does nothing.
+  lab::Draft d; d.name("Wave red"); d.addCond("distance", "under", 30); d.addSet("strip_color", 0); d.addFollow("servo", "knob", false); assert(d.usable());
+  gThinking = false; labOfferRule(d.rule); run(50); assert(gLabUi.view == LabView::Offer); show("offer"); assert(gCanvas.shows("Claude wrote this") && gCanvas.shows("Distance under 30 cm") && gCanvas.shows("Servo follows Knob"));
+  // Nothing is saved or driven by arriving. Esc drops it.
+  const int count = gLabBook.count; assert(!gLabPlaying); esc(); assert(gLabUi.view == LabView::Rules && gLabBook.count == count);
+  // Enter saves it, as an ordinary rule.
+  labOfferRule(d.rule); key(ENTER); assert(gLabUi.view == LabView::Rules && gLabBook.count == count + 1 && gLabUi.ruleRow == count && !std::strcmp(gLabBook.rules[count].name, "Wave red") && gLabSaved);
+  key('x'); key('x'); assert(gLabBook.count == count);
+  // E walks the steps, and saves as a new rule.
+  labOfferRule(d.rule); key('e'); assert(gLabUi.view == LabView::Wizard && gLabWizard.index < 0 && gLabWizard.rule.cond[0].value == 30); for (int i = 0; i < 40 && gLabUi.view == LabView::Wizard; ++i) key(ENTER);
+  assert(gLabBook.count == count + 1 && gLabBook.rules[count].actions == 2); key('x'); key('x'); assert(gLabBook.count == count);
+  // A reply with no rule says so, and it can be tried again.
+  goToRow(gLabBook.count + 1); key(ENTER); key(ENTER); run(20); key(ENTER); run(20); gThinking = false; gRecording = false; run(50); assert(gLabUi.sayFailed); show("say-failed"); assert(gCanvas.shows("No rule came back"));
+  key(ENTER); assert(gRecording && !gLabUi.sayFailed); key(ENTER); gThinking = false; run(50); esc(); assert(gLabUi.view == LabView::Rules); run(100);
+  // With no Wi-Fi it says so instead of trying.
+  key(ENTER); gWifiReady = false; show("say-offline"); assert(gCanvas.shows("Needs Wi-Fi")); { const int t = gVoiceTaps; key(ENTER); assert(gVoiceTaps == t); } gWifiReady = true; esc();
+  // A rule arriving elsewhere still reaches this screen, and stops rules that are playing.
+  setUiMode(UiMode::Home); labOfferRule(d.rule); assert(gUiMode == UiMode::LabRules && gLabOpen && gLabUi.view == LabView::Offer); esc();
+  keys("p"); run(300); assert(gLabPlaying); labOfferRule(d.rule); assert(!gLabPlaying && gLabUi.view == LabView::Offer); run(100); esc();
+  // With the list full, Enter refuses and the offer stays.
+  const lab::Book kept = gLabBook; gLabBook.count = lab::kMaxRules; labOfferRule(d.rule); key(ENTER); assert(gLabUi.view == LabView::Offer && gStatus.find("full") != std::string::npos); esc(); gLabBook = kept;
+  // A blank name still saves under something readable.
+  lab::Draft blank; blank.addCond("knob", "changes", 0); blank.addSet("servo", 1); labOfferRule(blank.rule); key('e'); for (int i = 0; i < 40 && gLabUi.view == LabView::Wizard; ++i) key(ENTER); assert(gLabBook.rules[gLabBook.count - 1].name[0]); key('x'); key('x');
+  gLabUi.ruleRow = 0; gLabUi.ruleTop = 0;
+}
+
+void testRemotes() {
+  const lab::Book kept = gLabBook;
+  lab::Draft d; d.name("Dark"); d.addCond("motion", "on", 0); d.addSet("lamp_power", 1); d.addSet("lamp_bright", 50); d.addSet("ac_tcl", 1); assert(d.usable()); d.rule.holdMs = 0;
+  gLabBook.count = 1; gLabBook.rules[0] = d.rule;
+  const int motion = ports(lab::Part::Motion);
+  gHubUnit.level[motion] = 0; run(200); gLampSent.clear(); gTclSends = 0; gDaikinSends = 0;
+  // Starting to play touches neither: the lamp may be in use.
+  keys("p"); run(4000); assert(gLampSent.empty() && gTclSends == 0);
+  gHubUnit.level[motion] = 1; run(300);
+  assert(gSmartLamp.power && gTclPower && gTclSends == 1 && gLampSent.size() == 2 && gLampSent[0] == "power1" && gLampSent[1] == "GL,4,2,128" && gSmartLamp.brightness == 128);
+  show("flow-remote");
+  run(5000); assert(gTclSends == 1 && gLampSent.size() == 2);  // Nothing is sent again while nothing changes.
+  // The rule ending undoes what it did, after the AC's gap, and brightness is left as it was.
+  gHubUnit.level[motion] = 0; run(4000); assert(!gSmartLamp.power && !gTclPower && gTclSends == 2 && gLampSent.size() == 3 && gLampSent[2] == "power0");
+  // Stopping while it's on does the same at once.
+  gHubUnit.level[motion] = 1; run(3500); assert(gTclPower); esc(); assert(!gLabPlaying && !gTclPower && !gSmartLamp.power);
+  { const int sends = gTclSends; const size_t lamp = gLampSent.size(); keys("p"); run(500); gHubUnit.level[motion] = 0; run(500); assert(gTclSends >= sends && gLampSent.size() >= lamp); esc(); }
+  // The Daikin has its own.
+  lab::Draft e; e.addCond("motion", "on", 0); e.addSet("ac_daikin", 1); gLabBook.rules[0] = e.rule; gLabBook.rules[0].holdMs = 0; gHubUnit.level[motion] = 0; run(200); keys("p"); run(300); gDaikinSends = 0; gHubUnit.level[motion] = 1; run(300); assert(gDaikinPower && gDaikinSends == 1); esc(); assert(!gDaikinPower && gDaikinSends == 2);
+  // A rule that says off sends off, and leaves it off.
+  lab::Draft f; f.addCond("motion", "on", 0); f.addSet("lamp_power", 0); gLabBook.rules[0] = f.rule; gLabBook.rules[0].holdMs = 0; gHubUnit.level[motion] = 0; run(200); keys("p"); run(800); gLampSent.clear(); gHubUnit.level[motion] = 1; run(600); assert(gLampSent.size() == 1 && gLampSent[0] == "power0"); gHubUnit.level[motion] = 0; run(600); assert(gLampSent.size() == 1); esc(); assert(gLampSent.size() == 1);
+  gLabBook = kept;
+  setUiMode(UiMode::Home);
+}
+
 void testSaving() {
   // Everything comes back after a restart.
+  setUiMode(UiMode::LabRules); run(100);
   const std::string name = gLabBook.rules[1].name;
-  setUiMode(UiMode::LabRules); run(100); key(ENTER); key(DOWN); esc(); setUiMode(UiMode::Home);
   { uint8_t bytes[lab::kFileBytes]; const size_t n = lab::encode(gLabBook, bytes); gDisk.files["/lab/rules.dat"].assign(bytes, bytes + n); }
-  gLabBook = lab::Book{}; freshBoot(); setUiMode(UiMode::LabRules); run(100);
+  setUiMode(UiMode::Home); gLabBook = lab::Book{}; freshBoot(); setUiMode(UiMode::LabRules); run(100);
   assert(gLabBook.count == 2 && name == gLabBook.rules[1].name);
   setUiMode(UiMode::Home);
   // A power cut between the last two steps leaves the new file, and that one's used.
@@ -555,28 +702,22 @@ void testSaving() {
   // No card: it works until restart, and says so.
   gSdReady = false; gStatus = ""; keys(" "); assert(!gLabSaved && gStatus.find("No SD card") != std::string::npos); show("rules-unsaved");
   gSdReady = true; keys(" "); assert(gLabSaved);
-  // Deleting takes two presses, and the last rule can go.
-  key(ENTER); { LabCardRow rows[kLabMostCardRows]; const int n = labCardList(gLabBook.rules[0], rows); for (int i = 0; i < n; ++i) if (rows[i].line == LabLine::Delete) gLabUi.cardRow = i; }
-  labKeepRowShown(gLabUi.cardRow, gLabUi.cardTop, kLabCardRows); show("rule-delete");
-  key(ENTER); assert(gLabUi.deleteArmed); show("rule-delete-armed"); assert(gCanvas.shows("ENTER again")); key(UP); assert(!gLabUi.deleteArmed); key(DOWN);
-  key(ENTER); key(ENTER); assert(gLabBook.count == 0 && gLabUi.view == LabView::Rules); show("rules-empty");
-  keys("p"); assert(!gLabPlaying);  // Nothing to play.
-  // Full up, the new row goes and the list stops growing.
+  // The last rule can go, and then there's nothing to play.
+  gLabUi.ruleRow = 0; key('x'); key('x'); assert(gLabBook.count == 0 && gLabUi.view == LabView::Rules); show("rules-empty"); keys("p"); assert(!gLabPlaying);
+  // Full up, the extra rows go and the list stops growing.
   gLabBook.count = lab::kMaxRules; for (int i = 0; i < lab::kMaxRules; ++i) { gLabBook.rules[i] = lab::starterRule(); snprintf(gLabBook.rules[i].name, 16, "Long name no %d", i); }
   gLabUi.ruleRow = 0; gLabUi.ruleTop = 0; show("rules-full"); assert(!gCanvas.shows("+ New rule"));
   for (int i = 0; i < lab::kMaxRules; ++i) { key(DOWN); show("rules-full"); }
   keys("p"); run(300); assert(gLabPlaying);
-  for (int i = 0; i < 8; ++i) { keys("."); show("board-full"); } keys(",");
-  for (int page = 0; page <= lab::kMaxRules; ++page) { gLabUi.playPage = page; show("pages"); }
+  for (int page = 0; page <= lab::kMaxRules; ++page) { show("pages"); keys("/"); }
   esc();
-  // A rule with everything in it fits its card and its flow.
+  // A rule with everything in it fits its flow, with live values and without.
   lab::Rule big; std::strcpy(big.name, "Fifteen letters"); big.conds = 3; big.actions = 3; big.any = false;
   big.cond[0] = {Sig::Temperature, lab::Op::Above, 45}; big.cond[1] = {Sig::StickX, lab::Op::Below, -100}; big.cond[2] = {Sig::Satellites, lab::Op::Changes, 0};
   big.action[0].out = Out::StripBright; big.action[0].how = lab::How::FollowBack; big.action[0].source = Sig::StickPress;
-  big.action[1].out = Out::Tone; big.action[1].how = lab::How::Set; big.action[1].value = 2000; big.action[2].out = Out::StripLength; big.action[2].how = lab::How::Follow; big.action[2].source = Sig::Temperature;
-  gLabBook.rules[0] = big; gLabUi.ruleIndex = 0; gLabUi.view = LabView::Rule; gLabUi.cardTop = 0; gLabUi.cardRow = 1; show("rule-big");
-  for (int i = 0; i < 16; ++i) { key(DOWN); show("rule-big"); }
-  gLabUi.view = LabView::Rules; gLabPlaying = true; gLabUi.view = LabView::Play; gLabUi.playPage = 1; show("flow-big"); gLabPlaying = false; gLabUi.view = LabView::Rules;
+  big.action[1].out = Out::Tone; big.action[1].how = lab::How::Set; big.action[1].value = 2000; big.action[2].out = Out::StripColor; big.action[2].how = lab::How::Follow; big.action[2].source = Sig::Temperature;
+  gLabBook.rules[0] = big; gLabUi.ruleRow = 0; keys("p"); gLabUi.playRule = 0; show("flow-big-waiting"); gLabStates[0].active = true; show("flow-big"); keys("t"); show("flow-big-practice"); keys("/"); keys("/"); show("flow-big-practice"); esc(); esc();
+  labOfferRule(big); show("offer-big"); assert(gCanvas.shows("and Stick X") && !gCanvas.shows("or Stick X")); esc();
 }
 
 void testGuards() {
@@ -585,11 +726,13 @@ void testGuards() {
   gRecording = true; { const auto before = gUnits.commands; run(300); assert(gUnits.commands == before); } gRecording = false;
   gRealtimeActive = true; { const auto before = gUnits.commands; run(300); assert(gUnits.commands == before); } gRealtimeActive = false;
   gPlaybackActive = true; { const auto before = gUnits.commands; run(300); assert(gUnits.commands == before); } gPlaybackActive = false;
+  // The network waits while rules play, and only then.
+  assert(labAllowsNetwork()); gLabUi.ruleRow = 0; keys("p"); assert(!labAllowsNetwork()); esc(); assert(labAllowsNetwork());
   // The speaker only sounds when it's allowed to.
   labDriveSet(Out::Tone, 500); gToneAllowed = false; { const int tones = M5Cardputer.Speaker.tones; run(100); assert(M5Cardputer.Speaker.tones == tones); } gToneAllowed = true; run(100); assert(gLabToneOn); labDriveClear(); run(100); assert(!gLabToneOn);
   // Esc on a first screen falls through to leave the app, and it does nothing outside the Lab.
   gLabUi.view = LabView::Rules; assert(!routeLabEscape()); gLabUi.view = LabView::Devices; assert(!routeLabEscape());
-  gLabUi.view = LabView::Rule; gLauncherVisible = true; assert(!routeLabEscape()); gLauncherVisible = false; gLabUi.view = LabView::Rules;
+  gLabUi.view = LabView::Wizard; gLauncherVisible = true; assert(!routeLabEscape()); gLauncherVisible = false; gLabUi.view = LabView::Rules;
   setUiMode(UiMode::Home); assert(!routeLabEscape());
   // Each menu entry opens on its own screen.
   setUiMode(UiMode::LabDevices); assert(gLabUi.view == LabView::Devices); setUiMode(UiMode::LabRules); assert(gLabUi.view == LabView::Rules && gLabOpen); setUiMode(UiMode::Home);
@@ -600,9 +743,9 @@ void testGuards() {
 int main(int argc, char** argv) {
   if (argc > 1) gDump = std::fopen(argv[1], "w");
   for (bool& live : gLabHistoryLive) live = false;
-  testDevices(); testMissing(); testWiring(); testBuildAndPlay(); testSaving(); testGuards();
+  testDevices(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGuards();
   if (gDump) std::fclose(gDump);
-  std::puts("PASS Lab screens: every device test, the wiring screen, building a rule by steps and by card, playing it through a simulated hub, pause and the menu, units leaving and returning, saving and damage, and every screen stays on the display");
+  std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, the lamp and AC guards, units leaving and returning, saving and damage, and every screen stays on the display");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-lab-ui-') as directory:

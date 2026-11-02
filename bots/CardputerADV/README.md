@@ -70,14 +70,17 @@ moves the basket. The keyboard also plays it. Open it from Arcade, or type `/cat
 ## Lab
 
 **The Lab** is a tab in the launcher, and `/lab` or `/rules` opens it. Devices tests every sensor
-and output, and Rules saves "if this, then that" rules and plays them with live status. It uses:
+and output, and Rules saves "if this, then that" rules and plays them with live status. Rules come
+from steps on the device, ready-made recipes, or asking Claude, and Practice tries them with
+nothing plugged in. It uses:
 
 | Connection | Parts |
 | --- | --- |
 | Grove port, directly or through a passive hub | Ultrasonic (RCWL-9620, 0x57), ENV III (SHT30, 0x44), Joystick 2 (0x63), NFC (0x50), DLight (BH1750, 0x23) |
 | I/O Hub (Unit PbHub, 0x61) on the Grove port | Mini Angle, Light, PIR, 2-channel relay, SG90 servo, 30-LED SK6812 strip |
 | Cap LoRa-1262 | GPS on G15 (receive) and G13 (transmit), 115200 baud, NMEA |
-| Built in | BMI270 tilt, RGB LED, speaker |
+| Built in | BMI270 tilt, RGB LED, speaker, and the IR transmitter for TCL and Daikin air conditioners |
+| Wi-Fi | smartLamp |
 
 A servo or single-wire strip needs a signal line of its own, and on a passive hub the only two
 lines are the I2C ones, so those parts go on the I/O hub. See

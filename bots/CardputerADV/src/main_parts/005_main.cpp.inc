@@ -546,6 +546,8 @@ void serviceLab();
 bool handleLabKey(char key, const Keyboard_Class::KeysState& keys);
 void renderLabUi();
 bool routeLabEscape();
+bool labAllowsNetwork();
+void labOfferRule(const lab::Rule& rule);
 void beginNfcNotes();
 void serviceNfcNotes();
 bool cancelNfcNotes();

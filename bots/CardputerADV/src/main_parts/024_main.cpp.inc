@@ -167,7 +167,7 @@ bool executeDeviceActionsJson(const String& json) {
   if (json.isEmpty()) {
     return false;
   }
-  DynamicJsonDocument doc(1024);
+  DynamicJsonDocument doc(2048);  // A full rule from Claude is the largest action.
   DeserializationError err = deserializeJson(doc, json);
   if (err) {
     appendRuntimeLog("ACT", "device action json rejected", true);

@@ -23,8 +23,6 @@ bool appAllowsBackgroundNetwork() {
     case UiMode::Flappy:
     case UiMode::Balloon:
     case UiMode::BallCatch:
-    case UiMode::LabDevices: // Rules react to sensors, so they can't wait on background TLS.
-    case UiMode::LabRules:
     case UiMode::Radio:
     case UiMode::VlcRemote: // VLC explicitly polls; keep background TLS out.
     case UiMode::Nes: // The emulator owns RAM, audio and Wi-Fi until it exits.
@@ -33,6 +31,8 @@ bool appAllowsBackgroundNetwork() {
     case UiMode::NfcNotes:
     case UiMode::WifiSettings: // A join would pull the link out from under any request.
     case UiMode::IrRemote: return false;
+    case UiMode::LabDevices:
+    case UiMode::LabRules: return labAllowsNetwork();
     case UiMode::Tetris: return !gTetrisStarted || gTetrisPaused || gTetrisGameOver;
     case UiMode::KeyRush: return !gKeyRush.running;
     case UiMode::BrainFlow: return gBrainFlow.phase!=brainflow::Phase::Playing &&

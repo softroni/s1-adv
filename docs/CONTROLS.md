@@ -221,6 +221,7 @@ turns off when you leave a test screen.
 - **NFC:** Enter opens NFC Notes, which is the full test for that unit.
 - **LoRa Cap GPS:** satellites, position and speed, with the Cap fitted. M opens Mesh.
 - **Cardputer LED and Speaker:** the built-in ones. They work with nothing plugged in.
+- **smartLamp and IR for AC:** Enter opens their own apps.
 
 If a unit stops answering, its screen shows what else still answers, which tells you whether to
 look at that unit's cable or at the Grove port. Units reconnect by themselves.
@@ -231,37 +232,57 @@ Cardputer restarts, give the strip its own 5 V supply and join the grounds.
 
 ### Rules
 
-Rules lists what's saved. A solid dot means the rule is on, Space turns it off or on, and P plays
-the ones that are on. "Wave lights" is there to start with: when the Mini Angle turns or something
-comes within 30 cm, the strip's color follows the distance and the servo follows the Mini Angle.
+Rules lists what's saved. A solid dot means the rule is on, Space turns it off or on, P plays the
+ones that are on, and pressing X twice deletes one. "Wave lights" is there to start with: when the
+Mini Angle turns or something comes within 30 cm, the strip's color follows the distance and the
+servo follows the Mini Angle.
 
-**+ New rule** asks one question a screen: what to watch, when it counts, and what to do. To set a
-distance, put your hand there and press Enter, or nudge the number with left and right.
+**+ New rule** asks one question a screen, and Esc goes back a step:
 
-Enter on a rule opens its card, which shows the whole rule with live values:
+1. What to watch, and when it counts. To set a distance, put your hand there and press Enter, or
+   nudge the number with left and right. Space goes back to the live reading.
+2. Whether to watch something else, up to 3. With more than one, whether any or all of them must
+   be true.
+3. What to do, up to 3 things. An output can be **set** to a value, can **follow** a sensor so it
+   moves with it, or can **do the opposite**.
+4. How long it keeps going afterwards, and a name.
 
-- WHEN ANY or ALL: Enter switches. A rule can watch up to 3 things.
-- Enter on a line changes it, and X removes it. A rule can do up to 3 things.
-- **Keep going** sets how long it carries on after it stops being true. Use left and right.
-- A rule can **set** an output to a value, or **follow** a sensor so the output moves with it.
-  Do the opposite follows it backwards.
-- Name: type to rename it. Delete this rule takes two presses of Enter.
+Nothing is saved until the last Enter. Enter on a saved rule walks the same steps with your answers
+already picked, so change what you want and press Enter through the rest. Choosing "That's all"
+drops any lines after that point.
 
-Esc saves. Rules are kept on the SD card in `/lab/rules.dat`, with the hub wiring, so they survive
-a firmware install. With no card they last until the next restart.
+**Recipes** are ten ready-made rules for these parts. Enter adds one to your list, and it's then a
+rule like any other.
+
+**Say a rule** lets you tell Claude what you want, for example "when I wave my hand, turn the strip
+red". Enter starts and stops listening. Claude's rule comes back to look at before anything
+happens: Enter saves it, E walks through it in the steps, and Esc drops it. A rule that's asked for
+in chat arrives the same way. It needs Wi-Fi and the bridge.
+
+Rules are kept on the SD card in `/lab/rules.dat`, with the hub wiring, so they survive a firmware
+install. With no card they last until the next restart.
 
 ### Playing
 
-Rules only run on the Playing screen, because the Grove port can't be shared with other apps.
-The screen stays on while they play.
+Rules only run on the Playing screen, because the Grove port can't be shared with other apps. The
+screen stays on while they play.
 
-- The board shows each rule as firing, following or waiting, and how close a waiting rule is.
-- Left and right switch to a picture of one rule, with dots moving from what set it off to what
-  it drives.
-- Space pauses, and Esc stops. Either one turns everything off, and so does opening the menu.
+It shows one rule as a picture: what it's watching, what it's driving, and dots moving between them
+while it fires. Left and right change rule. The dots at the bottom right stand for every rule, so
+you can see one firing on another page.
+
+**T** starts Practice, for trying a rule with nothing plugged in. Up and down change the highlighted
+sensor, left and right pick another, and Esc ends it and goes back to the real readings. Real
+outputs still move if they're connected.
+
+Space pauses, and Esc stops. Either one turns everything off, and so does opening the menu.
 
 When two rules want the same output, the lower one in the list wins. A relay can switch at most
 about three times a second, however much a sensor flickers.
+
+The smartLamp and the air conditioner are left alone until a rule asks. When that rule ends, or you
+stop, an "on" that it sent is undone. A rule can turn an AC on or off at most every 3 seconds, and
+only a TCL or Daikin. It sends by infrared, so point the Cardputer at it.
 
 Realtime shows CONNECT, LISTEN, THINK, SPEAK, READY or ERROR above the large eyes.
 MIC ON and the input meter appear only during recording. Connection errors remain

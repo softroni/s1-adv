@@ -12,6 +12,9 @@ for file, text in [
         ('001_main.cpp.inc', '#include "lab.h"'),
         ('001_main.cpp.inc', '#include "lab_gps.h"'),
         ('001_main.cpp.inc', 'kLauncherGroupCount = 9'),
+        ('001_main.cpp.inc', '#include "lab_json.h"'),
+        ('023_main.cpp.inc', 'lab::ruleFromJson(action, rule)'),
+        ('063_main.cpp.inc', 'return labAllowsNetwork();'),
         ('004_main.cpp.inc', '{"Devices", UiMode::LabDevices}'),
         ('004_main.cpp.inc', '{"Rules", UiMode::LabRules}'),
         ('022_main.cpp.inc', 'mode == "lab"'),
@@ -315,7 +318,109 @@ void testSaving(){
   {Book n;n.count=1;std::memset(n.rules[0].name,'a',sizeof(n.rules[0].name));uint8_t b[kFileBytes];const size_t s=encode(n,b);Book o;assert(decode(b,s,o)&&std::strlen(o.rules[0].name)==kNameChars);}
 }
 
+void testPractice(){
+  Inputs real;Practice p;assert(!p.any()&&!p.faking(Sig::Knob));
+  // With nothing plugged in it starts from the middle, and with a reading from that.
+  p.nudge(Sig::Knob,1,real,100);assert(p.faking(Sig::Knob)&&p.any());
+  Inputs view=real;p.overlay(view);assert(view.get(Sig::Knob).live&&view.get(Sig::Knob).value==55);
+  real.set(Sig::Light,20,100);p.nudge(Sig::Light,-1,real,100);view=real;p.overlay(view);assert(view.get(Sig::Light).value==15);
+  // Only what's being faked is covered.
+  real.set(Sig::Humidity,40,100);view=real;p.overlay(view);assert(view.get(Sig::Humidity).value==40);
+  // A real sensor moving underneath doesn't touch a faked one.
+  real.set(Sig::Knob,3,200);real.set(Sig::Knob,90,300);view=real;p.overlay(view);assert(view.get(Sig::Knob).value==55);
+  // It stops at the ends, and an on or off sensor flips.
+  for(int i=0;i<60;++i)p.nudge(Sig::Knob,1,real,400);view=real;p.overlay(view);assert(view.get(Sig::Knob).value==100);
+  for(int i=0;i<60;++i)p.nudge(Sig::Knob,-1,real,400);view=real;p.overlay(view);assert(view.get(Sig::Knob).value==0);
+  p.nudge(Sig::Motion,1,real,500);view=real;p.overlay(view);const int16_t first=view.get(Sig::Motion).value;
+  p.nudge(Sig::Motion,1,real,501);view=real;p.overlay(view);assert(view.get(Sig::Motion).value!=first);
+  // A press counts as a change, so a "changes" rule can be tried.
+  Practice c;Inputs none;c.nudge(Sig::Knob,1,none,1000);Inputs v;c.overlay(v);
+  Cond turns{Sig::Knob,Op::Changes,0};assert(condHolds(turns,v,1000));assert(condHolds(turns,v,1000+kChangedMs-1));assert(!condHolds(turns,v,1000+kChangedMs));
+  // Every signal can be pushed past its step in one press.
+  for(uint8_t i=0;i<kSigCount;++i){Practice q;Inputs n;const Sig sig=Sig(i);q.nudge(sig,1,n,1);q.nudge(sig,-1,n,2);Inputs w;q.overlay(w);assert(w.get(sig).moved);}
+  p.clear();assert(!p.any());view=real;p.overlay(view);assert(view.get(Sig::Knob).value==90&&!view.get(Sig::Motion).live);
+}
+
+void testRecipes(){
+  std::map<std::string,int> names;
+  for(int i=0;i<kRecipeCount;++i){
+    const Rule r=recipeRule(i);
+    assert(r.name[0]&&std::strlen(r.name)<=kNameChars&&++names[r.name]==1);
+    assert(r.on&&r.conds==1&&(r.actions==1||r.actions==2)&&r.holdMs<=kMaxHoldMs);
+    assert(std::strlen(kRecipes[i].about)*6<=232);
+    for(uint8_t a=0;a<r.actions;++a){const Action& x=r.action[a];const OutInfo& o=info(x.out);
+      if(x.how==How::Set)assert(x.value>=o.lo&&x.value<=o.hi);else assert(!o.onOff);}
+    const Cond& c=r.cond[0];if(c.op!=Op::Changes&&!info(c.sig).onOff)assert(c.value>=info(c.sig).lo&&c.value<=info(c.sig).hi);
+    // Each one fires when its sensor does what it describes, and passes through saving unchanged.
+    Book b;b.count=1;b.rules[0]=r;uint8_t bytes[kFileBytes];const size_t n=encode(b,bytes);Book back;assert(decode(bytes,n,back));
+    Inputs in;const SigInfo& s=info(c.sig);in.set(c.sig,c.op==Op::Above?s.lo:s.hi,1);
+    if(c.op==Op::Changes)in.set(c.sig,int16_t((s.lo+s.hi)/2),1000);
+    else in.set(c.sig,c.op==Op::Above?int16_t(c.value+1):int16_t(c.value-1),1000);
+    Drive d[kOutCount];RuleState st[1];step(&back.rules[0],1,st,in,1000,d);
+    assert(st[0].active);
+    for(uint8_t a=0;a<r.actions;++a)assert(d[uint8_t(r.action[a].out)].on);
+  }
+  // Rules saved before the lamp and AC outputs existed still load.
+  Book old;old.count=1;old.rules[0]=starterRule();uint8_t bytes[kFileBytes];const size_t n=encode(old,bytes);Book back;assert(decode(bytes,n,back)&&back.rules[0].action[1].out==Out::Servo);
+  assert(uint8_t(Out::Tone)==7&&uint8_t(Out::Servo)==0);
+}
+
+void testRemotes(){
+  RemoteSwitch s;bool send=true;const uint32_t gap=500;
+  // Starting up, and a rule that isn't asking, send nothing: the lamp may be in use.
+  assert(!s.update(false,false,1000,gap,send));assert(!s.release());
+  // A rule turning it on is sent once, and repeats are not.
+  assert(s.update(true,true,1000,gap,send)&&send);assert(!s.update(true,true,2000,gap,send));
+  // When the rule stops, its "on" is undone, but not before the gap.
+  s=RemoteSwitch{};assert(s.update(true,true,1000,gap,send));assert(!s.update(false,false,1100,gap,send));
+  assert(s.update(false,false,1500,gap,send)&&!send);assert(!s.update(false,false,3000,gap,send));
+  // A rule that turns it off leaves it off afterwards, and doesn't turn it back on.
+  RemoteSwitch t;assert(t.update(true,false,1000,gap,send)&&!send);assert(!t.update(false,false,2000,gap,send));assert(!t.release());
+  // Leaving undoes an "on" at once, whatever the gap.
+  RemoteSwitch u;assert(u.update(true,true,1000,gap,send));assert(u.release());assert(!u.release());
+  // A rule flickering can't flood it.
+  RemoteSwitch v;int sends=0;for(uint32_t ms=0;ms<10000;++ms)sends+=v.update(ms%2==0,true,ms,gap,send);assert(sends<=21);
+}
+
+void testDrafts(){
+  Sig sig;Out out;assert(sigFromKey("stick_x",sig)&&sig==Sig::StickX&&outFromKey("ac_daikin",out)&&out==Out::AcDaikin);
+  assert(!sigFromKey("Distance",sig)&&!sigFromKey("",sig)&&!sigFromKey(nullptr,sig)&&!outFromKey("servo ",out)&&!outFromKey(nullptr,out));
+  for(const SigInfo& s:kSigs)assert(sigFromKey(s.key,sig));
+  for(const OutInfo& o:kOuts)assert(outFromKey(o.key,out));
+  Draft d;d.name("Wave!! red; ok");d.hold(999999);d.rule.any=false;
+  d.addCond("distance","under",30);d.addCond("motion","on",0);d.addCond("knob","changes",0);
+  d.addSet("strip_color",0);d.addFollow("servo","knob",true);d.addSet("relay_1",7);
+  assert(d.usable());const Rule& r=d.rule;
+  assert(!std::strcmp(r.name,"Wave red ok")&&r.holdMs==kMaxHoldMs&&r.conds==3&&r.actions==3);
+  assert(r.cond[0].op==Op::Below&&r.cond[0].value==30&&r.cond[1].op==Op::Above&&r.cond[1].value==0&&r.cond[2].op==Op::Changes);
+  assert(r.action[1].how==How::FollowBack&&r.action[1].source==Sig::Knob&&r.action[2].value==1);
+  // A fourth line, a made-up word, or a test that doesn't suit the sensor all refuse the rule.
+  const auto refused=[](void(*f)(Draft&)){Draft x;x.addCond("knob","changes",0);x.addSet("servo",1);f(x);return !x.usable();};
+  assert(refused([](Draft& x){x.addCond("ghost","under",1);}));
+  assert(refused([](Draft& x){x.addCond("motion","under",1);}));
+  assert(refused([](Draft& x){x.addCond("knob","on",0);}));
+  assert(refused([](Draft& x){x.addCond("knob","sometimes",0);}));
+  assert(refused([](Draft& x){x.addCond("knob",nullptr,0);}));
+  assert(refused([](Draft& x){x.addSet("toaster",1);}));
+  assert(refused([](Draft& x){x.addFollow("relay_1","knob",false);}));   // A relay can't follow.
+  assert(refused([](Draft& x){x.addFollow("servo","ghost",false);}));
+  assert(refused([](Draft& x){x.addFollow("toaster","knob",false);}));
+  assert(refused([](Draft& x){x.addCond("knob","changes",0);x.addCond("knob","changes",0);x.addCond("knob","changes",0);}));
+  assert(refused([](Draft& x){x.addSet("led",0);x.addSet("led",0);x.addSet("led",0);}));
+  // Nothing to watch or nothing to do isn't a rule.
+  Draft e;assert(!e.usable());e.addSet("servo",1);assert(!e.usable());Draft f;f.addCond("knob","changes",0);assert(!f.usable());
+  // Out-of-range numbers come back in range, even huge ones.
+  Draft g;g.addCond("distance","under",99999999);g.addCond("tilt","over",-99999999);g.addSet("servo",999999);g.addSet("speaker",-5);
+  assert(g.usable()&&g.rule.cond[0].value==100&&g.rule.cond[1].value==-90&&g.rule.action[0].value==180&&g.rule.action[1].value==200);
+  // Names can't smuggle anything into a screen or a file.
+  Draft n;n.name("[[x]]\n\t%s\xf8""ab");assert(!std::strcmp(n.rule.name,"xsab"));n.name(nullptr);assert(!n.rule.name[0]);
+  std::string big(200,'a');n.name(big.c_str());assert(std::strlen(n.rule.name)==kNameChars);
+}
+
 void testTables(){
+  for(const SigInfo& s:kSigs)assert(s.key&&std::strlen(s.name)<=12);
+  for(const OutInfo& o:kOuts)assert(o.key&&std::strlen(o.name)<=12);  // Both fit a flow box.
+  for(const char* name:kDevNames)assert(std::strlen(name)<=13);
   // The launcher's number keys reach the new tab, and the menu stays as it was without it.
   {using namespace launcher_shortcuts;assert(resolve('9',false,9,2).kind==Kind::Group&&resolve('9',false,9,2).index==8);
    assert(resolve('9',false,8,2).kind==Kind::None);assert(resolve('9',true,9,2).kind==Kind::None);}
@@ -329,14 +434,39 @@ void testTables(){
 }
 
 int main(){
-  testHub();testGps();testRanges();testInputs();testRules();testWiring();testCloseness();testStrip();testRelays();testSaving();testTables();
+  testHub();testGps();testRanges();testInputs();testRules();testWiring();testCloseness();testStrip();testRelays();testPractice();testRecipes();testRemotes();testDrafts();testSaving();testTables();JSON_TEST
   std::puts("PASS Lab: hub commands, GPS lines, ranges, change detection, rules with hold and priority, wiring, the strip cap, the relay guard, and saved files that refuse every kind of damage");
 }
 '''
+# The real JSON library, once PlatformIO has fetched it. CI's firmware job has it, and the logic
+# above doesn't depend on it.
+library = root / 'bots/CardputerADV/.pio/libdeps/cardputer_adv/ArduinoJson/src'
+json_test = r'''
+#include "lab_json.h"
+bool parse(const char* text, Rule& out){StaticJsonDocument<2048> doc;assert(!deserializeJson(doc,text));return ruleFromJson(doc.as<JsonObjectConst>(),out);}
+void testJson(){
+  Rule r;
+  assert(parse(R"({"type":"lab.rule","name":"Wave red","any":true,"hold_ms":2000,"when":[{"sensor":"distance","test":"under","value":30}],"do":[{"output":"strip_color","set":0},{"output":"servo","follow":"knob"}]})",r));
+  assert(!std::strcmp(r.name,"Wave red")&&r.any&&r.holdMs==2000&&r.conds==1&&r.cond[0].value==30&&r.actions==2);
+  assert(r.action[0].out==Out::StripColor&&r.action[0].how==How::Set&&r.action[1].how==How::Follow&&r.action[1].source==Sig::Knob);
+  assert(parse(R"({"any":false,"when":[{"sensor":"motion","test":"on"}],"do":[{"output":"servo","oppose":"knob"}]})",r));
+  assert(!r.any&&!std::strcmp(r.name,"Spoken rule")&&r.holdMs==2000&&r.action[0].how==How::FollowBack);
+  // The largest rule fits the device's buffer.
+  assert(parse(R"({"type":"lab.rule","name":"Fifteen letters","any":false,"hold_ms":30000,"when":[{"sensor":"temperature","test":"over","value":45},{"sensor":"stick_button","test":"off"},{"sensor":"satellites","test":"changes"}],"do":[{"output":"strip_bright","oppose":"stick_x"},{"output":"lamp_power","set":1},{"output":"strip_length","follow":"temperature"}]})",r));
+  assert(r.conds==3&&r.actions==3);
+  for(const char* bad:{R"({})",R"({"when":[],"do":[]})",R"({"when":[{"sensor":"knob","test":"changes"}]})",R"({"do":[{"output":"servo","set":1}]})",
+      R"({"when":[{"sensor":"ghost","test":"changes"}],"do":[{"output":"servo","set":1}]})",R"({"when":[{"sensor":"knob","test":"changes"}],"do":[{"output":"servo"}]})",
+      R"({"when":[{"sensor":"knob","test":"changes"}],"do":[{"output":"relay_1","follow":"knob"}]})",R"({"when":"knob","do":"servo"})"}){Rule x;assert(!parse(bad,x));}
+}
+'''
+if (library / 'ArduinoJson.h').exists():
+    code = code.replace('void testHub(){', json_test + 'void testHub(){', 1).replace('JSON_TEST', 'testJson();')
+else:
+    code = code.replace('JSON_TEST', '')
 with tempfile.TemporaryDirectory(prefix='s1-lab-') as directory:
     p = Path(directory)
     (p / 'test.cpp').write_text(code)
     subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++17', '-Wall', '-Wextra', '-Werror',
-                    '-fsanitize=address,undefined', '-I', str(src), str(p / 'test.cpp'),
+                    '-fsanitize=address,undefined', '-I', str(src), '-I', str(library), str(p / 'test.cpp'),
                     '-o', str(p / 'test')], check=True)
     subprocess.run([str(p / 'test')], check=True)

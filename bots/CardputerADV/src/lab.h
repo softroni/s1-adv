@@ -14,37 +14,44 @@ constexpr uint8_t kSigCount = static_cast<uint8_t>(Sig::Count);
 
 // lo to hi is what a follow spreads across its output. A reading can go past it. `step` is how
 // far a value must move to count as changed, so a noisy sensor doesn't look busy.
-struct SigInfo { const char* name; const char* unit; int16_t lo, hi, step; bool onOff; };
+// `key` is the name a rule from Claude uses, so the bridge's prompt has to list the same ones.
+struct SigInfo { const char* key; const char* name; const char* unit; int16_t lo, hi, step; bool onOff; };
 constexpr SigInfo kSigs[kSigCount] = {
-    {"Distance", "cm", 2, 100, 3, false},
-    {"Temperature", "C", -10, 50, 1, false},
-    {"Humidity", "%", 0, 100, 2, false},
-    {"Knob", "%", 0, 100, 2, false},
-    {"Light", "%", 0, 100, 3, false},
-    {"Motion", "", 0, 1, 1, true},
-    {"Stick X", "", -100, 100, 8, false},
-    {"Stick Y", "", -100, 100, 8, false},
-    {"Stick button", "", 0, 1, 1, true},
-    {"Tilt", "deg", -90, 90, 5, false},
-    {"Satellites", "", 0, 32, 1, false},
+    {"distance", "Distance", "cm", 2, 100, 3, false},
+    {"temperature", "Temperature", "C", -10, 50, 1, false},
+    {"humidity", "Humidity", "%", 0, 100, 2, false},
+    {"knob", "Knob", "%", 0, 100, 2, false},
+    {"light", "Light", "%", 0, 100, 3, false},
+    {"motion", "Motion", "", 0, 1, 1, true},
+    {"stick_x", "Stick X", "", -100, 100, 8, false},
+    {"stick_y", "Stick Y", "", -100, 100, 8, false},
+    {"stick_button", "Stick button", "", 0, 1, 1, true},
+    {"tilt", "Tilt", "deg", -90, 90, 5, false},
+    {"satellites", "Satellites", "", 0, 32, 1, false},
 };
 constexpr const SigInfo& info(Sig sig) { return kSigs[static_cast<uint8_t>(sig)]; }
 
 // --- What can be driven ---------------------------------------------------------------------
-enum class Out : uint8_t { Servo, StripColor, StripBright, StripLength, Relay1, Relay2, Led, Tone, Count };
+// New outputs go at the end, because saved rules store these numbers.
+enum class Out : uint8_t { Servo, StripColor, StripBright, StripLength, Relay1, Relay2, Led, Tone, LampPower,
+                           LampBright, AcTcl, AcDaikin, Count };
 constexpr uint8_t kOutCount = static_cast<uint8_t>(Out::Count);
 
 constexpr int kStripLeds = 30;
-struct OutInfo { const char* name; const char* unit; int16_t lo, hi, step; bool onOff; };
+struct OutInfo { const char* key; const char* name; const char* unit; int16_t lo, hi, step; bool onOff; };
 constexpr OutInfo kOuts[kOutCount] = {
-    {"Servo", "deg", 0, 180, 5, false},
-    {"Strip color", "", 0, 359, 15, false},
-    {"Strip bright", "%", 0, 100, 5, false},
-    {"Strip length", "LEDs", 0, kStripLeds, 1, false},
-    {"Relay 1", "", 0, 1, 1, true},
-    {"Relay 2", "", 0, 1, 1, true},
-    {"Built-in LED", "", 0, 359, 15, false},
-    {"Speaker", "Hz", 200, 2000, 50, false},
+    {"servo", "Servo", "deg", 0, 180, 5, false},
+    {"strip_color", "Strip color", "", 0, 359, 15, false},
+    {"strip_bright", "Strip bright", "%", 0, 100, 5, false},
+    {"strip_length", "Strip length", "LEDs", 0, kStripLeds, 1, false},
+    {"relay_1", "Relay 1", "", 0, 1, 1, true},
+    {"relay_2", "Relay 2", "", 0, 1, 1, true},
+    {"led", "Built-in LED", "", 0, 359, 15, false},
+    {"speaker", "Speaker", "Hz", 200, 2000, 50, false},
+    {"lamp_power", "Lamp power", "", 0, 1, 1, true},
+    {"lamp_bright", "Lamp bright", "%", 0, 100, 5, false},
+    {"ac_tcl", "TCL AC", "", 0, 1, 1, true},
+    {"ac_daikin", "Daikin AC", "", 0, 1, 1, true},
 };
 constexpr const OutInfo& info(Out out) { return kOuts[static_cast<uint8_t>(out)]; }
 
@@ -100,10 +107,48 @@ class Inputs {
     r.live = false;
     r.moved = false;
   }
+  void adopt(Sig sig, const Reading& reading) { mReadings[static_cast<uint8_t>(sig)] = reading; }
   const Reading& get(Sig sig) const { return mReadings[static_cast<uint8_t>(sig)]; }
 
  private:
   Reading mReadings[kSigCount];
+};
+
+// Practice stands in for sensors from the keyboard. Its readings sit apart from the real ones, so
+// a live sensor underneath can't look like a change, and going back loses nothing.
+class Practice {
+ public:
+  void clear() { *this = Practice{}; }
+  bool faking(Sig sig) const { return mOn[static_cast<uint8_t>(sig)]; }
+  bool any() const {
+    for (bool on : mOn) if (on) return true;
+    return false;
+  }
+  // The first press starts from the real reading, or the middle of the range without one.
+  void nudge(Sig sig, int direction, const Inputs& real, uint32_t now) {
+    const SigInfo& s = info(sig);
+    const uint8_t index = static_cast<uint8_t>(sig);
+    if (!mOn[index]) {
+      const Reading& reading = real.get(sig);
+      mOn[index] = true;
+      mInputs.set(sig, reading.live ? reading.value : static_cast<int16_t>((s.lo + s.hi) / 2), now);
+    }
+    const int16_t was = mInputs.get(sig).value;
+    if (s.onOff) {
+      mInputs.set(sig, was ? 0 : 1, now);
+      return;
+    }
+    const int jump = (s.hi - s.lo) / 20;
+    const int size = jump > s.step ? jump : s.step;
+    mInputs.set(sig, clampTo<int16_t>(static_cast<int16_t>(was + direction * size), s.lo, s.hi), now);
+  }
+  void overlay(Inputs& view) const {
+    for (uint8_t i = 0; i < kSigCount; ++i) if (mOn[i]) view.adopt(static_cast<Sig>(i), mInputs.get(static_cast<Sig>(i)));
+  }
+
+ private:
+  bool mOn[kSigCount] = {};
+  Inputs mInputs;
 };
 
 // --- Rules ----------------------------------------------------------------------------------
@@ -240,6 +285,128 @@ inline Rule starterRule() {
   return rule;
 }
 
+// --- Recipes ----------------------------------------------------------------------------------
+struct Recipe {
+  const char* name;
+  const char* about;
+  uint16_t holdMs;
+  Cond when;
+  Action first;
+  bool second;
+  Action then;
+};
+constexpr Action setTo(Out out, int16_t value) { return Action{out, How::Set, value, Sig::Knob}; }
+constexpr Action follow(Out out, Sig source) { return Action{out, How::Follow, 0, source}; }
+constexpr Action oppose(Out out, Sig source) { return Action{out, How::FollowBack, 0, source}; }
+constexpr int kRecipeCount = 10;
+constexpr Recipe kRecipes[kRecipeCount] = {
+    {"Knob to servo", "Turn the knob and the servo follows", 2000, {Sig::Knob, Op::Changes, 0},
+     follow(Out::Servo, Sig::Knob), false, {}},
+    {"Stick steers", "Push the joystick to aim the servo", 1000, {Sig::StickX, Op::Changes, 0},
+     follow(Out::Servo, Sig::StickX), false, {}},
+    {"Distance bar", "Closer lights more of the strip", 500, {Sig::Distance, Op::Below, 100},
+     oppose(Out::StripLength, Sig::Distance), false, {}},
+    {"Air theremin", "Move your hand to change the pitch", 0, {Sig::Distance, Op::Below, 60},
+     oppose(Out::Tone, Sig::Distance), false, {}},
+    {"Night light", "Warm strip when the room goes dark", 5000, {Sig::Light, Op::Below, 20},
+     setTo(Out::StripColor, 30), false, {}},
+    {"Motion alarm", "Someone moves: red strip and a beep", 3000, {Sig::Motion, Op::Above, 0},
+     setTo(Out::StripColor, 0), true, setTo(Out::Tone, 880)},
+    {"Fan for damp", "Humid air closes relay 1", 5000, {Sig::Humidity, Op::Above, 60},
+     setTo(Out::Relay1, 1), true, setTo(Out::Led, 200)},
+    {"Tilt to servo", "Tip the Cardputer to turn the servo", 500, {Sig::Tilt, Op::Changes, 0},
+     follow(Out::Servo, Sig::Tilt), false, {}},
+    {"Dark lamp", "Dark room turns the smartLamp on", 10000, {Sig::Light, Op::Below, 20},
+     setTo(Out::LampPower, 1), false, {}},
+    {"Hot room", "Over 28 C turns the TCL AC on", 30000, {Sig::Temperature, Op::Above, 28},
+     setTo(Out::AcTcl, 1), false, {}},
+};
+inline Rule recipeRule(int index) {
+  const Recipe& recipe = kRecipes[index];
+  Rule rule;
+  strncpy(rule.name, recipe.name, kNameChars);
+  rule.name[kNameChars] = '\0';
+  rule.holdMs = recipe.holdMs;
+  rule.conds = 1;
+  rule.cond[0] = recipe.when;
+  rule.actions = recipe.second ? 2 : 1;
+  rule.action[0] = recipe.first;
+  rule.action[1] = recipe.then;
+  return rule;
+}
+
+// --- Rules that arrive from Claude ------------------------------------------------------------
+// Everything here came from a language model over the network, so a word that doesn't match is
+// a refusal, not a guess. A rule that gets through still waits for a press of Enter.
+inline bool sigFromKey(const char* key, Sig& out) {
+  for (uint8_t i = 0; key && i < kSigCount; ++i) {
+    if (strcmp(key, kSigs[i].key) == 0) {
+      out = static_cast<Sig>(i);
+      return true;
+    }
+  }
+  return false;
+}
+inline bool outFromKey(const char* key, Out& out) {
+  for (uint8_t i = 0; key && i < kOutCount; ++i) {
+    if (strcmp(key, kOuts[i].key) == 0) {
+      out = static_cast<Out>(i);
+      return true;
+    }
+  }
+  return false;
+}
+class Draft {
+ public:
+  Rule rule;
+  bool ok = true;
+
+  void name(const char* text) {
+    size_t length = 0;
+    for (const char* c = text; c && *c && length < kNameChars; ++c) {
+      const bool word = (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') || *c == ' ';
+      if (word) rule.name[length++] = *c;
+    }
+    rule.name[length] = '\0';
+  }
+  void hold(int ms) { rule.holdMs = static_cast<uint16_t>(clampTo<int>(ms, 0, kMaxHoldMs)); }
+  void addCond(const char* sensor, const char* test, int value) {
+    Cond cond;
+    if (rule.conds >= kMaxConds || !sigFromKey(sensor, cond.sig) || !test) { ok = false; return; }
+    const SigInfo& s = info(cond.sig);
+    if (strcmp(test, "changes") == 0) cond.op = Op::Changes;
+    else if (strcmp(test, "on") == 0 && s.onOff) setOnOff(cond, true);
+    else if (strcmp(test, "off") == 0 && s.onOff) setOnOff(cond, false);
+    else if ((strcmp(test, "under") == 0 || strcmp(test, "over") == 0) && !s.onOff) {
+      cond.op = test[0] == 'u' ? Op::Below : Op::Above;
+      cond.value = clampTo<int16_t>(static_cast<int16_t>(clampTo<int>(value, -32000, 32000)), s.lo, s.hi);
+    } else {
+      ok = false;
+      return;
+    }
+    rule.cond[rule.conds++] = cond;
+  }
+  void addSet(const char* output, int value) {
+    Action action;
+    if (rule.actions >= kMaxActions || !outFromKey(output, action.out)) { ok = false; return; }
+    const OutInfo& o = info(action.out);
+    action.how = How::Set;
+    action.value = clampTo<int16_t>(static_cast<int16_t>(clampTo<int>(value, -32000, 32000)), o.lo, o.hi);
+    rule.action[rule.actions++] = action;
+  }
+  void addFollow(const char* output, const char* sensor, bool backwards) {
+    Action action;
+    if (rule.actions >= kMaxActions || !outFromKey(output, action.out) || !sigFromKey(sensor, action.source) ||
+        info(action.out).onOff) {
+      ok = false;
+      return;
+    }
+    action.how = backwards ? How::FollowBack : How::Follow;
+    rule.action[rule.actions++] = action;
+  }
+  bool usable() const { return ok && rule.conds > 0 && rule.actions > 0; }
+};
+
 // --- The I/O hub's six ports ------------------------------------------------------------------
 // Nothing on a hub port can say what it is, so the owner says, and the Lab remembers.
 enum class Part : uint8_t { None, Knob, Light, Motion, Relay, Servo, Strip, Count };
@@ -267,11 +434,11 @@ struct Wiring {
 
 // --- Everything the Lab lists -----------------------------------------------------------------
 enum class Dev : uint8_t { Ultrasonic, Env, Joystick, Knob, Light, Motion, Relay, Servo, Strip, Hub, Nfc, Gps, Tilt,
-                           Led, Speaker, Count };
+                           Led, Speaker, Lamp, Ac, Count };
 constexpr uint8_t kDevCount = static_cast<uint8_t>(Dev::Count);
 constexpr const char* kDevNames[kDevCount] = {"Ultrasonic", "ENV III", "Joystick 2", "Mini Angle", "Light", "PIR motion",
                                               "2 relays", "Servo", "LED strip", "I/O hub", "NFC", "LoRa Cap GPS",
-                                              "Tilt", "Cardputer LED", "Speaker"};
+                                              "Tilt", "Cardputer LED", "Speaker", "smartLamp", "IR for AC"};
 
 // I2C units found by asking. The Light unit is analog, but the digital one (DLight) answers here.
 enum class Unit : uint8_t { Ultrasonic, Env, Joystick, Hub, Nfc, DLight, Count };
@@ -358,6 +525,41 @@ class RelayGuard {
  private:
   bool mKnown = false, mState = false;
   uint32_t mChangedMs = 0;
+};
+
+// The lamp and the air conditioner are shared with the room, so unlike a relay they're left alone
+// until a rule asks, and only an "on" that a rule sent gets undone. They also take longer to obey.
+class RemoteSwitch {
+ public:
+  // Whether to send now, and what. A change that's too soon is asked for again next pass.
+  bool update(bool driven, bool wanted, uint32_t now, uint32_t gapMs, bool& send) {
+    if (mEver && now - mSentMs < gapMs) return false;
+    if (driven) {
+      if (mHeld && wanted == mState) return false;
+      mHeld = true;
+      mState = wanted;
+    } else {
+      if (!mHeld) return false;
+      mHeld = false;
+      if (!mState) return false;
+      mState = false;
+    }
+    mEver = true;
+    mSentMs = now;
+    send = mState;
+    return true;
+  }
+  // Leaving can't wait for the gap. Says whether an "off" has to go out now.
+  bool release() {
+    const bool undo = mHeld && mState;
+    mHeld = false;
+    mState = false;
+    return undo;
+  }
+
+ private:
+  bool mHeld = false, mState = false, mEver = false;
+  uint32_t mSentMs = 0;
 };
 
 // --- Saving ----------------------------------------------------------------------------------

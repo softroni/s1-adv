@@ -35,6 +35,7 @@ struct DeviceActionCatalogEntry {
 constexpr const char* kDeviceActionCatalogVersion = "2026-05-03.2";
 constexpr DeviceActionCatalogEntry kDeviceActionCatalog[] = {
     {"focus.start", "start focus", "set pomodoro to 45 minutes"},
+    {"lab.rule", "make a Lab rule", "when I wave, turn the strip red"},
     {"focus.pause", "pause focus", "pause focus"},
     {"focus.resume", "resume focus", "resume focus"},
     {"focus.reset", "reset focus", "reset pomodoro"},

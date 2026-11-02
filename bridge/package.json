@@ -15,7 +15,7 @@
     "publish:firmware": "node scripts/publish-firmware.mjs",
     "enqueue:ota-install": "node scripts/enqueue-ota-install.mjs",
     "test:upstream": "node --test src/upstream-client.test.mjs",
-    "test:claude-code": "node --test src/claude-code-client.test.mjs src/live-activity.test.mjs src/weather.test.mjs src/kokoro-tts.test.mjs src/firmware-publish.test.mjs",
+    "test:claude-code": "node --test src/lab-rule.test.mjs src/claude-code-client.test.mjs src/live-activity.test.mjs src/weather.test.mjs src/kokoro-tts.test.mjs src/firmware-publish.test.mjs",
     "test:install": "node --test src/install.test.mjs src/plugin-service.test.mjs src/firmware-automation.test.mjs",
     "setup": "node scripts/setup.mjs",
     "check:package": "node scripts/check-package.mjs",

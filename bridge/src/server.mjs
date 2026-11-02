@@ -286,8 +286,9 @@ function authErrorPayload(message) {
   };
 }
 
-const DEVICE_ACTION_CATALOG_VERSION = "2026-10-17.1";
+const DEVICE_ACTION_CATALOG_VERSION = "2026-11-01.1";
 const DEVICE_ACTION_CATALOG = [
+  { type: "lab.rule", group: "lab", description: "Offer the owner a rule joining sensors to outputs", example: "when I wave, turn the strip red" },
   { type: "focus.start", group: "focus", description: "Start or resume focus timer", example: "start pomodoro for 45 minutes" },
   { type: "focus.pause", group: "focus", description: "Pause a running focus timer", example: "pause focus" },
   { type: "focus.resume", group: "focus", description: "Resume paused focus timer", example: "resume focus" },
@@ -375,9 +376,29 @@ const CARDPUTER_FIRMWARE_CAPABILITIES = {
   ]
 };
 
+// The sensor and output names must match kSigs and kOuts in bots/CardputerADV/src/lab.h.
+export const LAB_RULE_POLICY =
+  "When the user describes something the Cardputer's sensors should do, like \"when I wave, turn the strip red\", " +
+  "reply briefly and append one lab.rule action. Example: " +
+  "[[cardputer_actions:[{\"type\":\"lab.rule\",\"name\":\"Wave red\",\"any\":true,\"hold_ms\":2000," +
+  "\"when\":[{\"sensor\":\"distance\",\"test\":\"under\",\"value\":30}]," +
+  "\"do\":[{\"output\":\"strip_color\",\"set\":0},{\"output\":\"servo\",\"follow\":\"knob\"}]}]]] " +
+  "Sensors: distance (cm), temperature (C), humidity (%), knob (%), light (%), tilt (degrees), satellites, " +
+  "stick_x and stick_y (-100 to 100), and motion and stick_button, which are on or off. " +
+  "A test is under or over with a value, on or off for the on or off sensors, or changes. " +
+  "Outputs with their set values: servo (0 to 180), strip_color and led (hue: red 0, orange 30, yellow 60, green 120, cyan 180, blue 240, purple 280, pink 330), " +
+  "strip_bright and lamp_bright (0 to 100), strip_length (0 to 30), speaker (200 to 2000 Hz), " +
+  "and relay_1, relay_2, lamp_power, ac_tcl and ac_daikin (1 or 0). " +
+  "Each do line has set, or follow or oppose with a sensor name, except the 1 or 0 outputs, which can only set. " +
+  "Use at most 3 when lines and 3 do lines, any false when all must be true, and a name of 15 letters at most. " +
+  "A wave or a hand means distance under 30. hold_ms is how long it keeps going afterwards, up to 30000. " +
+  "The owner reviews every rule before it is saved, so never say it is running.";
+
 const DEVICE_ACTION_TYPES = new Set(DEVICE_ACTION_CATALOG.map((action) => action.type));
 
 const DEVICE_UI_MODES = new Set([
+  "lab",
+  "rules",
   "home",
   "pulse",
   "chat",
@@ -416,7 +437,7 @@ function normalizeDeviceActionType(value) {
   return String(value || "").trim().toLowerCase().replace(/_/gu, ".");
 }
 
-function sanitizeDeviceAction(raw) {
+export function sanitizeDeviceAction(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return null;
   }
@@ -491,6 +512,34 @@ function sanitizeDeviceAction(raw) {
     action.value = Boolean(raw.value ?? raw.enabled);
   } else if (type === "settings.set_ota_min_battery") {
     action.value = clampNumber(raw.value ?? raw.percent, 5, 95, 40);
+  } else if (type === "lab.rule") {
+    // Only the shape is checked here. The device refuses any name it doesn't know.
+    const lines = (value) => (Array.isArray(value) ? value : []).filter((line) => line && typeof line === "object").slice(0, 3);
+    const number = (value) => clampNumber(value, -32000, 32000, 0);
+    action.name = boundedString(raw.name, 15);
+    action.any = raw.any !== false;
+    action.hold_ms = clampNumber(raw.hold_ms, 0, 30000, 2000);
+    action.when = lines(raw.when).map((line) => {
+      const out = { sensor: boundedString(line.sensor, 16), test: boundedString(line.test, 8) };
+      if (Object.hasOwn(line, "value")) {
+        out.value = number(line.value);
+      }
+      return out;
+    });
+    action.do = lines(raw.do).map((line) => {
+      const out = { output: boundedString(line.output, 16) };
+      if (line.follow) {
+        out.follow = boundedString(line.follow, 16);
+      } else if (line.oppose) {
+        out.oppose = boundedString(line.oppose, 16);
+      } else if (Object.hasOwn(line, "set")) {
+        out.set = number(line.set);
+      }
+      return out;
+    });
+    if (!action.when.length || !action.do.length) {
+      return null;
+    }
   } else if (type === "topic.open") {
     if (Object.hasOwn(raw, "index")) {
       action.index = clampNumber(raw.index, 0, 999, 0);
@@ -597,7 +646,7 @@ function stripInlineDeviceActionMarkers(text, addActions) {
   return output;
 }
 
-function extractDeviceActionsFromText(input) {
+export function extractDeviceActionsFromText(input) {
   let visibleText = String(input || "");
   const actions = [];
   const addActions = (jsonText) => {
@@ -688,7 +737,8 @@ function buildDeviceActionPolicyText() {
     `Examples: ${examples}. ` +
     "audio.play and voice.play only play existing local assets or voice notes and must include index, query, or path. " +
     "If the user asks you to say or test an arbitrary spoken phrase, do not use audio.play or voice.play; put the phrase in the visible reply because reply_audio will synthesize it. " +
-    "Do not emit device_actions for normal conversation. Do not invent unsupported actions. Use settings actions when the user asks to change device preferences."
+    "Do not emit device_actions for normal conversation. Do not invent unsupported actions. Use settings actions when the user asks to change device preferences. " +
+    LAB_RULE_POLICY
   );
 }
 

@@ -12,6 +12,7 @@ constexpr uint32_t kLabHubReplyUs = 150;   // The hub reads its ADC when it sees
 constexpr uint32_t kLabProbeMs = 150, kLabEnvMs = 1000, kLabEnvWaitMs = 20, kLabStickMs = 50;
 constexpr uint32_t kLabKnobMs = 40, kLabLightMs = 200, kLabMotionMs = 100, kLabTiltMs = 100;
 constexpr uint32_t kLabServoGapMs = 40, kLabStripGapMs = 50, kLabLedGapMs = 50;
+constexpr uint32_t kLabLampGapMs = 500, kLabAcGapMs = 3000;  // A remote command takes a while to act.
 constexpr uint32_t kLabRedrawMs = 100, kLabSampleMs = 250, kLabAwakeMs = 1000;
 constexpr uint32_t kLabFarthestMm = 4500;
 constexpr uint32_t kLabDLightLuxForFull = 1000;
@@ -26,6 +27,7 @@ constexpr const char* kLabPath = "/lab/rules.dat";
 constexpr const char* kLabNewPath = "/lab/rules.new";
 
 void serviceLabTests();
+void serviceLabSay();
 void labEnterView(UiMode mode);
 
 enum class LabStripTest : uint8_t { Solid, Rainbow, Chase, Count };
@@ -67,6 +69,8 @@ pbhub::Hub<LabBus> gLabHub(gLabBus);
 lab::Book gLabBook;
 bool gLabBookRead = false, gLabSaved = true;
 lab::Inputs gLabInputs;
+lab::Inputs gLabSeen;              // The readings with any practice values on top, for rules and the view.
+lab::Practice gLabPractice;
 lab::RuleState gLabStates[lab::kMaxRules];
 lab::Drive gLabDrive[lab::kOutCount];
 lab_gps::Parser gLabGps;
@@ -95,6 +99,9 @@ bool gLabStripKnown = false;
 lab::RelayGuard gLabRelays[2];
 int gLabLedSent = -1;
 bool gLabToneOn = false;
+lab::RemoteSwitch gLabLamp, gLabAcs[2];
+int gLabLampBrightSent = -1;
+uint32_t gLabLampBrightMs = 0;
 LabStripTest gLabStripTest = LabStripTest::Solid;
 int gLabRainbowNext = 0, gLabChaseAt = -1;
 uint32_t gLabChaseMs = 0;
@@ -413,9 +420,40 @@ void labWriteTone() {
   }
   gLabToneOn = true;
 }
+void labSendLamp(bool on) {
+  gSmartLamp.power = on;
+  smartLampSendControl(smartLampControlPacket(on ? 1 : 0), on ? "Lamp on" : "Lamp off");
+}
+void labSendAc(int which, bool on) {
+  if (which == 0) {
+    gTclPower = on;
+    sendTclAcState(on ? "Rule on" : "Rule off");
+  } else {
+    gDaikinPower = on;
+    sendDaikinAcState(on ? "Rule on" : "Rule off");
+  }
+}
+void labWriteRemotes(uint32_t now) {
+  bool send = false;
+  const lab::Drive& power = gLabDrive[static_cast<uint8_t>(lab::Out::LampPower)];
+  if (gLabLamp.update(power.on, power.value > 0, now, kLabLampGapMs, send)) labSendLamp(send);
+  const lab::Drive& bright = gLabDrive[static_cast<uint8_t>(lab::Out::LampBright)];
+  if (bright.on && bright.value != gLabLampBrightSent && now - gLabLampBrightMs >= kLabLampGapMs) {
+    gLabLampBrightMs = now;
+    gLabLampBrightSent = bright.value;
+    const int level = lab::mapRange(bright.value, 0, 100, 0, 255);
+    gSmartLamp.brightness = static_cast<uint8_t>(level);
+    smartLampSendControl("GL,4,2," + String(level), "Lamp " + String(int(bright.value)) + "%");
+  }
+  for (int i = 0; i < 2; ++i) {
+    const lab::Drive& ac = gLabDrive[static_cast<uint8_t>(i == 0 ? lab::Out::AcTcl : lab::Out::AcDaikin)];
+    if (gLabAcs[i].update(ac.on, ac.value > 0, now, kLabAcGapMs, send)) labSendAc(i, send);
+  }
+}
 void labWriteOutputs(uint32_t now) {
   labWriteLed(now);
   labWriteTone();
+  labWriteRemotes(now);
   if (!labFound(lab::Unit::Hub) || !gLabHubReady) return;
   labWriteServo(now);
   if (labFound(lab::Unit::Hub)) labWriteStrip(now);
@@ -446,6 +484,10 @@ void labReleaseOutputs() {
   gLabLedSent = -1;
   if (gLabToneOn) M5Cardputer.Speaker.stop(kLabToneChannel);
   gLabToneOn = false;
+  // Only what a rule turned on goes back off. The lamp and the AC aren't only the Lab's.
+  if (gLabLamp.release()) labSendLamp(false);
+  gLabLampBrightSent = -1;
+  for (int i = 0; i < 2; ++i) if (gLabAcs[i].release()) labSendAc(i, false);
 }
 
 // --- Saving ----------------------------------------------------------------------------------
@@ -510,10 +552,12 @@ void labHistorySample(uint32_t now) {
 void labStopPlaying() {
   gLabPlaying = false;
   gLabPaused = false;
+  gLabPractice.clear();
   labReleaseOutputs();
 }
 void labPlay() {
   for (lab::RuleState& state : gLabStates) state = lab::RuleState{};
+  gLabPractice.clear();
   labReleaseOutputs();
   gLabPlaying = true;
   gLabPaused = false;
@@ -549,8 +593,12 @@ void labKeepAwake(uint32_t now) {
   gLabAwakeMs = now;
   handleScreensaverWake();
 }
+// Rules react to sensors, so nothing else should hold up the loop while they play. Before that
+// the Lab has to stay reachable, because a spoken rule comes back as a reply.
+bool labAllowsNetwork() { return !gLabPlaying; }
 void serviceLab() {
   if (!labMode(gUiMode) || !gLabOpen) return;
+  serviceLabSay();
   // Nothing should move behind the menu, where it can't be seen or stopped.
   if (gLauncherVisible) {
     if (!gLabBehindMenu) {
@@ -573,10 +621,12 @@ void serviceLab() {
   labReadHubParts(now);
   labReadTilt(now);
   labReadGps(now);
+  gLabSeen = gLabInputs;
+  gLabPractice.overlay(gLabSeen);
   labHistorySample(now);
   serviceLabTests();
   if (gLabPlaying && !gLabPaused) {
-    lab::step(gLabBook.rules, gLabBook.count, gLabStates, gLabInputs, now, gLabDrive);
+    lab::step(gLabBook.rules, gLabBook.count, gLabStates, gLabSeen, now, gLabDrive);
     labKeepAwake(now);
   } else if (gLabPlaying) {
     labDriveClear();

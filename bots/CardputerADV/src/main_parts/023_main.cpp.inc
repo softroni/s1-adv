@@ -140,6 +140,16 @@ bool executeDeviceAction(JsonObjectConst action) {
     return false;
   }
 
+  if (type == "lab.rule") {
+    lab::Rule rule;
+    if (!lab::ruleFromJson(action, rule)) {
+      appendRuntimeLog("LAB", "rule from Claude refused", true);
+      return false;
+    }
+    labOfferRule(rule);
+    return true;
+  }
+
   String petType = type;
   petType.replace("_", ".");
   if (petType == "pet.care" || petType == "tama.care" || petType == "tamagotchi.care") {
