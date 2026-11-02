@@ -196,6 +196,24 @@ ENV III, Joystick 2 or NFC unit can't share the port with these, even through th
 Mini Angle on the same hub stops them answering at all. If an I2C unit is plugged in, those screens
 say so.
 
+Most parts have more pages: a dot under the title shows which you're on. Left and right turn the
+page, or **N** on the Servo and Speaker, where the arrows are already used.
+
+| Part | Pages |
+| --- | --- |
+| Ultrasonic | Live, parking sensor (B for sound), graph |
+| ENV III | Live, comfort map, graph (T swaps the reading) |
+| Joystick 2 | Live, draw (press the stick to clear), target game |
+| Mini Angle | Live, graph, steady hand game |
+| Light | Live, sky, graph |
+| PIR motion | Live, guard alarm (G arms it, after 5 seconds), graph |
+| Tilt | Live, spirit level, roll the ball |
+| Servo | Gauge, moves (up and down pick, left and right set the speed, Enter runs it) |
+| Speaker | Tone, piano (1 to 8 play) |
+
+**D** on the Devices list opens the **Dashboard**: every live sensor at once, each with a small graph
+of its last minute. A part on the I/O hub joins it once you've opened that part.
+
 To use more parts at once, plug the I/O hub into the Grove port, and use any of its six ports for
 any of these parts, one or all of them. I2C units can't go on those ports, so to add them, put the
 1-to-3 hub in front of it: its other two sockets take any two of them.

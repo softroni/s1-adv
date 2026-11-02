@@ -18,6 +18,7 @@ constexpr uint32_t kLabServoGapMs = 40, kLabStripGapMs = 50, kLabLedGapMs = 50;
 constexpr uint32_t kLabLampGapMs = 500, kLabAcGapMs = 3000;  // A remote command takes a while to act.
 constexpr uint32_t kLabRedrawMs = 100, kLabSampleMs = 250, kLabAwakeMs = 1000;
 constexpr uint32_t kLabWireCheckMs = 400, kLabRescanMs = 3000;
+constexpr uint32_t kLabTrendMs = 2000;
 constexpr uint16_t kLabBusHighRaw = 3900;  // Above any part's own output: I2C pull-ups hold it here.
 constexpr uint8_t kLabSilentChecks = 3;  // In a row, because a knob near the logic threshold can fool one.
 constexpr uint8_t kLabSonicFailsToLose = 4;  // Bad transfers in a row. One lost echo isn't an unplugged unit.
@@ -88,6 +89,9 @@ bool gLabBookRead = false, gLabSaved = true;
 lab::Inputs gLabInputs;
 lab::Inputs gLabSeen;              // The readings with any practice values on top, for rules and the view.
 lab::Practice gLabPractice;
+lab::Trends gLabTrends;
+uint32_t gLabTrendMs = 0;
+int16_t gLabTiltSide = 0;          // The other axis, for the spirit level. Rules only use the front-back one.
 lab::RuleState gLabStates[lab::kMaxRules];
 uint16_t gLabSaidFires[lab::kMaxRules] = {};  // How many of each rule's firings have been spoken.
 uint8_t gLabNamed = 0;             // A bit for each rule whose name has been said while playing.
@@ -381,6 +385,7 @@ void labReadTilt(uint32_t now) {
   float ax = 0.0f, ay = 0.0f, az = 0.0f;
   if (!M5.Imu.getAccel(&ax, &ay, &az)) return;
   gLabInputs.set(lab::Sig::Tilt, static_cast<int16_t>(asinf(clampValue(ay, -1.0f, 1.0f)) * 57.3f), now);
+  gLabTiltSide = static_cast<int16_t>(asinf(clampValue(ax, -1.0f, 1.0f)) * 57.3f);
 }
 void labReadGps(uint32_t now) {
   for (int i = 0; i < kLabGpsBytesPerPass && Serial1.available() > 0; ++i) {
@@ -922,6 +927,7 @@ void labPlay() {
 }
 void beginLab() {
   labReadBook();
+  gLabTrends.clear();
   for (bool& used : gLabPartUsed) used = false;
   labDriveClear();
   labForgetOutputs();
@@ -991,6 +997,10 @@ void serviceLab() {
   gLabSeen = gLabInputs;
   gLabPractice.overlay(gLabSeen);
   labHistorySample(now);
+  if (now - gLabTrendMs >= kLabTrendMs) {
+    gLabTrendMs = now;
+    gLabTrends.sample(gLabInputs);
+  }
   serviceLabTests();
   if (gLabPlaying && !gLabPaused) {
     lab::step(gLabBook.rules, gLabBook.count, gLabStates, gLabSeen, now, gLabDrive, labNamedNow());

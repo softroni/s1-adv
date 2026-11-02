@@ -320,6 +320,21 @@ void testSaving(){
    uint8_t old[kFileBytes];std::memcpy(old,c,kHeaderBytes);std::memcpy(old+kHeaderBytes,c+kHeaderBytes,kOldRuleBytes);std::memcpy(old+kHeaderBytes+kOldRuleBytes,c+kHeaderBytes+kRuleBytes,kOldRuleBytes);old[3]=2;
    const size_t oldSize=kHeaderBytes+2*kOldRuleBytes+2;const uint16_t k=checksum(old,oldSize-2);old[oldSize-2]=uint8_t(k&255);old[oldSize-1]=uint8_t(k>>8);
    Book o;assert(decode(old,oldSize,o)&&o.count==2&&!std::strcmp(o.rules[1].name,"Air theremin")&&o.direct.white==Part::Knob&&o.rules[0].say[0]==0&&o.rules[1].say[0]==0);}
+  // The numbers behind the device pages.
+  {assert(parkingGapMs(100)==1000&&parkingGapMs(300)==1000&&parkingGapMs(9)==90&&parkingGapMs(8)==0&&parkingGapMs(1)==0);
+   assert(!strcmp(parkingWord(14),"Stop!")&&!strcmp(parkingWord(15),"Getting close")&&!strcmp(parkingWord(40),"All clear"));
+   assert(!strcmp(comfortWord(22,45),"Comfortable")&&!strcmp(comfortWord(17,45),"Chilly")&&!strcmp(comfortWord(28,45),"Warm")&&!strcmp(comfortWord(22,29),"Dry air")&&!strcmp(comfortWord(22,61),"Damp"));
+   assert(dewPoint(25,100)==25&&dewPoint(25,50)==15&&dewPoint(25,-5)==5);
+   assert(!strcmp(skyWord(14),"Night")&&!strcmp(skyWord(39),"Dim")&&!strcmp(skyWord(74),"Daylight")&&!strcmp(skyWord(75),"Bright sun"));
+   // A trend keeps the newest points, oldest first, and shows where a sensor was gone.
+   Trends t;Inputs in;for(int i=0;i<kTrendPoints;++i)assert(t.point(Sig::Knob,i)==0);
+   in.set(Sig::Knob,0,0);t.sample(in);in.set(Sig::Knob,100,0);t.sample(in);in.lose(Sig::Knob);t.sample(in);
+   assert(t.point(Sig::Knob,kTrendPoints-1)==0&&t.point(Sig::Knob,kTrendPoints-2)==255&&t.point(Sig::Knob,kTrendPoints-3)==1);
+   for(int i=0;i<kTrendPoints+3;++i){in.set(Sig::Knob,50,0);t.sample(in);}
+   for(int i=0;i<kTrendPoints;++i)assert(t.point(Sig::Knob,i)==128);
+   // A reading past its range stays on the graph.
+   in.set(Sig::Distance,450,0);t.sample(in);assert(t.point(Sig::Distance,kTrendPoints-1)==255);
+   t.clear();assert(t.point(Sig::Knob,0)==0);}
   // The diary keeps an hour in a line, and only what was really read.
   {Diary d;assert(d.empty());Inputs in;in.set(Sig::Distance,40,0);in.set(Sig::Motion,1,0);d.note(in);assert(!d.empty());in.set(Sig::Distance,12,100);d.note(in);in.set(Sig::Temperature,-3,100);d.note(in);in.lose(Sig::Distance);d.note(in);d.count(1,0);d.count(2,5);
    char line[200];Text t(line,sizeof(line));d.write("Nov 02 03h",t);assert(!strcmp(line,"Nov 02 03h: motion 3, rules fired 5, distance 12 to 40, temperature -3 to -3\n"));

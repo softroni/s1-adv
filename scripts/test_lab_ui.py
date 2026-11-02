@@ -96,6 +96,7 @@ struct Canvas {
   void drawRoundRect(int a, int b, int w, int h, int r, uint16_t c) { box(a, b, w, h); log("rrect_o", {a, b, w, h, r}, c); }
   void fillRoundRect(int a, int b, int w, int h, int r, uint16_t c) { box(a, b, w, h); log("rrect", {a, b, w, h, r}, c); }
   void fillRect(int a, int b, int w, int h, uint16_t c) { box(a, b, w, h); log("rect", {a, b, w, h}, c); }
+  void drawRect(int a, int b, int w, int h, uint16_t c) { box(a, b, w, h); log("rrect_o", {a, b, w, h, 0}, c); }
   void drawFastHLine(int a, int b, int w, uint16_t c) { box(a, b, w, 1); log("rect", {a, b, w, 1}, c); }
   void drawFastVLine(int a, int b, int h, uint16_t c) { box(a, b, 1, h); log("rect", {a, b, 1, h}, c); }
   void fillCircle(int a, int b, int r, uint16_t c) { on(a - r, b - r); on(a + r, b + r); log("fcircle", {a, b, r}, c); }
@@ -237,7 +238,7 @@ struct EnvSensors {
 // --- The rest of the board -----------------------------------------------------------------------
 struct { int r = 0, g = 0, b = 0; } gLed;
 void neopixelWrite(uint8_t pin, uint8_t r, uint8_t g, uint8_t b) { assert(pin == 21); gLed.r = r; gLed.g = g; gLed.b = b; }
-struct ImuClass { float ay = 0.5f; bool getAccel(float* x, float* y, float* z) { *x = 0; *y = ay; *z = 1; return true; } };
+struct ImuClass { float ax = 0, ay = 0.5f; bool getAccel(float* x, float* y, float* z) { *x = ax; *y = ay; *z = 1; return true; } };
 struct { ImuClass Imu; } M5;
 struct SpeakerClass { int stops = 0, tones = 0, queued = 0; float hz = 0;
   void stop(uint8_t) { ++stops; queued = 0; } int isPlaying(uint8_t) { return queued; }
@@ -324,7 +325,7 @@ void renderDebugOverlay() {}
 bool labMode(UiMode mode) { return mode == UiMode::LabDevices || mode == UiMode::LabRules; }
 namespace { void beginLab(); void stopLab(); }
 void setUiMode(UiMode mode) { if (labMode(gUiMode) && mode != gUiMode) stopLab(); gUiMode = mode; if (labMode(mode)) beginLab(); }
-''' + (parts / '081_main.cpp.inc').read_text() + (parts / '082_main.cpp.inc').read_text() + r'''
+''' + (parts / '081_main.cpp.inc').read_text() + (parts / '082_main.cpp.inc').read_text() + (parts / '084_main.cpp.inc').read_text() + r'''
 // --- Driving it ----------------------------------------------------------------------------------
 FILE* gDump = nullptr;
 lab::Rule gOfferSteps[4]; int gOfferStepAt = -1;
@@ -393,7 +394,7 @@ void testDevices() {
   keys("///"); assert(gHubUnit.angle[servo][1] == 105 && gLabUi.servoAngle == 105);
   keys("d"); assert(gHubUnit.angle[servo][1] == 106); keys("a,"); assert(gHubUnit.angle[servo][1] == 100);
   gLabUi.servoAngle = 112; labDriveSet(Out::Servo, 112); run(60); show("servo");
-  assert(gCanvas.shows("112") && gCanvas.shows("Watch it move"));
+  assert(gCanvas.shows("112") && gCanvas.shows("Watch it  N moves"));
   for (int i = 0; i < 60; ++i) keys("/"); assert(gHubUnit.angle[servo][1] == 180);
   for (int i = 0; i < 60; ++i) keys(","); assert(gHubUnit.angle[servo][1] == 0);
   show("servo-zero"); keys("c"); assert(gHubUnit.angle[servo][1] == 90);
@@ -471,6 +472,87 @@ void testDevices() {
   assert(labFound(Unit::DLight) && gLabLux == 600 && gLabInputs.get(Sig::Light).value == 60);
   pickDevice(Dev::Light); show("dlight"); assert(gCanvas.shows("600 lux")); esc();
   gUnits.present.erase(0x23); run(1500); assert(!labFound(Unit::DLight));
+}
+
+// Every page, played the way a person would, with the bench's fake parts.
+void testPages() {
+  setUiMode(UiMode::LabDevices); fingers(); run(500); gLabUi.view = LabView::Devices;
+  const auto flip = [](const char* scene, const char* word) { key(RIGHT); run(150); show(scene); assert(gCanvas.shows(word)); };
+  const auto tone = []() { return gLabDrive[int(Out::Tone)].on; };
+  // Arrows in a hint are drawn by hand, because text drawing skips them.
+  pickDevice(Dev::Ultrasonic); assert(gLabUi.page == 0); show("ultrasonic-paged"); assert(gCanvas.shows(" page  R reset") && !gCanvas.shows("\x1b") && !gCanvas.shows("\x1a"));
+  // Pages wrap both ways, and a part's screen always opens on its first page.
+  key(LEFT); assert(gLabUi.page == 2); key(RIGHT); assert(gLabUi.page == 0);
+  gUnits.um = 300000; run(300);
+  flip("page-parking", "PARKING"); assert(gCanvas.shows("30 cm") && gCanvas.shows("Getting close") && gCanvas.shows("B sound"));
+  assert(!tone()); key('b'); gUnits.um = 100000; run(300); int tones = 0; { bool was = false; for (int i = 0; i < 100; ++i) { run(10); tones += tone() && !was; was = tone(); } } assert(tones >= 5);
+  gUnits.um = 60000; run(300); show("page-parking-near"); assert(gCanvas.shows("Stop!") && gCanvas.shows("B quiet") && gCanvas.shows("SOUND ON")); key('b'); assert(!tone());
+  gUnits.um = 0; run(300); renderLabUi(); assert(gCanvas.shows("Nothing in range")); gUnits.um = 240000; run(300);
+  for (int i = 0; i < 20; ++i) { gUnits.um = uint32_t((30 + 20 * std::sin(i / 3.0)) * 10000); run(260); }
+  flip("page-graph", "LAST 30 SEC"); assert(gCanvas.shows("LOW") && gCanvas.shows("AVG") && gCanvas.shows("HIGH"));
+  key('r'); run(10); gUnits.um = 0; run(300); gUnits.um = 240000; esc(); assert(gLabUi.view == LabView::Devices);
+  pickDevice(Dev::Ultrasonic); assert(gLabUi.page == 0); esc();
+  // ENV III: a dot on a map of how the room feels, and either reading on the graph.
+  pickDevice(Dev::Env); run(1200); flip("page-comfort", "Comfortable"); assert(gCanvas.shows("DEW POINT"));
+  gUnits.rawHumid = 8000; run(1200); renderLabUi(); assert(gCanvas.shows("Dry air"));
+  gUnits.rawHumid = 27000; gUnits.rawTemp = 12000; run(1200); renderLabUi(); assert(gCanvas.shows("Chilly")); gUnits.rawTemp = 26000; run(1200);
+  key(RIGHT); run(300); assert(gLabHistorySig == Sig::Humidity); key('t'); run(600); assert(gLabHistorySig == Sig::Temperature); show("page-env-graph"); assert(gCanvas.shows("Temperature") && gCanvas.shows("T other reading")); esc();
+  // Joystick: drawing leaves a line, and pressing the stick clears it.
+  gUnits.stickX = 120; gUnits.stickY = 60; pickDevice(Dev::Joystick); key(RIGHT); run(800); assert(gLabPlay.trailCount > 5 && gLabPlay.penX > kLabArenaW / 2); gUnits.stickX = -100; gUnits.stickY = -90; run(500); gUnits.stickX = 40; gUnits.stickY = 120; run(600); show("page-draw"); assert(gCanvas.shows("DRAW"));
+  for (int i = 0; i < 400; ++i) run(10); assert(gLabPlay.trailCount == kLabTrailPoints);  // It keeps the newest once it's full.
+  gUnits.stickButton = 0; run(150); assert(gLabPlay.trailCount == 0); gUnits.stickButton = 1;
+  // The target counts a hit, moves, and remembers the quickest.
+  key(RIGHT); run(100); const auto aim = [](int x, int y) { gUnits.stickX = int8_t((x * 200 / 231 - 100) * 127 / 100); gUnits.stickY = int8_t((100 - y * 200 / 101) * 127 / 100); };
+  gUnits.stickX = 0; gUnits.stickY = 0; run(100); assert(gLabPlay.hits == 0 || gLabPlay.bestMs);
+  { const int before = gLabPlay.hits, x = gLabPlay.targetX, y = gLabPlay.targetY; aim(x, y); run(200); assert(gLabPlay.hits == before + 1 && gLabPlay.bestMs); assert(gLabPlay.targetX != x || gLabPlay.targetY != y); }
+  aim(gLabPlay.targetX, gLabPlay.targetY); run(100); show("page-target"); assert(gCanvas.shows("Best ") && gCanvas.shows(" HITS")); gUnits.stickX = 47; gUnits.stickY = -15; run(100); esc();
+  // Mini Angle: its own graph, then following the moving zone.
+  const int knob = ports(lab::Part::Knob); pickDevice(Dev::Knob); assert(gLabHistorySig == Sig::Knob); key(RIGHT); run(800); show("page-knob-graph"); assert(gCanvas.shows("Knob") && !gCanvas.shows("-")); key(RIGHT);
+  for (int i = 0; i < 80; ++i) { gHubUnit.analog[knob] = uint16_t((100 - gLabPlay.zone) * gLabKnobRange.top / 100); run(40); }
+  show("page-steady"); assert(gCanvas.shows("In the zone") && gLabPlay.heldMs >= 1000 && gLabPlay.bestHeldMs >= gLabPlay.heldMs);
+  gHubUnit.analog[knob] = gLabPlay.zone > 50 ? gLabKnobRange.top : 0; run(200); renderLabUi(); assert(gCanvas.shows("Find the zone") && gLabPlay.heldMs == 0 && gLabPlay.bestHeldMs >= 1000); fingers(); esc();
+  // Light: the sky follows it.
+  const int light = ports(lab::Part::Light); pickDevice(Dev::Light); key(RIGHT); gHubUnit.analog[light] = 1000; run(500); show("page-sky-night"); assert(gCanvas.shows("Night"));
+  gHubUnit.analog[light] = 450; run(500); show("page-sky-day"); assert(gCanvas.shows("Daylight")); gHubUnit.analog[light] = 0; run(500); show("page-sky-sun"); assert(gCanvas.shows("Bright sun"));
+  key(RIGHT); run(300); show("page-light-graph"); assert(gCanvas.shows("Light")); gHubUnit.analog[light] = 500; run(300); esc();
+  // PIR: arm it, walk away, and it goes off once, until told to stop.
+  const int motion = ports(lab::Part::Motion); gHubUnit.level[motion] = 0; pickDevice(Dev::Motion); key(RIGHT); run(150); show("page-guard"); assert(gCanvas.shows("GUARD") && gCanvas.shows("G arm it"));
+  key('g'); run(200); show("page-guard-arming"); assert(gLabPlay.guard == LabGuard::Arming && gCanvas.shows("Leave in 5"));
+  gHubUnit.level[motion] = 1; run(1000); assert(gLabPlay.guard == LabGuard::Arming); gHubUnit.level[motion] = 0;  // You get time to leave.
+  run(4200); show("page-guard-armed"); assert(gLabPlay.guard == LabGuard::Armed && gCanvas.shows("Watching") && !tone());
+  gHubUnit.level[motion] = 1; run(300); show("page-guard-tripped"); assert(gLabPlay.guard == LabGuard::Tripped && gLabPlay.trips == 1 && gCanvas.shows("Motion!") && tone());
+  gHubUnit.level[motion] = 0; run(1000); assert(gLabPlay.guard == LabGuard::Tripped && tone());  // It stays on after they've gone.
+  key('g'); assert(gLabPlay.guard == LabGuard::Off && !tone()); run(100); assert(!tone());
+  // Leaving the page stops the alarm too.
+  key('g'); gLabPlay.guardMs -= 6000; run(100); gHubUnit.level[motion] = 1; run(200); assert(tone()); key(RIGHT); assert(!tone()); gHubUnit.level[motion] = 0; run(300); assert(!tone()); show("page-motion-graph"); assert(gCanvas.shows("LAST 30 SEC")); esc();
+  // Tilt: flat is level, and rolling the ball into the hole scores.
+  M5.Imu.ax = 0; M5.Imu.ay = 0; pickDevice(Dev::Tilt); key(RIGHT); run(300); show("page-level"); assert(gCanvas.shows("Level"));
+  M5.Imu.ax = 0.34f; M5.Imu.ay = -0.26f; run(300); show("page-level-tilted"); assert(gCanvas.shows("Tilted") && gLabTiltSide == 19); key(RIGHT); run(100);
+  { const float startX = gLabPlay.ballX; run(600); assert(gLabPlay.ballX > startX); run(4000); assert(gLabPlay.ballX <= kLabArenaW - 6.0f && gLabPlay.ballX >= 5.0f && gLabPlay.ballY <= kLabArenaH - 6.0f && gLabPlay.ballY >= 5.0f); }
+  gLabPlay.targetX = int(gLabPlay.ballX); gLabPlay.targetY = int(gLabPlay.ballY); run(100); assert(gLabPlay.goals == 1); show("page-roll"); assert(gCanvas.shows("1 GOAL")); M5.Imu.ax = 0; M5.Imu.ay = 0.5f; run(200); esc();
+  // Servo: N, because its arrows turn it. A move runs by itself, and stops with the page.
+  const int servo = ports(lab::Part::Servo); pickDevice(Dev::Servo); keys("c"); key('n'); run(100); show("page-moves"); assert(gLabUi.page == 1 && gCanvas.shows("MOVES") && gCanvas.shows("Sweep") && gCanvas.shows("Tick"));
+  key(ENTER); assert(gLabPlay.moving); { std::set<int> seen; for (int i = 0; i < 100; ++i) { run(40); seen.insert(gHubUnit.angle[servo][1]); } assert(seen.size() > 10); show("page-moves-running"); assert(gCanvas.shows("MOVING")); }
+  key(ENTER); key(DOWN); key(ENTER); assert(gLabPlay.move == LabMove::Wave); { int lo = 180, hi = 0; run(2000); for (int i = 0; i < 100; ++i) { run(40); lo = std::min(lo, gHubUnit.angle[servo][1]); hi = std::max(hi, gHubUnit.angle[servo][1]); } assert(lo >= 50 && hi <= 130 && hi > lo); }
+  key(RIGHT); assert(gLabPlay.moveSpeed == 3); for (int i = 0; i < 5; ++i) key(LEFT); assert(gLabPlay.moveSpeed == 1); key(ENTER); key(DOWN); key(ENTER); assert(gLabPlay.move == LabMove::Tick); { std::set<int> seen; run(100); for (int i = 0; i < 500; ++i) { run(10); seen.insert(gHubUnit.angle[servo][1]); } assert(seen.size() >= 3 && seen.size() <= 7); for (int a : seen) assert(a % 30 == 0); }
+  key('n'); assert(gLabUi.page == 0); { const int a = gHubUnit.angle[servo][1]; run(1200); assert(gHubUnit.angle[servo][1] == a); } esc();
+  // Speaker: a piano on the number keys.
+  pickDevice(Dev::Speaker); show("speaker-paged"); assert(gCanvas.shows("N opens the piano")); key('n'); run(50); key('3'); assert(tone() && gLabDrive[int(Out::Tone)].value == 659); show("page-piano"); assert(gCanvas.shows("PIANO")); run(400); assert(!tone()); key('9'); assert(!tone()); key(ENTER); assert(!tone()); key('n'); assert(gLabUi.page == 0); esc();
+  // A page that's lost its part shows the same help as the first one.
+  pickDevice(Dev::Ultrasonic); key(RIGHT); gUnits.present.erase(0x57); run(2000); show("page-missing"); assert(gCanvas.shows("Nothing at 0x57")); gUnits.present.insert(0x57); run(2000); renderLabUi(); assert(gCanvas.shows("PARKING")); esc();
+  // Parts with one screen ignore N.
+  pickDevice(Dev::Relay); key('n'); assert(gLabUi.page == 0); esc();
+  // The Dashboard: everything live, with a graph of the last minute.
+  gLabUi.view = LabView::Devices; show("devices-dash"); assert(gCanvas.shows("D dash"));
+  key('d'); assert(gLabUi.view == LabView::Dash); for (int i = 0; i < 12; ++i) { gUnits.um = uint32_t((30 + 20 * std::sin(i)) * 10000); run(2000); } show("dash"); assert(gCanvas.shows(" LIVE") && gCanvas.shows("Distance") && gCanvas.shows("1 of 2"));
+  key(RIGHT); show("dash-2"); assert(gLabUi.dashPage == 1 && gCanvas.shows("2 of 2") && gCanvas.shows("Tilt")); key(RIGHT); assert(gLabUi.dashPage == 0); key(LEFT); assert(gLabUi.dashPage == 1);
+  assert(labAskOnScreen() && !labChangeOnScreen());
+  // An empty hub port is noise, so it stays off until the part has been opened.
+  gLabPartUsed[int(lab::Part::Knob)] = false; assert(!labDashShows(Sig::Knob) && labDashShows(Sig::Distance)); gLabPartUsed[int(lab::Part::Knob)] = true; assert(labDashShows(Sig::Knob));
+  esc(); assert(gLabUi.view == LabView::Devices);
+  // With nothing live it says what to do.
+  { const lab::Inputs kept = gLabInputs; gLabInputs = lab::Inputs{}; gLabUi.view = LabView::Dash; renderLabUi(); assert(gCanvas.shows("Nothing reading yet")); gLabInputs = kept; gLabUi.view = LabView::Devices; }
+  run(100);
 }
 
 void testMissing() {
@@ -1166,7 +1248,7 @@ void testGuards() {
 int main(int argc, char** argv) {
   if (argc > 1) gDump = std::fopen(argv[1], "w");
   for (bool& live : gLabHistoryLive) live = false;
-  testDevices(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); setUiMode(UiMode::LabRules); run(1500); testGuards();
+  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); setUiMode(UiMode::LabRules); run(1500); testGuards();
   if (gDump) std::fclose(gDump);
   std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, the lamp and AC guards, units leaving and returning, saving and damage, and every screen stays on the display");
 }

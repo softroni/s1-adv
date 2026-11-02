@@ -117,6 +117,38 @@ The dot beside each device tells you what the Lab knows:
 
 The label at the top right tells you how much the Lab really knows. **ANSWERING** means the part replied just now. **ON CH0** or **ON GROVE** says where it is. **SIGNAL SENT** means a command went out, but an output can't reply, so watch the part itself.
 
+### More pages
+
+Most parts have more than one page. The dots under the title show where you are. Left and right turn the page, or **N** on the Servo and Speaker, where the arrows already do something.
+
+<table>
+<tr>
+<td width="33%"><img src="assets/lab/dashboard.png" alt="The Dashboard, with a live value and small graph for six sensors" width="100%"><br><sub><b>Dashboard.</b> Press <b>D</b> on Devices to see everything live, with its last minute.</sub></td>
+<td width="33%"><img src="assets/lab/graph.png" alt="A full-screen graph of distance with low, average and high" width="100%"><br><sub><b>Graph.</b> The last 30 seconds, scaled to what it saw, with low, average and high.</sub></td>
+<td width="33%"><img src="assets/lab/parking.png" alt="A parking sensor at 6 cm, with every bar lit and the word Stop" width="100%"><br><sub><b>Ultrasonic: parking.</b> Bars fill as you get closer. <b>B</b> adds beeps that speed up.</sub></td>
+</tr>
+<tr>
+<td width="33%"><img src="assets/lab/comfort.png" alt="A map of temperature and humidity with a dot inside a green box" width="100%"><br><sub><b>ENV III: comfort.</b> A dot on a map of the room, and whether it feels right.</sub></td>
+<td width="33%"><img src="assets/lab/draw.png" alt="A colored line drawn across the screen" width="100%"><br><sub><b>Joystick: draw.</b> Steer a line around the screen. Press the stick to clear it.</sub></td>
+<td width="33%"><img src="assets/lab/target.png" alt="A crosshair and a red target" width="100%"><br><sub><b>Joystick: target.</b> Hit the target as fast as you can.</sub></td>
+</tr>
+<tr>
+<td width="33%"><img src="assets/lab/steady.png" alt="A dot inside a moving green zone" width="100%"><br><sub><b>Mini Angle: steady hand.</b> Follow the moving zone with the knob.</sub></td>
+<td width="33%"><img src="assets/lab/sky.png" alt="A sun in the sky at 55 percent light" width="100%"><br><sub><b>Light: sky.</b> The sky follows the reading, from stars to full sun.</sub></td>
+<td width="33%"><img src="assets/lab/guard.png" alt="A red panel saying Motion" width="100%"><br><sub><b>PIR: guard.</b> <b>G</b> arms it, gives you 5 seconds to leave, then sounds the alarm.</sub></td>
+</tr>
+<tr>
+<td width="33%"><img src="assets/lab/level.png" alt="A spirit level with the bubble off center" width="100%"><br><sub><b>Tilt: level.</b> A spirit level for both directions.</sub></td>
+<td width="33%"><img src="assets/lab/roll.png" alt="A ball and a hole" width="100%"><br><sub><b>Tilt: roll.</b> Tip the Cardputer to roll the ball into the hole.</sub></td>
+<td width="33%"><img src="assets/lab/moves.png" alt="A list of servo moves: Sweep, Wave and Tick" width="100%"><br><sub><b>Servo: moves.</b> Press <b>N</b> for ready-made motions at three speeds.</sub></td>
+</tr>
+<tr>
+<td width="33%"><img src="assets/lab/piano.png" alt="Eight piano keys with one pressed" width="100%"><br><sub><b>Speaker: piano.</b> Press <b>N</b>, then play the number keys.</sub></td>
+</tr>
+</table>
+
+Sounds and moves stop when you leave the page.
+
 ## Build a rule
 
 A rule has three pieces: what to **watch**, what to **do**, and how long to **keep going** afterwards. Open **Rules** and choose **+ New rule**. It asks one question a screen, and Esc goes back a step.

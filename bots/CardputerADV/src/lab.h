@@ -405,6 +405,46 @@ inline Rule recipeRule(int index) {
   return rule;
 }
 
+// --- What the device pages work out -----------------------------------------------------------
+constexpr int kParkingStopCm = 15, kParkingCloseCm = 40;
+// Beeps get closer together as something does, and 0 means one steady tone.
+inline uint16_t parkingGapMs(int cm) { return cm <= 8 ? 0 : static_cast<uint16_t>(clampTo(cm, 8, 100) * 10); }
+inline const char* parkingWord(int cm) { return cm < kParkingStopCm ? "Stop!" : cm < kParkingCloseCm ? "Getting close" : "All clear"; }
+
+constexpr int kComfyLowC = 18, kComfyHighC = 27, kComfyLowHumidity = 30, kComfyHighHumidity = 60;
+inline const char* comfortWord(int tempC, int humidity) {
+  if (tempC < kComfyLowC) return "Chilly";
+  if (tempC > kComfyHighC) return "Warm";
+  if (humidity < kComfyLowHumidity) return "Dry air";
+  if (humidity > kComfyHighHumidity) return "Damp";
+  return "Comfortable";
+}
+// A rule of thumb, close enough for a room, and it needs no floating point.
+inline int dewPoint(int tempC, int humidity) { return tempC - (100 - clampTo(humidity, 0, 100)) / 5; }
+inline const char* skyWord(int percent) { return percent < 15 ? "Night" : percent < 40 ? "Dim" : percent < 75 ? "Daylight" : "Bright sun"; }
+constexpr int kSteadyZone = 10;  // How far from the middle of the zone still counts, in percent.
+
+// The last minute of every sensor, in a byte each, for the Dashboard's small graphs. A point is 0
+// with no reading, or 1 to 255 across that sensor's range.
+constexpr int kTrendPoints = 30;
+class Trends {
+ public:
+  void sample(const Inputs& inputs) {
+    for (uint8_t i = 0; i < kSigCount; ++i) {
+      const Reading& reading = inputs.get(static_cast<Sig>(i));
+      mPoints[i][mAt] = reading.live ? static_cast<uint8_t>(1 + mapRange(reading.value, kSigs[i].lo, kSigs[i].hi, 0, 254)) : 0;
+    }
+    mAt = static_cast<uint8_t>((mAt + 1) % kTrendPoints);
+  }
+  // Oldest first.
+  uint8_t point(Sig sig, int index) const { return mPoints[static_cast<uint8_t>(sig)][(mAt + index) % kTrendPoints]; }
+  void clear() { *this = Trends{}; }
+
+ private:
+  uint8_t mPoints[kSigCount][kTrendPoints] = {};
+  uint8_t mAt = 0;
+};
+
 // --- Rules that arrive from Claude ------------------------------------------------------------
 // Everything here came from a language model over the network, so a word that doesn't match is
 // a refusal, not a guess. A rule that gets through still waits for a press of Enter.

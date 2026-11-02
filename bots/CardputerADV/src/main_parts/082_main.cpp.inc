@@ -23,7 +23,7 @@ constexpr uint32_t kLabBeepMs = 400;
 constexpr int kLabLastPort = pbhub::kPorts - 1;
 constexpr int kLabLedMilliamps = 33;  // M5 rates this strip at 2 A a meter, with 60 LEDs a meter.
 
-enum class LabView : uint8_t { Devices, Device, PickPort, Wiring, Rules, Wizard, Play, Recipes, Say, Offer };
+enum class LabView : uint8_t { Devices, Device, PickPort, Wiring, Rules, Wizard, Play, Recipes, Say, Offer, Dash };
 enum class LabStep : uint8_t { Sig, Op, Value, MoreConds, Join, Out, How, OutValue, Source, MoreActions, Hold, Name };
 
 // What a recording in the Lab is for, which sets the words on the screen around it.
@@ -32,6 +32,7 @@ enum class LabVoice : uint8_t { NewRule, Change, Ask, Command };
 struct LabUi {
   LabView view = LabView::Devices;
   int devRow = 0, devTop = 0;
+  int page = 0, dashPage = 0;   // Which page of a device's screen, and of the Dashboard.
   int wiringRow = 0, portRow = 0;
   int ruleRow = 0, ruleTop = 0;
   bool deleteArmed = false;
@@ -76,6 +77,18 @@ bool gLabOfferBatch = false;    // These arrived together, so they're choices, n
 int gLabOfferChanges = -1;      // The saved rule it would replace, or -1 for a new one.
 int gLabOfferNext = -1;         // What the next offer replaces. Only a change sets this.
 bool gLabVoiceSetting = false;  // Only an answer to a question asked here can move a part.
+
+// The pages themselves are in part 084.
+int labDevPages(Dev dev);
+bool labArrowsTurnPages(Dev dev);
+void labTurnPage(int delta);
+void labPageDots();
+String labPageKeys(const char* more);
+void renderLabPage(Dev dev, int page);
+void serviceLabPage(uint32_t now);
+bool labPageKey(Dev dev, char key, char lower, bool left, bool right, bool up, bool down, bool enter);
+void renderLabDash();
+int labDashPages();
 
 // --- Words ------------------------------------------------------------------------------------
 String labNumberText(int value, const char* unit, const char* degree) {
@@ -148,12 +161,41 @@ void labHead(const char* title, const uint8_t* icon, uint16_t accent, const Stri
   if (!chip.isEmpty()) labChip(chip, chipColor);
   d.drawFastHLine(0, 18, 240, accent);
 }
+// Three rows of 1, 3 and 5 pixels, or the same on its side.
+void labArrow(int x, int y, char kind) {
+  auto& d = gCanvas;
+  for (int i = 0; i < 3; ++i) {
+    if (kind == kLabArrowUpDown[0]) d.drawFastHLine(x + 2 - i, y + 1 + i, i * 2 + 1, kLabSoft);
+    else if (kind == kLabArrowUpDown[1]) d.drawFastHLine(x + 2 - i, y + 5 - i, i * 2 + 1, kLabSoft);
+    else if (kind == kLabArrowLeftRight[0]) d.drawFastVLine(x + 1 + i, y + 3 - i, i * 2 + 1, kLabSoft);
+    else d.drawFastVLine(x + 3 - i, y + 3 - i, i * 2 + 1, kLabSoft);
+  }
+}
+// Font 0 has arrows, but text drawing skips anything below a space, so they're drawn by hand.
 void labKeys(const String& text) {
   auto& d = gCanvas;
   d.setFont(&fonts::Font0);
   d.setTextColor(kLabSoft);
-  d.setCursor(3, 127);
-  d.print(text);
+  int x = 3;
+  String words;
+  const auto flush = [&]() {
+    if (words.isEmpty()) return;
+    d.setCursor(x, 127);
+    d.print(words);
+    x += d.textWidth(words);
+    words = "";
+  };
+  for (size_t i = 0; i < text.length(); ++i) {
+    const char c = text[i];
+    if (c == kLabArrowUpDown[0] || c == kLabArrowUpDown[1] || c == kLabArrowLeftRight[0] || c == kLabArrowLeftRight[1]) {
+      flush();
+      labArrow(x, 127, c);
+      x += 6;
+    } else {
+      words += c;
+    }
+  }
+  flush();
 }
 void labTextAt(const lgfx::IFont* font, int x, int y, const String& text, uint16_t color) {
   auto& d = gCanvas;
@@ -333,7 +375,7 @@ void renderLabDevices() {
     else d.drawCircle(227, y + 10, 3, dot);
   }
   labScrollBar(gLabUi.devTop, kLabListRows, lab::kDevCount, kLabListY, kLabListRows * kLabRowH - 1);
-  labKeys(String(kLabArrowUpDown) + " pick ENTER open W wiring ALT ask");
+  labKeys("ENTER open D dash W wiring ALT ask");
 }
 
 // --- A sensor's screen -------------------------------------------------------------------------
@@ -380,7 +422,7 @@ void renderLabUltrasonic() {
   labStat(170, 23, "READINGS", "8 a sec");
   labStat(170, 48, "GROVE", "0x57");
   labDrawGraph();
-  labKeys("R reset  ESC back");
+  labKeys(labPageKeys("R reset  ESC back"));
 }
 void renderLabEnv() {
   labDrawAnswering(Dev::Env);
@@ -394,7 +436,7 @@ void renderLabEnv() {
     labTextAt(&fonts::Font4, 6, 33, "--", kLabMuted);
   }
   labDrawGraph();
-  labKeys("Breathe on it to see the humidity move");
+  labKeys(labPageKeys("Breathe on it"));
 }
 void renderLabLight() {
   renderLabSensor(Dev::Light, Sig::Light);
@@ -402,19 +444,19 @@ void renderLabLight() {
     labStat(170, 23, "LIGHT", String(gLabLux) + " lux");
     labStat(170, 48, "GROVE", "0x23");
     labDrawGraph();
-    labKeys("Cover it to see it work  R reset");
+    labKeys(labPageKeys("Cover it  R reset"));
     return;
   }
   labStat(170, 23, "RAW", String(gLabLightRaw));
   labStat(170, 48, "ON", labWhere(Dev::Light));
   labDrawGraph();
-  labKeys(labOnHub(Dev::Light) ? "Cover it  F flip  P port  R reset" : "Cover it to test  F flip  R reset");
+  labKeys(labPageKeys(labOnHub(Dev::Light) ? "F flip  P port  R reset" : "Cover it  F flip  R reset"));
 }
 void renderLabTilt() {
   renderLabSensor(Dev::Tilt, Sig::Tilt);
   labStat(170, 23, "ON", "Built in");
   labDrawGraph();
-  labKeys("Tip the Cardputer  R reset");
+  labKeys(labPageKeys("Tip it  R reset"));
 }
 void renderLabMotion() {
   labDrawAnswering(Dev::Motion);
@@ -424,7 +466,7 @@ void renderLabMotion() {
   labStat(176, 23, "ON", labWhere(Dev::Motion));
   labTextAt(&fonts::Font0, 6, 54, "Stays on about 2 sec after you stop", kLabMuted);
   labDrawGraph();
-  labKeys(labOnHub(Dev::Motion) ? "Wave at it  P port  R reset  ESC back" : "Wave in front of it  R reset");
+  labKeys(labPageKeys(labOnHub(Dev::Motion) ? "Wave  P port  R reset" : "Wave at it  R reset"));
 }
 void renderLabKnob() {
   auto& d = gCanvas;
@@ -447,7 +489,7 @@ void renderLabKnob() {
   labStat(112, 54, "TURNING", turning ? "Yes" : "No", turning ? kLabGreen : TFT_WHITE);
   labStat(176, 54, "RAW", String(gLabKnobRaw));
   labStat(112, 84, "ON", labWhere(Dev::Knob));
-  labKeys(labOnHub(Dev::Knob) ? "Turn it  P port  R reset  ESC back" : "Turn it end to end to set its range");
+  labKeys(labPageKeys(labOnHub(Dev::Knob) ? "Turn it  P port  R reset" : "Turn it end to end"));
 }
 void renderLabStick() {
   auto& d = gCanvas;
@@ -465,7 +507,7 @@ void renderLabStick() {
   labStat(124, 25, "LEFT-RIGHT", String(stickX));
   labStat(124, 53, "UP-DOWN", String(stickY));
   labStat(124, 81, "BUTTON", pressed ? "Pressed" : "Up", pressed ? kLabGreen : TFT_WHITE);
-  labKeys("Move it and press it  ESC back");
+  labKeys(labPageKeys("Move it and press it"));
 }
 void renderLabServo() {
   auto& d = gCanvas;
@@ -483,7 +525,7 @@ void renderLabServo() {
   labTextAt(&fonts::Font0, 190, 102, "180", kLabSoft);
   labTextAt(&fonts::Font4, 2, 24, String(angle) + "`", TFT_WHITE);
   labStat(198, 26, "STEP", String(kLabServoStep) + "`");
-  labTextCenter(&fonts::Font0, 120, 117, gLabUi.sweeping ? "Sweeping" : "Watch it move  ALT say it", kLabAmber);
+  labTextCenter(&fonts::Font0, 120, 117, gLabUi.sweeping ? "Sweeping" : "Watch it  N moves  ALT say it", kLabAmber);
   if (labOnHub(Dev::Servo)) labKeys(String(kLabArrowLeftRight) + " turn AD fine C center S sweep P port");
   else labKeys(String(kLabArrowLeftRight) + " turn  A D fine  C center  S sweep");
 }
@@ -645,6 +687,7 @@ void renderLabSpeaker() {
   labDrawHeadFor(Dev::Speaker, kLabLime, "BUILT IN", kLabSoft);
   labTextCenter(&fonts::Font6, 120, 34, String(gLabUi.toneHz), TFT_WHITE);
   labTextCenter(&fonts::Font2, 120, 88, "Hz", kLabMuted);
+  labTextCenter(&fonts::Font0, 120, 106, "N opens the piano", kLabAmber);
   labKeys(String(kLabArrowLeftRight) + " pitch  ENTER beep  ESC back");
 }
 // Says what is wrong as far as the bus can tell: this unit, or the whole port.
@@ -710,6 +753,11 @@ void renderLabDevice() {
   const Dev dev = static_cast<Dev>(gLabUi.devRow);
   if (dev == Dev::Gps) { renderLabGps(); return; }
   if (!labDevHere(dev)) { renderLabMissing(dev); return; }
+  if (gLabUi.page) {
+    renderLabPage(dev, gLabUi.page);
+    labPageDots();
+    return;
+  }
   switch (dev) {
     case Dev::Ultrasonic: renderLabUltrasonic(); break;
     case Dev::Env: renderLabEnv(); break;
@@ -729,6 +777,7 @@ void renderLabDevice() {
     default: renderLabSpeaker(); break;
   }
   if (dev != Dev::Servo && labTakesVoiceSet(dev)) labTextRight(&fonts::Font0, 236, 116, "ALT say it", kLabMuted);
+  labPageDots();
 }
 
 // --- Rules list --------------------------------------------------------------------------------
@@ -1294,6 +1343,7 @@ void renderLabUi() {
     case LabView::Recipes: renderLabRecipes(); break;
     case LabView::Say: renderLabSay(); break;
     case LabView::Offer: renderLabOffer(); break;
+    case LabView::Dash: renderLabDash(); break;
     default: renderLabFlow(gLabUi.playRule); break;
   }
   renderLauncherOverlay();
@@ -1303,6 +1353,7 @@ void renderLabUi() {
 // --- Keys ----------------------------------------------------------------------------------------
 void labOpenDevice(Dev dev) {
   gLabUi.view = LabView::Device;
+  gLabUi.page = 0;
   gLabPartUsed[static_cast<uint8_t>(lab::partFor(dev))] = true;
   gLabUi.sweeping = false;
   gLabUi.ledOn = false;
@@ -1312,6 +1363,7 @@ void labOpenDevice(Dev dev) {
   else if (dev == Dev::Light) sig = Sig::Light;
   else if (dev == Dev::Motion) sig = Sig::Motion;
   else if (dev == Dev::Tilt) sig = Sig::Tilt;
+  else if (dev == Dev::Knob) sig = Sig::Knob;
   labHistoryReset(sig);
   if (dev == Dev::Strip) {
     gLabStripTest = LabStripTest::Solid;
@@ -1341,6 +1393,11 @@ void labServoGoTo(int angle) {
 }
 void labDeviceKey(char key, char lower, bool left, bool right, bool up, bool down, bool enter) {
   const Dev dev = static_cast<Dev>(gLabUi.devRow);
+  if (labDevPages(dev) > 1 && (lower == 'n' || ((left || right) && labArrowsTurnPages(dev)))) {
+    labTurnPage(left ? -1 : 1);
+    return;
+  }
+  if (gLabUi.page && labPageKey(dev, key, lower, left, right, up, down, enter)) return;
   if (lower == 'p' && labOnHub(dev)) {
     gLabUi.portRow = max(labPortOf(dev), 0);
     gLabUi.view = LabView::PickPort;
@@ -1447,6 +1504,7 @@ void serviceLabTests() {
     gLabUi.beepUntilMs = 0;
     labDriveOff(Out::Tone);
   }
+  serviceLabPage(now);
   if (!gLabUi.sweeping || now - gLabUi.sweepMs < kLabSweepStepMs) return;
   gLabUi.sweepMs = now;
   if (gLabUi.servoAngle >= pbhub::kMaxAngle) gLabUi.sweepUp = false;
@@ -1622,7 +1680,8 @@ bool labVoiceSet(const char* output, int value) {
 bool labVoiceScreen() {
   if (!labMode(gUiMode)) return false;
   const LabView view = gLabUi.view;
-  return view == LabView::Devices || view == LabView::Device || view == LabView::Wiring || view == LabView::Rules || view == LabView::Say;
+  return view == LabView::Devices || view == LabView::Device || view == LabView::Dash || view == LabView::Wiring ||
+         view == LabView::Rules || view == LabView::Say;
 }
 bool labSayOnScreen() { return labVoiceScreen() && labVoiceNow() == LabVoice::NewRule; }
 bool labChangeOnScreen() { return labVoiceScreen() && labVoiceNow() == LabVoice::Change; }
@@ -1761,7 +1820,13 @@ bool handleLabKey(char key, const Keyboard_Class::KeysState& keys) {
         labOpenDevice(static_cast<Dev>(ui.devRow));
       } else if (lower == 'w') {
         ui.view = LabView::Wiring;
+      } else if (lower == 'd') {
+        ui.dashPage = 0;
+        ui.view = LabView::Dash;
       }
+      break;
+    case LabView::Dash:
+      if (left || right) ui.dashPage = (ui.dashPage + (right ? 1 : labDashPages() - 1)) % labDashPages();
       break;
     case LabView::Device:
       if (lower == 'w' && static_cast<Dev>(ui.devRow) == Dev::Hub) ui.view = LabView::Wiring;
@@ -1863,6 +1928,7 @@ bool routeLabEscape() {
     case LabView::Wizard: labWizardBack(); break;
     case LabView::Recipes: case LabView::Offer: ui.view = LabView::Rules; break;
     case LabView::Say: ui.view = ui.sayBack; break;
+    case LabView::Dash: ui.view = LabView::Devices; break;
     default:
       if (ui.practicing) {
         ui.practicing = false;
