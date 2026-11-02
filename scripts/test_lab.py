@@ -133,6 +133,10 @@ void testRanges(){
   AnalogRange range;assert(range.percent(0)==0&&range.percent(256)==50&&range.top==512);
   assert(range.percent(3000)==100&&range.top==3000&&range.percent(1500)==50&&range.percent(3000)==100);
   for(uint32_t raw:{0u,1u,511u,512u,4095u,65535u}){AnalogRange r;assert(r.percent(uint16_t(raw))<=100);}
+  // The Mini Angle runs backwards: full voltage is its left end, so the number goes up clockwise.
+  AnalogRange knob;knob.top=2800;assert(knobPercent(knob,2800)==0&&knobPercent(knob,0)==100&&knobPercent(knob,1400)==50&&knobPercent(knob,700)==75);
+  assert(knobPercent(knob,3100)==0&&knob.top==3100);
+  for(uint32_t raw:{0u,1u,2799u,4095u,65535u}){AnalogRange r;const int v=knobPercent(r,uint16_t(raw));assert(v>=0&&v<=100);}
 }
 
 void testInputs(){

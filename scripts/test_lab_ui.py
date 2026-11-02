@@ -325,7 +325,7 @@ void testDevices() {
   assert(!labFound(Unit::DLight) && gLabHubReady && gHubUnit.leds[ports(lab::Part::Strip)] == 30);
   assert(gLabHubFirmware == 2);
   assert(gLabInputs.get(Sig::Distance).value == 24);
-  assert(gLabInputs.get(Sig::Knob).live && gLabInputs.get(Sig::Knob).value == 100);
+  assert(gLabInputs.get(Sig::Knob).live && gLabInputs.get(Sig::Knob).value == 0);  // Top voltage is its left end.
   gHubUnit.analog[ports(lab::Part::Knob)] = 1000; run(100); assert(gLabInputs.get(Sig::Knob).value == 50);
   assert(gLabInputs.get(Sig::Temperature).live && gLabTempTenths == 244);  // 26000 raw.
   assert(gLabInputs.get(Sig::Humidity).value == 41);
@@ -399,7 +399,7 @@ void testDevices() {
   // The sensor screens, each shaped like its unit.
   pickDevice(Dev::Env); run(1200); show("env"); assert(gCanvas.shows("24.4") && gCanvas.shows("41%")); esc();
   pickDevice(Dev::Joystick); run(100); show("joystick"); assert(gCanvas.shows("37")); gUnits.stickButton = 0; run(100); show("joystick-pressed"); assert(gCanvas.shows("Pressed")); gUnits.stickButton = 1; esc();
-  gHubUnit.analog[ports(lab::Part::Knob)] = 660; pickDevice(Dev::Knob); run(100); show("knob"); assert(gCanvas.shows("33%"));
+  gHubUnit.analog[ports(lab::Part::Knob)] = 660; pickDevice(Dev::Knob); run(100); show("knob"); assert(gCanvas.shows("67%"));
   gHubUnit.analog[ports(lab::Part::Knob)] = 1400; run(100); show("knob-turning"); assert(gCanvas.shows("Yes"));
   for (int v : {0, 2000}) { gHubUnit.analog[ports(lab::Part::Knob)] = v; run(100); show("knob-ends"); } esc();
   pickDevice(Dev::Light); run(300); show("light"); keys("f"); run(300); assert(!gLabBook.lightFlipped && gLabInputs.get(Sig::Light).value == 50); keys("f"); esc();
@@ -586,8 +586,8 @@ void testPlay() {
   gHubUnit.angle[servo][1] = -1;
   // Turn the knob: the rule fires, the servo moves with it, and the strip lights.
   gHubUnit.analog[ports(lab::Part::Knob)] = 1500; run(300);
-  assert(gLabStates[0].active && gHubUnit.angle[servo][1] == 135 && sumLeds(strip) == 30);
-  show("flow-firing"); assert(gCanvas.shows("FIRING 1/2") && gCanvas.shows("Knob") && gCanvas.shows("135") && gCanvas.shows("Fired once"));
+  assert(gLabStates[0].active && gHubUnit.angle[servo][1] == 45 && sumLeds(strip) == 30);
+  show("flow-firing"); assert(gCanvas.shows("FIRING 1/2") && gCanvas.shows("Knob") && gCanvas.shows("45") && gCanvas.shows("Fired once"));
   // It holds for 2 seconds after, then lets the strip go. The servo stays where it was put.
   run(3000); assert(!gLabStates[0].active && sumLeds(strip) == 0 && gHubUnit.pulses[servo][1] == 1);
   // A hand close: the other condition, and the second rule's relay and LED.
@@ -766,7 +766,7 @@ void testAnySetup() {
   // P on its own screen says which port, and the reading follows straight away.
   key('p'); assert(gLabUi.view == LabView::PickPort && gLabUi.portRow == 0); show("hub-pick-port"); assert(gCanvas.shows("WHICH PORT?") && gCanvas.shows("Mini Angle"));
   key(DOWN); key(DOWN); key(DOWN); key(ENTER); assert(gLabUi.view == LabView::Device && ports(lab::Part::Knob) == 3 && gLabBook.wiring.port[0] == lab::Part::Relay); run(300);
-  show("hub-knob"); assert(gLabInputs.get(Sig::Knob).live && gLabInputs.get(Sig::Knob).value == 100 && gCanvas.shows("CH3"));
+  show("hub-knob"); assert(gLabInputs.get(Sig::Knob).live && gLabInputs.get(Sig::Knob).value == 0 && gCanvas.shows("CH3"));
   gHubUnit.analog[3] = 700; run(200); assert(gLabInputs.get(Sig::Knob).value == 50);
   assert(gLabSaved && gDisk.files.count("/lab/rules.dat"));
   // Esc from the question changes nothing.
@@ -784,7 +784,7 @@ void testAnySetup() {
   assert(labFound(Unit::Hub) && labFound(Unit::Ultrasonic) && labFound(Unit::Env) && gLabInputs.get(Sig::Distance).value == 24 && gLabInputs.get(Sig::Motion).value == 1 && gLabInputs.get(Sig::Knob).value == 50 && !gLabOnWires);
   gHubUnit.level[ports(lab::Part::Motion)] = 0;
   // Out of the hub and straight into Grove, with the same screen still open.
-  pickDevice(Dev::Knob); run(100); plugOnly(); gGrove.adc = 700; run(2500); assert(gLabOnWires && gLabBook.direct.white == lab::Part::Knob && gLabInputs.get(Sig::Knob).value == 25); show("moved-to-grove"); assert(gCanvas.shows("ON GROVE") && !gCanvas.shows("P port"));
+  pickDevice(Dev::Knob); run(100); plugOnly(); gGrove.adc = 700; run(2500); assert(gLabOnWires && gLabBook.direct.white == lab::Part::Knob && gLabInputs.get(Sig::Knob).value == 75); show("moved-to-grove"); assert(gCanvas.shows("ON GROVE") && !gCanvas.shows("P port"));
   key('p'); assert(gLabUi.view == LabView::Device);  // There's no port to pick on Grove.
   // And back: the hub's pull-ups hold the wire high, so the reading can't be a knob. The screen moves by itself.
   plugOnly({}, true); gHubUnit.analog[ports(lab::Part::Knob)] = 700; run(4500); assert(!gLabOnWires && labFound(Unit::Hub) && gLabInputs.get(Sig::Knob).live); show("moved-to-hub"); assert(gCanvas.shows("ON CH3") && !gCanvas.shows("ANSWERING") && gCanvas.shows("P port"));
@@ -808,9 +808,10 @@ void testGrove() {
   show("grove-knob"); assert(gCanvas.shows("50%") && gCanvas.shows("Grove") && gCanvas.shows("ON GROVE") && !gCanvas.shows("ANSWERING") && !gCanvas.shows("hub"));
   assert(gLabInputs.get(Sig::Knob).live && gLabInputs.get(Sig::Knob).value == 50);
   // It follows the knob, both ways, and the ends are the ends.
-  gGrove.adc = 0; run(100); assert(gLabInputs.get(Sig::Knob).value == 0); show("grove-knob-zero");
-  gGrove.adc = 2800; run(100); assert(gLabInputs.get(Sig::Knob).value == 100);
-  gGrove.adc = 3100; run(100); assert(gLabInputs.get(Sig::Knob).value == 100 && gLabKnobRange.top == 3100); gGrove.adc = 1550; run(100); assert(gLabInputs.get(Sig::Knob).value == 50);
+  // Turning it clockwise lowers the voltage, and that has to read as going up.
+  gGrove.adc = 0; run(100); assert(gLabInputs.get(Sig::Knob).value == 100); show("grove-knob-zero");
+  gGrove.adc = 2800; run(100); assert(gLabInputs.get(Sig::Knob).value == 0);
+  gGrove.adc = 3100; run(100); assert(gLabInputs.get(Sig::Knob).value == 0 && gLabKnobRange.top == 3100); gGrove.adc = 1550; run(100); assert(gLabInputs.get(Sig::Knob).value == 50);
   // The bus stays out of it: the wire is the knob's.
   { const auto before = gUnits.commands; run(1000); assert(gUnits.commands == before); }
   assert(gLabSaved && gDisk.files.count("/lab/rules.dat"));
@@ -827,7 +828,8 @@ void testGrove() {
   keys("c"); assert(gGrove.duty == lab::servoDuty(90)); keys("/"); assert(gGrove.duty == lab::servoDuty(95));
   esc(); assert(gGrove.duty == 0 && gGrove.attached == 3);  // Limp, with the wire still set up.
   setUiMode(UiMode::LabRules); run(1500); assert(gLabOnWires && gGrove.attached == 3); assert(gLabInputs.get(Sig::Knob).live);
-  gLabUi.ruleRow = 0; keys("p"); run(500); gGrove.adc = 2800; run(300); assert(gLabStates[0].active && gGrove.duty == lab::servoDuty(180));
+  gLabUi.ruleRow = 0; keys("p"); run(500); gGrove.adc = 2800; run(300); assert(gLabStates[0].active && gGrove.duty == lab::servoDuty(0));
+  gGrove.adc = 0; run(300); assert(gGrove.duty == lab::servoDuty(180));
   show("grove-play"); gGrove.adc = 1400; run(300); assert(gGrove.duty == lab::servoDuty(90));
   esc(); assert(gGrove.duty == 0);
   // After a restart the Lab remembers what was on the wires.

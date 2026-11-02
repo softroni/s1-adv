@@ -528,6 +528,11 @@ struct AnalogRange {
   }
 };
 
+// The Mini Angle's voltage falls as it turns clockwise, so the number has to be turned around for
+// clockwise to read as up, on the screen and in every rule that follows it. The owner found this
+// on the real part.
+inline int16_t knobPercent(AnalogRange& range, uint16_t raw) { return static_cast<int16_t>(100 - range.percent(raw)); }
+
 // Hue is 0 to 359, and the color comes out at full strength.
 inline void hueToRgb(int hue, uint8_t& r, uint8_t& g, uint8_t& b) {
   hue = ((hue % 360) + 360) % 360;

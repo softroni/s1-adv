@@ -307,7 +307,7 @@ void labReadHubParts(uint32_t now) {
   const int8_t motion = wiring.portOf(lab::Part::Motion);
   if (knob >= 0 && now - gLabKnobMs >= kLabKnobMs) {
     gLabKnobMs = now;
-    if (gLabHub.analogRead(knob, gLabKnobRaw)) gLabInputs.set(lab::Sig::Knob, gLabKnobRange.percent(gLabKnobRaw), now);
+    if (gLabHub.analogRead(knob, gLabKnobRaw)) gLabInputs.set(lab::Sig::Knob, lab::knobPercent(gLabKnobRange, gLabKnobRaw), now);
     else labUnitLost(lab::Unit::Hub);
   }
   if (light >= 0 && !labFound(lab::Unit::DLight) && now - gLabLightMs >= kLabLightMs) {
@@ -444,7 +444,7 @@ void labReadWires(uint32_t now) {
   if (white == lab::Part::Knob && now - gLabKnobMs >= kLabKnobMs) {
     gLabKnobMs = now;
     gLabKnobRaw = static_cast<uint16_t>(analogRead(kLabWhitePin));
-    gLabInputs.set(lab::Sig::Knob, gLabKnobRange.percent(gLabKnobRaw), now);
+    gLabInputs.set(lab::Sig::Knob, lab::knobPercent(gLabKnobRange, gLabKnobRaw), now);
   } else if (white == lab::Part::Light && now - gLabLightMs >= kLabLightMs) {
     gLabLightMs = now;
     gLabLightRaw = static_cast<uint16_t>(analogRead(kLabWhitePin));
