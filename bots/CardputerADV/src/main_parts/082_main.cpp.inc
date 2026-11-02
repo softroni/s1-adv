@@ -23,13 +23,13 @@ constexpr uint32_t kLabBeepMs = 400;
 constexpr int kLabLastPort = pbhub::kPorts - 1;
 constexpr int kLabLedMilliamps = 33;  // M5 rates this strip at 2 A a meter, with 60 LEDs a meter.
 
-enum class LabView : uint8_t { Devices, Device, Wiring, Rules, Wizard, Play, Recipes, Say, Offer };
+enum class LabView : uint8_t { Devices, Device, PickPort, Wiring, Rules, Wizard, Play, Recipes, Say, Offer };
 enum class LabStep : uint8_t { Sig, Op, Value, MoreConds, Join, Out, How, OutValue, Source, MoreActions, Hold, Name };
 
 struct LabUi {
   LabView view = LabView::Devices;
   int devRow = 0, devTop = 0;
-  int wiringRow = 0;
+  int wiringRow = 0, portRow = 0;
   int ruleRow = 0, ruleTop = 0;
   bool deleteArmed = false;
   int recipeRow = 0, recipeTop = 0;
@@ -216,11 +216,18 @@ bool labUnitOf(Dev dev, Unit& unit) {
   }
 }
 bool labLightIsDigital() { return labFound(Unit::DLight); }
-bool labListShowing() { return gLabUi.view == LabView::Devices; }
+// Looking at the bus only makes sense while nothing is being driven through those wires.
+bool labRescanAllowed() {
+  if (gLabUi.view == LabView::Devices) return true;
+  if (gLabUi.view != LabView::Device) return false;
+  const lab::Part part = lab::partFor(static_cast<Dev>(gLabUi.devRow));
+  return lab::Direct::usesWhite(part) && part != lab::Part::Relay;
+}
 int labPortOf(Dev dev) {
   const lab::Part part = lab::partFor(dev);
   return part == lab::Part::None ? -1 : gLabBook.wiring.portOf(part);
 }
+bool labOnHub(Dev dev) { return labFound(Unit::Hub) && lab::partFor(dev) != lab::Part::None && !(dev == Dev::Light && labLightIsDigital()); }
 // Where a part is plugged in, as the screen should say it.
 String labWhere(Dev dev) {
   if (labOnWires(lab::partFor(dev))) return "Grove";
@@ -242,9 +249,13 @@ bool labDevHere(Dev dev) {
   if (dev == Dev::Tilt) return gImuEnabled;
   return true;
 }
-// These take orders and can't answer, so being reachable is all anyone can know.
-bool labDevOutputOnly(Dev dev) { return dev == Dev::Relay || dev == Dev::Servo || dev == Dev::Strip; }
+// These take orders and can't answer, so being reachable is all anyone can know. The I/O hub can't
+// tell if a port is empty either, so anything on it is in the same position.
+bool labDevOutputOnly(Dev dev) { return dev == Dev::Relay || dev == Dev::Servo || dev == Dev::Strip || labOnHub(dev); }
 String labDevValue(Dev dev) {
+  // An empty hub port reads as noise, so a number only shows once the part has been opened.
+  const lab::Part part = lab::partFor(dev);
+  if (labOnHub(dev) && !gLabPartUsed[static_cast<uint8_t>(part)]) return labWhere(dev);
   const auto number = [](Sig sig) -> String {
     const lab::Reading& reading = gLabInputs.get(sig);
     return reading.live ? labValueText(sig, reading.value) : String("--");
@@ -327,8 +338,9 @@ void labDrawHeadFor(Dev dev, uint16_t accent, const String& chip, uint16_t chipC
   labHead(lab::kDevNames[static_cast<uint8_t>(dev)], labDevIcon(dev), accent, chip, chipColor);
 }
 void labDrawAnswering(Dev dev) {
-  // A part on the Grove wires can't answer anything, so the chip shouldn't claim it did.
-  labDrawHeadFor(dev, kLabLime, labOnWires(lab::partFor(dev)) ? "ON GROVE" : "ANSWERING", kLabGreen);
+  // Only an I2C unit really answers. For anything else, the chip just says where it is.
+  const bool answers = !labOnHub(dev) && !labOnWires(lab::partFor(dev));
+  labDrawHeadFor(dev, kLabLime, answers ? String("ANSWERING") : String("ON ") + labWhereCaps(dev), kLabGreen);
 }
 void renderLabSensor(Dev dev, Sig sig) {
   labDrawAnswering(dev);
@@ -375,7 +387,7 @@ void renderLabLight() {
   labStat(170, 23, "RAW", String(gLabLightRaw));
   labStat(170, 48, "ON", labWhere(Dev::Light));
   labDrawGraph();
-  labKeys("Cover it to test  F flip  R reset");
+  labKeys(labOnHub(Dev::Light) ? "Cover it  F flip  P port  R reset" : "Cover it to test  F flip  R reset");
 }
 void renderLabTilt() {
   renderLabSensor(Dev::Tilt, Sig::Tilt);
@@ -391,7 +403,7 @@ void renderLabMotion() {
   labStat(176, 23, "ON", labWhere(Dev::Motion));
   labTextAt(&fonts::Font0, 6, 54, "Stays on about 2 sec after you stop", kLabMuted);
   labDrawGraph();
-  labKeys("Wave in front of it  R reset");
+  labKeys(labOnHub(Dev::Motion) ? "Wave at it  P port  R reset  ESC back" : "Wave in front of it  R reset");
 }
 void renderLabKnob() {
   auto& d = gCanvas;
@@ -414,7 +426,7 @@ void renderLabKnob() {
   labStat(112, 54, "TURNING", turning ? "Yes" : "No", turning ? kLabGreen : TFT_WHITE);
   labStat(176, 54, "RAW", String(gLabKnobRaw));
   labStat(112, 84, "ON", labWhere(Dev::Knob));
-  labKeys("Turn it end to end to set its range");
+  labKeys(labOnHub(Dev::Knob) ? "Turn it  P port  R reset  ESC back" : "Turn it end to end to set its range");
 }
 void renderLabStick() {
   auto& d = gCanvas;
@@ -451,7 +463,8 @@ void renderLabServo() {
   labTextAt(&fonts::Font4, 2, 24, String(angle) + "`", TFT_WHITE);
   labStat(198, 26, "STEP", String(kLabServoStep) + "`");
   labTextCenter(&fonts::Font0, 120, 117, gLabUi.sweeping ? "Sweeping" : "A servo cannot reply: watch it move", kLabAmber);
-  labKeys(String(kLabArrowLeftRight) + " turn  A D fine  C center  S sweep");
+  if (labOnHub(Dev::Servo)) labKeys(String(kLabArrowLeftRight) + " turn AD fine C center S sweep P port");
+  else labKeys(String(kLabArrowLeftRight) + " turn  A D fine  C center  S sweep");
 }
 void renderLabStrip() {
   auto& d = gCanvas;
@@ -485,7 +498,9 @@ void renderLabStrip() {
   const int milliamps = gLabUi.stripBright * gLabBook.capPercent / 100 * lab::kStripLeds * kLabLedMilliamps / 100;
   labTextAt(&fonts::Font0, 4, 107, String("Worst case ") + String(milliamps) + " mA", kLabAmber);
   if (gLabHubFirmware == 1) labTextRight(&fonts::Font0, 236, 107, "Hub firmware 1", kLabAmber);
-  labKeys(String(kLabArrowLeftRight) + " " + (test == LabStripTest::Count ? "move" : "color") + "  " + kLabArrowUpDown + " bright  M mode  T timing");
+  const char* arrows = test == LabStripTest::Count ? "move" : "color";
+  if (labOnHub(Dev::Strip)) labKeys(String(kLabArrowLeftRight) + " " + arrows + " " + kLabArrowUpDown + " bright M mode T time P port");
+  else labKeys(String(kLabArrowLeftRight) + " " + arrows + "  " + kLabArrowUpDown + " bright  M mode  T timing");
 }
 void renderLabRelays() {
   auto& d = gCanvas;
@@ -499,7 +514,7 @@ void renderLabRelays() {
   }
   labTextCenter(&fonts::Font0, 120, 95, "Listen for the click", kLabAmber);
   labTextCenter(&fonts::Font0, 120, 107, "Both turn off when you leave", kLabMuted);
-  labKeys("1 and 2 switch them  ESC back");
+  labKeys(labOnHub(Dev::Relay) ? "1 and 2 switch them  P port  ESC back" : "1 and 2 switch them  ESC back");
 }
 void renderLabHub() {
   auto& d = gCanvas;
@@ -537,6 +552,22 @@ void renderLabHandOver(Dev dev, const char* title, const char* place, const char
   labTextAt(&fonts::Font0, 6, 68, line1, kLabSoft);
   labTextAt(&fonts::Font0, 6, 79, line2, kLabSoft);
   labKeys(keys);
+}
+// The one question for a part on the I/O hub, asked from its own screen.
+void renderLabPickPort() {
+  auto& d = gCanvas;
+  const Dev dev = static_cast<Dev>(gLabUi.devRow);
+  const lab::Part part = lab::partFor(dev);
+  labDrawHeadFor(dev, kLabLime, "WHICH PORT?", kLabSoft);
+  for (int i = 0; i < pbhub::kPorts; ++i) {
+    const int y = 20 + i * 17;
+    const bool chosen = i == gLabUi.portRow;
+    const lab::Part there = gLabBook.wiring.port[i];
+    if (chosen) d.fillRoundRect(1, y, 237, 16, 5, kLabLime);
+    labTextAt(&fonts::Font2, 8, y, String("CH") + String(i), chosen ? TFT_BLACK : kLabMuted);
+    labTextAt(&fonts::Font2, 48, y, lab::kPartNames[static_cast<uint8_t>(there)], chosen ? TFT_BLACK : there == part ? kLabLime : kLabSoft);
+  }
+  labKeys(String(kLabArrowUpDown) + " pick  ENTER it's here  ESC back");
 }
 void renderLabNfc() {
   renderLabHandOver(Dev::Nfc, "NFC unit found", "Grove 0x50", "NFC Notes reads and writes tags, and", "it is the full test for this unit.",
@@ -605,7 +636,7 @@ void renderLabMissing(Dev dev) {
     labTextAt(&fonts::FreeSansBold9pt7b, 4, 21, "Not on a hub port", TFT_WHITE);
     labTextAt(&fonts::Font0, 4, 46, "The I/O hub can't tell what's plugged", kLabSoft);
     labTextAt(&fonts::Font0, 4, 57, "in, so it needs telling which port.", kLabSoft);
-    labKeys("ESC, then W to set its port");
+    labKeys("P pick its port  ESC back");
     return;
   }
   // Alone on the Grove port it can't answer, so the only clue is its wire.
@@ -1132,6 +1163,7 @@ void renderLabUi() {
   switch (gLabUi.view) {
     case LabView::Devices: renderLabDevices(); break;
     case LabView::Device: renderLabDevice(); break;
+    case LabView::PickPort: renderLabPickPort(); break;
     case LabView::Wiring: renderLabWiring(); break;
     case LabView::Rules: renderLabRules(); break;
     case LabView::Wizard: renderLabWizard(); break;
@@ -1147,9 +1179,7 @@ void renderLabUi() {
 // --- Keys ----------------------------------------------------------------------------------------
 void labOpenDevice(Dev dev) {
   gLabUi.view = LabView::Device;
-  const lab::Part part = lab::partFor(dev);
-  const bool lightOnBus = dev == Dev::Light && labLightIsDigital();
-  if (part != lab::Part::None && !lightOnBus && !labFound(Unit::Hub) && !labAnyUnit()) labUseOnWires(part);
+  gLabPartUsed[static_cast<uint8_t>(lab::partFor(dev))] = true;
   gLabUi.sweeping = false;
   gLabUi.ledOn = false;
   gLabUi.relays[0] = gLabUi.relays[1] = false;
@@ -1187,6 +1217,11 @@ void labServoGoTo(int angle) {
 }
 void labDeviceKey(char key, char lower, bool left, bool right, bool up, bool down, bool enter) {
   const Dev dev = static_cast<Dev>(gLabUi.devRow);
+  if (lower == 'p' && labOnHub(dev)) {
+    gLabUi.portRow = max(labPortOf(dev), 0);
+    gLabUi.view = LabView::PickPort;
+    return;
+  }
   if (lower == 'r') {
     if (dev == Dev::Knob) gLabKnobRange.top = gLabOnWires ? lab::kDirectKnobTop : lab::AnalogRange{}.top;
     else if (dev == Dev::Light) gLabLightRange.top = gLabOnWires ? lab::kDirectLightTop : lab::AnalogRange{}.top;
@@ -1271,9 +1306,18 @@ void labDeviceKey(char key, char lower, bool left, bool right, bool up, bool dow
       return;
   }
 }
+// Whichever way a part is connected should just work, even if that changes while its screen is
+// open. With no I/O hub and an empty bus, the part on the screen must be on the Grove wires.
+void labFollowPart() {
+  const Dev dev = static_cast<Dev>(gLabUi.devRow);
+  const lab::Part part = lab::partFor(dev);
+  const bool emptyBus = gLabOnWires || (gLabQuietProbes >= lab::kUnitCount && !labAnyUnit());
+  if (part != lab::Part::None && emptyBus && !labFound(Unit::Hub)) labUseOnWires(part);
+}
 // The servo's sweep and the speaker's beep run while the screen is up, with no key held.
 void serviceLabTests() {
   if (gLabUi.view != LabView::Device) return;
+  labFollowPart();
   const uint32_t now = millis();
   if (gLabUi.beepUntilMs && now >= gLabUi.beepUntilMs) {
     gLabUi.beepUntilMs = 0;
@@ -1457,6 +1501,22 @@ bool handleLabKey(char key, const Keyboard_Class::KeysState& keys) {
       if (lower == 'w' && static_cast<Dev>(ui.devRow) == Dev::Hub) ui.view = LabView::Wiring;
       else labDeviceKey(key, lower, left, right, up, down, enter);
       break;
+    case LabView::PickPort:
+      if (up || down) {
+        ui.portRow = (ui.portRow + (up ? kLabLastPort : 1)) % pbhub::kPorts;
+      } else if (enter) {
+        const Dev dev = static_cast<Dev>(ui.devRow);
+        const lab::Part part = lab::partFor(dev), there = gLabBook.wiring.port[ui.portRow];
+        labReleaseOutputs();
+        gLabBook.wiring.moveTo(static_cast<uint8_t>(ui.portRow), part);
+        // What was learned from the wrong port, even if only noise, shouldn't set a part's range.
+        if (part == lab::Part::Knob || there == lab::Part::Knob) gLabKnobRange = lab::AnalogRange{};
+        if (part == lab::Part::Light || there == lab::Part::Light) gLabLightRange = lab::AnalogRange{};
+        gLabHubReady = false;
+        labSaveBook();
+        labOpenDevice(dev);
+      }
+      break;
     case LabView::Wiring:
       if (up || down) ui.wiringRow = (ui.wiringRow + (up ? kLabLastPort : 1)) % pbhub::kPorts;
       else if (left || right) gLabBook.wiring.cycle(ui.wiringRow, right ? 1 : -1);
@@ -1518,6 +1578,7 @@ bool routeLabEscape() {
   switch (ui.view) {
     case LabView::Devices: case LabView::Rules: return false;
     case LabView::Device: labCloseDevice(); break;
+    case LabView::PickPort: ui.view = LabView::Device; break;
     case LabView::Wiring:
       // Nothing is driven on this screen. The parts may have moved, so the hub starts over.
       gLabHubReady = false;

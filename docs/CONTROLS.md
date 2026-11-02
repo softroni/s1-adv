@@ -195,13 +195,18 @@ That's enough for the Mini Angle to drive the servo. I2C units use both wires, s
 ENV III, Joystick 2 or NFC unit can't share the port with these. If one is plugged in, those
 screens say so.
 
-To use more parts at once, plug the I/O hub into the Grove port through the 1-to-3 hub. Its six
-ports run these parts, and the other two sockets on the 1-to-3 hub take any two of the I2C units.
-Swap them as you need them, because the Lab notices what's plugged in.
+To use more parts at once, plug the I/O hub into the Grove port, and use any of its six ports for
+any of these parts, one or all of them. To add I2C units as well, put the 1-to-3 hub in front of
+it: its other two sockets take any two of them.
 
-Nothing on an I/O hub port can say what it is either, so Devices, W sets which part is on which
-port.
-This is the starting layout:
+You can switch between these whenever you like, even with a part's screen open. The Lab notices
+the I/O hub or an I2C unit arriving or leaving, and the part follows. Rules work the same way
+however the parts are connected. With a servo, strip or relay on the Grove wires, the Lab mostly
+checks when you press Esc on a screen, because bus traffic would disturb them.
+
+Nothing on an I/O hub port can say what it is either, or whether anything's there. So if a part
+doesn't respond, open it and press **P**, then pick the port it's in. Devices, W shows all six at
+once. This is the starting layout:
 
 | Port | Part |
 | --- | --- |
@@ -212,15 +217,17 @@ This is the starting layout:
 | CH4 | Servo |
 | CH5 | LED strip |
 
-In that screen, up and down pick a port, and left and right change only that port. To swap two
-parts, set one to Nothing first. A digital light unit (DLight) on the Grove port needs no port
-and is used instead.
+In the W screen, up and down pick a port, and left and right change only that port. To swap two
+parts, set one to Nothing first, or use P, which swaps them for you. A digital light unit (DLight)
+on the Grove port needs no port and is used instead.
 
 ### Devices
 
 Up and down pick a device, and Enter opens it. A solid dot means it's there. A cyan ring means it
-only takes orders, so it can be reached but can't reply, and a grey ring means it hasn't been
-found. Esc goes back, and everything turns off when you leave a test screen.
+can be reached but can't confirm it, which goes for outputs and anything on the I/O hub. A grey
+ring means it hasn't been found. Until you open it, a part on the I/O hub shows its port rather
+than a number, because an empty port would only show noise. Esc goes back, and everything turns
+off when you leave a test screen.
 
 - **Ultrasonic, Light, Tilt and PIR:** a live number and the last 30 seconds. R resets the lowest
   and highest. If the Light reads backwards, F flips it.

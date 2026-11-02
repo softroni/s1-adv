@@ -18,6 +18,7 @@ constexpr uint32_t kLabServoGapMs = 40, kLabStripGapMs = 50, kLabLedGapMs = 50;
 constexpr uint32_t kLabLampGapMs = 500, kLabAcGapMs = 3000;  // A remote command takes a while to act.
 constexpr uint32_t kLabRedrawMs = 100, kLabSampleMs = 250, kLabAwakeMs = 1000;
 constexpr uint32_t kLabWireCheckMs = 400, kLabRescanMs = 3000;
+constexpr uint16_t kLabBusHighRaw = 3900;  // Above any part's own output: I2C pull-ups hold it here.
 constexpr uint8_t kLabSilentChecks = 3;  // In a row, because a knob near the logic threshold can fool one.
 constexpr uint32_t kLabPullSettleUs = 30;
 constexpr uint32_t kLabFarthestMm = 4500;
@@ -35,7 +36,7 @@ constexpr const char* kLabNewPath = "/lab/rules.new";
 void serviceLabTests();
 void serviceLabSay();
 void labEnterView(UiMode mode);
-bool labListShowing();
+bool labRescanAllowed();
 void labSaveBook();
 
 enum class LabStripTest : uint8_t { Solid, Rainbow, Chase, Count };
@@ -88,6 +89,7 @@ uint8_t gLabHubFirmware = 0;       // 0 until the hub says.
 bool gLabHubReady = false;
 // The Grove wires are either the I2C bus or, with nothing on it, belong to parts plugged in directly.
 bool gLabOnWires = false;
+bool gLabPartUsed[lab::kPartCount] = {};  // Opened since the Lab started, so it's really plugged in.
 uint8_t gLabQuietProbes = 0;
 uint8_t gLabWhiteSilent = 0;
 uint32_t gLabWireCheckMs = 0, gLabRescanMs = 0;
@@ -200,6 +202,7 @@ void labUnitLost(lab::Unit unit) {
   }
 }
 void labHubStart() {
+  logf("[LAB] I/O hub found");
   const int8_t strip = gLabBook.wiring.portOf(lab::Part::Strip);
   if (strip >= 0) gLabHub.ledCount(strip, lab::kStripLeds);
   gLabHub.showMode(gLabBook.showMode);
@@ -392,6 +395,7 @@ void labLoseWireSignals() {
   gLabInputs.lose(lab::Sig::Light);
 }
 void labTakeWires() {
+  logf("[LAB] on the Grove wires white=%d yellow=%d", static_cast<int>(gLabBook.direct.white), static_cast<int>(gLabBook.direct.yellow));
   gAirSensor.close();
   labForgetOutputs();
   gLabOnWires = true;
@@ -402,6 +406,7 @@ void labTakeWires() {
 }
 // Back to the bus, which is how a unit plugged in later gets noticed.
 void labGiveUpWires() {
+  logf("[LAB] wires back to the I2C bus");
   labWiresOff();
   gLabOnWires = false;
   gLabQuietProbes = 0;
@@ -413,7 +418,8 @@ void labGiveUpWires() {
 // A quick look at the bus at a moment when nothing's being driven. Going back to it for good is
 // what lets a unit or the I/O hub plugged in later take over.
 void labRescanBus() {
-  if (!gLabOnWires) return;
+  // The relay unit's inputs would see every bus pulse, so it waits for the Lab to reopen.
+  if (!gLabOnWires || gLabBook.direct.white == lab::Part::Relay) return;
   labWiresOff();
   gAirSensor.open();
   bool found = false;
@@ -452,16 +458,24 @@ void labReadWires(uint32_t now) {
     gLabInputs.set(lab::Sig::Motion, high ? 1 : 0, now);
   }
 }
-// With nothing on the bus, whatever was last used on the wires gets them back. The list keeps an
-// eye out for a unit or the I/O hub being plugged in, except that bus traffic on the yellow wire
-// would twitch a servo or flash a strip, so with one of those it waits for a sensor to go quiet.
-void serviceLabWires(uint32_t now, bool listShowing) {
+// Whether a look at the bus is worth it. A white wire stuck at the top means I2C pull-ups have
+// arrived, so a part has been swapped. Otherwise it's only safe with nothing else to disturb: a
+// knob at zero holds the bus clock low and every try would stall, and bus traffic would twitch a
+// servo, flash a strip or click a relay.
+bool labShouldLookAtBus() {
+  const lab::Direct& direct = gLabBook.direct;
+  const bool pinned = gLabWhiteSilent >= kLabSilentChecks || (direct.white == lab::Part::Knob && gLabKnobRaw >= kLabBusHighRaw) ||
+                      (direct.white == lab::Part::Light && gLabLightRaw >= kLabBusHighRaw);
+  const bool nothingToDisturb = direct.yellow == lab::Part::None && (direct.white == lab::Part::None || direct.white == lab::Part::Motion);
+  return pinned || nothingToDisturb;
+}
+// With nothing on the bus, whatever was last used on the wires gets them back.
+void serviceLabWires(uint32_t now, bool rescanAllowed) {
   if (!gLabOnWires) {
     if (gLabBook.direct.any() && gLabQuietProbes >= lab::kUnitCount && !labAnyUnit()) labTakeWires();
     return;
   }
-  const bool quietYellow = gLabBook.direct.yellow == lab::Part::None || gLabWhiteSilent >= kLabSilentChecks;
-  if (listShowing && quietYellow && now - gLabRescanMs >= kLabRescanMs) {
+  if (rescanAllowed && labShouldLookAtBus() && now - gLabRescanMs >= kLabRescanMs) {
     gLabRescanMs = now;
     labRescanBus();
   }
@@ -476,6 +490,7 @@ void labUseOnWires(lab::Part part) {
   labForgetOutputs();
   gLabWhiteSilent = 0;
   if (gLabOnWires) labWiresOn();
+  logf("[LAB] using %d on the Grove port", static_cast<int>(part));
 }
 
 // --- Outputs ---------------------------------------------------------------------------------
@@ -754,6 +769,7 @@ void labPlay() {
 }
 void beginLab() {
   labReadBook();
+  for (bool& used : gLabPartUsed) used = false;
   labDriveClear();
   labForgetOutputs();
   gLabStripTest = LabStripTest::Solid;
@@ -806,7 +822,7 @@ void serviceLab() {
   // A poll stops the main loop for a moment, and the mic and the speaker run on that loop.
   if (gRecording || gRealtimeActive || gPlaybackActive) return;
   const uint32_t now = millis();
-  serviceLabWires(now, labListShowing());
+  serviceLabWires(now, labRescanAllowed());
   if (gLabOnWires) {
     labReadWires(now);
   } else {

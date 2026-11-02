@@ -221,6 +221,11 @@ void testWiring(){
   w.cycle(0,1);assert(w.port[0]==Part::Knob);
   // Swapping two: empty one, then each takes the other's part.
   w.cycle(0,-1);assert(w.port[0]==Part::None);w.cycle(5,1);assert(w.port[5]==Part::None);w.cycle(5,1);assert(w.port[5]==Part::Knob);w.cycle(0,-1);assert(w.port[0]==Part::Strip);
+  // Moving a part straight to a port swaps it, and is the same as doing nothing onto itself.
+  Wiring m;m.moveTo(3,Part::Knob);assert(m.port[3]==Part::Knob&&m.port[0]==Part::Relay&&m.port[1]==Part::Light);
+  m.moveTo(3,Part::Knob);assert(m.port[3]==Part::Knob&&m.port[0]==Part::Relay);
+  m.moveTo(2,Part::None);assert(m.port[2]==Part::None&&m.portOf(Part::Motion)==-1);
+  m.moveTo(5,Part::Motion);assert(m.port[5]==Part::Motion&&m.portOf(Part::Strip)==-1);
   Wiring a;
   // Cycling one port forever can't lose or move anything on the others.
   for(int round=0;round<500;++round){const Part before=a.port[1];a.cycle(0,round%3?1:-1);assert(a.port[1]==before);}

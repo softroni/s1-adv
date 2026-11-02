@@ -161,9 +161,11 @@ struct Grove {
   int ledsLit = 0, frames = 0; uint8_t lastGreen = 0, lastRed = 0, lastBlue = 0;
 } gGrove;
 void pinMode(uint8_t pin, int mode) { assert(pin == 1 || pin == 2); assert(!gBusOpen); gGrove.mode[pin] = mode; }
-int digitalRead(uint8_t pin) { assert(pin == 1 && !gBusOpen); if (gGrove.held) return gGrove.level; assert(gGrove.mode[1] == INPUT_PULLUP || gGrove.mode[1] == INPUT_PULLDOWN || gGrove.mode[1] == INPUT); return gGrove.mode[1] == INPUT_PULLUP; }
+// Anything on the I2C bus brings pull-ups, which hold the wire high whatever else is there.
+bool busPullsUp() { return gHubUnit.here || !gUnits.present.empty(); }
+int digitalRead(uint8_t pin) { assert(pin == 1 && !gBusOpen); if (busPullsUp()) return HIGH; if (gGrove.held) return gGrove.level; assert(gGrove.mode[1] == INPUT_PULLUP || gGrove.mode[1] == INPUT_PULLDOWN || gGrove.mode[1] == INPUT); return gGrove.mode[1] == INPUT_PULLUP; }
 void digitalWrite(uint8_t pin, int value) { assert((pin == 1 || pin == 2) && !gBusOpen); gGrove.out[pin] = value; }
-int analogRead(uint8_t pin) { assert(pin == 1 && !gBusOpen); return gGrove.held ? gGrove.adc : (rand() & 4095); }
+int analogRead(uint8_t pin) { assert(pin == 1 && !gBusOpen); if (busPullsUp()) return 4095; return gGrove.held ? gGrove.adc : (rand() & 4095); }
 void ledcSetup(uint8_t channel, uint32_t hz, uint8_t bits) { gGrove.channel = channel; gGrove.hz = hz; gGrove.bits = bits; }
 void ledcAttachPin(uint8_t pin, uint8_t channel) { assert(pin == 2 && !gBusOpen && channel == gGrove.channel); gGrove.attached = channel; }
 void ledcDetachPin(uint8_t pin) { assert(pin == 2); gGrove.attached = -1; }
@@ -279,6 +281,7 @@ uint32_t gLastRenderMs = 1;
 struct { int changes = 0; void invalidate() { ++changes; } } gUiFramePolicy;
 String gStatus; int gWakes = 0;
 void setStatus(const String& s, int) { gStatus = s; }
+void logf(const char*, ...) {}
 bool focusToneAllowed() { return gToneAllowed; }
 bool handleScreensaverWake() { ++gWakes; return false; }
 void renderLauncherOverlay() {}
@@ -751,6 +754,48 @@ void testSaving() {
 }
 
 void plugOnly(std::set<uint8_t> units = {}, bool hub = false) { gUnits.present = units; gHubUnit.here = hub; }
+// The ways the owner uses it: one part directly, or one or several through a hub.
+void testAnySetup() {
+  lab::Book book; book.count = 1; book.rules[0] = lab::recipeRule(0); gLabBook = book;
+  gLabBookRead = true; gLabUi = LabUi{}; gDisk.files.clear(); gHubUnit.reset(); gGrove = Grove{};
+  for (int& v : gHubUnit.analog) v = 0;
+  // One part on the I/O hub, in whatever port was nearest. The list doesn't claim the rest are there.
+  plugOnly({}, true); gHubUnit.analog[3] = 1400; setUiMode(UiMode::LabDevices); run(1500);
+  gLabUi.devRow = int(Dev::Knob); gLabUi.devTop = 2; show("hub-list"); assert(gCanvas.shows("CH0") && gCanvas.shows("CH1") && !gCanvas.shows("%"));
+  key(ENTER); run(200); show("hub-knob-wrong-port"); assert(gCanvas.shows("0%") && gCanvas.shows("P port"));
+  // P on its own screen says which port, and the reading follows straight away.
+  key('p'); assert(gLabUi.view == LabView::PickPort && gLabUi.portRow == 0); show("hub-pick-port"); assert(gCanvas.shows("WHICH PORT?") && gCanvas.shows("Mini Angle"));
+  key(DOWN); key(DOWN); key(DOWN); key(ENTER); assert(gLabUi.view == LabView::Device && ports(lab::Part::Knob) == 3 && gLabBook.wiring.port[0] == lab::Part::Relay); run(300);
+  show("hub-knob"); assert(gLabInputs.get(Sig::Knob).live && gLabInputs.get(Sig::Knob).value == 100 && gCanvas.shows("CH3"));
+  gHubUnit.analog[3] = 700; run(200); assert(gLabInputs.get(Sig::Knob).value == 50);
+  assert(gLabSaved && gDisk.files.count("/lab/rules.dat"));
+  // Esc from the question changes nothing.
+  key('p'); key(DOWN); esc(); assert(gLabUi.view == LabView::Device && ports(lab::Part::Knob) == 3); esc();
+  // Now it's been opened, the list shows its number, and the others still say where they'd be.
+  show("hub-list-used"); assert(gCanvas.shows("50%"));
+  // Moving a driven part leaves nothing on behind it, and sets the strip up on its new port.
+  const int old = ports(lab::Part::Strip);
+  pickDevice(Dev::Strip); run(200); assert(sumLeds(old) == 30); show("hub-strip"); assert(gCanvas.shows("P port"));
+  key('p'); assert(gLabUi.portRow == old); key(UP); key(ENTER); run(300); assert(sumLeds(old) == 0 && ports(lab::Part::Strip) == old - 1 && gHubUnit.leds[old - 1] == 30 && sumLeds(old - 1) == 30); esc(); run(100);
+  // A relay can't be reached through its own 1 and 2 keys by accident.
+  pickDevice(Dev::Relay); run(400); key('p'); assert(gLabUi.view == LabView::PickPort); esc(); key('1'); run(400); assert(gLabUi.relays[0]); show("hub-relay"); esc();
+  // Several parts on the hub together, and I2C units beside it through the 1-to-3 hub.
+  plugOnly({0x57, 0x44}, true); gUnits.um = 240000; gHubUnit.level[ports(lab::Part::Motion)] = 1; run(1500);
+  assert(labFound(Unit::Hub) && labFound(Unit::Ultrasonic) && labFound(Unit::Env) && gLabInputs.get(Sig::Distance).value == 24 && gLabInputs.get(Sig::Motion).value == 1 && gLabInputs.get(Sig::Knob).value == 50 && !gLabOnWires);
+  gHubUnit.level[ports(lab::Part::Motion)] = 0;
+  // Out of the hub and straight into Grove, with the same screen still open.
+  pickDevice(Dev::Knob); run(100); plugOnly(); gGrove.adc = 700; run(2500); assert(gLabOnWires && gLabBook.direct.white == lab::Part::Knob && gLabInputs.get(Sig::Knob).value == 25); show("moved-to-grove"); assert(gCanvas.shows("ON GROVE") && !gCanvas.shows("P port"));
+  key('p'); assert(gLabUi.view == LabView::Device);  // There's no port to pick on Grove.
+  // And back: the hub's pull-ups hold the wire high, so the reading can't be a knob. The screen moves by itself.
+  plugOnly({}, true); gHubUnit.analog[ports(lab::Part::Knob)] = 700; run(4500); assert(!gLabOnWires && labFound(Unit::Hub) && gLabInputs.get(Sig::Knob).live); show("moved-to-hub"); assert(gCanvas.shows("ON CH3") && !gCanvas.shows("ANSWERING") && gCanvas.shows("P port"));
+  esc();
+  // A knob at zero isn't mistaken for the bus, so the bus isn't tried: it would only stall.
+  plugOnly(); gGrove.adc = 0; run(2500); assert(gLabOnWires); { const auto before = gUnits.commands; run(7000); assert(gUnits.commands == before); }
+  // The relay's inputs never see bus traffic once it's on the wires.
+  pickDevice(Dev::Relay); run(200); assert(gLabBook.direct.white == lab::Part::Relay); { const auto before = gUnits.commands; esc(); run(7000); assert(gUnits.commands == before); }
+  setUiMode(UiMode::Home); plugOnly({0x57, 0x44, 0x63, 0x50}, true); gLabUi = LabUi{};
+}
+
 void testGrove() {
   // The owner's photo: a Mini Angle straight on the Grove port, with no I/O hub.
   lab::Book book; book.count = 1; book.rules[0] = lab::recipeRule(0); gLabBook = book;
@@ -848,7 +893,7 @@ void testGuards() {
 int main(int argc, char** argv) {
   if (argc > 1) gDump = std::fopen(argv[1], "w");
   for (bool& live : gLabHistoryLive) live = false;
-  testDevices(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testGuards();
+  testDevices(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); setUiMode(UiMode::LabRules); run(1500); testGuards();
   if (gDump) std::fclose(gDump);
   std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, the lamp and AC guards, units leaving and returning, saving and damage, and every screen stays on the display");
 }

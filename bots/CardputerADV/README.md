@@ -82,7 +82,8 @@ nothing plugged in. It uses:
 | Built in | BMI270 tilt, RGB LED, speaker, and the IR transmitter for TCL and Daikin air conditioners |
 | Wi-Fi | smartLamp |
 
-The parts on the I/O hub can also go straight on the Grove port with no I2C unit attached: a sensor
+Any of those can be used alone or together, and the Lab follows when the connection changes. The
+parts on the I/O hub can also go straight on the Grove port with no I2C unit attached: a sensor
 on white (G1), which reads analog, and a servo or strip on yellow (G2). The relay unit uses both.
 See [Lab in the controls guide](../../docs/CONTROLS.md#lab) for the wiring and every key.
 

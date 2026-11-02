@@ -421,6 +421,13 @@ struct Wiring {
     for (uint8_t i = 0; i < pbhub::kPorts; ++i) if (port[i] == part) return static_cast<int8_t>(i);
     return -1;
   }
+  // Puts a part on a port, and whatever was there takes the port it came from, so nothing is lost.
+  void moveTo(uint8_t target, Part part) {
+    const int8_t from = portOf(part);
+    const Part there = port[target];
+    port[target] = part;
+    if (from >= 0 && from != target) port[from] = there;
+  }
   // Steps one port to the next part that isn't on another port, so a change never touches any
   // row but its own. To swap two parts, set one to Nothing first.
   void cycle(uint8_t target, int delta) {
