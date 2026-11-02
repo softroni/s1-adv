@@ -292,6 +292,12 @@ Its speech is made when you save the rule and kept in `/lab/say` on the SD card,
 network. Sensors and rules wait while it speaks, and anything already on stays on. Without a card a
 rule can't speak. The steps can keep or remove a phrase, but only speech can add one.
 
+**Spoken commands** work while rules play. Ask for something like "when I say movie time, turn the
+strip blue", and you get a rule called Movie time that listens for its name. On the Playing screen,
+tap Alt and say the name to switch it on, and say it again to switch it off. Rules wait while it
+listens, and what's on stays on. Only rules that listen for their name can be called this way, and
+Practice can stand in for saying it. Stopping the rules forgets what was said.
+
 **Change a rule** by talking to it. Pick a rule in the list, tap Alt and say what should be different,
 for example "make it stay on longer" or "only when it's dark". Claude sees the rule as it is now and
 sends it back. What changed stands out and the rest is grey. Enter replaces the old rule, E walks

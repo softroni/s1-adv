@@ -159,8 +159,9 @@ Relays, lamp power and the air conditioners are simply on or off, so they can on
 | Knob, Light, Motion | Strip color, Strip bright, Strip length |
 | Stick X, Stick Y, Stick button | Relay 1, Relay 2 |
 | Tilt, Satellites | Built-in LED, Speaker |
-| | Lamp power, Lamp bright |
+| Its name, said aloud | Lamp power, Lamp bright |
 | | TCL AC, Daikin AC |
+| | Say a phrase |
 
 You can save up to 8 rules.
 
@@ -230,6 +231,8 @@ With [Claude connected](../README.md#3-connect-claude), you can just describe wh
 Nothing happens until you've looked at it. If Claude can't make a rule from what it heard, the screen says what it needs. A rule you ask for in chat arrives the same way.
 
 A rule can speak too. Say "when someone walks in, say welcome back", and the Cardputer says it each time the rule starts firing. The speech is saved on the SD card, so it works with no network. Sensors and rules wait while it speaks.
+
+You can call a rule by name while rules are playing. Ask for "when I say movie time, turn the strip blue", then tap Alt on the Playing screen and say "movie time". Say it again to switch it off. Rules wait while it listens.
 
 To change a rule, pick it in the list and tap Alt, then say what should be different, like "make it stay on longer" or "only when it's dark". You see what changed before anything is saved.
 

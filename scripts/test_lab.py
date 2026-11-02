@@ -320,6 +320,25 @@ void testSaving(){
    uint8_t old[kFileBytes];std::memcpy(old,c,kHeaderBytes);std::memcpy(old+kHeaderBytes,c+kHeaderBytes,kOldRuleBytes);std::memcpy(old+kHeaderBytes+kOldRuleBytes,c+kHeaderBytes+kRuleBytes,kOldRuleBytes);old[3]=2;
    const size_t oldSize=kHeaderBytes+2*kOldRuleBytes+2;const uint16_t k=checksum(old,oldSize-2);old[oldSize-2]=uint8_t(k&255);old[oldSize-1]=uint8_t(k>>8);
    Book o;assert(decode(old,oldSize,o)&&o.count==2&&!std::strcmp(o.rules[1].name,"Air theremin")&&o.direct.white==Part::Knob&&o.rules[0].say[0]==0&&o.rules[1].say[0]==0);}
+  // A rule listens for its name: on once said, for that rule only, and off when said again.
+  {Rule movie;strcpy(movie.name,"Movie time");Draft d;d.addCond("spoken","on",0);d.addSet("strip_color",240);assert(d.usable());std::memcpy(movie.cond,d.rule.cond,sizeof(movie.cond));std::memcpy(movie.action,d.rule.action,sizeof(movie.action));movie.conds=1;movie.actions=1;movie.holdMs=0;
+   Rule lights=movie;strcpy(lights.name,"Lights");Rule off=movie;strcpy(off.name,"Time");Rule deaf=starterRule();strcpy(deaf.name,"Deaf");
+   Rule rules[4]={movie,lights,off,deaf};RuleState st[4];Drive out[kOutCount];Inputs none;
+   step(rules,4,st,none,1000,out,0);assert(!st[0].active&&!st[1].active);
+   step(rules,4,st,none,1010,out,1);assert(st[0].active&&!st[1].active&&out[uint8_t(Out::StripColor)].on);
+   step(rules,4,st,none,1020,out,0);assert(!st[0].active);
+   assert(listensForName(movie)&&!listensForName(deaf));
+   // A "not said" line is the opposite, and needs no reading to work.
+   Cond notSaid;notSaid.sig=Sig::Spoken;setOnOff(notSaid,false);assert(condHolds(notSaid,none,0,false)&&!condHolds(notSaid,none,0,true));
+   // However speech recognition writes it. The longest name wins, and a rule that doesn't listen can't be named.
+   assert(spokenRule("Movie time.",rules,4)==0);assert(spokenRule("  MOVIE-TIME!",rules,4)==0);assert(spokenRule("start movie time please",rules,4)==0);
+   assert(spokenRule("lights",rules,4)==1);assert(spokenRule("time",rules,4)==2);assert(spokenRule("Deaf",rules,4)==-1);assert(spokenRule("nothing here",rules,4)==-1);assert(spokenRule("",rules,4)==-1);
+   assert(spokenRule("movie",rules,4)==-1);
+   Rule blank=movie;blank.name[0]=0;assert(spokenRule("anything",&blank,1)==-1);
+   // Only saying it or not saying it makes sense.
+   Draft e;e.addCond("spoken","changes",0);assert(!e.ok);Draft f;f.addCond("spoken","over",1);assert(!f.ok);
+   // A saved file with it still loads.
+   Book b;b.count=1;b.rules[0]=movie;uint8_t c[kFileBytes];const size_t n=encode(b,c);Book o;assert(decode(c,n,o)&&o.rules[0].cond[0].sig==Sig::Spoken);}
   // A phrase saves with its rule, and a file with anything strange in one is refused.
   {Draft d;d.name("Welcome");d.addCond("motion","on",0);d.addSay("  Welcome back, friend! ");d.addSet("led",30);assert(d.usable()&&!std::strcmp(d.rule.say,"Welcome back, friend!")&&hasSay(d.rule));
    Book b;b.count=1;b.rules[0]=d.rule;uint8_t c[kFileBytes];const size_t n=encode(b,c);assert(c[3]==3&&n==kHeaderBytes+kRuleBytes+2);

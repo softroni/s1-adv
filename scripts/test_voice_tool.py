@@ -52,6 +52,7 @@ tools = re.search(r'kVoiceTools\[\] = \{(.*?)\n\};', part(83), re.S)[1]
 assert '{"lab.rule", labSayOnScreen, labSayAnswered, labVoiceContext},' in tools
 assert '{"lab.change", labChangeOnScreen, labChangeAnswered, labVoiceContext},' in tools
 assert '{"lab.ask", labAskOnScreen, labAskAnswered, labVoiceContext},' in tools
+assert '{"transcribe", labCommandOnScreen, labCommandAnswered, nullptr},' in tools
 assert 'serviceLabSay' not in joined and 'sayAsked' not in joined
 
 module = part(83)

@@ -820,6 +820,35 @@ void testSay() {
     gLabUi.ruleRow = count; key('x'); key('x'); assert(gLabBook.count == count);
     goToRow(gLabBook.count + 1);
   }
+  // Spoken commands: Alt while playing, and the name toggles the rule, without leaving the screen.
+  {
+    M5.Imu.ay = 0;
+    lab::Draft d; d.name("Movie time"); d.addCond("spoken", "on", 0); d.addSet("led", 240); d.hold(0); assert(d.usable());
+    lab::Draft other; other.name("Lamp on"); other.addCond("spoken", "on", 0); other.addSet("led", 30); other.hold(0);
+    const int count = gLabBook.count; assert(count + 2 <= lab::kMaxRules);
+    gLabBook.rules[count] = d.rule; gLabBook.rules[count + 1] = other.rule; gLabBook.count = count + 2;
+    labOfferRule(d.rule); renderLabUi(); assert(gCanvas.shows("You say its name")); esc();
+    assert(!labCommandOnScreen()); keys("p"); assert(gLabPlaying && labCommandOnScreen() && !labAskOnScreen() && !labChangeOnScreen());
+    gLabUi.playRule = count; run(100); show("name-flow"); assert(gCanvas.shows("ALT and say its name") && gCanvas.shows("not yet") && !gLabStates[count].active);
+    gRecording = true; show("name-listening"); assert(gCanvas.shows("Say its name") && gCanvas.shows("ALT send  ESC cancel"));
+    gRecording = false; gThinking = true; show("name-checking"); assert(gCanvas.shows("Checking what you said")); gThinking = false;
+    const auto heard = [](const char* words) { VoiceToolAnswer a; a.ok = true; a.heard = words; labCommandAnswered(a); };
+    heard("Lamp on."); assert(gLabUi.view == LabView::Play && gLabUi.playRule == count + 1 && gLabNamed == (1 << (count + 1))); run(100);
+    assert(gLabStates[count + 1].active && !gLabStates[count].active); show("name-on"); assert(gCanvas.shows("Lamp on on") && gCanvas.shows("said"));
+    heard("movie time"); run(100); assert(gLabStates[count].active && gLabUi.playRule == count);
+    heard("Lamp on"); run(100); assert(!gLabStates[count + 1].active && gLabStates[count].active); renderLabUi();
+    // Words that aren't a name say what was heard, and change nothing.
+    const uint8_t before = gLabNamed; heard("pizza"); assert(gLabNamed == before); show("name-unknown"); assert(gCanvas.shows("Heard: pizza"));
+    // A failure says why, then the screen goes back to normal.
+    { VoiceToolAnswer a; a.problem = "Couldn't reach the bridge."; labCommandAnswered(a); } renderLabUi(); assert(gCanvas.shows("Couldn't reach the bridge."));
+    run(3100); renderLabUi(); assert(!gCanvas.shows("Couldn't reach the bridge.") && gCanvas.shows("ALT and say its name"));
+    // Practice stands in for saying it.
+    gLabUi.playRule = count + 1; key('t'); assert(gLabUi.practicing); key(UP); run(100); assert(gLabStates[count + 1].active); key('t'); gLabPractice.clear(); run(100);
+    // Stopping forgets what was said.
+    esc(); assert(!gLabPlaying && gLabNamed == 0); gLabBook.count = count; gLabUi.view = LabView::Rules; goToRow(gLabBook.count + 1);
+    // The steps put it in words.
+    labWizardStart(-1, nullptr); gLabWizard.rule.cond[0].sig = Sig::Spoken; gLabWizard.step = LabStep::Op; assert(labWizardRowCount() == 2 && std::string(labWizardRow(0)) == "is said"); gLabWizard = LabWizard{}; gLabUi.view = LabView::Rules;
+  }
   // Set a part by voice: only the one on the screen, only something small, only from the Lab.
   {
     gLabUi.view = LabView::Devices;

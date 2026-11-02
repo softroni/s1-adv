@@ -27,7 +27,7 @@ enum class LabView : uint8_t { Devices, Device, PickPort, Wiring, Rules, Wizard,
 enum class LabStep : uint8_t { Sig, Op, Value, MoreConds, Join, Out, How, OutValue, Source, MoreActions, Hold, Name };
 
 // What a recording in the Lab is for, which sets the words on the screen around it.
-enum class LabVoice : uint8_t { NewRule, Change, Ask };
+enum class LabVoice : uint8_t { NewRule, Change, Ask, Command };
 
 struct LabUi {
   LabView view = LabView::Devices;
@@ -39,6 +39,8 @@ struct LabUi {
   int playRule = 0;             // Which rule the flow is showing.
   bool practicing = false;
   int practiceCond = 0;
+  String playNote;              // What came of a spoken command, for a moment.
+  uint32_t playNoteUntilMs = 0;
   LabVoice voice = LabVoice::NewRule;
   LabView sayBack = LabView::Rules;  // Where Esc goes from the Say screen.
   bool sayFailed = false;            // There's an answer to show, or a reason there isn't one.
@@ -96,6 +98,7 @@ String labOutText(Out out, int value, const char* degree = "`") {
   return labNumberText(value, info.unit, degree);
 }
 String labCondText(const lab::Cond& cond) {
+  if (cond.sig == Sig::Spoken) return cond.op == lab::Op::Above ? "You say its name" : "You haven't said its name";
   const lab::SigInfo& info = lab::info(cond.sig);
   String text = info.name;
   if (cond.op == lab::Op::Changes) return text + " changes";
@@ -773,6 +776,7 @@ void renderLabRecipes() {
 LabVoice labVoiceNow() {
   const LabUi& ui = gLabUi;
   if (ui.view == LabView::Say) return ui.voice;
+  if (ui.view == LabView::Play) return LabVoice::Command;
   if (ui.view != LabView::Rules) return LabVoice::Ask;
   if (ui.ruleRow < gLabBook.count) return LabVoice::Change;
   return ui.ruleRow == gLabBook.count + 1 ? LabVoice::NewRule : LabVoice::Ask;
@@ -789,11 +793,11 @@ void renderLabAnswer() {
 }
 void renderLabSay() {
   const LabVoice voice = labVoiceNow();
-  const bool change = voice == LabVoice::Change, ask = voice == LabVoice::Ask;
+  const bool change = voice == LabVoice::Change, ask = voice == LabVoice::Ask, command = voice == LabVoice::Command;
   const bool listening = voiceToolListening(), working = voiceToolWorking();
   const bool starting = voiceToolStarting();
-  const char* chip = listening ? "LISTENING" : working ? (ask ? "LOOKING" : "WRITING") : starting ? "STARTING" : "READY";
-  const char* title = change ? gLabBook.rules[gLabUi.ruleRow].name : ask ? "Ask the Lab" : "Say a rule";
+  const char* chip = listening ? "LISTENING" : working ? (ask ? "LOOKING" : command ? "CHECKING" : "WRITING") : starting ? "STARTING" : "READY";
+  const char* title = change ? gLabBook.rules[gLabUi.ruleRow].name : ask ? "Ask the Lab" : command ? "Say its name" : "Say a rule";
   labHead(title, launcher_icons::kMic, kLabLime, chip, listening ? kLabGreen : working || starting ? kLabAmber : kLabSoft);
   if (starting) {
     labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Getting ready...", TFT_WHITE);
@@ -801,11 +805,11 @@ void renderLabSay() {
     labKeys("ESC cancel");
   } else if (listening) {
     labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Listening...", kLabGreen);
-    labTextAt(&fonts::Font0, 6, 52, ask ? "Ask about your parts and rules." : change ? "Say what should be different." : "Say what to watch and what to do.", kLabSoft);
+    labTextAt(&fonts::Font0, 6, 52, command ? "Rules wait until you've finished." : ask ? "Ask about your parts and rules." : change ? "Say what should be different." : "Say what to watch and what to do.", kLabSoft);
     labKeys("ALT send  ESC cancel");
   } else if (working) {
-    labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, ask ? "Claude is looking" : change ? "Claude is changing it" : "Claude is writing it", TFT_WHITE);
-    labTextAt(&fonts::Font0, 6, 52, ask ? "It can see your parts and readings." : "You'll see it before it's saved.", kLabSoft);
+    labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, command ? "Checking what you said" : ask ? "Claude is looking" : change ? "Claude is changing it" : "Claude is writing it", TFT_WHITE);
+    labTextAt(&fonts::Font0, 6, 52, command ? "Rules carry on when this is done." : ask ? "It can see your parts and readings." : "You'll see it before it's saved.", kLabSoft);
     labKeys("ESC back");
   } else if (!gWifiReady || gHubHost.isEmpty()) {
     labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Needs Wi-Fi", TFT_WHITE);
@@ -884,6 +888,7 @@ String labWizardRow(int i) {
   switch (w.step) {
     case LabStep::Sig: case LabStep::Source: return lab::kSigs[i].name;
     case LabStep::Op: {
+      if (w.rule.cond[w.cond].sig == Sig::Spoken) return i == 0 ? "is said" : "hasn't been said";
       if (lab::info(w.rule.cond[w.cond].sig).onOff) return i == 0 ? "turns on" : "turns off";
       static constexpr const char* kOps[3] = {"goes under", "goes over", "changes at all"};
       return kOps[i];
@@ -1216,7 +1221,8 @@ void renderLabFlow(int index) {
   for (int i = 0; i < rule.conds; ++i) {
     const lab::Cond& cond = rule.cond[i];
     const int h = labFlowBoxH(rule.conds), y = labFlowBoxY(i, rule.conds);
-    const bool holds = lab::condHolds(cond, gLabSeen, now);
+    const bool said = (labNamedNow() >> index) & 1;
+    const bool holds = lab::condHolds(cond, gLabSeen, now, said);
     const bool picked = practicing && i == gLabUi.practiceCond;
     labCurve(kLeft + kBoxW, y + h / 2, cx - kCircle, cy, holds ? kLabGreen : kLabDim, holds ? dot : -1);
     d.fillRoundRect(kLeft, y, kBoxW, h, 5, kLabPanel);
@@ -1225,7 +1231,8 @@ void renderLabFlow(int index) {
     gCanvas.setFont(&fonts::Font0);
     labTextAt(&fonts::Font0, kLeft + 5, y + 3, fitCurrentFontToWidth(lab::info(cond.sig).name, kBoxW - 6), picked ? kLabAmber : holds ? kLabGreen : kLabMuted);
     const lab::Reading& reading = gLabSeen.get(cond.sig);
-    labTextAt(&fonts::Font2, kLeft + 5, y + (h > 30 ? 17 : 11), reading.live ? labValueText(cond.sig, reading.value) : String("--"), TFT_WHITE);
+    const String value = cond.sig == Sig::Spoken ? String(said ? "said" : "not yet") : reading.live ? labValueText(cond.sig, reading.value) : String("--");
+    labTextAt(&fonts::Font2, kLeft + 5, y + (h > 30 ? 17 : 11), value, TFT_WHITE);
   }
   for (int i = 0; i < rule.actions; ++i) {
     const lab::Action& action = rule.action[i];
@@ -1244,7 +1251,14 @@ void renderLabFlow(int index) {
   }
   d.fillCircle(cx, cy, kCircle, live);
   labTextCenter(&fonts::Font2, cx, cy - 7, rule.conds > 1 ? (rule.any ? "ANY" : "ALL") : "IF", firing ? TFT_BLACK : kLabSoft);
-  labTextAt(&fonts::Font0, 4, 116, state.fires == 1 ? String("Fired once") : String("Fired ") + String(int(state.fires)) + " times", kLabSoft);
+  if (static_cast<int32_t>(gLabUi.playNoteUntilMs - millis()) > 0) {
+    gCanvas.setFont(&fonts::efontCN_12);
+    labTextAt(&fonts::efontCN_12, 4, 113, fitCurrentFontToWidth(gLabUi.playNote, 160), kLabAmber);
+  } else if (lab::listensForName(rule) && !practicing) {
+    labTextAt(&fonts::Font0, 4, 116, "ALT and say its name", kLabAmber);
+  } else {
+    labTextAt(&fonts::Font0, 4, 116, state.fires == 1 ? String("Fired once") : String("Fired ") + String(int(state.fires)) + " times", kLabSoft);
+  }
   // Every rule at a glance, so a rule firing on another page still shows.
   const int count = gLabBook.count;
   for (int i = 0; i < count; ++i) {
@@ -1612,6 +1626,7 @@ bool labVoiceScreen() {
 bool labSayOnScreen() { return labVoiceScreen() && labVoiceNow() == LabVoice::NewRule; }
 bool labChangeOnScreen() { return labVoiceScreen() && labVoiceNow() == LabVoice::Change; }
 bool labAskOnScreen() { return labVoiceScreen() && labVoiceNow() == LabVoice::Ask; }
+bool labCommandOnScreen() { return labMode(gUiMode) && gLabUi.view == LabView::Play; }
 // Several rules at once are choices. They stay in order, and the first is shown.
 bool labTakeOffers(const String& json) {
   gLabOfferCount = 0;
@@ -1653,6 +1668,25 @@ void labAskAnswered(const VoiceToolAnswer& answer) {
   ui.sayHeard = answer.heard;
   if (answer.ok && !answer.reply.isEmpty()) gQueuedVoiceReplySpeech = cleanReplyForDevice(answer.reply);
   labRedraw();
+}
+// Only the words matter here, and rules are waiting, so this skips Claude. Saying a name again
+// turns it back off.
+void labCommandAnswered(const VoiceToolAnswer& answer) {
+  LabUi& ui = gLabUi;
+  ui.playNoteUntilMs = millis() + 3000;
+  labRedraw();
+  if (!answer.ok) {
+    ui.playNote = answer.problem;
+    return;
+  }
+  const int index = lab::spokenRule(answer.heard.c_str(), gLabBook.rules, gLabBook.count);
+  if (index < 0) {
+    ui.playNote = "Heard: " + answer.heard;
+    return;
+  }
+  gLabNamed ^= static_cast<uint8_t>(1U << index);
+  ui.playRule = index;
+  ui.playNote = String(gLabBook.rules[index].name) + ((gLabNamed >> index) & 1 ? " on" : " off");
 }
 // What Claude can't see from the words: what's plugged in, what it reads, and the rules so far.
 String labVoiceContext() {

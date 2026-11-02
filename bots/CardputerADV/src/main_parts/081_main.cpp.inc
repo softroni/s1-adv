@@ -85,6 +85,7 @@ lab::Inputs gLabSeen;              // The readings with any practice values on t
 lab::Practice gLabPractice;
 lab::RuleState gLabStates[lab::kMaxRules];
 uint16_t gLabSaidFires[lab::kMaxRules] = {};  // How many of each rule's firings have been spoken.
+uint8_t gLabNamed = 0;             // A bit for each rule whose name has been said while playing.
 bool gLabFetchingSpeech = false;
 lab::Drive gLabDrive[lab::kOutCount];
 lab_gps::Parser gLabGps;
@@ -824,7 +825,13 @@ void labHistorySample(uint32_t now) {
   if (!gLabRangeSeen || reading.value > gLabHighest) gLabHighest = reading.value;
   gLabRangeSeen = true;
 }
+// Practice can stand in for saying the name, and then it's on for every rule listening.
+uint8_t labNamedNow() {
+  const lab::Reading& practice = gLabSeen.get(lab::Sig::Spoken);
+  return practice.live && practice.value ? 0xFF : gLabNamed;
+}
 void labStopPlaying() {
+  gLabNamed = 0;
   gLabPlaying = false;
   gLabPaused = false;
   gLabPractice.clear();
@@ -833,6 +840,7 @@ void labStopPlaying() {
 void labPlay() {
   for (lab::RuleState& state : gLabStates) state = lab::RuleState{};
   for (uint16_t& said : gLabSaidFires) said = 0;
+  gLabNamed = 0;
   gLabPractice.clear();
   labReleaseOutputs();
   gLabPlaying = true;
@@ -911,7 +919,7 @@ void serviceLab() {
   labHistorySample(now);
   serviceLabTests();
   if (gLabPlaying && !gLabPaused) {
-    lab::step(gLabBook.rules, gLabBook.count, gLabStates, gLabSeen, now, gLabDrive);
+    lab::step(gLabBook.rules, gLabBook.count, gLabStates, gLabSeen, now, gLabDrive, labNamedNow());
     labSpeakNewFirings();
     labKeepAwake(now);
   } else if (gLabPlaying) {

@@ -9,8 +9,9 @@
 
 namespace lab {
 // --- What can be read -----------------------------------------------------------------------
+// New signals go at the end, because saved rules store these numbers.
 enum class Sig : uint8_t { Distance, Temperature, Humidity, Knob, Light, Motion, StickX, StickY, StickPress, Tilt,
-                           Satellites, Count };
+                           Satellites, Spoken, Count };
 constexpr uint8_t kSigCount = static_cast<uint8_t>(Sig::Count);
 
 // lo to hi is what a follow spreads across its output. A reading can go past it. `step` is how
@@ -29,6 +30,7 @@ constexpr SigInfo kSigs[kSigCount] = {
     {"stick_button", "Stick button", "", 0, 1, 1, true},
     {"tilt", "Tilt", "deg", -90, 90, 5, false},
     {"satellites", "Satellites", "", 0, 32, 1, false},
+    {"spoken", "Its name", "", 0, 1, 1, true},  // On once the rule's name is said, off when said again.
 };
 constexpr const SigInfo& info(Sig sig) { return kSigs[static_cast<uint8_t>(sig)]; }
 
@@ -205,7 +207,9 @@ inline void setOnOff(Cond& cond, bool on) {
   cond.value = on ? 0 : 1;
 }
 
-inline bool condHolds(const Cond& cond, const Inputs& inputs, uint32_t now) {
+// `said` is whether this rule's name has been spoken, which belongs to the rule and not to a sensor.
+inline bool condHolds(const Cond& cond, const Inputs& inputs, uint32_t now, bool said = false) {
+  if (cond.sig == Sig::Spoken) return cond.op == Op::Above ? said : !said;
   const Reading& r = inputs.get(cond.sig);
   if (!r.live) return false;
   switch (cond.op) {
@@ -216,10 +220,10 @@ inline bool condHolds(const Cond& cond, const Inputs& inputs, uint32_t now) {
   return false;
 }
 
-inline bool ruleHolds(const Rule& rule, const Inputs& inputs, uint32_t now) {
+inline bool ruleHolds(const Rule& rule, const Inputs& inputs, uint32_t now, bool said = false) {
   if (!rule.conds) return false;
   for (uint8_t i = 0; i < rule.conds; ++i) {
-    const bool holds = condHolds(rule.cond[i], inputs, now);
+    const bool holds = condHolds(rule.cond[i], inputs, now, said);
     if (holds == rule.any) return holds;
   }
   return !rule.any;
@@ -253,9 +257,55 @@ struct RuleState {
   uint32_t heldMs = 0, firedMs = 0;
 };
 
+inline bool listensForName(const Rule& rule) {
+  for (uint8_t i = 0; i < rule.conds; ++i) if (rule.cond[i].sig == Sig::Spoken) return true;
+  return false;
+}
+// Whether `name` appears in `heard`, ignoring case, spaces and punctuation, which speech
+// recognition is free to change. Returns how many letters matched, or 0.
+inline size_t nameInWords(const char* name, const char* heard) {
+  const auto plain = [](char c) -> char {
+    if (c >= 'A' && c <= 'Z') return static_cast<char>(c - 'A' + 'a');
+    return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ? c : '\0';
+  };
+  for (const char* start = heard; *start; ++start) {
+    if (!plain(*start)) continue;
+    const char* n = name;
+    size_t matched = 0;
+    for (const char* h = start;; ++n) {
+      while (*n && !plain(*n)) ++n;
+      if (!*n) {
+        if (matched) return matched;
+        break;
+      }
+      while (*h && !plain(*h)) ++h;
+      if (!*h || plain(*h) != plain(*n)) break;
+      ++h;
+      ++matched;
+    }
+  }
+  return 0;
+}
+// Which rule was named, for rules that listen for theirs. The longest name wins, so "movie time"
+// isn't taken for a rule called "time".
+inline int spokenRule(const char* heard, const Rule* rules, uint8_t count) {
+  int best = -1;
+  size_t bestLetters = 0;
+  for (uint8_t i = 0; i < count; ++i) {
+    if (!listensForName(rules[i])) continue;
+    const size_t letters = nameInWords(rules[i].name, heard);
+    if (letters > bestLetters) {
+      bestLetters = letters;
+      best = i;
+    }
+  }
+  return best;
+}
+
 // One pass over the rules in order, so when two want the same output the later one wins.
+// `spoken` has a bit for each rule whose name has been said.
 inline void step(const Rule* rules, uint8_t count, RuleState* states, const Inputs& inputs, uint32_t now,
-                 Drive* drive) {
+                 Drive* drive, uint8_t spoken = 0) {
   for (uint8_t i = 0; i < kOutCount; ++i) drive[i] = Drive{};
   for (uint8_t i = 0; i < count; ++i) {
     const Rule& rule = rules[i];
@@ -264,7 +314,7 @@ inline void step(const Rule* rules, uint8_t count, RuleState* states, const Inpu
       state.active = false;
       continue;
     }
-    if (ruleHolds(rule, inputs, now)) {
+    if (ruleHolds(rule, inputs, now, (spoken >> i) & 1)) {
       if (!state.active) {
         state.active = true;
         state.firedMs = now;
@@ -394,6 +444,7 @@ class Draft {
     Cond cond;
     if (rule.conds >= kMaxConds || !sigFromKey(sensor, cond.sig) || !test) { ok = false; return; }
     const SigInfo& s = info(cond.sig);
+    if (cond.sig == Sig::Spoken && strcmp(test, "on") != 0 && strcmp(test, "off") != 0) { ok = false; return; }
     if (strcmp(test, "changes") == 0) cond.op = Op::Changes;
     else if (strcmp(test, "on") == 0 && s.onOff) setOnOff(cond, true);
     else if (strcmp(test, "off") == 0 && s.onOff) setOnOff(cond, false);

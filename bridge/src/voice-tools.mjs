@@ -9,6 +9,8 @@ export const LAB_RULE_POLICY =
   "\"do\":[{\"output\":\"strip_color\",\"set\":0},{\"output\":\"servo\",\"follow\":\"knob\"}]}]]] " +
   "Sensors: distance (cm), temperature (C), humidity (%), knob (%), light (%), tilt (degrees), satellites, " +
   "stick_x and stick_y (-100 to 100), and motion and stick_button, which are on or off. " +
+  "There is also spoken, which is on or off: saying the rule's name while rules play turns it on, and saying it " +
+  "again turns it off, so for something like \"when I say movie time\" name the rule Movie time. " +
   "A test is under or over with a value, on or off for the on or off sensors, or changes. " +
   "Outputs with their set values: servo (0 to 180), strip_color and led (hue: red 0, orange 30, yellow 60, green 120, cyan 180, blue 240, purple 280, pink 330), " +
   "strip_bright and lamp_bright (0 to 100), strip_length (0 to 30), speaker (200 to 2000 Hz), " +
