@@ -150,13 +150,43 @@ struct Units {
   uint32_t um = 240000; uint16_t rawTemp = 26000, rawHumid = 27000; int8_t stickX = 47, stickY = -15; uint8_t stickButton = 1;
   uint16_t lux = 600; int commands = 0;
 } gUnits;
+// The Grove wires themselves, for parts with no I2C. G1 is white and G2 is yellow.
+constexpr int INPUT = 1, OUTPUT = 2, INPUT_PULLUP = 3, INPUT_PULLDOWN = 4, LOW = 0, HIGH = 1;
+bool gBusOpen = false;
+struct Grove {
+  bool held = true;           // Something is really on the white wire.
+  int adc = 1500; bool level = false;
+  int mode[3] = {}, out[3] = {};
+  uint32_t duty = 0; int channel = -1, attached = -1, bits = 0; uint32_t hz = 0;
+  int ledsLit = 0, frames = 0; uint8_t lastGreen = 0, lastRed = 0, lastBlue = 0;
+} gGrove;
+void pinMode(uint8_t pin, int mode) { assert(pin == 1 || pin == 2); assert(!gBusOpen); gGrove.mode[pin] = mode; }
+int digitalRead(uint8_t pin) { assert(pin == 1 && !gBusOpen); if (gGrove.held) return gGrove.level; assert(gGrove.mode[1] == INPUT_PULLUP || gGrove.mode[1] == INPUT_PULLDOWN || gGrove.mode[1] == INPUT); return gGrove.mode[1] == INPUT_PULLUP; }
+void digitalWrite(uint8_t pin, int value) { assert((pin == 1 || pin == 2) && !gBusOpen); gGrove.out[pin] = value; }
+int analogRead(uint8_t pin) { assert(pin == 1 && !gBusOpen); return gGrove.held ? gGrove.adc : (rand() & 4095); }
+void ledcSetup(uint8_t channel, uint32_t hz, uint8_t bits) { gGrove.channel = channel; gGrove.hz = hz; gGrove.bits = bits; }
+void ledcAttachPin(uint8_t pin, uint8_t channel) { assert(pin == 2 && !gBusOpen && channel == gGrove.channel); gGrove.attached = channel; }
+void ledcDetachPin(uint8_t pin) { assert(pin == 2); gGrove.attached = -1; }
+void ledcWrite(uint8_t channel, uint32_t duty) { assert(channel == gGrove.channel); gGrove.duty = duty; }
+struct rmt_obj_t { int pin; }; rmt_obj_t gRmtObject; int gRmtLive = 0;
+struct rmt_data_t { uint32_t level0, duration0, level1, duration1; };
+constexpr bool RMT_TX_MODE = true; constexpr int RMT_MEM_64 = 1;
+rmt_obj_t* rmtInit(int pin, bool tx, int) { assert(pin == 2 && tx && !gBusOpen); ++gRmtLive; return &gRmtObject; }
+float rmtSetTick(rmt_obj_t*, float tick) { assert(tick == 100); return tick; }
+bool rmtDeinit(rmt_obj_t*) { --gRmtLive; return true; }
+bool rmtWriteBlocking(rmt_obj_t*, rmt_data_t* data, size_t size) {
+  assert(size == 720 && gRmtLive == 1); ++gGrove.frames; gGrove.ledsLit = 0;
+  for (int led = 0; led < 30; ++led) { uint8_t c[3] = {}; for (int bit = 0; bit < 24; ++bit) { assert(data[led * 24 + bit].duration0 + data[led * 24 + bit].duration1 == 12); if (data[led * 24 + bit].duration0 == 7) c[bit / 8] |= uint8_t(0x80 >> (bit % 8)); }
+    if (c[0] || c[1] || c[2]) { ++gGrove.ledsLit; gGrove.lastGreen = c[0]; gGrove.lastRed = c[1]; gGrove.lastBlue = c[2]; } }
+  return true;
+}
 struct WireClass {
   uint8_t address = 0; std::vector<uint8_t> out, in; size_t readAt = 0; bool held = false;
   void beginTransmission(uint8_t a) { address = a; out.clear(); }
   void write(uint8_t b) { out.push_back(b); }
   void write(const uint8_t* b, size_t n) { out.insert(out.end(), b, b + n); }
   uint8_t endTransmission(bool stop = true) {
-    held = !stop; ++gUnits.commands;
+    held = !stop; ++gUnits.commands; assert(gBusOpen);
     const bool here = address == pbhub::kAddress ? gHubUnit.here : gUnits.present.count(address) > 0;
     if (!here) return 2;
     if (address == pbhub::kAddress && !out.empty()) { assert(stop); gHubUnit.receive(out); }
@@ -179,8 +209,8 @@ struct WireClass {
 // --- What the Lab borrows from the games ---------------------------------------------------------
 struct AirSensor {
   int opens = 0, closes = 0; bool open_ = false;
-  void open() { if (!open_) ++opens; open_ = true; }
-  void close() { if (open_) ++closes; open_ = false; }
+  void open() { if (!open_) ++opens; open_ = true; gBusOpen = true; }
+  void close() { if (open_) ++closes; open_ = false; gBusOpen = false; }
   bool trigger() { Wire.beginTransmission(0x57); Wire.write(uint8_t(1)); return Wire.endTransmission() == 0; }
   bool read(uint32_t& um) { if (!gUnits.present.count(0x57)) return false; um = gUnits.um; return true; }
 } gAirSensor;
@@ -195,10 +225,10 @@ struct EnvSensors {
 } gBalloonSensors;
 
 // --- The rest of the board -----------------------------------------------------------------------
-struct LedClass { int r = 0, g = 0, b = 0, shows = 0; bool isEnabled() { return true; }
-  void setAllColor(int a, int c, int d) { r = a; g = c; b = d; } void display() { ++shows; } };
+struct { int r = 0, g = 0, b = 0; } gLed;
+void neopixelWrite(uint8_t pin, uint8_t r, uint8_t g, uint8_t b) { assert(pin == 21); gLed.r = r; gLed.g = g; gLed.b = b; }
 struct ImuClass { float ay = 0.5f; bool getAccel(float* x, float* y, float* z) { *x = 0; *y = ay; *z = 1; return true; } };
-struct { ImuClass Imu; LedClass Led; } M5;
+struct { ImuClass Imu; } M5;
 struct SpeakerClass { int stops = 0, tones = 0, queued = 0; float hz = 0;
   void stop(uint8_t) { ++stops; queued = 0; } int isPlaying(uint8_t) { return queued; }
   void tone(float f, uint32_t, uint8_t, bool) { hz = f; ++tones; } };
@@ -375,7 +405,7 @@ void testDevices() {
   assert(gLabMotionCount == 2); show("motion"); assert(gCanvas.shows("Motion!")); gHubUnit.level[motion] = 0; run(200); esc();
   pickDevice(Dev::Hub); show("hub"); assert(gCanvas.shows("Mini Angle")); esc();
   pickDevice(Dev::Tilt); run(100); show("tilt"); esc();
-  pickDevice(Dev::Led); keys(" "); assert(gLabUi.ledOn && M5.Led.g > 0); show("led"); keys("/"); esc(); assert(M5.Led.r == 0 && M5.Led.g == 0 && M5.Led.b == 0);
+  pickDevice(Dev::Led); keys(" "); assert(gLabUi.ledOn && gLed.g > 0); show("led"); keys("/"); esc(); assert(gLed.r == 0 && gLed.g == 0 && gLed.b == 0);
   pickDevice(Dev::Speaker); keys("/"); assert(M5Cardputer.Speaker.tones > 0 && M5Cardputer.Speaker.hz == 930); show("speaker");
   run(600); assert(!gLabDrive[uint8_t(Out::Tone)].on); esc();
 
@@ -559,7 +589,7 @@ void testPlay() {
   run(3000); assert(!gLabStates[0].active && sumLeds(strip) == 0 && gHubUnit.pulses[servo][1] == 1);
   // A hand close: the other condition, and the second rule's relay and LED.
   gUnits.um = 200000; run(300); assert(gLabStates[0].active && gLabStates[0].fires == 2 && gLabStates[1].active);
-  assert(gHubUnit.written[relay][0] == 1 && M5.Led.g > 0); show("flow-again"); assert(gCanvas.shows("Fired 2 times"));
+  assert(gHubUnit.written[relay][0] == 1 && gLed.g > 0); show("flow-again"); assert(gCanvas.shows("Fired 2 times"));
   // Paging wraps, and shows the rule that's on each page.
   keys("/"); assert(gLabUi.playRule == 1); show("flow-two"); assert(gCanvas.shows("Close and turn") || gCanvas.shows("2/2")); keys("/"); assert(gLabUi.playRule == 0); keys(","); assert(gLabUi.playRule == 1);
   // Pause stops everything at once and resumes.
@@ -580,7 +610,7 @@ void testPlay() {
   gUnits.um = 200000; run(300); gHubUnit.here = false; run(1500); assert(!labFound(Unit::Hub) && gLabPlaying);
   gHubUnit.here = true; std::memset(gHubUnit.ledRgb, 0, sizeof(gHubUnit.ledRgb)); fingers(); run(1500); assert(labFound(Unit::Hub) && gHubUnit.written[relay][0] == 1 && sumLeds(strip) == 30);
   // Leaving: relays open, strip off, servo limp, and the port is free.
-  esc(); assert(!gLabPlaying && gLabUi.view == LabView::Rules && gHubUnit.written[relay][0] == 0 && sumLeds(strip) == 0 && gHubUnit.pulses[servo][1] == 0 && M5.Led.g == 0);
+  esc(); assert(!gLabPlaying && gLabUi.view == LabView::Rules && gHubUnit.written[relay][0] == 0 && sumLeds(strip) == 0 && gHubUnit.pulses[servo][1] == 0 && gLed.g == 0);
   const int closes = gAirSensor.closes;
   keys("p"); run(300); assert(gLabPlaying);
   setUiMode(UiMode::Home); assert(!gLabOpen && !gLabPlaying && gHubUnit.written[relay][0] == 0 && sumLeds(strip) == 0 && gAirSensor.closes == closes + 1 && !Serial1.open);
@@ -720,6 +750,81 @@ void testSaving() {
   labOfferRule(big); show("offer-big"); assert(gCanvas.shows("and Stick X") && !gCanvas.shows("or Stick X")); esc();
 }
 
+void plugOnly(std::set<uint8_t> units = {}, bool hub = false) { gUnits.present = units; gHubUnit.here = hub; }
+void testGrove() {
+  // The owner's photo: a Mini Angle straight on the Grove port, with no I/O hub.
+  lab::Book book; book.count = 1; book.rules[0] = lab::recipeRule(0); gLabBook = book;
+  gLabBookRead = true; gLabUi = LabUi{}; gDisk.files.clear();
+  plugOnly(); gGrove = Grove{}; gGrove.adc = 1400;
+  setUiMode(UiMode::LabDevices); run(1500);
+  assert(!gLabOnWires);  // Nothing to use yet: it can't be found, only asked for.
+  gLabUi.devRow = int(Dev::Knob); gLabUi.devTop = 2; show("grove-list"); assert(gCanvas.shows("press ENTER"));
+  key(ENTER); run(1500); assert(gLabOnWires && gLabBook.direct.white == lab::Part::Knob && !gBusOpen);
+  show("grove-knob"); assert(gCanvas.shows("50%") && gCanvas.shows("Grove") && gCanvas.shows("ON GROVE") && !gCanvas.shows("ANSWERING") && !gCanvas.shows("hub"));
+  assert(gLabInputs.get(Sig::Knob).live && gLabInputs.get(Sig::Knob).value == 50);
+  // It follows the knob, both ways, and the ends are the ends.
+  gGrove.adc = 0; run(100); assert(gLabInputs.get(Sig::Knob).value == 0); show("grove-knob-zero");
+  gGrove.adc = 2800; run(100); assert(gLabInputs.get(Sig::Knob).value == 100);
+  gGrove.adc = 3100; run(100); assert(gLabInputs.get(Sig::Knob).value == 100 && gLabKnobRange.top == 3100); gGrove.adc = 1550; run(100); assert(gLabInputs.get(Sig::Knob).value == 50);
+  // The bus stays out of it: the wire is the knob's.
+  { const auto before = gUnits.commands; run(1000); assert(gUnits.commands == before); }
+  assert(gLabSaved && gDisk.files.count("/lab/rules.dat"));
+  // Pull the cable and it stops making numbers up from a floating wire, then comes back.
+  gGrove.held = false; run(2000); assert(!gLabInputs.get(Sig::Knob).live); show("grove-unplugged"); assert(gCanvas.shows("Nothing on its wire"));
+  gGrove.held = true; run(1000); assert(gLabInputs.get(Sig::Knob).live); show("grove-knob");
+  // A single odd check near the logic threshold doesn't drop it.
+  gGrove.held = false; run(450); gGrove.held = true; run(100); assert(gLabInputs.get(Sig::Knob).live);
+  esc(); run(200); assert(gLabUi.view == LabView::Devices && gLabOnWires); show("grove-list-live"); assert(gCanvas.shows("1 ON THE PORT"));
+  // Rules read it, in the steps and when playing, with the servo through the 1-to-3 hub.
+  pickDevice(Dev::Servo); run(100); assert(gLabBook.direct.white == lab::Part::Knob && gLabBook.direct.yellow == lab::Part::Servo && gGrove.attached == 3 && gGrove.hz == 50 && gGrove.bits == 14);
+  show("grove-servo"); assert(gCanvas.shows("GROVE SIGNAL SENT"));
+  assert(gGrove.duty == 0);  // Nothing moves until a key says so.
+  keys("c"); assert(gGrove.duty == lab::servoDuty(90)); keys("/"); assert(gGrove.duty == lab::servoDuty(95));
+  esc(); assert(gGrove.duty == 0 && gGrove.attached == 3);  // Limp, with the wire still set up.
+  setUiMode(UiMode::LabRules); run(1500); assert(gLabOnWires && gGrove.attached == 3); assert(gLabInputs.get(Sig::Knob).live);
+  gLabUi.ruleRow = 0; keys("p"); run(500); gGrove.adc = 2800; run(300); assert(gLabStates[0].active && gGrove.duty == lab::servoDuty(180));
+  show("grove-play"); gGrove.adc = 1400; run(300); assert(gGrove.duty == lab::servoDuty(90));
+  esc(); assert(gGrove.duty == 0);
+  // After a restart the Lab remembers what was on the wires.
+  setUiMode(UiMode::Home); assert(!gBusOpen && gGrove.attached == -1 && gGrove.mode[1] == INPUT);
+  gLabBook = lab::Book{}; freshBoot(); setUiMode(UiMode::LabRules); run(1500); assert(gLabOnWires && gLabBook.direct.white == lab::Part::Knob && gLabBook.direct.yellow == lab::Part::Servo);
+  setUiMode(UiMode::LabDevices); run(1500);
+  // PIR on the white wire: its signal is plain on or off.
+  gGrove.level = false; gGrove.adc = 0; pickDevice(Dev::Motion); run(300); assert(gLabBook.direct.white == lab::Part::Motion && !gLabInputs.get(Sig::Knob).live && gLabInputs.get(Sig::Motion).live);
+  gLabMotionCount = 0; gGrove.level = true; run(200); assert(gLabInputs.get(Sig::Motion).value == 1 && gLabMotionCount == 1); show("grove-pir"); assert(gCanvas.shows("Motion!") && gCanvas.shows("Grove")); gGrove.level = false; run(200); esc();
+  // Light: analog on white.
+  gGrove.adc = 1000; pickDevice(Dev::Light); run(400); assert(gLabBook.direct.white == lab::Part::Light && gLabInputs.get(Sig::Light).value == 76); show("grove-light"); esc();
+  // Relay: both wires, high closes, white is relay 1, and it opens on leaving.
+  pickDevice(Dev::Relay); run(400); assert(gLabBook.direct.white == lab::Part::Relay && gLabBook.direct.yellow == lab::Part::Relay && gGrove.attached == -1 && gGrove.mode[1] == OUTPUT && gGrove.mode[2] == OUTPUT);
+  key('1'); run(400); assert(gGrove.out[1] == 1 && gGrove.out[2] == 0); key('2'); run(400); assert(gGrove.out[2] == 1); show("grove-relay"); assert(gCanvas.shows("GROVE SIGNAL SENT"));
+  esc(); assert(gGrove.out[1] == 0 && gGrove.out[2] == 0);
+  // Strip: its data on yellow, under the same power limit.
+  pickDevice(Dev::Strip); run(200); assert(gLabBook.direct.yellow == lab::Part::Strip && gLabBook.direct.white == lab::Part::None && gRmtLive == 1 && gGrove.ledsLit == 30 && gGrove.lastBlue > 0 && gGrove.lastBlue <= 25);
+  show("grove-strip");
+  keys("m"); run(300); keys("m"); run(500); assert(gGrove.ledsLit == 1); keys("m"); run(100); assert(gGrove.ledsLit == 1); keys("m"); run(200); assert(gGrove.ledsLit == 30);
+  esc(); run(50); assert(gGrove.ledsLit == 0);
+  // Swapping one part for another leaves no timer or LED driver behind.
+  pickDevice(Dev::Servo); run(100); assert(gRmtLive == 0 && gGrove.attached == 3); esc(); pickDevice(Dev::Strip); run(100); assert(gRmtLive == 1 && gGrove.attached == -1); esc(); pickDevice(Dev::Knob); run(100);
+  assert(gLabBook.direct.white == lab::Part::Knob && gLabBook.direct.yellow == lab::Part::Strip); esc();
+  // An I2C unit is noticed once the wires go quiet, and takes the port back.
+  gGrove.held = false; gUnits.present.insert(0x57); gUnits.um = 240000; run(6000);
+  assert(!gLabOnWires && gBusOpen && labFound(Unit::Ultrasonic) && gLabInputs.get(Sig::Distance).value == 24 && !gLabInputs.get(Sig::Knob).live); gGrove.held = true;
+  // With a unit on the port the wires can't be shared, and the screen says why.
+  pickDevice(Dev::Knob); run(500); assert(!gLabOnWires); show("grove-busy"); assert(gCanvas.shows("Ultrasonic") && gCanvas.shows("unplug these")); esc();
+  // The I/O hub always wins, even when a unit leaves just as it arrives, and the same part goes through it.
+  gLabBook.direct.yellow = lab::Part::None; plugOnly({}, true); fingers(); run(6000); assert(labFound(Unit::Hub) && !gLabOnWires && gLabInputs.get(Sig::Knob).live);
+  // The list notices it while a sensor is on the wires, however it was plugged in.
+  plugOnly(); run(3000); assert(gLabOnWires); gGrove.adc = 1400; run(300); assert(gLabInputs.get(Sig::Knob).value == 50);
+  plugOnly({}, true); fingers(); run(4000); assert(!gLabOnWires && labFound(Unit::Hub));
+  // With a servo on yellow the list leaves the bus alone, and Esc from a screen checks instead.
+  plugOnly(); run(3000); assert(gLabOnWires); pickDevice(Dev::Servo); run(100); assert(gLabBook.direct.yellow == lab::Part::Servo); esc();
+  { const auto before = gUnits.commands; run(7000); assert(gUnits.commands == before); }
+  pickDevice(Dev::Knob); run(200); plugOnly({}, true); fingers(); esc(); assert(!gLabOnWires); run(1500); assert(labFound(Unit::Hub) && gLabInputs.get(Sig::Knob).live);
+  setUiMode(UiMode::Home); plugOnly({0x57, 0x44, 0x63, 0x50}, true); gLabBook = lab::Book{}; gLabBook.count = 1; gLabBook.rules[0] = lab::starterRule(); gDisk.files.clear(); gLabUi = LabUi{};
+  // The built-in LED, which M5's library leaves off on this board, is driven directly.
+  setUiMode(UiMode::LabDevices); run(100); labDriveSet(Out::Led, 120); run(100); assert(gLed.g > 0); labDriveClear(); run(100); assert(gLed.g == 0); setUiMode(UiMode::LabRules); run(1500);
+}
+
 void testGuards() {
   // Keys with Ctrl and the like are left alone, and the voice path keeps the bus quiet.
   gLabUi.view = LabView::Rules; gLabUi.ruleRow = 0; Keyboard_Class::KeysState ctrl; ctrl.ctrl = true; assert(handleLabKey('.', ctrl)); assert(gLabUi.ruleRow == 0);
@@ -743,7 +848,7 @@ void testGuards() {
 int main(int argc, char** argv) {
   if (argc > 1) gDump = std::fopen(argv[1], "w");
   for (bool& live : gLabHistoryLive) live = false;
-  testDevices(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGuards();
+  testDevices(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testGuards();
   if (gDump) std::fclose(gDump);
   std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, the lamp and AC guards, units leaving and returning, saving and damage, and every screen stays on the display");
 }

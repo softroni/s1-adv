@@ -6,6 +6,9 @@ namespace {
 constexpr uint8_t kLabGpsRxPin = 15, kLabGpsTxPin = 13;  // The Cap's GPS, seen from the Cardputer.
 constexpr uint32_t kLabGpsBaud = 115200;
 constexpr int kLabGpsBytesPerPass = 256;
+constexpr uint8_t kLabWhitePin = 1, kLabYellowPin = 2;   // The Grove port's two signal wires.
+constexpr uint8_t kLabServoChannel = 3;  // IR takes LEDC channel 0 and the backlight takes 7.
+constexpr uint8_t kLabLedPin = 21;       // M5Unified leaves M5.Led unset on the Cardputer.
 constexpr uint8_t kLabToneChannel = 6;
 constexpr uint32_t kLabToneSliceMs = 60;
 constexpr uint32_t kLabHubReplyUs = 150;   // The hub reads its ADC when it sees the stop.
@@ -14,6 +17,9 @@ constexpr uint32_t kLabKnobMs = 40, kLabLightMs = 200, kLabMotionMs = 100, kLabT
 constexpr uint32_t kLabServoGapMs = 40, kLabStripGapMs = 50, kLabLedGapMs = 50;
 constexpr uint32_t kLabLampGapMs = 500, kLabAcGapMs = 3000;  // A remote command takes a while to act.
 constexpr uint32_t kLabRedrawMs = 100, kLabSampleMs = 250, kLabAwakeMs = 1000;
+constexpr uint32_t kLabWireCheckMs = 400, kLabRescanMs = 3000;
+constexpr uint8_t kLabSilentChecks = 3;  // In a row, because a knob near the logic threshold can fool one.
+constexpr uint32_t kLabPullSettleUs = 30;
 constexpr uint32_t kLabFarthestMm = 4500;
 constexpr uint32_t kLabDLightLuxForFull = 1000;
 constexpr uint8_t kLabDLightStart = 0x10;  // Keep measuring at 1 lux.
@@ -29,6 +35,8 @@ constexpr const char* kLabNewPath = "/lab/rules.new";
 void serviceLabTests();
 void serviceLabSay();
 void labEnterView(UiMode mode);
+bool labListShowing();
+void labSaveBook();
 
 enum class LabStripTest : uint8_t { Solid, Rainbow, Chase, Count };
 
@@ -78,6 +86,14 @@ bool gLabFound[lab::kUnitCount] = {};
 uint8_t gLabProbe = 0;
 uint8_t gLabHubFirmware = 0;       // 0 until the hub says.
 bool gLabHubReady = false;
+// The Grove wires are either the I2C bus or, with nothing on it, belong to parts plugged in directly.
+bool gLabOnWires = false;
+uint8_t gLabQuietProbes = 0;
+uint8_t gLabWhiteSilent = 0;
+uint32_t gLabWireCheckMs = 0, gLabRescanMs = 0;
+rmt_obj_t* gLabRmt = nullptr;
+uint8_t gLabStripRgb[lab::kStripLeds][3];
+rmt_data_t gLabStripBits[lab::kStripLeds * lab::kStripBits];
 bool gLabOpen = false, gLabPlaying = false, gLabPaused = false, gLabBehindMenu = false;
 int16_t gLabTempTenths = 0;
 uint32_t gLabLux = 0;
@@ -119,6 +135,16 @@ void labRedraw() {
   gUiFramePolicy.invalidate();
 }
 bool labFound(lab::Unit unit) { return gLabFound[static_cast<uint8_t>(unit)]; }
+bool labAnyUnit() {
+  for (bool found : gLabFound) if (found) return true;
+  return false;
+}
+// Whether this part is on the Grove wires right now, rather than on the I/O hub.
+bool labOnWires(lab::Part part) { return gLabOnWires && gLabBook.direct.has(part); }
+bool labPartReady(lab::Part part) {
+  if (gLabOnWires) return gLabBook.direct.has(part);
+  return labFound(lab::Unit::Hub) && gLabHubReady && gLabBook.wiring.portOf(part) >= 0;
+}
 void labDriveSet(lab::Out out, int value) {
   lab::Drive& drive = gLabDrive[static_cast<uint8_t>(out)];
   drive.on = true;
@@ -187,8 +213,14 @@ void labProbeNext(uint32_t now) {
   gLabProbeMs = now;
   const lab::Unit unit = static_cast<lab::Unit>(gLabProbe);
   const bool here = gLabBus.ping(lab::kUnitAddresses[gLabProbe]);
-  if (!here) labUnitLost(unit);
-  else gLabFound[gLabProbe] = true;
+  // Only a whole round of silence counts, or a unit swap could look like an empty port.
+  if (here) {
+    gLabFound[gLabProbe] = true;
+    gLabQuietProbes = 0;
+  } else {
+    labUnitLost(unit);
+    if (gLabQuietProbes < lab::kUnitCount) ++gLabQuietProbes;
+  }
   gLabProbe = (gLabProbe + 1) % lab::kUnitCount;
 }
 void labReadSonic(uint32_t now) {
@@ -311,29 +343,185 @@ void labReadGps(uint32_t now) {
   else gLabInputs.lose(lab::Sig::Satellites);
 }
 
+// --- Parts on the Grove wires -------------------------------------------------------------------
+// Nothing here can answer, so the only sign of a sensor is that its wire is held. Left alone, a
+// wire follows the chip's weak pulls, and anything really attached overrides them.
+bool labWhiteFloats() {
+  pinMode(kLabWhitePin, INPUT_PULLUP);
+  delayMicroseconds(kLabPullSettleUs);
+  const bool followsUp = digitalRead(kLabWhitePin);
+  pinMode(kLabWhitePin, INPUT_PULLDOWN);
+  delayMicroseconds(kLabPullSettleUs);
+  const bool followsDown = !digitalRead(kLabWhitePin);
+  pinMode(kLabWhitePin, INPUT);
+  return followsUp && followsDown;
+}
+void labWiresOn() {
+  const lab::Direct& direct = gLabBook.direct;
+  if (direct.white == lab::Part::Relay) {
+    digitalWrite(kLabWhitePin, LOW);
+    digitalWrite(kLabYellowPin, LOW);
+    pinMode(kLabWhitePin, OUTPUT);
+    pinMode(kLabYellowPin, OUTPUT);
+  } else if (direct.white != lab::Part::None) {
+    pinMode(kLabWhitePin, INPUT);
+  }
+  if (direct.yellow == lab::Part::Servo) {
+    ledcSetup(kLabServoChannel, lab::kServoHz, lab::kServoBits);
+    ledcWrite(kLabServoChannel, 0);
+    ledcAttachPin(kLabYellowPin, kLabServoChannel);
+  } else if (direct.yellow == lab::Part::Strip) {
+    gLabRmt = rmtInit(kLabYellowPin, RMT_TX_MODE, RMT_MEM_64);
+    if (gLabRmt) rmtSetTick(gLabRmt, 100);
+    memset(gLabStripRgb, 0, sizeof(gLabStripRgb));
+  }
+}
+void labWiresOff() {
+  const lab::Direct& direct = gLabBook.direct;
+  if (direct.yellow == lab::Part::Servo) ledcDetachPin(kLabYellowPin);
+  if (gLabRmt) {
+    rmtDeinit(gLabRmt);
+    gLabRmt = nullptr;
+  }
+  pinMode(kLabWhitePin, INPUT);
+  pinMode(kLabYellowPin, INPUT);
+}
+void labLoseWireSignals() {
+  gLabInputs.lose(lab::Sig::Knob);
+  gLabInputs.lose(lab::Sig::Motion);
+  gLabInputs.lose(lab::Sig::Light);
+}
+void labTakeWires() {
+  gAirSensor.close();
+  labForgetOutputs();
+  gLabOnWires = true;
+  gLabWhiteSilent = 0;
+  gLabKnobRange.top = lab::kDirectKnobTop;
+  gLabLightRange.top = lab::kDirectLightTop;
+  labWiresOn();
+}
+// Back to the bus, which is how a unit plugged in later gets noticed.
+void labGiveUpWires() {
+  labWiresOff();
+  gLabOnWires = false;
+  gLabQuietProbes = 0;
+  gLabKnobRange = lab::AnalogRange{};
+  gLabLightRange = lab::AnalogRange{};
+  labLoseWireSignals();
+  labForgetOutputs();
+}
+// A quick look at the bus at a moment when nothing's being driven. Going back to it for good is
+// what lets a unit or the I/O hub plugged in later take over.
+void labRescanBus() {
+  if (!gLabOnWires) return;
+  labWiresOff();
+  gAirSensor.open();
+  bool found = false;
+  for (uint8_t address : lab::kUnitAddresses) found = gLabBus.ping(address) || found;
+  gAirSensor.close();
+  labWiresOn();
+  if (found) labGiveUpWires();
+}
+void labReadWires(uint32_t now) {
+  const lab::Part white = gLabBook.direct.white;
+  const bool sensor = white == lab::Part::Knob || white == lab::Part::Light || white == lab::Part::Motion;
+  if (!sensor) return;
+  if (now - gLabWireCheckMs >= kLabWireCheckMs) {
+    gLabWireCheckMs = now;
+    if (!labWhiteFloats()) gLabWhiteSilent = 0;
+    else if (gLabWhiteSilent < kLabSilentChecks) ++gLabWhiteSilent;
+  }
+  if (gLabWhiteSilent >= kLabSilentChecks) {
+    labLoseWireSignals();
+    return;
+  }
+  if (white == lab::Part::Knob && now - gLabKnobMs >= kLabKnobMs) {
+    gLabKnobMs = now;
+    gLabKnobRaw = static_cast<uint16_t>(analogRead(kLabWhitePin));
+    gLabInputs.set(lab::Sig::Knob, gLabKnobRange.percent(gLabKnobRaw), now);
+  } else if (white == lab::Part::Light && now - gLabLightMs >= kLabLightMs) {
+    gLabLightMs = now;
+    gLabLightRaw = static_cast<uint16_t>(analogRead(kLabWhitePin));
+    const int percent = gLabLightRange.percent(gLabLightRaw);
+    gLabInputs.set(lab::Sig::Light, static_cast<int16_t>(gLabBook.lightFlipped ? 100 - percent : percent), now);
+  } else if (white == lab::Part::Motion && now - gLabMotionMs >= kLabMotionMs) {
+    gLabMotionMs = now;
+    const bool high = digitalRead(kLabWhitePin);
+    if (high && !gLabMotionWas) ++gLabMotionCount;
+    gLabMotionWas = high;
+    gLabInputs.set(lab::Sig::Motion, high ? 1 : 0, now);
+  }
+}
+// With nothing on the bus, whatever was last used on the wires gets them back. The list keeps an
+// eye out for a unit or the I/O hub being plugged in, except that bus traffic on the yellow wire
+// would twitch a servo or flash a strip, so with one of those it waits for a sensor to go quiet.
+void serviceLabWires(uint32_t now, bool listShowing) {
+  if (!gLabOnWires) {
+    if (gLabBook.direct.any() && gLabQuietProbes >= lab::kUnitCount && !labAnyUnit()) labTakeWires();
+    return;
+  }
+  const bool quietYellow = gLabBook.direct.yellow == lab::Part::None || gLabWhiteSilent >= kLabSilentChecks;
+  if (listShowing && quietYellow && now - gLabRescanMs >= kLabRescanMs) {
+    gLabRescanMs = now;
+    labRescanBus();
+  }
+}
+// Opening a part with no I/O hub means it's on the Grove port, so that's where it's looked for.
+void labUseOnWires(lab::Part part) {
+  if (gLabBook.direct.has(part)) return;
+  if (gLabOnWires) labWiresOff();
+  gLabBook.direct.claim(part);
+  labSaveBook();
+  labLoseWireSignals();
+  labForgetOutputs();
+  gLabWhiteSilent = 0;
+  if (gLabOnWires) labWiresOn();
+}
+
 // --- Outputs ---------------------------------------------------------------------------------
 void labWriteServo(uint32_t now) {
   const lab::Drive& drive = gLabDrive[static_cast<uint8_t>(lab::Out::Servo)];
-  const int8_t port = gLabBook.wiring.portOf(lab::Part::Servo);
-  if (!drive.on || port < 0 || drive.value == gLabServoSent || now - gLabServoMs < kLabServoGapMs) return;
+  if (!drive.on || !labPartReady(lab::Part::Servo) || drive.value == gLabServoSent || now - gLabServoMs < kLabServoGapMs) return;
   gLabServoMs = now;
-  if (gLabHub.servo(port, pbhub::kOutputPin, static_cast<uint8_t>(lab::clampTo<int>(drive.value, 0, pbhub::kMaxAngle)))) {
-    gLabServoSent = drive.value;
-    gLabServoHeld = true;
-  } else {
+  const int angle = lab::clampTo<int>(drive.value, 0, pbhub::kMaxAngle);
+  if (labOnWires(lab::Part::Servo)) {
+    ledcWrite(kLabServoChannel, lab::servoDuty(angle));
+  } else if (!gLabHub.servo(gLabBook.wiring.portOf(lab::Part::Servo), pbhub::kOutputPin, static_cast<uint8_t>(angle))) {
     labUnitLost(lab::Unit::Hub);
+    return;
   }
+  gLabServoSent = drive.value;
+  gLabServoHeld = true;
 }
-void labWriteStripFrame(uint32_t now, int8_t port) {
+void labStripShow() {
+  if (!gLabRmt) return;
+  lab::encodeStrip(gLabStripRgb, lab::kStripLeds, gLabStripBits);
+  rmtWriteBlocking(gLabRmt, gLabStripBits, lab::kStripLeds * lab::kStripBits);
+}
+bool labStripFill(uint16_t start, uint16_t count, uint8_t r, uint8_t g, uint8_t b) {
+  if (!labOnWires(lab::Part::Strip)) return gLabHub.fillLeds(gLabBook.wiring.portOf(lab::Part::Strip), start, count, r, g, b);
+  for (uint16_t i = start; i < start + count && i < lab::kStripLeds; ++i) {
+    gLabStripRgb[i][0] = r;
+    gLabStripRgb[i][1] = g;
+    gLabStripRgb[i][2] = b;
+  }
+  labStripShow();
+  return true;
+}
+bool labStripOne(uint16_t index, uint8_t r, uint8_t g, uint8_t b) {
+  if (!labOnWires(lab::Part::Strip)) return gLabHub.oneLed(gLabBook.wiring.portOf(lab::Part::Strip), index, r, g, b);
+  return labStripFill(index, 1, r, g, b);
+}
+void labWriteStripFrame(uint32_t now) {
   const lab::StripFrame frame = lab::stripFrame(gLabDrive, gLabBook.capPercent);
   if ((gLabStripKnown && frame == gLabStripSent) || now - gLabStripMs < kLabStripGapMs) return;
   gLabStripMs = now;
   bool ok = true;
   if (frame.on && frame.lit < lab::kStripLeds) {
-    ok = gLabHub.fillLeds(port, 0, frame.lit, frame.r, frame.g, frame.b) &&
-         gLabHub.fillLeds(port, frame.lit, lab::kStripLeds - frame.lit, 0, 0, 0);
+    ok = labStripFill(0, frame.lit, frame.r, frame.g, frame.b) &&
+         labStripFill(frame.lit, lab::kStripLeds - frame.lit, 0, 0, 0);
   } else {
-    ok = gLabHub.fillLeds(port, 0, lab::kStripLeds, frame.r, frame.g, frame.b);
+    ok = labStripFill(0, lab::kStripLeds, frame.r, frame.g, frame.b);
   }
   if (!ok) {
     labUnitLost(lab::Unit::Hub);
@@ -344,13 +532,13 @@ void labWriteStripFrame(uint32_t now, int8_t port) {
 }
 // The test patterns light LEDs one at a time. The hub redraws the strip for each, so a rainbow is
 // sent a few LEDs per pass rather than holding up the loop.
-void labWriteStripTest(uint32_t now, int8_t port) {
+void labWriteStripTest(uint32_t now) {
   uint8_t r = 0, g = 0, b = 0;
   const int percent = gLabDrive[static_cast<uint8_t>(lab::Out::StripBright)].value * gLabBook.capPercent / 100;
   if (gLabStripTest == LabStripTest::Rainbow) {
     for (int i = 0; i < kLabRainbowPerPass && gLabRainbowNext < lab::kStripLeds; ++i, ++gLabRainbowNext) {
       lab::hueToRgb(gLabRainbowNext * 360 / lab::kStripLeds, r, g, b);
-      if (!gLabHub.oneLed(port, gLabRainbowNext, r * percent / 100, g * percent / 100, b * percent / 100)) {
+      if (!labStripOne(gLabRainbowNext, r * percent / 100, g * percent / 100, b * percent / 100)) {
         labUnitLost(lab::Unit::Hub);
         return;
       }
@@ -366,36 +554,36 @@ void labWriteStripTest(uint32_t now, int8_t port) {
   }
   if (target == gLabChaseAt) return;
   lab::hueToRgb(color.value, r, g, b);
-  const bool ok = gLabChaseAt < 0 ? gLabHub.fillLeds(port, 0, lab::kStripLeds, 0, 0, 0)
-                                  : gLabHub.oneLed(port, gLabChaseAt, 0, 0, 0);
-  if (!ok || !gLabHub.oneLed(port, target, r * percent / 100, g * percent / 100, b * percent / 100)) {
+  const bool ok = gLabChaseAt < 0 ? labStripFill(0, lab::kStripLeds, 0, 0, 0) : labStripOne(gLabChaseAt, 0, 0, 0);
+  if (!ok || !labStripOne(target, r * percent / 100, g * percent / 100, b * percent / 100)) {
     labUnitLost(lab::Unit::Hub);
     return;
   }
   gLabChaseAt = target;
 }
 void labWriteStrip(uint32_t now) {
-  const int8_t port = gLabBook.wiring.portOf(lab::Part::Strip);
-  if (port < 0) return;
-  if (gLabStripTest == LabStripTest::Solid) labWriteStripFrame(now, port);
-  else labWriteStripTest(now, port);
+  if (!labPartReady(lab::Part::Strip)) return;
+  if (gLabStripTest == LabStripTest::Solid) labWriteStripFrame(now);
+  else labWriteStripTest(now);
 }
 void labWriteRelays(uint32_t now) {
+  if (!labPartReady(lab::Part::Relay)) return;
   const int8_t port = gLabBook.wiring.portOf(lab::Part::Relay);
-  if (port < 0) return;
   for (uint8_t i = 0; i < 2; ++i) {
     const lab::Drive& drive = gLabDrive[static_cast<uint8_t>(i == 0 ? lab::Out::Relay1 : lab::Out::Relay2)];
     const bool wanted = drive.on && drive.value > 0;
     if (!gLabRelays[i].allow(wanted, now)) continue;
     // Relay 1 is on the white wire and relay 2 on the yellow, and high closes them.
-    if (!gLabHub.digitalWrite(port, i == 0 ? pbhub::kInputPin : pbhub::kOutputPin, wanted)) {
+    if (labOnWires(lab::Part::Relay)) {
+      digitalWrite(i == 0 ? kLabWhitePin : kLabYellowPin, wanted ? HIGH : LOW);
+    } else if (!gLabHub.digitalWrite(port, i == 0 ? pbhub::kInputPin : pbhub::kOutputPin, wanted)) {
       labUnitLost(lab::Unit::Hub);
       return;
     }
   }
 }
 void labWriteLed(uint32_t now) {
-  if (!M5.Led.isEnabled() || now - gLabLedMs < kLabLedGapMs) return;
+  if (now - gLabLedMs < kLabLedGapMs) return;
   const lab::Drive& drive = gLabDrive[static_cast<uint8_t>(lab::Out::Led)];
   const int wanted = drive.on ? drive.value : -1;
   if (wanted == gLabLedSent) return;
@@ -403,8 +591,7 @@ void labWriteLed(uint32_t now) {
   gLabLedSent = wanted;
   uint8_t r = 0, g = 0, b = 0;
   if (drive.on) lab::hueToRgb(drive.value, r, g, b);
-  M5.Led.setAllColor(r / kLabLedDivide, g / kLabLedDivide, b / kLabLedDivide);
-  M5.Led.display();
+  neopixelWrite(kLabLedPin, r / kLabLedDivide, g / kLabLedDivide, b / kLabLedDivide);
 }
 void labWriteTone() {
   auto& speaker = M5Cardputer.Speaker;
@@ -454,16 +641,22 @@ void labWriteOutputs(uint32_t now) {
   labWriteLed(now);
   labWriteTone();
   labWriteRemotes(now);
-  if (!labFound(lab::Unit::Hub) || !gLabHubReady) return;
   labWriteServo(now);
-  if (labFound(lab::Unit::Hub)) labWriteStrip(now);
-  if (labFound(lab::Unit::Hub)) labWriteRelays(now);
+  labWriteStrip(now);
+  labWriteRelays(now);
 }
 // Everything off, relays first. The servo is let go too, so it stops holding and drawing power.
 void labReleaseOutputs() {
   labDriveClear();
   gLabStripTest = LabStripTest::Solid;
-  if (labFound(lab::Unit::Hub) && gLabHubReady) {
+  if (gLabOnWires) {
+    if (gLabBook.direct.has(lab::Part::Relay)) {
+      digitalWrite(kLabWhitePin, LOW);
+      digitalWrite(kLabYellowPin, LOW);
+    }
+    if (gLabBook.direct.has(lab::Part::Strip)) labStripFill(0, lab::kStripLeds, 0, 0, 0);
+    if (gLabBook.direct.has(lab::Part::Servo)) ledcWrite(kLabServoChannel, 0);
+  } else if (labFound(lab::Unit::Hub) && gLabHubReady) {
     const lab::Wiring& wiring = gLabBook.wiring;
     const int8_t relay = wiring.portOf(lab::Part::Relay);
     if (relay >= 0) {
@@ -477,10 +670,7 @@ void labReleaseOutputs() {
   }
   gLabServoHeld = false;
   labForgetOutputs();
-  if (M5.Led.isEnabled() && gLabLedSent >= 0) {
-    M5.Led.setAllColor(0, 0, 0);
-    M5.Led.display();
-  }
+  if (gLabLedSent >= 0) neopixelWrite(kLabLedPin, 0, 0, 0);
   gLabLedSent = -1;
   if (gLabToneOn) M5Cardputer.Speaker.stop(kLabToneChannel);
   gLabToneOn = false;
@@ -572,6 +762,8 @@ void beginLab() {
   gLabHubReady = false;
   gLabServoHeld = false;
   gLabLedSent = -1;
+  gLabOnWires = false;
+  gLabQuietProbes = 0;
   gLabOpen = true;
   labEnterView(gUiMode);
   gLabGps = lab_gps::Parser{};
@@ -582,6 +774,8 @@ void beginLab() {
 void stopLab() {
   if (!gLabOpen) return;
   labStopPlaying();
+  if (gLabOnWires) labWiresOff();
+  gLabOnWires = false;
   Serial1.end();
   for (uint8_t i = 0; i < lab::kUnitCount; ++i) labUnitLost(static_cast<lab::Unit>(i));
   gLabInputs = lab::Inputs{};
@@ -612,13 +806,18 @@ void serviceLab() {
   // A poll stops the main loop for a moment, and the mic and the speaker run on that loop.
   if (gRecording || gRealtimeActive || gPlaybackActive) return;
   const uint32_t now = millis();
-  gAirSensor.open();
-  labProbeNext(now);
-  labReadSonic(now);
-  labReadEnv(now);
-  labReadStick(now);
-  labReadDLight(now);
-  labReadHubParts(now);
+  serviceLabWires(now, labListShowing());
+  if (gLabOnWires) {
+    labReadWires(now);
+  } else {
+    gAirSensor.open();
+    labProbeNext(now);
+    labReadSonic(now);
+    labReadEnv(now);
+    labReadStick(now);
+    labReadDLight(now);
+    labReadHubParts(now);
+  }
   labReadTilt(now);
   labReadGps(now);
   gLabSeen = gLabInputs;

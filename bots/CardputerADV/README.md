@@ -82,9 +82,9 @@ nothing plugged in. It uses:
 | Built in | BMI270 tilt, RGB LED, speaker, and the IR transmitter for TCL and Daikin air conditioners |
 | Wi-Fi | smartLamp |
 
-A servo or single-wire strip needs a signal line of its own, and on a passive hub the only two
-lines are the I2C ones, so those parts go on the I/O hub. See
-[Lab in the controls guide](../../docs/CONTROLS.md#lab) for the wiring and every key.
+The parts on the I/O hub can also go straight on the Grove port with no I2C unit attached: a sensor
+on white (G1), which reads analog, and a servo or strip on yellow (G2). The relay unit uses both.
+See [Lab in the controls guide](../../docs/CONTROLS.md#lab) for the wiring and every key.
 
 The ENV III's pressure sensor isn't read. The M5StickS3 and M5StickC Plus2 are separate computers
 with no sensor mode, so they would need firmware of their own.

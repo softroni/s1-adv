@@ -178,12 +178,29 @@ is only held while a Lab screen is open.
 
 ### Wiring
 
-Plug the I/O hub into the Grove port through the 1-to-3 hub. Its six ports run the parts that
-can't share the Grove wires, and the other two sockets on the 1-to-3 hub take any two of the
-Ultrasonic, ENV III, Joystick 2 and NFC units. Swap them as you need them, because the Lab
-notices what's plugged in.
+To try one part, plug it straight into the Grove port and open it in Devices. The Mini Angle,
+Light, PIR, 2 relays, Servo and LED strip can't answer on the port, so the list shows **press
+ENTER** for them. Opening one tells the Lab that's what is plugged in, and it remembers.
 
-Nothing on an I/O hub port can say what it is, so Devices, W sets which part is on which port.
+Through the 1-to-3 hub, the two Grove wires can serve one sensor and one output together, with no
+I/O hub at all:
+
+| Wire | Part |
+| --- | --- |
+| White | Mini Angle, Light or PIR |
+| Yellow | Servo or LED strip |
+| Both | 2 relays |
+
+That's enough for the Mini Angle to drive the servo. I2C units use both wires, so an Ultrasonic,
+ENV III, Joystick 2 or NFC unit can't share the port with these. If one is plugged in, those
+screens say so.
+
+To use more parts at once, plug the I/O hub into the Grove port through the 1-to-3 hub. Its six
+ports run these parts, and the other two sockets on the 1-to-3 hub take any two of the I2C units.
+Swap them as you need them, because the Lab notices what's plugged in.
+
+Nothing on an I/O hub port can say what it is either, so Devices, W sets which part is on which
+port.
 This is the starting layout:
 
 | Port | Part |
@@ -201,9 +218,9 @@ and is used instead.
 
 ### Devices
 
-Up and down pick a device, and Enter opens it. A solid dot means it answered just now. A ring
-means it only takes orders, so it can be reached but can't reply. Esc goes back, and everything
-turns off when you leave a test screen.
+Up and down pick a device, and Enter opens it. A solid dot means it's there. A cyan ring means it
+only takes orders, so it can be reached but can't reply, and a grey ring means it hasn't been
+found. Esc goes back, and everything turns off when you leave a test screen.
 
 - **Ultrasonic, Light, Tilt and PIR:** a live number and the last 30 seconds. R resets the lowest
   and highest. If the Light reads backwards, F flips it.

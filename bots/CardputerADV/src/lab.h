@@ -432,6 +432,60 @@ struct Wiring {
   }
 };
 
+// --- Parts straight on the Grove port ----------------------------------------------------------
+// Without the I/O hub, a part can use the Grove port's own two wires, which are the ones I2C units
+// need, so this only works with no I2C unit attached. White is G1, which reads analog, and
+// yellow is G2. Each wire has one job, so through the 1-to-3 hub a knob on white can drive a servo
+// on yellow. The relay unit needs both.
+struct Direct {
+  Part white = Part::None, yellow = Part::None;
+
+  static constexpr bool usesWhite(Part part) {
+    return part == Part::Knob || part == Part::Light || part == Part::Motion || part == Part::Relay;
+  }
+  static constexpr bool usesYellow(Part part) { return part == Part::Servo || part == Part::Strip || part == Part::Relay; }
+  bool any() const { return white != Part::None || yellow != Part::None; }
+  bool has(Part part) const { return part != Part::None && (white == part || yellow == part); }
+  // The newest part on a wire takes it. Replacing half of the relay unit removes all of it.
+  void claim(Part part) {
+    if (usesWhite(part) && yellow == Part::Relay) yellow = Part::None;
+    if (usesYellow(part) && white == Part::Relay) white = Part::None;
+    if (usesWhite(part)) white = part;
+    if (usesYellow(part)) yellow = part;
+  }
+};
+
+constexpr uint16_t kDirectKnobTop = 2800;   // What the ADC reads for the Mini Angle's top, about 2.5 V.
+constexpr uint16_t kDirectLightTop = 4095;
+
+// A 50 Hz pulse from 500 to 2500 microseconds, as a 14-bit duty, which is what the I/O hub's chip
+// sends for the same angle.
+constexpr uint32_t kServoHz = 50;
+constexpr uint8_t kServoBits = 14;
+inline uint32_t servoDuty(int degrees) {
+  const uint32_t pulseUs = 500U + static_cast<uint32_t>(clampTo(degrees, 0, 180)) * 2000U / 180U;
+  return pulseUs * (1UL << kServoBits) / (1000000UL / kServoHz);
+}
+
+// SK6812 data for `leds` colors, green first, in 100 ns ticks. These timings are inside both the
+// SK6812 and WS2812 limits. Symbol needs level0, duration0, level1 and duration1.
+constexpr int kStripBits = 24;
+template <class Symbol>
+void encodeStrip(const uint8_t (*rgb)[3], int leds, Symbol* out) {
+  for (int led = 0; led < leds; ++led) {
+    const uint8_t bytes[3] = {rgb[led][1], rgb[led][0], rgb[led][2]};
+    for (uint8_t byte : bytes) {
+      for (uint8_t mask = 0x80; mask; mask >>= 1, ++out) {
+        const bool one = byte & mask;
+        out->level0 = 1;
+        out->duration0 = one ? 7 : 3;
+        out->level1 = 0;
+        out->duration1 = one ? 5 : 9;
+      }
+    }
+  }
+}
+
 // --- Everything the Lab lists -----------------------------------------------------------------
 enum class Dev : uint8_t { Ultrasonic, Env, Joystick, Knob, Light, Motion, Relay, Servo, Strip, Hub, Nfc, Gps, Tilt,
                            Led, Speaker, Lamp, Ac, Count };
@@ -566,9 +620,10 @@ class RemoteSwitch {
 // The file holds only these numbers, and every one is checked on the way back in, so a damaged
 // card can't point a rule at something that doesn't exist.
 constexpr uint8_t kFileMagic[3] = {'S', 'L', 'B'};
-constexpr uint8_t kFileVersion = 1;
+constexpr uint8_t kFileVersion = 2;     // Version 1 had no Direct, and still loads.
 constexpr size_t kRuleBytes = kNameChars + 1 + 6 + kMaxConds * 4 + kMaxActions * 5;
-constexpr size_t kHeaderBytes = 4 + 1 + pbhub::kPorts + 3;
+constexpr size_t kOldHeaderBytes = 4 + 1 + pbhub::kPorts + 3;
+constexpr size_t kHeaderBytes = kOldHeaderBytes + 2;
 constexpr size_t kFileBytes = kHeaderBytes + kMaxRules * kRuleBytes + 2;
 
 struct Book {
@@ -578,6 +633,7 @@ struct Book {
   uint8_t capPercent = kDefaultCapPercent;
   bool lightFlipped = true;   // Most units read lower as it gets brighter.
   uint8_t showMode = 0;
+  Direct direct;
 };
 
 inline uint16_t checksum(const uint8_t* bytes, size_t length) {
@@ -603,6 +659,8 @@ inline size_t encode(const Book& book, uint8_t* out) {
   put(book.capPercent);
   put(book.lightFlipped ? 1 : 0);
   put(book.showMode);
+  put(static_cast<uint8_t>(book.direct.white));
+  put(static_cast<uint8_t>(book.direct.yellow));
   for (uint8_t i = 0; i < book.count; ++i) {
     const Rule& rule = book.rules[i];
     for (uint8_t c = 0; c <= kNameChars; ++c) put(static_cast<uint8_t>(rule.name[c]));
@@ -630,12 +688,16 @@ inline size_t encode(const Book& book, uint8_t* out) {
 }
 
 inline bool decode(const uint8_t* bytes, size_t length, Book& book) {
-  if (length < kHeaderBytes + 2 || length > kFileBytes) return false;
-  if (memcmp(bytes, kFileMagic, sizeof(kFileMagic)) != 0 || bytes[3] != kFileVersion) return false;
+  if (length < 6 || length > kFileBytes) return false;
+  if (memcmp(bytes, kFileMagic, sizeof(kFileMagic)) != 0) return false;
+  const uint8_t version = bytes[3];
+  if (version != 1 && version != kFileVersion) return false;
+  const size_t headerBytes = version == 1 ? kOldHeaderBytes : kHeaderBytes;
+  if (length < headerBytes + 2) return false;
   const uint16_t sum = static_cast<uint16_t>(bytes[length - 2] | (bytes[length - 1] << 8));
   if (checksum(bytes, length - 2) != sum) return false;
   const uint8_t count = bytes[4];
-  if (count > kMaxRules || length != kHeaderBytes + count * kRuleBytes + 2) return false;
+  if (count > kMaxRules || length != headerBytes + count * kRuleBytes + 2) return false;
   Book in;
   in.count = count;
   size_t at = 5;
@@ -657,6 +719,16 @@ inline bool decode(const uint8_t* bytes, size_t length, Book& book) {
   in.capPercent = cap;
   in.lightFlipped = get() != 0;
   in.showMode = get() ? 1 : 0;
+  if (version >= 2) {
+    const uint8_t white = get(), yellow = get();
+    if (white >= kPartCount || yellow >= kPartCount) return false;
+    const Part onWhite = static_cast<Part>(white), onYellow = static_cast<Part>(yellow);
+    const bool bothRelay = onWhite == Part::Relay && onYellow == Part::Relay;
+    if ((onWhite != Part::None && !Direct::usesWhite(onWhite)) || (onYellow != Part::None && !Direct::usesYellow(onYellow))) return false;
+    if ((onWhite == Part::Relay || onYellow == Part::Relay) && !bothRelay) return false;
+    in.direct.white = onWhite;
+    in.direct.yellow = onYellow;
+  }
   for (uint8_t i = 0; i < count; ++i) {
     Rule& rule = in.rules[i];
     for (uint8_t c = 0; c <= kNameChars; ++c) rule.name[c] = static_cast<char>(get());

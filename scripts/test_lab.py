@@ -292,6 +292,20 @@ void testSaving(){
   assert(encode(full,bytes)==kFileBytes);assert(decode(bytes,kFileBytes,back)&&back.count==kMaxRules);
   // Empty is fine: every rule deleted stays deleted.
   Book empty;const size_t small=encode(empty,bytes);assert(decode(bytes,small,back)&&back.count==0);
+  // Which parts are on the Grove wires comes back too.
+  {Book b;b.direct.claim(Part::Knob);b.direct.claim(Part::Servo);uint8_t c[kFileBytes];const size_t n=encode(b,c);Book o;assert(decode(c,n,o)&&o.direct.white==Part::Knob&&o.direct.yellow==Part::Servo);
+   b.direct.claim(Part::Relay);const size_t m=encode(b,c);assert(decode(c,m,o)&&o.direct.white==Part::Relay&&o.direct.yellow==Part::Relay);
+   const auto seal=[](uint8_t* x,size_t l){const uint16_t k=checksum(x,l-2);x[l-2]=uint8_t(k&255);x[l-1]=uint8_t(k>>8);};
+   // A part can't be on a wire that doesn't suit it, or half a relay on one.
+   Book e;const size_t l=encode(e,c);c[14]=uint8_t(Part::Servo);seal(c,l);assert(!decode(c,l,o));
+   encode(e,c);c[15]=uint8_t(Part::Knob);seal(c,l);assert(!decode(c,l,o));
+   encode(e,c);c[14]=uint8_t(Part::Relay);seal(c,l);assert(!decode(c,l,o));
+   encode(e,c);c[14]=uint8_t(kPartCount);seal(c,l);assert(!decode(c,l,o));}
+  // A file from 0.2.232 to 0.2.235, with no such bytes, still loads.
+  {Book b;b.count=1;b.rules[0]=starterRule();b.capPercent=50;uint8_t c[kFileBytes];const size_t n=encode(b,c);
+   uint8_t old[kFileBytes];std::memcpy(old,c,kOldHeaderBytes);std::memcpy(old+kOldHeaderBytes,c+kHeaderBytes,kRuleBytes);old[3]=1;
+   const size_t oldSize=n-2;const uint16_t k=checksum(old,oldSize-2);old[oldSize-2]=uint8_t(k&255);old[oldSize-1]=uint8_t(k>>8);
+   Book o;assert(decode(old,oldSize,o)&&o.count==1&&!std::strcmp(o.rules[0].name,"Wave lights")&&o.capPercent==50&&!o.direct.any());}
   // Every flipped byte and every short read is refused, and leaves the book alone.
   const size_t good=encode(book,bytes);
   for(size_t i=0;i<good;++i)for(int bit=0;bit<8;++bit){
@@ -316,6 +330,32 @@ void testSaving(){
   {uint8_t copy[kFileBytes];std::memcpy(copy,bytes,good);copy[first+4]=0xFF;copy[first+5]=0xFF;reseal(copy,good);Book out;assert(!decode(copy,good,out));}
   // A name with no end of its own still comes back ended.
   {Book n;n.count=1;std::memset(n.rules[0].name,'a',sizeof(n.rules[0].name));uint8_t b[kFileBytes];const size_t s=encode(n,b);Book o;assert(decode(b,s,o)&&std::strlen(o.rules[0].name)==kNameChars);}
+}
+
+void testDirect(){
+  Direct d;assert(!d.any()&&!d.has(Part::Knob)&&!d.has(Part::None));
+  // Each wire has one job, so a sensor and an output can share the port.
+  d.claim(Part::Knob);assert(d.white==Part::Knob&&d.yellow==Part::None&&d.any());
+  d.claim(Part::Servo);assert(d.white==Part::Knob&&d.yellow==Part::Servo&&d.has(Part::Knob)&&d.has(Part::Servo));
+  // The newest part on a wire takes it.
+  d.claim(Part::Motion);assert(d.white==Part::Motion&&d.yellow==Part::Servo&&!d.has(Part::Knob));
+  d.claim(Part::Strip);assert(d.yellow==Part::Strip&&!d.has(Part::Servo));
+  // The relay unit needs both, and anything taking either half removes it.
+  d.claim(Part::Relay);assert(d.white==Part::Relay&&d.yellow==Part::Relay);
+  d.claim(Part::Light);assert(d.white==Part::Light&&d.yellow==Part::None&&!d.has(Part::Relay));
+  d.claim(Part::Relay);d.claim(Part::Servo);assert(d.yellow==Part::Servo&&d.white==Part::None);
+  // The servo pulse is the one the hub's chip makes: 500 to 2500 microseconds at 50 Hz.
+  assert(servoDuty(0)==409&&servoDuty(180)==2048&&servoDuty(90)==1228);
+  assert(servoDuty(-5)==servoDuty(0)&&servoDuty(999)==servoDuty(180));
+  // Strip data is green first, high bit first, and every bit lasts the same 1.2 microseconds.
+  struct Sym{uint32_t level0,duration0,level1,duration1;}bits[48];
+  const uint8_t rgb[2][3]={{0x80,0x01,0xFF},{0,0,0}};encodeStrip(rgb,2,bits);
+  for(const Sym& b:bits)assert(b.level0==1&&b.level1==0&&b.duration0+b.duration1==12);
+  const auto one=[&](int i){return bits[i].duration0==7;};
+  for(int i=0;i<7;++i)assert(!one(i));assert(one(7));                  // Green 0x01.
+  assert(one(8));for(int i=9;i<16;++i)assert(!one(i));                 // Red 0x80.
+  for(int i=16;i<24;++i)assert(one(i));                                // Blue 0xFF.
+  for(int i=24;i<48;++i)assert(!one(i));
 }
 
 void testPractice(){
@@ -434,7 +474,7 @@ void testTables(){
 }
 
 int main(){
-  testHub();testGps();testRanges();testInputs();testRules();testWiring();testCloseness();testStrip();testRelays();testPractice();testRecipes();testRemotes();testDrafts();testSaving();testTables();JSON_TEST
+  testHub();testGps();testRanges();testInputs();testRules();testWiring();testCloseness();testStrip();testRelays();testDirect();testPractice();testRecipes();testRemotes();testDrafts();testSaving();testTables();JSON_TEST
   std::puts("PASS Lab: hub commands, GPS lines, ranges, change detection, rules with hold and priority, wiring, the strip cap, the relay guard, and saved files that refuse every kind of damage");
 }
 '''
