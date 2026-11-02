@@ -18,6 +18,9 @@ export const LAB_RULE_POLICY =
   "Each do line has set, or follow or oppose with a sensor name, except the 1 or 0 outputs, which can only set. " +
   "The output say speaks a phrase once each time the rule starts firing, and takes text instead of set, like " +
   "{\"output\":\"say\",\"text\":\"welcome back\"}, in English, up to 40 letters, once in a rule. " +
+  "The output sequence plays a saved sequence once each time the rule starts firing, and takes play with its " +
+  "name instead of set, like {\"output\":\"sequence\",\"play\":\"Door wave\"}. Only use a name the device state " +
+  "lists under saved sequences. " +
   "Use at most 3 when lines and 3 do lines, any false when all must be true, and a name of 15 letters at most. " +
   "A wave or a hand means distance under 30. hold_ms is how long it keeps going afterwards, up to 30000. " +
   "The owner reviews every rule before it is saved, so never say it is running.";
@@ -39,7 +42,11 @@ export const LAB_HELP =
   "hub, and the I2C units in its other two sockets. The device state can end with a diary: a line for each hour " +
   "rules were playing, with how many times motion was seen, how many times rules fired, and each sensor's lowest " +
   "and highest reading. Nothing is recorded while rules aren't playing, so if the diary has no line for a time, " +
-  "say that rather than guessing. The hours are in the owner's local time.";
+  "say that rather than guessing. The hours are in the owner's local time. Sequences are saved lists of steps with " +
+  "waits between them, kept under Sequences in the Lab. One plays from that list with P, or from a rule that plays " +
+  "it. Only one runs at a time, and a new one replaces it. It wins any output it has set, and rules keep the rest. " +
+  "Whatever it turned on goes off when it ends. A sequence set to play once finishes even if its rule stops, and " +
+  "one that plays over and over lasts as long as its rule. Claude can't write a sequence, only a rule that plays one.";
 
 // The device checks all of this again, and acts only on the part whose screen is open.
 export const LAB_SET_POLICY =

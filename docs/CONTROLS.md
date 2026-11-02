@@ -21,8 +21,8 @@
 - `/flappy` opens Flappy Bird, steered by hand over the same unit or flapped with Space.
 - `/balloon` opens Hot Air Balloon, flown by blowing on an ENV III and steered with a Joystick 2.
 - `/catch` opens Ball Catch, where you drop a ball and catch it in a basket with a Joystick 2.
-- `/lab` lists every sensor and output so you can test them, and `/rules` opens the saved rules
-  that join them. See [Lab](#lab).
+- `/lab` lists every sensor and output so you can test them, `/rules` opens the saved rules that
+  join them, and `/sequences` opens the steps you've saved. See [Lab](#lab).
 
 This firmware has evolved across development versions. Prefer the command help
 on your built device for current shortcuts. Specialized IR, RFID and sonar
@@ -321,8 +321,8 @@ for example "make it stay on longer" or "only when it's dark". Claude sees the r
 sends it back. What changed stands out and the rest is grey. Enter replaces the old rule, E walks
 through it in the steps, and Esc keeps the rule you had.
 
-**Ask the Lab** is at the bottom of the rules list, and tapping Alt on Devices, on a part's own screen
-or on the wiring screen asks it too. Claude sees what's plugged in, the live readings and your rules.
+**Ask the Lab** is at the bottom of the rules list, and tapping Alt on Devices, on a part's own screen,
+on the wiring screen or on Sequences asks it too. Claude sees what's plugged in, the live readings and your rules.
 Try "why didn't my rule fire?", "why won't the strip light up?" or "what can I make with these parts?".
 The answer shows and is read aloud. If it suggests rules you get up to three: left and right move
 between them, Enter saves the one showing, and Esc drops them all.
@@ -341,6 +341,38 @@ their keys, because speech can be misheard and they can switch mains.
 
 Rules are kept on the SD card in `/lab/rules.dat`, with the hub wiring, so they survive a firmware
 install. With no card they last until the next restart.
+
+### Sequences
+
+A sequence is a list of steps that run in order, and a rule can start one. **Hello** is there to try,
+and it only needs the Cardputer's own LED and speaker. Up to 8 can be saved, with up to 16 steps each.
+
+| Key | In the list |
+| --- | --- |
+| Up, down | Pick one |
+| Enter | Change it, or start a new one |
+| P | Play it |
+| X twice | Delete it. It's also taken out of any rule that plays it |
+
+| Key | In its steps |
+| --- | --- |
+| Up, down | Pick a row |
+| Enter | Change a step, add one, switch between once and over and over, or name it |
+| Left, right | Move a step earlier or later |
+| A | Add a step after this one |
+| X twice | Delete a step |
+| P | Save and play |
+| Esc | Save and go back |
+
+While one plays, P starts it again and Esc stops it. A step can wait for up to 10 minutes, set any
+output a rule can, except speech, or turn one off. Turning any part of the strip off turns off the
+whole strip.
+
+To start one from a rule, choose **Sequence** under What should it do. It starts once, each time the
+rule starts firing. If it plays once it finishes even if the rule stops, and if it plays over and
+over it stops with the rule. Only one plays at a time, and a new one replaces it. It wins any output
+it has set while rules keep the rest, and whatever it turned on goes off when it ends. Opening the
+menu, pausing or leaving the Lab stops it. Sequences are kept in `/lab/seqs.dat`.
 
 ### Playing
 

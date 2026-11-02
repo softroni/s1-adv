@@ -13,23 +13,26 @@ for file, text in [
         ('001_main.cpp.inc', '#include "lab_gps.h"'),
         ('001_main.cpp.inc', 'kLauncherGroupCount = 9'),
         ('001_main.cpp.inc', '#include "lab_json.h"'),
-        ('023_main.cpp.inc', 'lab::ruleFromJson(action, rule)'),
+        ('023_main.cpp.inc', 'lab::ruleFromJson(action, rule, labSequences(), labSequenceCount())'),
         ('063_main.cpp.inc', 'return labAllowsNetwork();'),
         ('004_main.cpp.inc', '{"Devices", UiMode::LabDevices}'),
         ('004_main.cpp.inc', '{"Rules", UiMode::LabRules}'),
+        ('004_main.cpp.inc', '{"Sequences", UiMode::LabSequences}'),
         ('022_main.cpp.inc', 'mode == "lab"'),
         ('024_main.cpp.inc', 'if (modeChanged && labMode(mode)) beginLab();'),
         ('024_main.cpp.inc', 'if (modeChanged && labMode(gUiMode)) stopLab();'),
         ('043_main.cpp.inc', 'cmd == "/lab"'),
         ('043_main.cpp.inc', 'cmd == "/rules"'),
+        ('043_main.cpp.inc', 'cmd == "/sequences"'),
         ('048_main.cpp.inc', 'handleLabKey(key, keys)'),
         ('048_main.cpp.inc', 'routeLabEscape()'),
         ('049_main.cpp.inc', 'routeLabEscape()'),
         ('061_main.cpp.inc', 'renderLabUi();'),
         ('061_main.cpp.inc', 'serviceLab();'),
-        ('063_main.cpp.inc', 'case UiMode::LabRules:')]:
+        ('063_main.cpp.inc', 'case UiMode::LabRules:'),
+        ('063_main.cpp.inc', 'case UiMode::LabSequences:')]:
     assert text in (parts / file).read_text(), (file, text)
-for part in ('081', '082'):
+for part in ('081', '082', '084', '085'):
     assert f'main_parts/{part}_main.cpp.inc' in (src / 'main.cpp').read_text()
 
 # The Grove port changes hands the same way it does for the games.
@@ -525,6 +528,113 @@ void testDrafts(){
   std::string big(200,'a');n.name(big.c_str());assert(std::strlen(n.rule.name)==kNameChars);
 }
 
+
+Sequence seqOf(std::initializer_list<SeqStep> steps,bool loop=false){Sequence s;strcpy(s.name,"Test");s.loop=loop;for(const SeqStep& t:steps)s.steps[s.count++]=t;return s;}
+constexpr SeqStep setStep(Out o,int v){return SeqStep{SeqKind::Set,o,int16_t(v)};}
+constexpr SeqStep offStep(Out o){return SeqStep{SeqKind::Off,o,0};}
+constexpr SeqStep waitStep(int tenths){return SeqStep{SeqKind::Wait,Out::Servo,int16_t(tenths)};}
+Drive at(const Drive* d,Out o){return d[uint8_t(o)];}
+// One pass of the Lab's loop for a sequence by itself.
+void tick(SeqRun& run,const Sequence* seqs,uint8_t count,uint32_t now,Drive* d){for(uint8_t i=0;i<kOutCount;++i)d[i]=Drive{};run.service(seqs,count,now);run.apply(d);}
+bool seqRefused(uint8_t* bytes,size_t n){const uint16_t sum=checksum(bytes,n-2);bytes[n-2]=uint8_t(sum&0xFF);bytes[n-1]=uint8_t(sum>>8);Sequence out[kMaxSequences];uint8_t count=99;const bool ok=decodeSequences(bytes,n,out,count);return !ok&&count==99;}
+
+void testSequences(){
+  Drive d[kOutCount];
+  // Steps happen in order, waits hold them up, and what's set stays set until it changes.
+  {Sequence s=seqOf({setStep(Out::Servo,10),setStep(Out::Relay1,1),waitStep(10),setStep(Out::Servo,170),waitStep(5),offStep(Out::Relay1)});SeqRun r;
+   assert(!r.running());tick(r,&s,1,1000,d);assert(!at(d,Out::Servo).on);
+   r.start(0,-1,1000);assert(r.running()&&r.owner()==-1&&r.index()==0);
+   tick(r,&s,1,1000,d);assert(at(d,Out::Servo).on&&at(d,Out::Servo).value==10&&at(d,Out::Relay1).value==1&&r.shown()==2&&r.leftMs(1000)==1000);
+   tick(r,&s,1,1999,d);assert(at(d,Out::Servo).value==10&&r.leftMs(1999)==1);
+   tick(r,&s,1,2000,d);assert(at(d,Out::Servo).value==170&&at(d,Out::Relay1).value==1&&r.shown()==4);
+   tick(r,&s,1,2500,d);assert(at(d,Out::Servo).value==170&&!at(d,Out::Relay1).on&&r.running());
+   // A last step with no wait still gets out, for long enough to reach its part, and then everything lets go.
+   tick(r,&s,1,2500+kSeqEndMs-1,d);assert(r.running()&&at(d,Out::Servo).on);tick(r,&s,1,2500+kSeqEndMs,d);assert(!r.running()&&!at(d,Out::Servo).on);
+   tick(r,&s,1,9000,d);assert(!at(d,Out::Servo).on);}
+  // Ending on a wait ends when the wait does, and it works across the clock wrapping.
+  {Sequence s=seqOf({setStep(Out::Led,5),waitStep(1)});SeqRun r;const uint32_t start=0xFFFFFFF0;r.start(0,-1,start);tick(r,&s,1,start,d);assert(at(d,Out::Led).on);tick(r,&s,1,start+99,d);assert(r.running());tick(r,&s,1,start+100,d);assert(!r.running()&&!at(d,Out::Led).on);}
+  // Nothing to do, or a place in the list that's gone, ends quietly.
+  {Sequence s;SeqRun r;r.start(0,-1,0);tick(r,&s,1,0,d);assert(!r.running());r.start(3,-1,0);tick(r,&s,1,0,d);assert(!r.running());}
+  // A loop goes round, keeping what it set, and with no waits it still gives the Lab its turn.
+  {Sequence s=seqOf({setStep(Out::Led,1),waitStep(1),setStep(Out::Led,2),waitStep(1)},true);SeqRun r;r.start(0,-1,0);uint32_t t=0;
+   for(int i=0;i<6;++i){tick(r,&s,1,t,d);assert(r.running()&&at(d,Out::Led).on&&at(d,Out::Led).value==(i%2?2:1));t+=100;}
+   Sequence q=seqOf({setStep(Out::Led,1),setStep(Out::Led,2)},true);r.start(0,-1,0);tick(r,&q,1,0,d);assert(at(d,Out::Led).value==2&&r.leftMs(0)==kSeqEndMs);tick(r,&q,1,1,d);assert(r.leftMs(1)==kSeqEndMs-1);tick(r,&q,1,kSeqEndMs,d);assert(r.running());
+   r.stop();assert(!r.running());tick(r,&q,1,kSeqEndMs+1,d);assert(!at(d,Out::Led).on);}
+  // Off turns the whole strip off, and a sequence's off beats a rule's on, while rules keep the rest.
+  {Sequence s=seqOf({setStep(Out::StripColor,120),setStep(Out::StripBright,50),waitStep(1),offStep(Out::StripColor),waitStep(1)});SeqRun r;r.start(0,-1,0);Drive rule[kOutCount];rule[uint8_t(Out::StripLength)]={true,5};rule[uint8_t(Out::Relay2)]={true,1};
+   r.service(&s,1,0);r.apply(rule);assert(rule[uint8_t(Out::StripColor)].value==120&&rule[uint8_t(Out::StripBright)].value==50&&rule[uint8_t(Out::StripLength)].value==5&&rule[uint8_t(Out::Relay2)].value==1);
+   assert(stripFrame(rule,100).on);
+   r.service(&s,1,100);r.apply(rule);assert(!rule[uint8_t(Out::StripColor)].on&&!rule[uint8_t(Out::StripBright)].on&&!rule[uint8_t(Out::StripLength)].on&&rule[uint8_t(Out::Relay2)].on&&!stripFrame(rule,100).on);}
+  // Rules start sequences.
+  {Sequence seqs[2];seqs[0]=seqOf({setStep(Out::Led,1),waitStep(10)});seqs[1]=seqOf({setStep(Out::Led,2),waitStep(1)},true);
+   Rule rules[2];rules[0].conds=rules[1].conds=1;rules[0].cond[0]={Sig::Knob,Op::Above,50};rules[1].cond[0]={Sig::Light,Op::Above,50};rules[0].holdMs=rules[1].holdMs=0;
+   rules[0].actions=rules[1].actions=1;rules[0].action[0]={Out::Sequence,How::Set,0,Sig::Knob};rules[1].action[0]={Out::Sequence,How::Set,1,Sig::Knob};
+   RuleState st[2];uint16_t seen[2]={};SeqRun r;Inputs in;Drive out[kOutCount];uint32_t t=1000;
+   const auto pass=[&](int knob,int light){in.set(Sig::Knob,int16_t(knob),t);in.set(Sig::Light,int16_t(light),t);step(rules,2,st,in,t,out);runSequences(rules,2,st,seen,seqs,2,r,t);r.service(seqs,2,t);r.apply(out);t+=10;};
+   pass(0,0);assert(!r.running());
+   // Once, when its rule starts firing, and staying true doesn't start it again.
+   pass(60,0);assert(r.running()&&r.owner()==0&&r.index()==0&&at(out,Out::Led).value==1);
+   for(int i=0;i<30;++i)pass(60,0);assert(r.running()&&st[0].fires==1);for(int i=0;i<80;++i)pass(60,0);assert(!r.running()&&st[0].active&&st[0].fires==1);
+   // Its output isn't left set just because the rule's still firing.
+   assert(!at(out,Out::Led).on);
+   // Firing again starts it again, and the rule ending doesn't cut a play-once sequence short.
+   pass(0,0);pass(60,0);assert(r.running()&&st[0].fires==2);pass(0,0);assert(!st[0].active&&r.running());for(int i=0;i<110;++i)pass(0,0);assert(!r.running());
+   // A new start replaces whatever's running, and only one ever runs.
+   pass(60,0);assert(r.index()==0);pass(60,60);assert(r.running()&&r.index()==1&&r.owner()==1);
+   // A loop ends with its rule, and a play-once rule that took over gives way back to it.
+   pass(0,60);pass(0,0);assert(!r.running());
+   pass(0,60);assert(r.index()==1);pass(60,60);assert(r.index()==0&&r.owner()==0);for(int i=0;i<120;++i)pass(60,60);assert(r.running()&&r.index()==1&&r.owner()==1);
+   // After a pause stops it, a loop whose rule is still firing picks up again, and a play-once one doesn't.
+   r.stop();pass(60,60);assert(r.running()&&r.index()==1);rules[1].on=false;pass(60,60);assert(!r.running());pass(60,60);assert(!r.running());rules[1].on=true;pass(0,0);
+   // Two rules starting together: the later one wins, as it does for an output.
+   pass(60,60);assert(r.index()==1);pass(0,0);
+   // A place in the list that's gone is ignored, with the running one left alone.
+   rules[0].action[0].value=7;pass(60,0);assert(!r.running());rules[0].action[0].value=-1;pass(0,0);pass(60,0);assert(!r.running());}
+  // Deleting moves the rules along with the list, and drops what can't be played any more.
+  {Sequence seqs[3];strcpy(seqs[0].name,"A");strcpy(seqs[1].name,"B");strcpy(seqs[2].name,"C");uint8_t count=3;Rule rules[2];
+   rules[0].actions=3;rules[0].action[0]=setTo(Out::Led,5);rules[0].action[1]={Out::Sequence,How::Set,1,Sig::Knob};rules[0].action[2]={Out::Sequence,How::Set,2,Sig::Knob};
+   rules[1].actions=1;rules[1].action[0]={Out::Sequence,How::Set,0,Sig::Knob};
+   assert(sequenceUsers(rules,2,0)==1&&sequenceUsers(rules,2,1)==1&&sequenceUsers(rules,2,2)==1);
+   removeSequence(seqs,count,rules,2,1);assert(count==2&&!strcmp(seqs[1].name,"C"));
+   assert(rules[0].actions==2&&rules[0].action[0].out==Out::Led&&rules[0].action[1].value==1&&rules[1].action[0].value==0);
+   removeSequence(seqs,count,rules,2,0);assert(count==1&&!strcmp(seqs[0].name,"C")&&rules[1].actions==0&&rules[0].action[1].value==0);
+   removeSequence(seqs,count,rules,2,0);assert(count==0&&rules[0].actions==1);}
+  // The starter needs nothing plugged in, and is a sequence like any other.
+  {Sequence s=starterSequence();assert(s.count>0&&!s.loop&&s.name[0]);for(uint8_t i=0;i<s.count;++i){assert(stepAllowed(s.steps[i]));assert(s.steps[i].kind==SeqKind::Wait||s.steps[i].out==Out::Led||s.steps[i].out==Out::Tone);}}
+  // Waits: fine when short, coarse when long, and going back retraces the way up.
+  {int v=1,n=0;std::vector<int> up;while(v<kMaxWaitTenths&&n<500){up.push_back(v);v=nextWait(v,1);++n;}assert(v==kMaxWaitTenths&&n<80);for(size_t i=up.size();i-->0;){v=nextWait(v,-1);assert(v==up[i]);}
+   assert(nextWait(1,-1)==1&&nextWait(kMaxWaitTenths,1)==kMaxWaitTenths&&nextWait(9,1)==10&&nextWait(10,1)==15&&nextWait(100,1)==150&&nextWait(600,1)==900);}
+  // A step the file can't hold is one the editor can't make.
+  {assert(stepAllowed(setStep(Out::Servo,180))&&!stepAllowed(setStep(Out::Servo,181))&&!stepAllowed(setStep(Out::Servo,-1)));
+   assert(!stepAllowed(setStep(Out::Say,1))&&!stepAllowed(setStep(Out::Sequence,1))&&!stepAllowed(offStep(Out::Sequence)));
+   assert(stepAllowed(waitStep(1))&&stepAllowed(waitStep(kMaxWaitTenths))&&!stepAllowed(waitStep(0))&&!stepAllowed(waitStep(kMaxWaitTenths+1)));
+   assert(kSeqOutCount==uint8_t(Out::Say)&&isStrip(Out::StripLength)&&!isStrip(Out::Led)&&!canTurnOff(Out::Servo)&&canTurnOff(Out::Tone));}
+  // Saving.
+  {Sequence seqs[kMaxSequences];for(int i=0;i<kMaxSequences;++i){std::string name=std::string("Fifteen letter")+char('a'+i);strcpy(seqs[i].name,name.c_str());seqs[i].loop=i%2;for(int j=0;j<kMaxSeqSteps;++j)seqs[i].steps[seqs[i].count++]=j%2?waitStep(kMaxWaitTenths-j):setStep(Out::Tone,200+j*50);}
+   uint8_t big[kSeqFileBytes+8]={};size_t n=encodeSequences(seqs,kMaxSequences,big);assert(n==kSeqFileBytes);
+   Sequence back[kMaxSequences];uint8_t count=0;assert(decodeSequences(big,n,back,count)&&count==kMaxSequences);
+   for(int i=0;i<kMaxSequences;++i){assert(!strcmp(back[i].name,seqs[i].name)&&back[i].loop==seqs[i].loop&&back[i].count==kMaxSeqSteps);for(int j=0;j<kMaxSeqSteps;++j)assert(back[i].steps[j].kind==seqs[i].steps[j].kind&&back[i].steps[j].value==seqs[i].steps[j].value&&back[i].steps[j].out==seqs[i].steps[j].out);}
+   // Only the steps in use are stored, and none at all is a file too.
+   Sequence one=seqOf({setStep(Out::Servo,10)});uint8_t small[kSeqFileBytes];n=encodeSequences(&one,1,small);assert(n==5+kNameChars+3+kSeqStepBytes+2);
+   count=0;assert(decodeSequences(small,n,back,count)&&count==1&&back[0].count==1);n=encodeSequences(nullptr,0,small);assert(n==7);count=9;assert(decodeSequences(small,n,back,count)&&count==0);
+   // Every kind of damage is refused, and leaves what was there.
+   Sequence s=seqOf({setStep(Out::Servo,10),waitStep(5)},true);uint8_t file[kSeqFileBytes];const size_t size=encodeSequences(&s,1,file);const size_t step0=5+kNameChars+3;
+   const auto damaged=[&](size_t where,uint8_t value){uint8_t copy[kSeqFileBytes];std::memcpy(copy,file,size);copy[where]=value;return seqRefused(copy,size);};
+   assert(damaged(0,'X'));assert(damaged(3,kSeqFileVersion+1));assert(damaged(4,kMaxSequences+1));assert(damaged(4,2));assert(damaged(4,0));
+   assert(damaged(5+kNameChars+2,kMaxSeqSteps+1));assert(damaged(5+kNameChars+2,3));assert(damaged(5+kNameChars+2,1));
+   assert(damaged(step0,3));assert(damaged(step0+1,uint8_t(Out::Say)));assert(damaged(step0+1,uint8_t(Out::Sequence)));assert(damaged(step0+1,kOutCount));assert(damaged(step0+2,181));
+   assert(damaged(step0+kSeqStepBytes+2,0));assert(damaged(step0+kSeqStepBytes+3,0x7F));
+   {uint8_t copy[kSeqFileBytes];std::memcpy(copy,file,size);copy[7]^=1;Sequence out[kMaxSequences];count=9;assert(!decodeSequences(copy,size,out,count)&&count==9);}  // A bad checksum.
+   for(size_t cut=0;cut<size;++cut){Sequence out[kMaxSequences];count=9;assert(!decodeSequences(file,cut,out,count)&&count==9);}
+   {Sequence out[kMaxSequences];count=9;assert(!decodeSequences(file,kSeqFileBytes+1,out,count));}
+   // A name that lost its end still ends.
+   {uint8_t copy[kSeqFileBytes];std::memcpy(copy,file,size);std::memset(copy+5,'a',kNameChars+1);const uint16_t sum=checksum(copy,size-2);copy[size-2]=uint8_t(sum&0xFF);copy[size-1]=uint8_t(sum>>8);Sequence out[kMaxSequences];count=0;assert(decodeSequences(copy,size,out,count)&&std::strlen(out[0].name)==kNameChars);}}
+  // A number can't stand in for a name, in either direction.
+  {Draft a;a.addCond("motion","on",0);a.addSet("sequence",1);assert(!a.usable());Draft b;b.addCond("motion","on",0);b.addFollow("sequence","knob",false);assert(!b.usable());
+   Sequence s;strcpy(s.name,"Wave");Draft c;c.addCond("motion","on",0);c.addPlay("wave",&s,1);c.addPlay("WAVE",&s,1);c.addPlay("Wave",&s,1);assert(c.usable()&&c.rule.actions==3);c.addPlay("Wave",&s,1);assert(!c.ok);
+   Draft e;e.addPlay("",&s,1);assert(!e.ok);}
+}
+
 void testTables(){
   for(const SigInfo& s:kSigs)assert(s.key&&std::strlen(s.name)<=12);
   for(const OutInfo& o:kOuts)assert(o.key&&std::strlen(o.name)<=12);  // Both fit a flow box.
@@ -542,8 +652,8 @@ void testTables(){
 }
 
 int main(){
-  testHub();testGps();testRanges();testInputs();testRules();testWiring();testCloseness();testStrip();testRelays();testDirect();testPractice();testRecipes();testRemotes();testDrafts();testSaving();testTables();JSON_TEST
-  std::puts("PASS Lab: hub commands, GPS lines, ranges, change detection, rules with hold and priority, wiring, the strip cap, the relay guard, and saved files that refuse every kind of damage");
+  testHub();testGps();testRanges();testInputs();testRules();testWiring();testCloseness();testStrip();testRelays();testDirect();testPractice();testRecipes();testRemotes();testDrafts();testSaving();testSequences();testTables();JSON_TEST
+  std::puts("PASS Lab: hub commands, GPS lines, ranges, change detection, rules with hold and priority, sequences, wiring, the strip cap, the relay guard, and saved files that refuse every kind of damage");
 }
 '''
 # The real JSON library, once PlatformIO has fetched it. CI's firmware job has it, and the logic
@@ -551,7 +661,8 @@ int main(){
 library = root / 'bots/CardputerADV/.pio/libdeps/cardputer_adv/ArduinoJson/src'
 json_test = r'''
 #include "lab_json.h"
-bool parse(const char* text, Rule& out){StaticJsonDocument<2048> doc;assert(!deserializeJson(doc,text));return ruleFromJson(doc.as<JsonObjectConst>(),out);}
+Sequence gSeqs[2];uint8_t gSeqCount=0;
+bool parse(const char* text, Rule& out){StaticJsonDocument<2048> doc;assert(!deserializeJson(doc,text));return ruleFromJson(doc.as<JsonObjectConst>(),out,gSeqs,gSeqCount);}
 void testJson(){
   Rule r;
   assert(parse(R"({"type":"lab.rule","name":"Wave red","any":true,"hold_ms":2000,"when":[{"sensor":"distance","test":"under","value":30}],"do":[{"output":"strip_color","set":0},{"output":"servo","follow":"knob"}]})",r));
@@ -565,6 +676,14 @@ void testJson(){
     char text[600];Text out(text,sizeof(text));ruleJson(r,out);Rule back;assert(parse(text,back)&&!strcmp(back.say,"welcome back")&&back.action[1].out==Out::Say);
     assert(strstr(text,"\"text\":\"welcome back\""));
     Rule none;assert(!parse(R"({"when":[{"sensor":"motion","test":"on"}],"do":[{"output":"say","text":"  "}]})",none));}
+  // A sequence goes by name, because that's all Claude knows it by, and only a saved one gets through.
+  { strcpy(gSeqs[0].name,"Hello");strcpy(gSeqs[1].name,"Door wave");gSeqCount=2;Rule r;
+    assert(parse(R"({"name":"Door","when":[{"sensor":"motion","test":"on"}],"do":[{"output":"sequence","play":"door wave"}]})",r));
+    assert(r.actions==1&&r.action[0].out==Out::Sequence&&r.action[0].how==How::Set&&r.action[0].value==1);
+    char text[600];Text out(text,sizeof(text));ruleJson(r,out,gSeqs,gSeqCount);assert(strstr(text,"{\"output\":\"sequence\",\"play\":\"Door wave\"}"));Rule back;assert(parse(text,back)&&back.action[0].value==1);
+    for(const char* bad:{R"({"when":[{"sensor":"motion","test":"on"}],"do":[{"output":"sequence","play":"Door"}]})",R"({"when":[{"sensor":"motion","test":"on"}],"do":[{"output":"sequence","play":"Door wave again"}]})",
+        R"({"when":[{"sensor":"motion","test":"on"}],"do":[{"output":"sequence","play":""}]})",R"({"when":[{"sensor":"motion","test":"on"}],"do":[{"output":"sequence","set":1}]})",R"({"when":[{"sensor":"motion","test":"on"}],"do":[{"output":"sequence","follow":"knob"}]})"}){Rule x;assert(!parse(bad,x));}
+    gSeqCount=0;Rule x;assert(!parse(R"({"when":[{"sensor":"motion","test":"on"}],"do":[{"output":"sequence","play":"Hello"}]})",x));}
   // A rule written out reads back the same, because Claude gets it back to change.
   { char text[600]; Text out(text,sizeof(text)); Rule start=recipeRule(5); start.any=false; start.action[1]=oppose(Out::Servo,Sig::Light); ruleJson(start,out);
     Rule back; assert(parse(text,back)); assert(!strcmp(back.name,start.name)&&back.any==start.any&&back.holdMs==start.holdMs&&back.conds==start.conds&&back.actions==start.actions);

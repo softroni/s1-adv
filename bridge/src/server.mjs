@@ -375,6 +375,7 @@ const DEVICE_ACTION_TYPES = new Set([...DEVICE_ACTION_CATALOG.map((action) => ac
 const DEVICE_UI_MODES = new Set([
   "lab",
   "rules",
+  "sequences",
   "home",
   "pulse",
   "chat",
@@ -508,6 +509,8 @@ export function sanitizeDeviceAction(raw) {
       const out = { output: boundedString(line.output, 16) };
       if (typeof line.text === "string") {
         out.text = boundedString(line.text, 40);
+      } else if (typeof line.play === "string") {
+        out.play = boundedString(line.play, 15);
       } else if (line.follow) {
         out.follow = boundedString(line.follow, 16);
       } else if (line.oppose) {

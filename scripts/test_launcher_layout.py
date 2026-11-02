@@ -170,7 +170,7 @@ int main() {
     const bool first = seen.insert(icon).second;
     assert(first || std::strcmp(group.items[i].label, "Pomodoro") == 0);
   }
-  assert(items == 45 && seen.size() == 44);
+  assert(items == 46 && seen.size() == 45);
 
   // Accents must stay apart once the canvas reduces them to 8 bits.
   std::set<int> accents;

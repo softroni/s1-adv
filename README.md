@@ -63,7 +63,7 @@ Put S1-ADV on it and you get a menu of more than 40 apps: an AI assistant that r
 | Arcade | R | Air Music, Flappy Bird, Hot Air Balloon, Ball Catch |
 | Settings | S | Device, Display, Wi-Fi, Pomodoro |
 | System | Y | Firmware, Logs, C-Matrix |
-| Lab | L | Devices, Rules |
+| Lab | L | Devices, Rules, Sequences |
 
 </details>
 

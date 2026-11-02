@@ -97,6 +97,7 @@ const uint8_t* launcherItemIcon(const LauncherSubItem& item) {
     case UiMode::BallCatch: return kBallCatch;
     case UiMode::LabDevices: return kPlug;
     case UiMode::LabRules: return kFlow;
+    case UiMode::LabSequences: return kSteps;
     case UiMode::Settings: return kDevice;
     case UiMode::ScreenSettings: return kDisplay;
     case UiMode::WifiSettings: return kWifi;

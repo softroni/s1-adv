@@ -1393,6 +1393,10 @@ bool handleLocalCommand(const String& input) {
     setUiMode(UiMode::LabRules);
     return true;
   }
+  if (cmd == "/sequences") {
+    setUiMode(UiMode::LabSequences);
+    return true;
+  }
   if (cmd == "/catch") {
     setUiMode(UiMode::BallCatch);
     return true;

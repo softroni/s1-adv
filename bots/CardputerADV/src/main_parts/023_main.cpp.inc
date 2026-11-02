@@ -94,7 +94,7 @@ bool executeDeviceAction(JsonObjectConst action) {
   if (type == "lab.set") return labVoiceSet(action["output"] | "", action["set"] | 0);
   if (type == "lab.rule") {
     lab::Rule rule;
-    if (!lab::ruleFromJson(action, rule)) {
+    if (!lab::ruleFromJson(action, rule, labSequences(), labSequenceCount())) {
       appendRuntimeLog("LAB", "rule from Claude refused", true);
       return false;
     }

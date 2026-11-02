@@ -69,10 +69,11 @@ moves the basket. The keyboard also plays it. Open it from Arcade, or type `/cat
 
 ## Lab
 
-**The Lab** is a tab in the launcher, and `/lab` or `/rules` opens it. Devices tests every sensor
-and output, and Rules saves "if this, then that" rules and plays them with live status. Rules come
-from steps on the device, ready-made recipes, or asking Claude, and Practice tries them with
-nothing plugged in. It uses:
+**The Lab** is a tab in the launcher, and `/lab`, `/rules` or `/sequences` opens it. Devices tests
+every sensor and output, Rules saves "if this, then that" rules and plays them with live status,
+and Sequences runs saved steps in order, by themselves or from a rule. Rules come from steps on the
+device, ready-made recipes, or asking Claude, and Practice tries them with nothing plugged in. It
+uses:
 
 | Connection | Parts |
 | --- | --- |

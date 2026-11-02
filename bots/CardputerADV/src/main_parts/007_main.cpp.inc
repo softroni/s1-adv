@@ -78,6 +78,8 @@ const char* uiModeName(UiMode mode) {
       return "Lab Devices";
     case UiMode::LabRules:
       return "Lab Rules";
+    case UiMode::LabSequences:
+      return "Lab Sequences";
     case UiMode::CMatrix:
       return "C-Matrix";
     case UiMode::Logs:

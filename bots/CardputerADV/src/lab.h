@@ -37,8 +37,9 @@ constexpr const SigInfo& info(Sig sig) { return kSigs[static_cast<uint8_t>(sig)]
 // --- What can be driven ---------------------------------------------------------------------
 // New outputs go at the end, because saved rules store these numbers.
 enum class Out : uint8_t { Servo, StripColor, StripBright, StripLength, Relay1, Relay2, Led, Tone, LampPower,
-                           LampBright, AcTcl, AcDaikin, Say, Count };
+                           LampBright, AcTcl, AcDaikin, Say, Sequence, Count };
 constexpr uint8_t kOutCount = static_cast<uint8_t>(Out::Count);
+constexpr uint8_t kMaxSequences = 8;
 
 constexpr int kStripLeds = 30;
 struct OutInfo { const char* key; const char* name; const char* unit; int16_t lo, hi, step; bool onOff; };
@@ -56,6 +57,7 @@ constexpr OutInfo kOuts[kOutCount] = {
     {"ac_tcl", "TCL AC", "", 0, 1, 1, true},
     {"ac_daikin", "Daikin AC", "", 0, 1, 1, true},
     {"say", "Say", "", 0, 1, 1, true},  // Speaks the rule's phrase once, each time it starts firing.
+    {"sequence", "Sequence", "", 0, kMaxSequences - 1, 1, true},  // Its value says which, and it starts the same way.
 };
 constexpr const OutInfo& info(Out out) { return kOuts[static_cast<uint8_t>(out)]; }
 
@@ -335,6 +337,177 @@ inline void step(const Rule* rules, uint8_t count, RuleState* states, const Inpu
   }
 }
 
+// --- Sequences ---------------------------------------------------------------------------------
+// A rule says when, and a sequence says what happens, in what order. Steps land in the same Drive
+// table as rules, so the brightness cap, the relay guard and the gaps for remotes cover them too.
+constexpr uint8_t kMaxSeqSteps = 16;
+constexpr int16_t kMaxWaitTenths = 6000;  // Ten minutes.
+constexpr uint32_t kSeqEndMs = 100;       // Long enough for a last step with no wait to reach its part.
+// What a step can drive. Speech stops the Lab until it's done, and a sequence can't start another.
+constexpr uint8_t kSeqOutCount = static_cast<uint8_t>(Out::Say);
+static_assert(kOutCount <= 16, "SeqRun marks the outputs it holds in 16 bits");
+
+enum class SeqKind : uint8_t { Set, Off, Wait };
+struct SeqStep {
+  SeqKind kind = SeqKind::Set;
+  Out out = Out::Servo;
+  int16_t value = 90;  // What to set it to, or how long to wait in tenths of a second.
+};
+struct Sequence {
+  char name[kNameChars + 1] = "";
+  bool loop = false;
+  uint8_t count = 0;
+  SeqStep steps[kMaxSeqSteps];
+};
+
+constexpr bool isStrip(Out out) { return out == Out::StripColor || out == Out::StripBright || out == Out::StripLength; }
+// A servo stays where it is with nothing asking, so "off" would look like a step that did nothing.
+constexpr bool canTurnOff(Out out) { return out != Out::Servo; }
+inline bool stepAllowed(const SeqStep& step) {
+  if (static_cast<uint8_t>(step.out) >= kSeqOutCount) return false;
+  if (step.kind == SeqKind::Wait) return step.value >= 1 && step.value <= kMaxWaitTenths;
+  return step.kind == SeqKind::Off || (step.value >= info(step.out).lo && step.value <= info(step.out).hi);
+}
+// Fine steps for a short wait and big ones for a long wait, and going back retraces the way up.
+inline int16_t nextWait(int tenths, int direction) {
+  const int from = direction > 0 ? tenths : tenths - 1;
+  const int size = from < 10 ? 1 : from < 100 ? 5 : from < 600 ? 50 : 300;
+  return clampTo<int16_t>(static_cast<int16_t>(tenths + direction * size), 1, kMaxWaitTenths);
+}
+
+// One sequence running. What it sets stays set until a later step changes it, and those outputs are
+// its own until it ends, while rules keep the rest. Then they all let go, so a forgotten last step
+// can't leave a relay closed.
+class SeqRun {
+ public:
+  bool running() const { return mRunning; }
+  int owner() const { return mOwner; }  // The rule that started it, or -1.
+  uint8_t index() const { return mIndex; }
+  uint8_t shown() const { return mNext ? static_cast<uint8_t>(mNext - 1) : 0; }  // The step in progress.
+  uint32_t leftMs(uint32_t now) const {
+    const int32_t left = static_cast<int32_t>(mDueMs - now);
+    return mRunning && left > 0 ? static_cast<uint32_t>(left) : 0;
+  }
+  void start(uint8_t index, int owner, uint32_t now) {
+    *this = SeqRun{};
+    mRunning = true;
+    mIndex = index;
+    mOwner = static_cast<int8_t>(owner);
+    mDueMs = now;
+  }
+  void stop() { *this = SeqRun{}; }
+  void service(const Sequence* seqs, uint8_t count, uint32_t now) {
+    if (!mRunning) return;
+    if (mIndex >= count) {
+      stop();
+      return;
+    }
+    if (static_cast<int32_t>(now - mDueMs) < 0) return;
+    const Sequence& seq = seqs[mIndex];
+    if (mNext >= seq.count) {
+      if (!seq.loop || !seq.count) {
+        stop();
+        return;
+      }
+      mNext = 0;
+    }
+    while (mNext < seq.count) {
+      const SeqStep& step = seq.steps[mNext++];
+      if (step.kind == SeqKind::Wait) {
+        mDueMs = now + static_cast<uint32_t>(step.value) * 100U;
+        return;
+      }
+      hold(step);
+    }
+    mDueMs = now + kSeqEndMs;  // This also stops a loop with no waits from taking over the Lab.
+  }
+  void apply(Drive* drive) const {
+    if (!mRunning) return;
+    for (uint8_t i = 0; i < kOutCount; ++i) if ((mHeld >> i) & 1) drive[i] = mDrive[i];
+  }
+
+ private:
+  void claim(Out out, const Drive& drive) {
+    mDrive[static_cast<uint8_t>(out)] = drive;
+    mHeld = static_cast<uint16_t>(mHeld | (1U << static_cast<uint8_t>(out)));
+  }
+  void hold(const SeqStep& step) {
+    const Drive drive{step.kind == SeqKind::Set, step.value};
+    if (step.kind == SeqKind::Off && isStrip(step.out)) {  // Its three outputs are one strip.
+      claim(Out::StripColor, drive);
+      claim(Out::StripBright, drive);
+      claim(Out::StripLength, drive);
+    } else {
+      claim(step.out, drive);
+    }
+  }
+
+  bool mRunning = false;
+  uint8_t mIndex = 0, mNext = 0;
+  int8_t mOwner = -1;
+  uint16_t mHeld = 0;
+  uint32_t mDueMs = 0;
+  Drive mDrive[kOutCount];
+};
+
+// A rule starts its sequence once, each time it starts firing, and a later start replaces whatever
+// is running. A loop has no end of its own, so it lasts as long as its rule does, and picks up
+// again if something shorter took over or the rules were paused.
+inline void runSequences(const Rule* rules, uint8_t count, const RuleState* states, uint16_t* seen, const Sequence* seqs,
+                         uint8_t seqCount, SeqRun& run, uint32_t now) {
+  if (run.running() && run.owner() >= 0 && run.index() < seqCount && seqs[run.index()].loop && !states[run.owner()].active) run.stop();
+  for (uint8_t i = 0; i < count; ++i) {
+    const bool fired = states[i].fires != seen[i];
+    seen[i] = states[i].fires;
+    for (uint8_t a = 0; a < rules[i].actions; ++a) {
+      const Action& action = rules[i].action[a];
+      if (action.out != Out::Sequence || action.value < 0 || action.value >= seqCount) continue;
+      const uint8_t index = static_cast<uint8_t>(action.value);
+      if (fired || (states[i].active && seqs[index].loop && !run.running())) run.start(index, i, now);
+    }
+  }
+}
+
+inline int sequenceUsers(const Rule* rules, uint8_t count, uint8_t index) {
+  int users = 0;
+  for (uint8_t i = 0; i < count; ++i) {
+    for (uint8_t a = 0; a < rules[i].actions; ++a) {
+      if (rules[i].action[a].out == Out::Sequence && rules[i].action[a].value == index) {
+        ++users;
+        break;
+      }
+    }
+  }
+  return users;
+}
+// Rules store a sequence by its place in the list, so taking one out has to move theirs too.
+inline void removeSequence(Sequence* seqs, uint8_t& seqCount, Rule* rules, uint8_t count, uint8_t index) {
+  for (uint8_t i = 0; i < count; ++i) {
+    Rule& rule = rules[i];
+    uint8_t kept = 0;
+    for (uint8_t a = 0; a < rule.actions; ++a) {
+      Action action = rule.action[a];
+      if (action.out == Out::Sequence && action.value == index) continue;
+      if (action.out == Out::Sequence && action.value > index) --action.value;
+      rule.action[kept++] = action;
+    }
+    rule.actions = kept;
+  }
+  for (uint8_t i = index; i + 1 < seqCount; ++i) seqs[i] = seqs[i + 1];
+  --seqCount;
+}
+
+// The first one to try: it only needs the Cardputer's own LED and speaker.
+inline Sequence starterSequence() {
+  constexpr SeqStep kSteps[] = {{SeqKind::Set, Out::Led, 240}, {SeqKind::Set, Out::Tone, 660}, {SeqKind::Wait, Out::Servo, 3},
+                                {SeqKind::Set, Out::Led, 120}, {SeqKind::Set, Out::Tone, 880}, {SeqKind::Wait, Out::Servo, 3},
+                                {SeqKind::Off, Out::Tone, 0},  {SeqKind::Wait, Out::Servo, 5}};
+  Sequence seq;
+  strcpy(seq.name, "Hello");
+  for (const SeqStep& step : kSteps) seq.steps[seq.count++] = step;
+  return seq;
+}
+
 // The first thing to try with the Lab: the rule that started it, ready on a new device.
 inline Rule starterRule() {
   Rule rule;
@@ -511,9 +684,23 @@ class Draft {
     action.value = 1;
     rule.action[rule.actions++] = action;
   }
+  // By name, because Claude can't know the number, and a name that isn't saved is a refusal.
+  void addPlay(const char* name, const Sequence* seqs, uint8_t count) {
+    for (uint8_t i = 0; rule.actions < kMaxActions && i < count; ++i) {
+      const size_t letters = nameInWords(seqs[i].name, name);
+      if (!letters || letters != nameInWords(name, seqs[i].name)) continue;
+      Action action;
+      action.out = Out::Sequence;
+      action.how = How::Set;
+      action.value = i;
+      rule.action[rule.actions++] = action;
+      return;
+    }
+    ok = false;
+  }
   void addSet(const char* output, int value) {
     Action action;
-    if (rule.actions >= kMaxActions || !outFromKey(output, action.out) || action.out == Out::Say) { ok = false; return; }
+    if (rule.actions >= kMaxActions || !outFromKey(output, action.out) || action.out == Out::Say || action.out == Out::Sequence) { ok = false; return; }
     const OutInfo& o = info(action.out);
     action.how = How::Set;
     action.value = clampTo<int16_t>(static_cast<int16_t>(clampTo<int>(value, -32000, 32000)), o.lo, o.hi);
@@ -556,7 +743,7 @@ class Text {
 };
 
 // A rule in the shape Claude writes one, so it can be handed back to be changed.
-inline void ruleJson(const Rule& rule, Text& out) {
+inline void ruleJson(const Rule& rule, Text& out, const Sequence* seqs = nullptr, uint8_t seqCount = 0) {
   out.add("{\"name\":\"").add(rule.name).add("\",\"any\":").add(rule.any ? "true" : "false");
   out.add(",\"hold_ms\":").add(static_cast<int>(rule.holdMs)).add(",\"when\":[");
   for (uint8_t i = 0; i < rule.conds; ++i) {
@@ -571,6 +758,7 @@ inline void ruleJson(const Rule& rule, Text& out) {
     const Action& action = rule.action[i];
     out.add(i ? ",{\"output\":\"" : "{\"output\":\"").add(info(action.out).key).add("\",");
     if (action.out == Out::Say) out.add("\"text\":\"").add(rule.say).add("\"}");
+    else if (action.out == Out::Sequence) out.add("\"play\":\"").add(action.value >= 0 && action.value < seqCount ? seqs[action.value].name : "").add("\"}");
     else if (action.how == How::Set) out.add("\"set\":").add(action.value).add("}");
     else out.add(action.how == How::Follow ? "\"follow\":\"" : "\"oppose\":\"").add(info(action.source).key).add("\"}");
   }
@@ -984,6 +1172,73 @@ inline bool decode(const uint8_t* bytes, size_t length, Book& book) {
     }
   }
   book = in;
+  return true;
+}
+
+// Sequences keep to a file of their own, with only the steps each one uses, so rules.dat stays as
+// it was and more steps can fit one day without changing this.
+constexpr uint8_t kSeqFileMagic[3] = {'S', 'L', 'Q'};
+constexpr uint8_t kSeqFileVersion = 1;
+constexpr size_t kSeqStepBytes = 4;
+constexpr size_t kSeqFileBytes = 5 + kMaxSequences * (kNameChars + 3 + kMaxSeqSteps * kSeqStepBytes) + 2;
+
+inline size_t encodeSequences(const Sequence* seqs, uint8_t count, uint8_t* out) {
+  size_t at = 0;
+  auto put = [&](uint8_t value) { out[at++] = value; };
+  for (uint8_t b : kSeqFileMagic) put(b);
+  put(kSeqFileVersion);
+  put(count);
+  for (uint8_t i = 0; i < count; ++i) {
+    const Sequence& seq = seqs[i];
+    for (uint8_t c = 0; c <= kNameChars; ++c) put(static_cast<uint8_t>(seq.name[c]));
+    put(seq.loop ? 1 : 0);
+    put(seq.count);
+    for (uint8_t s = 0; s < seq.count; ++s) {
+      const SeqStep& step = seq.steps[s];
+      put(static_cast<uint8_t>(step.kind));
+      put(static_cast<uint8_t>(step.out));
+      put(static_cast<uint8_t>(step.value & 0xFF));
+      put(static_cast<uint8_t>((step.value >> 8) & 0xFF));
+    }
+  }
+  const uint16_t sum = checksum(out, at);
+  put(static_cast<uint8_t>(sum & 0xFF));
+  put(static_cast<uint8_t>(sum >> 8));
+  return at;
+}
+
+inline bool decodeSequences(const uint8_t* bytes, size_t length, Sequence* seqs, uint8_t& count) {
+  if (length < 7 || length > kSeqFileBytes) return false;
+  if (memcmp(bytes, kSeqFileMagic, sizeof(kSeqFileMagic)) != 0 || bytes[3] != kSeqFileVersion) return false;
+  const uint16_t sum = static_cast<uint16_t>(bytes[length - 2] | (bytes[length - 1] << 8));
+  if (checksum(bytes, length - 2) != sum) return false;
+  const uint8_t saved = bytes[4];
+  if (saved > kMaxSequences) return false;
+  const size_t end = length - 2;
+  size_t at = 5;
+  Sequence in[kMaxSequences];
+  for (uint8_t i = 0; i < saved; ++i) {
+    Sequence& seq = in[i];
+    if (at + kNameChars + 3 > end) return false;
+    for (uint8_t c = 0; c <= kNameChars; ++c) seq.name[c] = static_cast<char>(bytes[at++]);
+    seq.name[kNameChars] = '\0';
+    seq.loop = bytes[at++] != 0;
+    seq.count = bytes[at++];
+    if (seq.count > kMaxSeqSteps || at + seq.count * kSeqStepBytes > end) return false;
+    for (uint8_t s = 0; s < seq.count; ++s) {
+      const uint8_t kind = bytes[at++], out = bytes[at++];
+      if (kind > static_cast<uint8_t>(SeqKind::Wait) || out >= kSeqOutCount) return false;
+      SeqStep& step = seq.steps[s];
+      step.kind = static_cast<SeqKind>(kind);
+      step.out = static_cast<Out>(out);
+      step.value = static_cast<int16_t>(bytes[at] | (bytes[at + 1] << 8));
+      at += 2;
+      if (!stepAllowed(step)) return false;
+    }
+  }
+  if (at != end) return false;
+  for (uint8_t i = 0; i < saved; ++i) seqs[i] = in[i];
+  count = saved;
   return true;
 }
 }  // namespace lab

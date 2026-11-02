@@ -122,8 +122,8 @@ constexpr LauncherGroup kLauncherGroups[kLauncherGroupCount] = {
       {"Wi-Fi", UiMode::WifiSettings}, {"Pomodoro", UiMode::FocusSettings}}},
     {"System", "Firmware and diagnostics", rgb565_local(180, 150, 255), 3,
      {{"Firmware", UiMode::Ota}, {"Logs", UiMode::Logs}, {"C-Matrix", UiMode::CMatrix}}},
-    {"Lab", "Test devices and play rules", rgb565_local(182, 255, 0), 2,
-     {{"Devices", UiMode::LabDevices}, {"Rules", UiMode::LabRules}}},
+    {"Lab", "Test devices and play rules", rgb565_local(182, 255, 0), 3,
+     {{"Devices", UiMode::LabDevices}, {"Rules", UiMode::LabRules}, {"Sequences", UiMode::LabSequences}}},
 };
 
 Preferences gPrefs;

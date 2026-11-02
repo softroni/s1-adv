@@ -32,7 +32,8 @@ bool appAllowsBackgroundNetwork() {
     case UiMode::WifiSettings: // A join would pull the link out from under any request.
     case UiMode::IrRemote: return false;
     case UiMode::LabDevices:
-    case UiMode::LabRules: return labAllowsNetwork();
+    case UiMode::LabRules:
+    case UiMode::LabSequences: return labAllowsNetwork();
     case UiMode::Tetris: return !gTetrisStarted || gTetrisPaused || gTetrisGameOver;
     case UiMode::KeyRush: return !gKeyRush.running;
     case UiMode::BrainFlow: return gBrainFlow.phase!=brainflow::Phase::Playing &&

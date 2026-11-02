@@ -14,7 +14,7 @@ test("the prompt names exactly the sensors and outputs the firmware accepts", as
   const sensors = table("SigInfo kSigs");
   const outputs = table("OutInfo kOuts");
   assert.equal(sensors.length, 12);
-  assert.equal(outputs.length, 13);
+  assert.equal(outputs.length, 14);
   for (const key of [...sensors, ...outputs]) {
     assert.match(LAB_RULE_POLICY, new RegExp(`\\b${key}\\b`, "u"), key);
   }
@@ -66,7 +66,16 @@ test("a phrase for a rule to speak gets through, and stays short", () => {
   assert.equal(rule.do[1].text.length, 40);
 });
 
+test("a sequence goes through by name, and stays short", () => {
+  const rule = sanitizeDeviceAction({ type: "lab.rule", name: "Door", when: [{ sensor: "motion", test: "on" }],
+    do: [{ output: "sequence", play: "Door wave", set: 3 }, { output: "sequence", play: "y".repeat(200) }, { output: "sequence", play: 4 }] });
+  assert.deepEqual(rule.do[0], { output: "sequence", play: "Door wave" });
+  assert.equal(rule.do[1].play.length, 15);
+  assert.deepEqual(rule.do[2], { output: "sequence" });
+});
+
 test("the Lab's screens can be opened by name", () => {
   assert.deepEqual(sanitizeDeviceAction({ type: "ui.open", mode: "lab" }), { type: "ui.open", mode: "lab" });
   assert.deepEqual(sanitizeDeviceAction({ type: "ui.open", mode: "rules" }), { type: "ui.open", mode: "rules" });
+  assert.deepEqual(sanitizeDeviceAction({ type: "ui.open", mode: "sequences" }), { type: "ui.open", mode: "sequences" });
 });

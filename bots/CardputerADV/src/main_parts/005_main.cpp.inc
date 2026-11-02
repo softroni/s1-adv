@@ -547,7 +547,7 @@ void stopBallCatch();
 void serviceBallCatch();
 bool handleBallCatchKey(char key, const Keyboard_Class::KeysState& keys);
 void renderBallCatchUi();
-bool labMode(UiMode mode) { return mode == UiMode::LabDevices || mode == UiMode::LabRules; }
+bool labMode(UiMode mode) { return mode == UiMode::LabDevices || mode == UiMode::LabRules || mode == UiMode::LabSequences; }
 void beginLab();
 void stopLab();
 void serviceLab();
@@ -556,6 +556,8 @@ void renderLabUi();
 bool routeLabEscape();
 bool labAllowsNetwork();
 void labOfferRule(const lab::Rule& rule);
+const lab::Sequence* labSequences();
+uint8_t labSequenceCount();
 bool labVoiceSet(const char* output, int value);
 void beginNfcNotes();
 void serviceNfcNotes();

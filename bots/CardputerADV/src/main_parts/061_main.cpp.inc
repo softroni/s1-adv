@@ -31,6 +31,7 @@
         break;
       case UiMode::LabDevices:
       case UiMode::LabRules:
+      case UiMode::LabSequences:
         renderLabUi();
         break;
       case UiMode::NfcNotes:

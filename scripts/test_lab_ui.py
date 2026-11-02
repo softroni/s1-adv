@@ -280,7 +280,7 @@ bool waitForInboxToFinish(uint32_t) { return true; }
 bool speechToWavFile(const String& text, const String& path) { ++gSpeechFetches; gSpeechText = text; if (!gSpeechWorks) return false; gDisk.files[std::string(path)] = {1, 2}; return true; }
 void render() {}
 struct Keyboard_Class { struct KeysState { bool ctrl = false, alt = false, opt = false, enter = false, del = false; }; };
-enum class UiMode { Home, NfcNotes, Mesh, SmartLamp, IrRemote, LabDevices, LabRules };
+enum class UiMode { Home, NfcNotes, Mesh, SmartLamp, IrRemote, LabDevices, LabRules, LabSequences };
 UiMode gUiMode = UiMode::Home;
 bool gLauncherVisible = false, gRecording = false, gRealtimeActive = false, gPlaybackActive = false, gToneAllowed = true;
 bool gSubmitting = false, gThinking = false, gWifiReady = true;
@@ -322,10 +322,10 @@ bool focusToneAllowed() { return gToneAllowed; }
 bool handleScreensaverWake() { ++gWakes; return false; }
 void renderLauncherOverlay() {}
 void renderDebugOverlay() {}
-bool labMode(UiMode mode) { return mode == UiMode::LabDevices || mode == UiMode::LabRules; }
+bool labMode(UiMode mode) { return mode == UiMode::LabDevices || mode == UiMode::LabRules || mode == UiMode::LabSequences; }
 namespace { void beginLab(); void stopLab(); }
 void setUiMode(UiMode mode) { if (labMode(gUiMode) && mode != gUiMode) stopLab(); gUiMode = mode; if (labMode(mode)) beginLab(); }
-''' + (parts / '081_main.cpp.inc').read_text() + (parts / '082_main.cpp.inc').read_text() + (parts / '084_main.cpp.inc').read_text() + r'''
+''' + (parts / '081_main.cpp.inc').read_text() + (parts / '082_main.cpp.inc').read_text() + (parts / '084_main.cpp.inc').read_text() + (parts / '085_main.cpp.inc').read_text() + r'''
 // --- Driving it ----------------------------------------------------------------------------------
 FILE* gDump = nullptr;
 lab::Rule gOfferSteps[4]; int gOfferStepAt = -1;
@@ -897,7 +897,7 @@ void testSay() {
     // Lost speech comes back before playing, and if it can't, playing still starts.
     gDisk.files.erase(path); gSpeechWorks = false; const int tries = gSpeechFetches; keys("p"); assert(gSpeechFetches == tries + 1 && gLabPlaying && !gDisk.files.count(path) && !gLabFetchingSpeech); labStopPlaying(); gLabUi.view = LabView::Rules; gSpeechWorks = true;
     // The steps keep a phrase, and only offer Say to a rule with one, skipping what makes no sense.
-    labWizardStart(count, nullptr); gLabWizard.step = LabStep::Out; assert(labWizardRowCount() == lab::kOutCount); assert(std::string(labWizardRow(lab::kOutCount - 1)) == "Say");
+    labWizardStart(count, nullptr); gLabWizard.step = LabStep::Out; assert(labWizardRowCount() == lab::kOutCount); assert(std::string(labWizardRow(lab::kOutCount - 2)) == "Say" && std::string(labWizardRow(lab::kOutCount - 1)) == "Sequence");
     gLabWizard = LabWizard{}; gLabUi.view = LabView::Rules;
     labWizardStart(-1, nullptr); gLabWizard.step = LabStep::Out; assert(labWizardRowCount() == lab::kOutCount - 1); gLabWizard = LabWizard{}; gLabUi.view = LabView::Rules;
     labWizardStart(count, nullptr); for (int i = 0; i < 40 && gLabUi.view == LabView::Wizard; ++i) key(ENTER);
@@ -1245,12 +1245,154 @@ void testGuards() {
   stopLab(); stopLab(); serviceLab();
 }
 
+
+// --- Sequences -----------------------------------------------------------------------------------
+void seqPick(int row) { for (int i = 0; i < 40 && gLabSeqEdit.askRow != row; ++i) key(DOWN); assert(gLabSeqEdit.askRow == row); key(ENTER); }
+void seqRowTo(int row) { for (int i = 0; i < 40 && gLabSeqEdit.row != row; ++i) key(DOWN); assert(gLabSeqEdit.row == row); }
+void seqListTo(int row) { for (int i = 0; i < 40 && gLabUi.seqRow != row; ++i) key(DOWN); assert(gLabUi.seqRow == row); }
+// From the screen that asks, one step, then back on the list of steps.
+void addWait(int presses) { assert(gLabUi.view == LabView::SeqAsk && gLabSeqEdit.ask == LabSeqAsk::What); seqPick(0); assert(gLabSeqEdit.ask == LabSeqAsk::Wait); for (int i = 0; i < presses; ++i) key(LEFT); key(ENTER); assert(gLabUi.view == LabView::SeqEdit); }
+void addServo(int value) { seqPick(int(Out::Servo) + 1); assert(gLabSeqEdit.ask == LabSeqAsk::Value && gLabSeqEdit.step.value == 90); for (int i = 90; i < value; i += 5) key(RIGHT); for (int i = 90; i > value; i -= 5) key(LEFT); key(ENTER); assert(gLabUi.view == LabView::SeqEdit); }
+void addRelay(Out out, bool on) { seqPick(int(out) + 1); assert(gLabSeqEdit.ask == LabSeqAsk::How && gLabSeqEdit.askRow == 0); seqPick(on ? 0 : 1); assert(gLabUi.view == LabView::SeqEdit); }
+int stepsOf(int index) { return gLabSeqs[index].count; }
+std::string stepAt(int index, int step) { return labStepText(gLabSeqs[index].steps[step]); }
+
+void testSequences() {
+  gDisk.files.clear(); gLabBook = lab::Book{}; freshBoot(); fingers();
+  setUiMode(UiMode::LabSequences); run(1500);
+  // A new device already has one to try, and it needs no parts at all.
+  assert(gLabUi.view == LabView::Seqs && gLabSeqCount == 1 && !std::strcmp(gLabSeqs[0].name, "Hello") && labAskOnScreen());
+  show("seqs"); assert(gCanvas.shows("Sequences") && gCanvas.shows("Hello") && gCanvas.shows("+ New sequence") && gCanvas.shows("8 steps"));
+  // Playing it reaches the Cardputer's own LED and speaker, in order, and everything lets go at the end.
+  { const int tones = M5Cardputer.Speaker.tones; key('p'); assert(gLabUi.view == LabView::SeqPlay && gLabSeqRun.running() && gLabSeqRun.owner() == -1 && !labAllowsNetwork()); run(100);
+    show("seq-play"); assert(gCanvas.shows("STEP 3/8") && gCanvas.shows("Wait 0.3 sec")); assert(gLabDrive[int(Out::Led)].value == 240 && gLabDrive[int(Out::Tone)].value == 660 && gLed.b > 0);
+    run(300); assert(gLabDrive[int(Out::Led)].value == 120 && gLabDrive[int(Out::Tone)].value == 880 && gLed.g > 0); run(300); assert(!gLabDrive[int(Out::Tone)].on && gLabDrive[int(Out::Led)].on);
+    assert(M5Cardputer.Speaker.tones > tones); { const int awake = gWakes; run(500); run(100); assert(gWakes >= awake); }
+    assert(!gLabSeqRun.running() && !gLabDrive[int(Out::Led)].on && gLed.g == 0 && !gLabToneOn && labAllowsNetwork()); show("seq-done"); assert(gCanvas.shows("DONE") && gCanvas.shows("P play again"));
+    key('p'); run(50); assert(gLabSeqRun.running()); esc(); assert(gLabUi.view == LabView::Seqs && !gLabSeqRun.running() && !gLed.g && !gLed.b); }
+
+  // Building one from nothing: the first step is asked for straight away.
+  const int servo = ports(lab::Part::Servo), relay = ports(lab::Part::Relay);
+  seqListTo(1); key(ENTER); assert(gLabUi.view == LabView::SeqAsk && gLabSeqEdit.index < 0 && gLabSeqEdit.adding); show("seq-what"); assert(gCanvas.shows("What should this step do?") && gCanvas.shows("Wait"));
+  // Say and Sequence aren't offered, so a sequence can't talk or start another.
+  assert(labSeqAskRows() == 1 + lab::kSeqOutCount && labSeqAskRow(labSeqAskRows() - 1) == "Daikin AC");
+  for (int i = 0; i < labSeqAskRows(); ++i) { key(DOWN); show("seq-what-scroll"); }
+  // Leaving before a step is chosen keeps nothing.
+  esc(); assert(gLabUi.view == LabView::SeqEdit); show("seq-empty"); assert(gCanvas.shows("+ Add a step")); keys("p"); assert(gStatus == "Add a step first" && gLabUi.view == LabView::SeqEdit);
+  esc(); assert(gLabUi.view == LabView::Seqs && gLabSeqCount == 1);
+  seqListTo(1); key(ENTER);
+  addServo(0); assert(gLabSeqEdit.seq.count == 1 && gLabSeqEdit.row == 1);  // It lands on "+ Add a step", so another is one key away.
+  key(ENTER); seqPick(0); show("seq-wait"); assert(gCanvas.shows("1 sec")); for (int i = 0; i < 4; ++i) key(LEFT); assert(gLabSeqEdit.step.value == 6); key(ENTER); assert(labStepText(gLabSeqEdit.seq.steps[1]) == "Wait 0.6 sec");
+  key(ENTER); addServo(90); key(ENTER); addRelay(Out::Relay1, true); key(ENTER); seqPick(0); key(RIGHT); key(ENTER); assert(labStepText(gLabSeqEdit.seq.steps[4]) == "Wait 1.5 sec");
+  // Strip color takes a value or turns off, and off stands for the whole strip.
+  key(ENTER); seqPick(int(Out::StripColor) + 1); assert(gLabSeqEdit.ask == LabSeqAsk::How); show("seq-how"); assert(gCanvas.shows("set to a value")); seqPick(0); assert(gLabSeqEdit.ask == LabSeqAsk::Value); show("seq-value"); key(ENTER);
+  key(ENTER); seqPick(int(Out::StripBright) + 1); seqPick(1); assert(labStepText(gLabSeqEdit.seq.steps[6]) == "Strip off");
+  show("seq-edit"); assert(gCanvas.shows("SAVED ON ESC"));
+  // Changing a step opens on what it already says, and a new step can go in the middle.
+  seqRowTo(1); key(ENTER); assert(gLabSeqEdit.askRow == 0 && !gLabSeqEdit.adding); key(ENTER); key(RIGHT); key(ENTER); assert(gLabUi.view == LabView::SeqEdit && gLabSeqEdit.seq.count == 7 && gLabSeqEdit.seq.steps[1].value == 7);
+  seqRowTo(0); key(ENTER); assert(gLabSeqEdit.askRow == int(Out::Servo) + 1); esc(); assert(gLabUi.view == LabView::SeqEdit);
+  seqRowTo(1); keys("a"); assert(gLabSeqEdit.stepAt == 2); addWait(0); assert(gLabSeqEdit.seq.count == 8 && labStepText(gLabSeqEdit.seq.steps[2]) == "Wait 1 sec" && gLabSeqEdit.row == 3);
+  // X takes two presses, and anything else between them calls it off.
+  seqRowTo(2); keys("x"); show("seq-delete-step"); assert(gCanvas.shows("X again deletes this step")); key(DOWN); assert(!gLabSeqEdit.deleteArmed && gLabSeqEdit.seq.count == 8); key(UP); keys("xx"); assert(gLabSeqEdit.seq.count == 7 && labStepText(gLabSeqEdit.seq.steps[2]) == "Servo to 90`" && !gLabSeqEdit.deleteArmed);
+  // Deleting from the bottom of a long list doesn't leave the window past its end.
+  { const lab::Sequence kept = gLabSeqEdit.seq; for (int i = gLabSeqEdit.seq.count; i < 9; ++i) gLabSeqEdit.seq.steps[gLabSeqEdit.seq.count++] = lab::SeqStep{}; seqRowTo(8); assert(gLabSeqEdit.top == 4);
+    for (int i = 8; i >= 2; --i) { seqRowTo(i); keys("xx"); assert(gLabSeqEdit.top + kLabListRows <= max(labSeqEditRows(), kLabListRows)); } gLabSeqEdit.seq = kept; gLabSeqEdit.top = 0; gLabSeqEdit.row = 0; }
+  // Left and right move a step, and stop at the ends.
+  seqRowTo(1); key(RIGHT); assert(gLabSeqEdit.row == 2 && labStepText(gLabSeqEdit.seq.steps[1]) == "Servo to 90`"); key(LEFT); assert(gLabSeqEdit.row == 1); seqRowTo(0); key(LEFT); assert(gLabSeqEdit.row == 0); seqRowTo(6); key(RIGHT); assert(gLabSeqEdit.row == 6);
+  // Its name, typed over the suggestion, which is kept if nothing is typed.
+  seqRowTo(labSeqEditRows() - 1); show("seq-edit-end"); assert(gCanvas.shows("Sequence 2")); key(ENTER); assert(gLabSeqEdit.ask == LabSeqAsk::Name); show("seq-name"); assert(gCanvas.shows("Sequence 2"));
+  key(LEFT); assert(!std::strcmp(gLabSeqEdit.seq.name, "Sequence 2") && !gLabSeqEdit.nameTouched);  // An arrow doesn't count as typing.
+  for (const char* c = "Door wave"; *c; ++c) key(*c); show("seq-name-typed"); key(ENTER); assert(gLabUi.view == LabView::SeqEdit && !std::strcmp(gLabSeqEdit.seq.name, "Door wave"));
+  // Nothing is saved until the way out, and then it's on the card.
+  assert(gLabSeqCount == 1); esc(); assert(gLabUi.view == LabView::Seqs && gLabSeqCount == 2 && gLabUi.seqRow == 1 && !std::strcmp(gLabSeqs[1].name, "Door wave") && stepsOf(1) == 7 && gDisk.files.count("/lab/seqs.dat")); show("seqs-two"); assert(gCanvas.shows("7 steps"));
+  // A saved name opens ready to correct, not to be replaced.
+  key(ENTER); seqRowTo(labSeqEditRows() - 1); key(ENTER); key('\b'); key('E'); assert(!std::strcmp(gLabSeqEdit.seq.name, "Door wavE")); key('\b'); key('e'); key(ENTER); esc(); assert(!std::strcmp(gLabSeqs[1].name, "Door wave"));
+  // Back after a restart, and the rules' file was left alone.
+  { const bool noRules = !gDisk.files.count("/lab/rules.dat"); setUiMode(UiMode::Home); gLabSeqCount = 0; freshBoot(); setUiMode(UiMode::LabSequences); run(1500); assert(gLabSeqCount == 2 && stepsOf(1) == 7 && stepAt(1, 0) == "Servo to 0`" && noRules == !gDisk.files.count("/lab/rules.dat")); }
+
+  // Playing it moves the real parts in order, on time, through the hub.
+  gHubUnit.angle[servo][1] = 77; seqListTo(1); key('p'); run(100); show("seq-play-parts"); assert(gHubUnit.angle[servo][1] == 0 && gCanvas.shows("Door wave") && gCanvas.shows(" left"));
+  run(700); assert(gHubUnit.angle[servo][1] == 90 && gHubUnit.written[relay][0] == 1); show("seq-play-wait"); run(1500); assert(gLabSeqRun.shown() == 6 && !gLabDrive[int(Out::StripColor)].on);
+  // What it left on goes off at the end, without being told to.
+  run(300); assert(!gLabSeqRun.running()); run(400); assert(gHubUnit.written[relay][0] == 0); esc();
+  // Opening the menu stops it, the same as it does rules, and it doesn't carry on afterwards.
+  key('p'); run(200); assert(gLabSeqRun.running()); gLauncherVisible = true; run(50); assert(!gLabSeqRun.running()); gLauncherVisible = false; run(100); assert(!gLabSeqRun.running()); renderLabUi(); assert(gCanvas.shows("DONE")); esc();
+  // So does leaving the Lab.
+  key('p'); run(50); setUiMode(UiMode::Home); assert(!gLabSeqRun.running() && !gLabOpen); setUiMode(UiMode::LabSequences); run(1500); assert(gLabUi.view == LabView::Seqs);
+
+  // A loop keeps going until it's stopped, and P from the steps plays what's on the screen.
+  seqListTo(1); key(ENTER); seqRowTo(labSeqEditRows() - 2); key(ENTER); assert(gLabSeqEdit.seq.loop); show("seq-loops"); assert(gCanvas.shows("Over and over")); keys("p"); assert(gLabUi.view == LabView::SeqPlay && gLabSeqs[1].loop && gLabUi.seqBack == LabView::SeqEdit);
+  run(3500); assert(gLabSeqRun.running()); renderLabUi(); assert(gCanvas.shows("LOOP ")); show("seq-loop"); esc(); assert(gLabUi.view == LabView::SeqEdit && !gLabSeqRun.running());
+  while (gLabUi.view != LabView::Seqs) esc();
+  gLabSeqs[1].loop = false; labSaveSeqs();
+
+  // A rule plays one: it's on the steps once there's something saved, and asks which.
+  setUiMode(UiMode::LabRules); run(1500); labWizardStart(-1, nullptr); gLabWizard.step = LabStep::Out;
+  assert(labWizardRowCount() == lab::kOutCount - 1 && labWizardRow(labWizardRowCount() - 1) == "Sequence");
+  { const uint8_t kept = gLabSeqCount; gLabSeqCount = 0; assert(labWizardRowCount() == lab::kOutCount - 2); gLabSeqCount = kept; }
+  gLabWizard = LabWizard{}; gLabUi.view = LabView::Rules;
+  labWizardStart(-1, nullptr); pickRow(int(Sig::Motion)); pickRow(0); key(ENTER); assert(stepNow() == LabStep::Out); pickRow(labWizardRowCount() - 1); assert(stepNow() == LabStep::PickSeq); show("step-pick-seq"); assert(gCanvas.shows("Play which sequence?") && gCanvas.shows("Door wave"));
+  esc(); assert(stepNow() == LabStep::Out && gLabWizard.row == labWizardRowCount() - 1); key(ENTER); pickRow(1); assert(stepNow() == LabStep::MoreActions && gLabWizard.rule.action[0].out == lab::Out::Sequence && gLabWizard.rule.action[0].value == 1);
+  key(ENTER); key(ENTER); assert(stepNow() == LabStep::Name); for (const char* c = "At the door"; *c; ++c) key(*c); key(ENTER); assert(gLabUi.view == LabView::Rules);
+  const int door = gLabBook.count - 1;
+  assert(labActionText(gLabBook.rules[door].action[0], "") == "Play Door wave"); assert(gLabBook.rules[door].holdMs == 2000);
+  // Changing that rule comes back to the same sequence.
+  gLabUi.ruleRow = door; labWizardStart(door, nullptr); key(ENTER); assert(stepNow() == LabStep::Op); key(ENTER); key(ENTER); assert(stepNow() == LabStep::Out && gLabWizard.row == labWizardRowCount() - 1); key(ENTER); assert(stepNow() == LabStep::PickSeq && gLabWizard.row == 1); gLabWizard = LabWizard{}; gLabUi.view = LabView::Rules;
+  for (int i = 0; i < gLabBook.count; ++i) gLabBook.rules[i].on = i == door;
+  gLabBook.rules[door].holdMs = 0;
+  // It waits for its rule, starts once, and a sequence with parts on the hub really moves them.
+  const int motion = ports(lab::Part::Motion);
+  gHubUnit.level[motion] = 0; gHubUnit.angle[servo][1] = 123; keys("p"); run(300); assert(gLabPlaying && !gLabSeqRun.running() && gHubUnit.angle[servo][1] == 123);
+  gLabUi.playRule = door; show("flow-seq-waiting"); assert(gCanvas.shows("Door wave") && gCanvas.shows("Sequence"));
+  gHubUnit.level[motion] = 1; run(250); assert(gLabSeqRun.running() && gLabSeqRun.owner() == door && gLabStates[door].fires == 1 && gHubUnit.angle[servo][1] == 0); show("flow-seq-firing"); assert(gCanvas.shows("Step ") && gCanvas.shows("Door wave"));
+  // Motion ending doesn't cut a play-once sequence short.
+  gHubUnit.level[motion] = 0; run(300); assert(!gLabStates[door].active && gLabSeqRun.running()); gLabUi.playRule = door; show("flow-seq-outlasts"); assert(gCanvas.shows("Step "));
+  run(2100); assert(!gLabSeqRun.running() && gLabPlaying && gLabStates[door].fires == 1);
+  gHubUnit.level[motion] = 1; run(250); assert(gLabSeqRun.running() && gLabStates[door].fires == 2);
+  // Pausing stops it and everything it drove, and it doesn't jump back in.
+  key(' '); run(100); assert(!gLabSeqRun.running() && gLabPaused && gHubUnit.written[relay][0] == 0); key(' '); run(200); assert(!gLabSeqRun.running()); esc(); assert(gLabUi.view == LabView::Rules && !gLabPlaying);
+  // A loop lasts as long as its rule, and comes back after a pause.
+  gLabSeqs[1].loop = true; keys("p"); gHubUnit.level[motion] = 1; run(4500); assert(gLabSeqRun.running()); key(' '); run(100); assert(!gLabSeqRun.running()); key(' '); run(100); assert(gLabSeqRun.running());
+  gHubUnit.level[motion] = 0; run(300); assert(!gLabStates[door].active && !gLabSeqRun.running()); esc(); gLabSeqs[1].loop = false;
+  // Claude is told what's saved, and gets a rule's sequence back by name, not by number.
+  { const String seen = labAskContext(); assert(std::string(seen).find("saved sequences: Hello, Door wave") != std::string::npos); assert(std::string(seen).find("\"output\":\"sequence\",\"play\":\"Door wave\"") != std::string::npos); }
+
+  // Deleting one warns about the rules using it, and takes it out of them.
+  setUiMode(UiMode::LabSequences); run(100); seqListTo(1); key('x'); show("seq-delete"); assert(gCanvas.shows("1 rule uses it") && gLabUi.seqDeleteArmed); key(UP); assert(!gLabUi.seqDeleteArmed && gLabSeqCount == 2);
+  seqListTo(0); key('x'); renderLabUi(); assert(gCanvas.shows("X again deletes this sequence")); key(DOWN);  // Hello isn't used by anything.
+  seqListTo(0); key('x'); key('x'); assert(gLabSeqCount == 1 && !std::strcmp(gLabSeqs[0].name, "Door wave") && gLabBook.rules[door].action[0].value == 0);  // Its rule moves with it.
+  seqListTo(0); key('x'); key('x'); assert(gLabSeqCount == 0 && gLabBook.rules[door].actions == 0); show("seqs-empty"); assert(gCanvas.shows("Rules can start them"));
+  // It stays gone after a restart, rather than the starter coming back.
+  setUiMode(UiMode::Home); freshBoot(); setUiMode(UiMode::LabSequences); run(100); assert(gLabSeqCount == 0 && gLabBook.rules[door].actions == 0);
+  // A rule from a card with no sequences on it does nothing, and says so.
+  gLabBook.rules[door].actions = 1; gLabBook.rules[door].action[0] = lab::Action{Out::Sequence, lab::How::Set, 5, Sig::Knob}; assert(labActionText(gLabBook.rules[door].action[0], "") == "Play a missing sequence");
+  setUiMode(UiMode::LabRules); run(1500); gLabUi.ruleRow = 0; gHubUnit.level[motion] = 1; keys("p"); run(300); assert(gLabStates[door].active && !gLabSeqRun.running()); gLabUi.playRule = door; show("flow-seq-missing"); esc();
+  // A card that can't be written says so.
+  setUiMode(UiMode::LabSequences); run(100); gDisk.broken = true; key(ENTER); addServo(45); esc(); assert(gLabSeqCount == 1 && !gLabSaved && gStatus == "Sequences not saved"); renderLabUi(); gDisk.broken = false;
+  // The list fits, and the most steps there can be.
+  while (gLabSeqCount < lab::kMaxSequences) { gLabSeqs[gLabSeqCount] = lab::starterSequence(); ++gLabSeqCount; } assert(labSeqRows() == lab::kMaxSequences); seqListTo(lab::kMaxSequences - 1); show("seqs-full");
+  key(ENTER); for (int i = stepsOf(lab::kMaxSequences - 1); i < lab::kMaxSeqSteps; ++i) { keys("a"); addWait(0); seqRowTo(gLabSeqEdit.seq.count - 1); } assert(gLabSeqEdit.seq.count == lab::kMaxSeqSteps && !labSeqHasAddRow()); keys("a"); assert(gLabUi.view == LabView::SeqEdit); show("seq-full");
+  for (int i = 0; i < labSeqEditRows(); ++i) { key(DOWN); show("seq-full-scroll"); } keys("p"); run(2000); show("seq-play-long"); esc(); esc();
+  // The pictures in docs/LAB.md: the example from the start of its Sequences section.
+  setUiMode(UiMode::Home); gLabBook = lab::Book{}; gDisk.files.clear(); freshBoot(); setUiMode(UiMode::LabSequences); run(1500);
+  { lab::Sequence& w = gLabSeqs[1]; w = lab::Sequence{}; std::strcpy(w.name, "Welcome"); using lab::SeqKind; using lab::SeqStep;
+    for (const SeqStep& step : {SeqStep{SeqKind::Set, Out::StripColor, 120}, SeqStep{SeqKind::Wait, Out::Servo, 10}, SeqStep{SeqKind::Set, Out::Servo, 90}, SeqStep{SeqKind::Wait, Out::Servo, 20}, SeqStep{SeqKind::Set, Out::Servo, 0}, SeqStep{SeqKind::Off, Out::StripColor, 0}}) w.steps[w.count++] = step;
+    gLabSeqCount = 2; labSaveSeqs(); }
+  gLabUi.seqTop = 0; gLabUi.seqRow = 1; show("doc-seqs"); assert(gCanvas.shows("Welcome") && gCanvas.shows("6 steps"));
+  key(ENTER); show("doc-seq-edit"); assert(gCanvas.shows("Strip color to 120") && gCanvas.shows("Wait 2 sec")); keys("p"); run(1300); show("doc-seq-play"); assert(gCanvas.shows("STEP 4/6") && gCanvas.shows(" left")); esc(); esc();
+  setUiMode(UiMode::LabRules); run(1500); gLabBook.rules[0].holdMs = 0; lab::setOnOff(gLabBook.rules[0].cond[0], true); gLabBook.rules[0].cond[0].sig = Sig::Motion; std::strcpy(gLabBook.rules[0].name, "At the door"); gLabBook.rules[0].conds = 1; gLabBook.rules[0].actions = 1; gLabBook.rules[0].action[0] = lab::Action{Out::Sequence, lab::How::Set, 1, Sig::Knob};
+  labWizardStart(0, nullptr); key(ENTER); key(ENTER); key(ENTER); key(ENTER); show("doc-pick-seq"); assert(stepNow() == LabStep::PickSeq && gCanvas.shows("Welcome")); gLabWizard = LabWizard{}; gLabUi.view = LabView::Rules;
+  gLabUi.ruleRow = 0; gHubUnit.level[motion] = 0; keys("p"); run(300); gHubUnit.level[motion] = 1; run(1400); show("doc-flow-seq"); assert(gCanvas.shows("Step 4") && gCanvas.shows("Welcome")); esc();
+  gLabSeqCount = 0; gLabBook = lab::Book{}; gDisk.files.clear(); setUiMode(UiMode::Home); freshBoot();
+  gHubUnit.level[motion] = 0;
+}
+
 int main(int argc, char** argv) {
   if (argc > 1) gDump = std::fopen(argv[1], "w");
   for (bool& live : gLabHistoryLive) live = false;
-  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); setUiMode(UiMode::LabRules); run(1500); testGuards();
+  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testSequences(); setUiMode(UiMode::LabRules); run(1500); testGuards();
   if (gDump) std::fclose(gDump);
-  std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, the lamp and AC guards, units leaving and returning, saving and damage, and every screen stays on the display");
+  std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, sequences on their own and from a rule, the lamp and AC guards, units leaving and returning, saving and damage, and every screen stays on the display");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-lab-ui-') as directory:

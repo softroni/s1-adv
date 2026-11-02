@@ -2,7 +2,7 @@
 
 **Plug in a part, watch it respond, then make parts work together. No code.**
 
-The Lab turns your Cardputer into a test bench. **Devices** shows everything it can reach, live. **Rules** joins sensors to lights, motors and switches with "if this, then that", built one question at a time on the little screen.
+The Lab turns your Cardputer into a test bench. **Devices** shows everything it can reach, live. **Rules** joins sensors to lights, motors and switches with "if this, then that", built one question at a time on the little screen. **Sequences** are steps that run in order, with waits between them.
 
 <table>
 <tr>
@@ -12,11 +12,11 @@ The Lab turns your Cardputer into a test bench. **Devices** shows everything it 
 </tr>
 </table>
 
-To open it, press **Tab**, then **L**. You can also type `/lab` or `/rules` in chat.
+To open it, press **Tab**, then **L**. You can also type `/lab`, `/rules` or `/sequences` in chat.
 
 On the Cardputer, the arrow keys are `;` up, `.` down, `,` left and `/` right, and Esc is the top-left key.
 
-[Try it with no parts](#try-it-with-no-parts) · [Connect a part](#connect-a-part) · [Test a part](#test-a-part) · [Build a rule](#build-a-rule) · [Play it](#play-it) · [Shortcuts](#shortcuts) · [If a part doesn't answer](#if-a-part-doesnt-answer) · [Good to know](#good-to-know)
+[Try it with no parts](#try-it-with-no-parts) · [Connect a part](#connect-a-part) · [Test a part](#test-a-part) · [Build a rule](#build-a-rule) · [Play it](#play-it) · [Sequences](#sequences) · [Shortcuts](#shortcuts) · [If a part doesn't answer](#if-a-part-doesnt-answer) · [Good to know](#good-to-know)
 
 > The Lab needs firmware built from source, as in step 1 of the [README](../README.md#set-it-up). The older one-command flash doesn't have it.
 
@@ -194,6 +194,7 @@ Relays, lamp power and the air conditioners are simply on or off, so they can on
 | Its name, said aloud | Lamp power, Lamp bright |
 | | TCL AC, Daikin AC |
 | | Say a phrase |
+| | Play a [sequence](#sequences) |
 
 You can save up to 8 rules.
 
@@ -224,6 +225,72 @@ Rules only run on this screen, because the Grove port can't be shared with other
 <img src="assets/lab/practice.png" alt="Practice mode, with the knob set by hand to 55% and the rule firing" width="360">
 
 Practice lets you try a rule with fake readings. Up and down change the highlighted sensor, left and right pick another, and Esc goes back to the real readings. Real outputs still move if they're connected, so it's also a good way to test a wiring job.
+
+## Sequences
+
+A rule decides **when**. A sequence decides **what happens, in what order**. Here's one that greets you: strip green, wait a second, servo to 90°, wait 2 seconds, servo back, strip off.
+
+**Hello** is already in the list, and it only needs the Cardputer's own LED and speaker. Open **Sequences**, pick it and press **P**.
+
+<table>
+<tr>
+<td width="33%"><img src="assets/lab/seqs.png" alt="The Sequences list with Hello and Welcome" width="100%"><br><sub><b>The list.</b> <b>P</b> plays one, Enter changes it, and pressing X twice deletes it.</sub></td>
+<td width="33%"><img src="assets/lab/seq-edit.png" alt="The steps of a sequence called Welcome" width="100%"><br><sub><b>Its steps.</b> They run from the top down. <b>P</b> tries it from here.</sub></td>
+<td width="33%"><img src="assets/lab/seq-play.png" alt="A sequence playing, on step 4 of 6, with 1.7 seconds left to wait" width="100%"><br><sub><b>Playing.</b> Green is the step it's on. Esc stops it, and everything turns off.</sub></td>
+</tr>
+</table>
+
+### Build a sequence
+
+Choose **+ New sequence** and it asks for the first step. A step either waits or does one thing, so two steps with no wait between them happen together.
+
+<table>
+<tr>
+<td width="33%"><img src="assets/lab/seq-what.png" alt="What should this step do, with Wait selected" width="100%"><br><sub><b>1. What it does.</b> Wait, or any output a rule can use except speech.</sub></td>
+<td width="33%"><img src="assets/lab/seq-how.png" alt="Strip color: set to a value, or turn off" width="100%"><br><sub><b>2. How.</b> Set a value, or turn it off. Turning any part of the strip off turns off the whole strip.</sub></td>
+<td width="33%"><img src="assets/lab/seq-wait.png" alt="How long should it wait, set to 1 sec" width="100%"><br><sub><b>A wait.</b> Up to 10 minutes. What's on stays on.</sub></td>
+</tr>
+</table>
+
+On the list of steps:
+
+| Key | What it does |
+| --- | --- |
+| Enter | Change a step, or use the row you're on |
+| Left, right | Move a step earlier or later |
+| **A** | Add a step after this one |
+| **X** twice | Delete a step |
+| **P** | Save it and play it |
+| Esc | Save it and go back |
+
+Below the steps, **Plays** chooses once or over and over, and **Name** names it. A sequence can have up to 16 steps, and you can save up to 8.
+
+### Start one from a rule
+
+When you build a rule, choose **Sequence** under What should it do, then pick one. It starts once, each time the rule starts firing.
+
+<table>
+<tr>
+<td width="50%"><img src="assets/lab/step-sequence.png" alt="Play which sequence, with Welcome selected" width="100%"><br><sub><b>Pick it.</b> This shows up once you've saved a sequence.</sub></td>
+<td width="50%"><img src="assets/lab/flow-sequence.png" alt="A rule firing, with Motion on and the Welcome sequence on step 4" width="100%"><br><sub><b>Watch it.</b> While it plays, the box shows which step it's on.</sub></td>
+</tr>
+</table>
+
+| If it plays | When the rule stops firing |
+| --- | --- |
+| **Once** | It finishes anyway |
+| **Over and over** | It stops too |
+
+For a sequence you can call by voice, give the rule **Its name** to watch. Then tap Alt on the Playing screen and say the name.
+
+### How they share
+
+- **One at a time.** A new sequence replaces the one playing. If that one was playing over and over and its rule is still firing, it picks up again afterwards.
+- **A sequence wins what it has set.** Rules keep every other output, so a rule can run the strip while a sequence moves the servo.
+- **Everything it turned on goes off when it ends**, so a forgotten last step can't leave a relay on. A servo stays where it stopped.
+- **It only plays in the Lab.** Opening the menu or leaving the Lab stops it, the same as rules, and so does pausing them.
+
+Every step goes through the same limits as rules: the strip's power limit, and how often relays and air conditioners can switch.
 
 ## Shortcuts
 
@@ -262,6 +329,8 @@ With [Claude connected](../README.md#3-connect-claude), you can just describe wh
 
 Nothing happens until you've looked at it. If Claude can't make a rule from what it heard, the screen says what it needs. A rule you ask for in chat arrives the same way.
 
+A rule you say can play a saved sequence: "when someone walks in, play Welcome". Claude can't write the sequence itself, so build that first.
+
 A rule can speak too. Say "when someone walks in, say welcome back", and the Cardputer says it each time the rule starts firing. The speech is saved on the SD card, so it works with no network. Sensors and rules wait while it speaks.
 
 You can call a rule by name while rules are playing. Ask for "when I say movie time, turn the strip blue", then tap Alt on the Playing screen and say "movie time". Say it again to switch it off. Rules wait while it listens.
@@ -270,7 +339,7 @@ To change a rule, pick it in the list and tap Alt, then say what should be diffe
 
 ### Ask the Lab
 
-Stuck? Tap Alt on Devices or on a part's screen and just ask. Claude can see what's plugged in, the live readings and your rules.
+Stuck? Tap Alt on Devices, on a part's screen or on Sequences and just ask. Claude can see what's plugged in, the live readings and your rules.
 
 - "Why didn't my rule fire?"
 - "Why won't the strip light up?"
@@ -309,7 +378,7 @@ To see what the Lab finds as it happens, connect USB and run `python scripts/car
 ## Good to know
 
 - **Watch the power.** The strip and the servo run off the Cardputer's Grove power, and M5Stack doesn't publish a limit for it. At full white, 30 LEDs can draw 1 A, and a stalled servo 750 mA. The strip's limit starts at 25%, so keep it low. If the Cardputer restarts, give the strip its own 5 V supply and join the grounds.
-- **Rules live on the SD card**, in `/lab/rules.dat`, along with your hub wiring. They survive a firmware install. With no card they last until the next restart.
+- **Rules live on the SD card**, in `/lab/rules.dat`, along with your hub wiring, and sequences in `/lab/seqs.dat`. They survive a firmware install. With no card they last until the next restart.
 - **When two rules want the same output**, the lower one in the list wins.
 - **A relay can switch about three times a second at most**, however much a sensor flickers.
 - **The smartLamp and air conditioner are left alone until a rule asks.** When that rule ends or you stop, an "on" that it sent is undone. An air conditioner changes at most every 3 seconds. It sends by infrared, so point the Cardputer at it.

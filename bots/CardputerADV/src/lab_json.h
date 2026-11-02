@@ -5,7 +5,7 @@
 #include "lab.h"
 
 namespace lab {
-inline bool ruleFromJson(JsonObjectConst json, Rule& out) {
+inline bool ruleFromJson(JsonObjectConst json, Rule& out, const Sequence* seqs, uint8_t seqCount) {
   Draft draft;
   draft.name(json["name"] | "");
   draft.rule.any = json["any"] | true;
@@ -16,6 +16,7 @@ inline bool ruleFromJson(JsonObjectConst json, Rule& out) {
   for (JsonObjectConst line : json["do"].as<JsonArrayConst>()) {
     const char* output = line["output"] | "";
     if (!line["text"].isNull()) draft.addSay(line["text"] | "");
+    else if (!line["play"].isNull()) draft.addPlay(line["play"] | "", seqs, seqCount);
     else if (!line["follow"].isNull()) draft.addFollow(output, line["follow"] | "", false);
     else if (!line["oppose"].isNull()) draft.addFollow(output, line["oppose"] | "", true);
     else if (!line["set"].isNull()) draft.addSet(output, line["set"] | 0);

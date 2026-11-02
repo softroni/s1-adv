@@ -70,6 +70,7 @@ enum class UiMode : uint8_t {
   PocketSynth,
   LabDevices,
   LabRules,
+  LabSequences,
 };
 
 enum class FocusState : uint8_t {

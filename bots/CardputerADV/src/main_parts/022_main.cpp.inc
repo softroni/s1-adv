@@ -248,6 +248,8 @@ bool mapActionUiMode(String mode, UiMode& out) {
     out = UiMode::LabDevices;
   } else if (mode == "rules") {
     out = UiMode::LabRules;
+  } else if (mode == "sequences") {
+    out = UiMode::LabSequences;
   } else if (mode == "folders") {
     out = UiMode::AudioFolders;
   } else if (mode == "notes" || mode == "note" || mode == "notepad") {

@@ -35,6 +35,8 @@ constexpr int kLabLedDivide = 4;           // The Cardputer's LED is bright at f
 constexpr const char* kLabDir = "/lab";
 constexpr const char* kLabPath = "/lab/rules.dat";
 constexpr const char* kLabNewPath = "/lab/rules.new";
+constexpr const char* kLabSeqPath = "/lab/seqs.dat";
+constexpr const char* kLabSeqNewPath = "/lab/seqs.new";
 constexpr const char* kLabSayDir = "/lab/say";
 constexpr const char* kLabDiaryPath = "/lab/diary.txt";
 constexpr const char* kLabDiaryOldPath = "/lab/diary.old";
@@ -47,6 +49,7 @@ void labEnterView(UiMode mode);
 bool labRescanAllowed();
 bool labBusWanted();
 void labSaveBook();
+bool labSeqOnScreen();
 
 enum class LabStripTest : uint8_t { Solid, Rainbow, Chase, Count };
 
@@ -93,6 +96,10 @@ lab::Trends gLabTrends;
 uint32_t gLabTrendMs = 0;
 int16_t gLabTiltSide = 0;          // The other axis, for the spirit level. Rules only use the front-back one.
 lab::RuleState gLabStates[lab::kMaxRules];
+lab::Sequence gLabSeqs[lab::kMaxSequences];
+uint8_t gLabSeqCount = 0;
+lab::SeqRun gLabSeqRun;
+uint16_t gLabSeqFires[lab::kMaxRules] = {};   // How many of each rule's firings have started a sequence.
 uint16_t gLabSaidFires[lab::kMaxRules] = {};  // How many of each rule's firings have been spoken.
 uint8_t gLabNamed = 0;             // A bit for each rule whose name has been said while playing.
 bool gLabFetchingSpeech = false;
@@ -115,7 +122,6 @@ uint32_t gLabWireCheckMs = 0, gLabRescanMs = 0;
 uint8_t gLabSonicFails = 0;
 rmt_obj_t* gLabRmt = nullptr;
 uint8_t gLabStripRgb[lab::kStripLeds][3];
-rmt_data_t gLabStripBits[lab::kStripLeds * lab::kStripBits];
 bool gLabOpen = false, gLabPlaying = false, gLabPaused = false, gLabBehindMenu = false;
 int16_t gLabTempTenths = 0;
 uint32_t gLabLux = 0;
@@ -564,8 +570,10 @@ void labWriteServo(uint32_t now) {
 }
 void labStripShow() {
   if (!gLabRmt) return;
-  lab::encodeStrip(gLabStripRgb, lab::kStripLeds, gLabStripBits);
-  rmtWriteBlocking(gLabRmt, gLabStripBits, lab::kStripLeds * lab::kStripBits);
+  // Only for as long as the write blocks. Kept for good, this would cost the Lab's TLS room 2.9 KB.
+  rmt_data_t bits[lab::kStripLeds * lab::kStripBits];
+  lab::encodeStrip(gLabStripRgb, lab::kStripLeds, bits);
+  rmtWriteBlocking(gLabRmt, bits, lab::kStripLeds * lab::kStripBits);
 }
 bool labStripFill(uint16_t start, uint16_t count, uint8_t r, uint8_t g, uint8_t b) {
   if (!labOnWires(lab::Part::Strip)) return gLabHub.fillLeds(gLabBook.wiring.portOf(lab::Part::Strip), start, count, r, g, b);
@@ -750,44 +758,63 @@ void labReleaseOutputs() {
 }
 
 // --- Saving ----------------------------------------------------------------------------------
-bool labWriteBook() {
+bool labWriteFile(const char* path, const char* newPath, const uint8_t* bytes, size_t size) {
   if (!gSdReady || !ensureDirRecursive(SD, kLabDir)) return false;
-  uint8_t bytes[lab::kFileBytes];
-  const size_t size = lab::encode(gLabBook, bytes);
-  SD.remove(kLabNewPath);
-  File file = SD.open(kLabNewPath, FILE_WRITE);
+  SD.remove(newPath);
+  File file = SD.open(newPath, FILE_WRITE);
   if (!file) return false;
   const bool wrote = file.write(bytes, size) == size;
   file.close();
   if (!wrote) return false;
   // The old file stays until the new one is whole, so a power cut loses at most this change.
-  SD.remove(kLabPath);
-  return SD.rename(kLabNewPath, kLabPath);
+  SD.remove(path);
+  return SD.rename(newPath, path);
+}
+// A save stopped between its two last steps leaves only the new file.
+template <class Decode>
+bool labReadFile(const char* path, const char* newPath, uint8_t* bytes, size_t room, Decode decode) {
+  bool loaded = false;
+  for (const char* from : {path, newPath}) {
+    if (loaded || !gSdReady || !SD.exists(from)) continue;
+    File file = SD.open(from, "r");
+    if (!file) continue;
+    const size_t size = file.size();
+    if (size <= room && file.read(bytes, size) == size) loaded = decode(size);
+    file.close();
+  }
+  return loaded;
+}
+bool labWriteBook() {
+  uint8_t bytes[lab::kFileBytes];
+  const size_t size = lab::encode(gLabBook, bytes);
+  return labWriteFile(kLabPath, kLabNewPath, bytes, size);
 }
 void labSaveBook() {
   gLabSaved = labWriteBook();
   if (!gLabSaved) setStatus(gSdReady ? "Rules not saved" : "No SD card: rules last until restart", 2500);
 }
+void labSaveSeqs() {
+  uint8_t bytes[lab::kSeqFileBytes];
+  const size_t size = lab::encodeSequences(gLabSeqs, gLabSeqCount, bytes);
+  gLabSaved = labWriteFile(kLabSeqPath, kLabSeqNewPath, bytes, size);
+  if (!gLabSaved) setStatus(gSdReady ? "Sequences not saved" : "No SD card: sequences last until restart", 2500);
+}
 void labReadBook() {
   if (gLabBookRead) return;
   gLabBookRead = true;
-  bool loaded = false;
-  // A save stopped between its two last steps leaves only the new file.
-  for (const char* path : {kLabPath, kLabNewPath}) {
-    if (loaded || !gSdReady || !SD.exists(path)) continue;
-    File file = SD.open(path, "r");
-    if (!file) continue;
-    uint8_t bytes[lab::kFileBytes];
-    const size_t size = file.size();
-    if (size <= sizeof(bytes) && file.read(bytes, size) == size) loaded = lab::decode(bytes, size, gLabBook);
-    file.close();
-  }
-  if (!loaded) {
+  uint8_t bytes[lab::kFileBytes > lab::kSeqFileBytes ? lab::kFileBytes : lab::kSeqFileBytes];
+  if (!labReadFile(kLabPath, kLabNewPath, bytes, lab::kFileBytes, [&](size_t size) { return lab::decode(bytes, size, gLabBook); })) {
     gLabBook = lab::Book{};
     gLabBook.rules[0] = lab::starterRule();
     gLabBook.count = 1;
   }
+  if (!labReadFile(kLabSeqPath, kLabSeqNewPath, bytes, lab::kSeqFileBytes, [&](size_t size) { return lab::decodeSequences(bytes, size, gLabSeqs, gLabSeqCount); })) {
+    gLabSeqs[0] = lab::starterSequence();
+    gLabSeqCount = 1;
+  }
 }
+const lab::Sequence* labSequences() { return gLabSeqs; }
+uint8_t labSequenceCount() { return gLabSeqCount; }
 
 // --- Rules that talk ---------------------------------------------------------------------------
 // Rules run with no network, so a phrase's speech is fetched while there's still time to wait: when
@@ -909,6 +936,7 @@ uint8_t labNamedNow() {
 }
 void labStopPlaying() {
   labDiarySave();
+  gLabSeqRun.stop();
   gLabNamed = 0;
   gLabPlaying = false;
   gLabPaused = false;
@@ -918,6 +946,8 @@ void labStopPlaying() {
 void labPlay() {
   for (lab::RuleState& state : gLabStates) state = lab::RuleState{};
   for (uint16_t& said : gLabSaidFires) said = 0;
+  for (uint16_t& seen : gLabSeqFires) seen = 0;
+  gLabSeqRun.stop();
   gLabNamed = 0;
   labDiaryCounted();
   gLabPractice.clear();
@@ -964,7 +994,15 @@ void labKeepAwake(uint32_t now) {
 }
 // Rules react to sensors, so nothing else should hold up the loop while they play. Before that
 // the Lab has to stay reachable, because a rule asked for in the chat comes back as a reply.
-bool labAllowsNetwork() { return !gLabPlaying; }
+bool labAllowsNetwork() { return !gLabPlaying && !gLabSeqRun.running(); }
+// Rules have already said what they want by now, so a sequence's outputs go on top. On its own
+// screen it's the only thing asking for anything.
+void labRunSequence(uint32_t now) {
+  if (labSeqOnScreen()) labDriveClear();
+  gLabSeqRun.service(gLabSeqs, gLabSeqCount, now);
+  gLabSeqRun.apply(gLabDrive);
+  if (gLabSeqRun.running()) labKeepAwake(now);
+}
 void serviceLab() {
   if (!labMode(gUiMode) || !gLabOpen) return;
   // Nothing should move behind the menu, where it can't be seen or stopped.
@@ -972,6 +1010,7 @@ void serviceLab() {
     if (!gLabBehindMenu) {
       gLabBehindMenu = true;
       if (gLabPlaying) gLabPaused = true;
+      gLabSeqRun.stop();
       labReleaseOutputs();
     }
     return;
@@ -1004,12 +1043,15 @@ void serviceLab() {
   serviceLabTests();
   if (gLabPlaying && !gLabPaused) {
     lab::step(gLabBook.rules, gLabBook.count, gLabStates, gLabSeen, now, gLabDrive, labNamedNow());
+    lab::runSequences(gLabBook.rules, gLabBook.count, gLabStates, gLabSeqFires, gLabSeqs, gLabSeqCount, gLabSeqRun, now);
     labSpeakNewFirings();
     labDiaryNote(now);
     labKeepAwake(now);
   } else if (gLabPlaying) {
+    gLabSeqRun.stop();
     labDriveClear();
   }
+  labRunSequence(now);
   labWriteOutputs(now);
   if (now - gLabRedrawMs >= kLabRedrawMs) {
     gLabRedrawMs = now;
