@@ -384,7 +384,7 @@ void testDevices() {
   keys("///"); assert(gHubUnit.angle[servo][1] == 105 && gLabUi.servoAngle == 105);
   keys("d"); assert(gHubUnit.angle[servo][1] == 106); keys("a,"); assert(gHubUnit.angle[servo][1] == 100);
   gLabUi.servoAngle = 112; labDriveSet(Out::Servo, 112); run(60); show("servo");
-  assert(gCanvas.shows("112") && gCanvas.shows("A servo cannot reply"));
+  assert(gCanvas.shows("112") && gCanvas.shows("Watch it move"));
   for (int i = 0; i < 60; ++i) keys("/"); assert(gHubUnit.angle[servo][1] == 180);
   for (int i = 0; i < 60; ++i) keys(","); assert(gHubUnit.angle[servo][1] == 0);
   show("servo-zero"); keys("c"); assert(gHubUnit.angle[servo][1] == 90);
