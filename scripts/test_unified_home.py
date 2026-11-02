@@ -77,7 +77,7 @@ struct Canvas {
  }
  template<class...T>void drawRoundRect(T...){}
  void setFont(const int*f){font=f;}template<class...T>void setTextColor(T...){}
- int textWidth(const String&s){return int(s.size())*(font==&fonts::Font7?18:font==&fonts::Font0?6:8);}
+ int textWidth(const String&s){return int(s.size())*(font==&fonts::Font7?18:6);}
  int fontHeight(){return font==&fonts::Font0?8:font==&fonts::Font7?48:font==&fonts::Font4?26:16;}
  void setCursor(int xx,int yy){x=xx;y=yy;}
  void print(const String&s){assert(x>=0&&y>=0&&x+textWidth(s)<=240&&y<135);if(s=="REC"){assert(font==&fonts::Font2&&x>=154&&x+textWidth(s)<=216&&y>=105&&y+fontHeight()<=126);}printed.push_back(s);}
@@ -106,6 +106,13 @@ String compactFlashKb(unsigned){return "900k";}String compactBytes(unsigned){ret
 void updateBatterySnapshot(){}bool batteryExternalPowerPresent(){return false;}
 template<class...T>void drawServiceOrb(T...){}
 template<class...T>void drawInfoRow(T...){}
+constexpr int kBigVisibleRows=5;[[maybe_unused]] constexpr int16_t kBigListY=24,kBigRowH=22,kBigLeft=8,kBigRight=229;
+void useBigTextFont(const String&){gCanvas.setFont(&fonts::Font2);}
+int bigListFirstRow(int s,int c){return max<int>(0,min<int>(s-kBigVisibleRows/2,c-kBigVisibleRows));}
+void drawBigHeader(const String&t,uint16_t,const String& =String(),const String& =String(),const String& =String()){gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,3);gCanvas.print(t);}
+void drawBigRow(int row,const String&l,const String&v,bool,uint16_t,uint16_t=0,uint16_t=0){gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,26+row*22);gCanvas.print(fitCurrentFontToWidth(l,v.empty()?220:96));if(!v.empty()){gCanvas.setCursor(150,26+row*22);gCanvas.print(fitCurrentFontToWidth(v,56));}}
+void drawBigScrollbar(int,int,uint16_t){}
+void drawBigNotice(const String&t,uint16_t){gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,114);gCanvas.print(fitCurrentFontToWidth(t,220));}
 '''
 for signature in ['AssistantPulseState assistantPulseState()', 'void drawAssistantPulseButton(', 'void renderAssistantPulseChatHint()',
                   'bool assistantPulseWorking(', 'void renderAssistantPulseUi()', 'void renderOtaUi()']:

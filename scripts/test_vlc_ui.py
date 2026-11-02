@@ -20,18 +20,26 @@ STUB=r'''
 using std::min;using std::max;
 struct String:std::string{using std::string::string;String()=default;String(const std::string&s):std::string(s){}String(int n):std::string(std::to_string(n)){}bool isEmpty()const{return empty();}};
 namespace fonts{int Font0=0,Font2=2;}
+const uint16_t TFT_WHITE=0xffff;
 struct Canvas{const int*font=&fonts::Font0;int x=0,y=0;int drawn=0;
  void bounds(int a,int b,int w,int h){assert(a>=0&&b>=0&&w>0&&h>0&&a+w<=240&&b+h<=135);}
  void fillScreen(int){drawn=0;}
  void fillRect(int a,int b,int w,int h,int){bounds(a,b,w,h);}
  void fillRoundRect(int a,int b,int w,int h,int,int c){fillRect(a,b,w,h,c);}
  void drawRoundRect(int a,int b,int w,int h,int r,int c){fillRoundRect(a,b,w,h,r,c);}
- void setFont(const int*f){font=f;}void setTextColor(int,int){}
+ void setFont(const int*f){font=f;}void setTextColor(int,int=0){}
  void setCursor(int a,int b){x=a;y=b;}int textWidth(const String&s){return s.size()*(font==&fonts::Font2?8:6);}
  void print(const String&s){if(s.empty())return;bounds(x,y,textWidth(s),font==&fonts::Font2?16:8);++drawn;}
 }gCanvas;
 int rgb565_local(int,int,int){return 0;}
 String fitCurrentFontToWidth(String s,int w){while(!s.empty()&&gCanvas.textWidth(s)>w)s.pop_back();return s;}
+constexpr int kBigVisibleRows=5;[[maybe_unused]] constexpr int16_t kBigListY=24,kBigRowH=22,kBigLeft=8,kBigRight=229;
+void useBigTextFont(const String&){gCanvas.setFont(&fonts::Font2);}
+int bigListFirstRow(int s,int c){return max<int>(0,min<int>(s-kBigVisibleRows/2,c-kBigVisibleRows));}
+void drawBigHeader(const String&t,uint16_t,const String& =String(),const String& =String(),const String& =String()){gCanvas.fillScreen(0);gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,3);gCanvas.print(t);}
+void drawBigRow(int row,const String&l,const String&v,bool,uint16_t,uint16_t=0,uint16_t=0){gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,26+row*22);gCanvas.print(fitCurrentFontToWidth(l,v.empty()?220:96));if(!v.empty()){gCanvas.setCursor(150,26+row*22);gCanvas.print(fitCurrentFontToWidth(v,56));}}
+void drawBigScrollbar(int,int,uint16_t){}
+void drawBigNotice(const String&t,uint16_t){gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,114);gCanvas.print(fitCurrentFontToWidth(t,220));}
 void renderLauncherOverlay(){}void renderDebugOverlay(){}
 struct Keyboard_Class{struct KeysState{bool ctrl=false,alt=false,opt=false,enter=false;};};
 enum class UiMode{Home,VlcRemote,Radio,Voice};UiMode gUiMode=UiMode::VlcRemote;
@@ -91,7 +99,7 @@ int main(){
   state.volume=volume;state.length=length;state.seconds=length;state.connected=online;
   memset(state.title,'Z',sizeof(state.title)-1);state.title[sizeof(state.title)-1]=0;
   strcpy(state.route,"LAN fallback");strcpy(state.playback,"playing");gVlcNotice=String(100,'x');
-  renderVlcRemoteUi();assert(gCanvas.drawn>=8);
+  renderVlcRemoteUi();assert(gCanvas.drawn>=6);
  }
  puts("PASS actual VLC UI: old NVS/default migration, all controls, read-only polling/no autoplay/replay, network gates, deferred exit and 240x135 bounds (ASan/UBSan)");
 }

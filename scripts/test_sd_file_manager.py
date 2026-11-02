@@ -79,12 +79,19 @@ struct Canvas{
  void fillScreen(uint16_t){text.clear();}
  template<class...T>void fillRoundRect(T...){}
  void setFont(const int*f){font=f;}
- void setTextColor(uint16_t,uint16_t){}
+ void setTextColor(uint16_t,uint16_t=0){}
  void setCursor(int xx,int yy){x=xx;y=yy;}
- int textWidth(const String&s){return int(s.size())*(font==&fonts::Font0?6:8);}
- void print(const String&s){Rect r{x,y,textWidth(s),font==&fonts::Font0?8:16};assert(x>=6&&y>=5&&x+r.w<=234&&y+r.h<=129);for(auto p:text)assert(x+r.w<=p.x||p.x+p.w<=x||y+r.h<=p.y||p.y+p.h<=y);text.push_back(r);}
+ int textWidth(const String&s){return int(s.size())*6;}
+ void print(const String&s){Rect r{x,y,textWidth(s),font==&fonts::Font0?8:16};assert(x>=0&&y>=0&&x+r.w<=240&&y+r.h<=135);for(auto p:text)assert(x+r.w<=p.x||p.x+p.w<=x||y+r.h<=p.y||p.y+p.h<=y);text.push_back(r);}
 }gCanvas;
-String fitCurrentFontToWidth(const String&s,int w){return s.substr(0,w/(gCanvas.font==&fonts::Font0?6:8));}
+String fitCurrentFontToWidth(const String&s,int w){return s.substr(0,w/6);}
+constexpr int kBigVisibleRows=5;[[maybe_unused]] constexpr int16_t kBigListY=24,kBigRowH=22,kBigLeft=8,kBigRight=229;
+void useBigTextFont(const String&){gCanvas.setFont(&fonts::Font2);}
+int bigListFirstRow(int s,int c){return max<int>(0,min<int>(s-kBigVisibleRows/2,c-kBigVisibleRows));}
+void drawBigHeader(const String&t,uint16_t,const String& =String(),const String& =String(),const String& =String()){gCanvas.fillScreen(0);gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,3);gCanvas.print(t);}
+void drawBigRow(int row,const String&l,const String&v,bool,uint16_t,uint16_t=0,uint16_t=0){gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,26+row*22);gCanvas.print(fitCurrentFontToWidth(l,v.empty()?220:96));if(!v.empty()){gCanvas.setCursor(150,26+row*22);gCanvas.print(fitCurrentFontToWidth(v,56));}}
+void drawBigScrollbar(int,int,uint16_t){}
+void drawBigNotice(const String&t,uint16_t){gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,114);gCanvas.print(fitCurrentFontToWidth(t,220));}
 String marqueeText(const String&s,int w,int){return fitCurrentFontToWidth(s,w);}
 void drawTinyFooter(uint16_t bg,uint16_t fg,const String&s,int x,int y,int w){gCanvas.setFont(&fonts::Font0);gCanvas.setTextColor(fg,bg);gCanvas.setCursor(x,y);gCanvas.print(fitCurrentFontToWidth(s,w));}
 void renderLauncherOverlay(){}void renderDebugOverlay(){}

@@ -88,25 +88,25 @@ String vlcTime(int seconds) {
 }
 void renderVlcRemoteUi() {
   auto& d=gCanvas;const auto state=vlc_remote::snapshot();
-  const uint16_t bg=rgb565_local(2,7,10),panel=rgb565_local(3,21,38);
-  const uint16_t cyan=rgb565_local(47,227,255),white=rgb565_local(244,251,255);
-  const uint16_t muted=rgb565_local(134,167,184),green=rgb565_local(88,240,141),amber=rgb565_local(255,136,64);
-  d.fillScreen(bg);d.drawRoundRect(0,0,240,135,6,rgb565_local(24,90,118));
-  d.fillRoundRect(5,5,230,24,6,panel);
-  d.setFont(&fonts::Font2);d.setTextColor(cyan,panel);d.setCursor(11,7);d.print("VLC REMOTE");
-  d.setFont(&fonts::Font0);d.setTextColor(state.connected?green:amber,panel);d.setCursor(174,14);d.print(state.connected?"MAC / LAN":"OFFLINE");
-  d.setTextColor(white,bg);d.setCursor(10,35);d.print(fitCurrentFontToWidth(state.connected?String(state.title):String("Open VLC on your Mac"),220));
-  d.setTextColor(muted,bg);d.setCursor(10,48);
-  d.print(fitCurrentFontToWidth(String(state.connected?state.playback:"stopped")+"  "+vlcTime(state.seconds)+" / "+vlcTime(state.length),220));
-  d.fillRoundRect(10,61,220,4,2,panel);
-  int bar=state.length>0?int(std::min<int64_t>(220,int64_t(state.seconds)*220/state.length)):0;
-  if(bar>0)d.fillRect(10,61,bar,4,cyan);
-  d.setTextColor(muted,bg);d.setCursor(10,74);
-  d.print(fitCurrentFontToWidth(String("VOL ")+String((state.volume*100+128)/256)+"%  "+state.route,220));
-  d.setTextColor(state.connected?green:amber,bg);d.setCursor(10,88);d.print(fitCurrentFontToWidth(gVlcNotice,220));
-  d.setTextColor(muted,bg);d.setCursor(10,103);d.print("Enter play/pause X stop N/P track");
-  d.setCursor(10,114);d.print("W/S vol A/D seek 10s R connect");
-  d.setCursor(10,125);d.print("Esc back  Tab menu  Audio on Mac");
+  const uint16_t cyan=rgb565_local(47,227,255),white=TFT_WHITE,dim=rgb565_local(36,73,85);
+  const uint16_t muted=rgb565_local(182,219,255),green=rgb565_local(88,240,141),amber=rgb565_local(255,136,64);
+  drawBigHeader("VLC Remote",state.connected?green:cyan,state.connected?"Connected":"Offline");
+  const String title=state.connected?String(state.title):String("Open VLC on your Mac");
+  useBigTextFont(title);
+  d.setTextColor(white);d.setCursor(kBigLeft,27);d.print(fitCurrentFontToWidth(title,222));
+  d.setFont(&fonts::Font2);
+  d.setTextColor(muted);d.setCursor(kBigLeft,47);
+  d.print(fitCurrentFontToWidth(String(state.connected?state.playback:"stopped")+"  "+vlcTime(state.seconds)+" / "+vlcTime(state.length),222));
+  d.fillRoundRect(kBigLeft,65,222,5,2,dim);
+  int bar=state.length>0?int(std::min<int64_t>(222,int64_t(state.seconds)*222/state.length)):0;
+  if(bar>0)d.fillRect(kBigLeft,65,bar,5,cyan);
+  d.setTextColor(muted);d.setCursor(kBigLeft,73);
+  d.print(fitCurrentFontToWidth(String("Vol ")+String((state.volume*100+128)/256)+"%  "+state.route,222));
+  d.setTextColor(state.connected?green:amber);d.setCursor(kBigLeft,90);d.print(fitCurrentFontToWidth(gVlcNotice,222));
+  d.setFont(&fonts::Font0);
+  d.setTextColor(muted);d.setCursor(8,110);d.print("Enter play/pause X stop N/P track");
+  d.setCursor(8,120);d.print("W/S vol A/D seek 10s R connect");
+  d.setFont(&fonts::Font2);
   renderLauncherOverlay();renderDebugOverlay();
 }
 } // namespace

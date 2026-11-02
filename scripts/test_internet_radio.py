@@ -28,7 +28,8 @@ struct String:std::string {using std::string::string;String(const std::string&s)
  template<class T,typename=std::enable_if_t<std::is_integral_v<T>>>String(T n):std::string(std::to_string(n)){}
  bool isEmpty()const{return empty();}
 };
-namespace fonts{const int Font0=0,Font7=7;}
+namespace fonts{const int Font0=0,Font2=2,Font7=7;}
+const uint16_t TFT_WHITE=0xffff;
 struct Box{int x,y,w,h;};
 struct Canvas{
  const int*font=&fonts::Font0;int x=0,y=0;std::vector<Box>texts;
@@ -40,7 +41,7 @@ struct Canvas{
  void drawFastHLine(int a,int b,int w,uint16_t c){fillRect(a,b,w,1,c);}
  void drawCircle(int a,int b,int r,uint16_t c){fillRect(a-r,b-r,2*r+1,2*r+1,c);}
  void fillTriangle(int a,int b,int c,int d,int e,int f,uint16_t color){fillRect(min({a,c,e}),min({b,d,f}),max({a,c,e})-min({a,c,e})+1,max({b,d,f})-min({b,d,f})+1,color);}
- void setFont(const int*f){font=f;}void setTextColor(uint16_t,uint16_t){}
+ void setFont(const int*f){font=f;}void setTextColor(uint16_t,uint16_t=0){}
  void setCursor(int a,int b){x=a;y=b;}
  int textWidth(const String&s){return font==&fonts::Font7?int(s.size())*20:int(s.size())*6;}
  void print(const String&s){if(s.empty())return;Box box{x,y,textWidth(s),font==&fonts::Font7?48:8};bounds(box.x,box.y,box.w,box.h);
@@ -48,6 +49,13 @@ struct Canvas{
 }gCanvas;
 uint16_t rgb565_local(int r,int g,int b){return ((r&248)<<8)|((g&252)<<3)|(b>>3);}
 String fitCurrentFontToWidth(String s,int w){while(!s.empty()&&gCanvas.textWidth(s)>w)s.pop_back();return s;}
+constexpr int kBigVisibleRows=5;[[maybe_unused]] constexpr int16_t kBigListY=24,kBigRowH=22,kBigLeft=8,kBigRight=229;
+void useBigTextFont(const String&){gCanvas.setFont(&fonts::Font2);}
+int bigListFirstRow(int s,int c){return max<int>(0,min<int>(s-kBigVisibleRows/2,c-kBigVisibleRows));}
+void drawBigHeader(const String&t,uint16_t,const String& =String(),const String& =String(),const String& =String()){gCanvas.fillScreen(0);gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,3);gCanvas.print(t);}
+void drawBigRow(int row,const String&l,const String&v,bool,uint16_t,uint16_t=0,uint16_t=0){gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,26+row*22);gCanvas.print(fitCurrentFontToWidth(l,v.empty()?220:96));if(!v.empty()){gCanvas.setCursor(150,26+row*22);gCanvas.print(fitCurrentFontToWidth(v,56));}}
+void drawBigScrollbar(int,int,uint16_t){}
+void drawBigNotice(const String&t,uint16_t){gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,114);gCanvas.print(fitCurrentFontToWidth(t,220));}
 void drawAssistantPulseArc(int,int,int,int,float,float,uint16_t){}
 void renderLauncherOverlay(){}void renderDebugOverlay(){}
 struct Keyboard_Class{struct KeysState{bool ctrl=false,alt=false,opt=false,enter=false;};};

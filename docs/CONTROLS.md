@@ -3,7 +3,7 @@
 - Type a question and press Enter in chat.
 - Tap **Alt** on Pulse, AI Chat or the other assistant screens to start listening, then tap it again to send. Tapping it while Claude is talking stops the reply and listens. Esc cancels.
 - You can also hold **G0**, speak and release, or use **Ctrl+V** or double **Ctrl**.
-- **Tab** opens the app menu from Home and the chat/eyes screens. Up/down or W/S picks a row, left/right or A/D switches group, and Enter opens. **1-8** jumps to a group, and **Ctrl+1-8** opens that row. The menu opens on what you last used, even after a restart.
+- **Tab** opens the app menu from Home and the chat/eyes screens. The arrow keys pick a row and switch group, and Enter opens. A letter jumps straight to a group: **A** AI Agent, **M** Media, **F** Focus, **T** Tools, **G** Games, **R** Arcade, **S** Settings, **Y** System, **L** Lab. The selected tab underlines its letter. **1-9** also jumps to a group, and **Ctrl+1-8** opens that row. The menu opens on what you last used, even after a restart.
 - **Ctrl+K** opens assistant commands. R selects Realtime, C AI Chat, E Chat Eyes, F Big Eyes.
 - **Ctrl+U** on the Home clock installs an available update. An orange **NEW UPDATE / Ctrl+U** badge replaces READY until the newer firmware is installed. Without a candidate, Ctrl+U checks for updates.
 - **Ctrl+R** starts Realtime or commits the current speech turn. While awaiting a reply, it stops Realtime.

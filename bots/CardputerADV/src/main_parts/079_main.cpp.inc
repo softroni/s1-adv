@@ -230,59 +230,43 @@ void wifiDrawBars(int x, int y, uint8_t level, uint16_t lit, uint16_t dim) {
   }
 }
 
-void renderWifiList(bool online) {
+void renderWifiList() {
   auto& d = gCanvas;
-  constexpr uint16_t kPanel = 0x0841;
-  constexpr int kRowTop = 43, kRowHeight = 13, kVisible = 5;
+  const uint16_t accent = rgb565_local(203, 216, 226);
   const uint16_t green = rgb565_local(88, 240, 141);
-
-  d.setFont(&fonts::efontCN_12);
-  d.setTextColor(online ? green : TFT_LIGHTGREY, kPanel);
-  d.setCursor(16, 29);
-  if (online) d.print(wifiFitName(std::string("On ") + gWifiSsid.c_str(), 208));
-  else if (gWifiSsid.isEmpty()) d.print("Pick a network");
-  else d.print(wifiFitName(std::string("Saved: ") + gWifiSsid.c_str(), 208));
-
+  const uint16_t light = rgb565_local(182, 219, 255);
+  const uint16_t black = TFT_BLACK;
+  const bool online = gWifiRadio.online();
   const int rows = static_cast<int>(gWifi.rows());
   const int selected = static_cast<int>(gWifi.selected);
-  const int start = max<int>(0, min<int>(selected - kVisible / 2, rows - kVisible));
-  for (int i = 0; i < kVisible && start + i < rows; ++i) {
-    const int index = start + i;
-    const int y = kRowTop + i * kRowHeight;
+  const int first = bigListFirstRow(selected, rows);
+  for (int i = 0; i < kBigVisibleRows && first + i < rows; ++i) {
+    const int index = first + i;
     const bool picked = index == selected;
-    const uint16_t bg = picked ? 0x4208 : 0x0841;
-    d.fillRoundRect(14, y - 1, 212, kRowHeight - 1, 3, bg);
-    d.setFont(&fonts::efontCN_12);
-    d.setTextColor(picked ? TFT_WHITE : TFT_LIGHTGREY, bg);
-    d.setCursor(18, y - 1);
+    const int y = kBigListY + i * kBigRowH;
     if (index == static_cast<int>(gWifi.networks.size())) {
-      d.print("Other network...");
+      drawBigRow(i, "Other network...", "", picked, accent);
       continue;
     }
     const auto& network = gWifi.networks[index];
     const bool current = online && gWifiSsid == network.ssid.c_str();
-    d.print(wifiFitName(network.ssid, 150));
-    if (network.inRange) {
-      wifiDrawBars(209, y + 1, wifi_settings::signalBars(network.rssi), picked ? TFT_WHITE : green, 0x4208);
-    }
+    useBigTextFont(network.ssid.c_str());
+    drawBigRow(i, wifiFitName(network.ssid, 142), "", picked, accent);
+    if (network.inRange) wifiDrawBars(216, y + 5, wifi_settings::signalBars(network.rssi), picked ? black : green, 0x4208);
     const char* label = current ? "joined" : network.saved ? "saved" : !network.secured ? "open" : "";
     d.setFont(&fonts::Font0);
-    d.setTextColor(current ? green : TFT_LIGHTGREY, bg);
-    d.setCursor(206 - d.textWidth(label), y + 1);
+    d.setTextColor(picked ? black : current ? green : light);
+    d.setCursor(212 - d.textWidth(label), y + 7);
     d.print(label);
   }
+  drawBigScrollbar(first, rows, accent);
   if (gWifi.networks.empty()) {
-    d.setFont(&fonts::Font0);
-    d.setTextColor(TFT_LIGHTGREY, kPanel);
-    d.setCursor(18, kRowTop + kRowHeight + 2);
+    d.setFont(&fonts::Font2);
+    d.setTextColor(TFT_WHITE);
+    d.setCursor(kBigLeft, kBigListY + kBigRowH + 8);
     d.print(gWifi.scanning() ? "Looking for networks..." : "R looks for networks");
   }
-  const bool hasMessage = !gWifi.message.empty();
-  drawTinyFooter(kPanel, hasMessage ? wifiMoodColor(gWifi.mood) : TFT_LIGHTGREY,
-                 hasMessage ? String(gWifi.message.c_str()) :
-                 gWifi.onSavedRow() ? String("^v pick  Enter join  F forget  Esc") :
-                 String("^v pick  Enter join  R rescan  Esc"),
-                 16, 116, 208);
+  if (!gWifi.message.empty()) drawBigNotice(String(gWifi.message.c_str()), wifiMoodColor(gWifi.mood));
 }
 
 void renderWifiField() {
@@ -291,14 +275,14 @@ void renderWifiField() {
   const uint16_t input = rgb565_local(14, 30, 44);
   const bool forPassword = gWifi.screen == Screen::Password;
 
-  d.setFont(&fonts::Font0);
+  d.setFont(&fonts::Font2);
   d.setTextColor(TFT_LIGHTGREY, kPanel);
-  d.setCursor(16, 31);
+  d.setCursor(16, 27);
   d.print(forPassword ? "Password for" : "Network name");
   if (forPassword) {
     d.setFont(&fonts::efontCN_12);
     d.setTextColor(TFT_WHITE, kPanel);
-    d.setCursor(16, 41);
+    d.setCursor(16, 43);
     d.print(wifiFitName(gWifi.name, 208));
   }
 
@@ -322,13 +306,13 @@ void renderWifiField() {
 void renderWifiJoining() {
   auto& d = gCanvas;
   constexpr uint16_t kPanel = 0x0841;
-  d.setFont(&fonts::Font0);
+  d.setFont(&fonts::Font2);
   d.setTextColor(TFT_LIGHTGREY, kPanel);
-  d.setCursor(16, 31);
+  d.setCursor(16, 27);
   d.print("Joining");
   d.setFont(&fonts::efontCN_12);
   d.setTextColor(TFT_WHITE, kPanel);
-  d.setCursor(16, 41);
+  d.setCursor(16, 44);
   d.print(wifiFitName(gWifi.name, 208));
 
   const uint32_t elapsed = min<uint32_t>(gWifi.joinElapsed(millis()), wifi_settings::kJoinTimeoutMs);
@@ -342,13 +326,13 @@ void renderWifiJoining() {
 void renderWifiForget() {
   auto& d = gCanvas;
   constexpr uint16_t kPanel = 0x0841;
-  d.setFont(&fonts::Font0);
+  d.setFont(&fonts::Font2);
   d.setTextColor(TFT_LIGHTGREY, kPanel);
-  d.setCursor(16, 31);
+  d.setCursor(16, 27);
   d.print("Forget this network?");
   d.setFont(&fonts::efontCN_12);
   d.setTextColor(TFT_WHITE, kPanel);
-  d.setCursor(16, 41);
+  d.setCursor(16, 44);
   d.print(wifiFitName(gWifi.name, 208));
   const bool hasMessage = !gWifi.message.empty();
   const String detail = hasMessage ? String(gWifi.message.c_str()) :
@@ -444,19 +428,24 @@ bool handleWifiSettingsKey(char key, const Keyboard_Class::KeysState& keys) {
 
 void renderWifiSettingsUi() {
   auto& d = gCanvas;
-  drawCardHeader("Wi-Fi", 0x7BEF);
   d.setTextWrap(false);
   const bool online = gWifiRadio.online();
-  d.setFont(&fonts::Font0);
-  d.setTextColor(TFT_LIGHTGREY, 0x0841);
   const char* state = gWifi.screen == Screen::Joining ? "" : gWifi.scanning() ? "Scanning..." :
                       online ? "Connected" : "Offline";
-  d.setCursor(226 - d.textWidth(state), 17);
-  d.print(state);
-  if (gWifi.screen == Screen::Joining) renderWifiJoining();
-  else if (gWifi.screen == Screen::Forget) renderWifiForget();
-  else if (gWifi.typing()) renderWifiField();
-  else renderWifiList(online);
+  if (gWifi.screen == Screen::List) {
+    const String here = online ? String("On ") + gWifiSsid : gWifiSsid.isEmpty() ? String("") : String("Saved: ") + gWifiSsid;
+    drawBigHeader("Wi-Fi", rgb565_local(203, 216, 226), state, here, gWifi.onSavedRow() ? "F forget  R rescan" : "R rescan");
+    renderWifiList();
+  } else {
+    drawCardHeader("Wi-Fi", 0x7BEF);
+    d.setFont(&fonts::Font0);
+    d.setTextColor(TFT_LIGHTGREY, 0x0841);
+    d.setCursor(226 - d.textWidth(state), 17);
+    d.print(state);
+    if (gWifi.screen == Screen::Joining) renderWifiJoining();
+    else if (gWifi.screen == Screen::Forget) renderWifiForget();
+    else renderWifiField();
+  }
   d.setFont(&fonts::Font2);
   renderLauncherOverlay();
   renderDebugOverlay();

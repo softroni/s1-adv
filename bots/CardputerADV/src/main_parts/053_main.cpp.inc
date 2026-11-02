@@ -134,6 +134,101 @@ String fitCurrentFontToWidth(String text, int32_t pixelLimit) {
   return text + "..";
 }
 
+// The app menu's rows, for any screen that's a list, so they all read at the same size.
+constexpr int16_t kBigListY = 24, kBigRowH = 22, kBigLeft = 8, kBigRight = 229;
+
+// The bold font is ASCII only, and a missing glyph would send the renderer looking on the SD card.
+// Returns how far down a row the chosen font sits, because they're different heights.
+int16_t useBigTextFont(const String& text) {
+  for (size_t i = 0; i < text.length(); ++i) {
+    if (static_cast<uint8_t>(text[i]) >= 0x80) {
+      gCanvas.setFont(&fonts::efontCN_12);
+      return 4;
+    }
+  }
+  gCanvas.setFont(&fonts::FreeSansBold9pt7b);
+  return 3;
+}
+
+// Keeps the selected row in the middle, so the next one is always in view.
+int bigListFirstRow(int selected, int count) {
+  return max<int>(0, min<int>(selected - kBigVisibleRows / 2, count - kBigVisibleRows));
+}
+
+void drawBigHeader(const String& title, uint16_t accent, const String& right, const String& hint, const String& hint2) {
+  auto& d = gCanvas;
+  const uint16_t black = TFT_BLACK;
+  const uint16_t muted = rgb565_local(146, 146, 170);
+  d.fillScreen(black);
+  d.setFont(&fonts::FreeSansBold9pt7b);
+  d.setTextColor(accent);
+  d.setCursor(kBigLeft, 3);
+  d.print(title);
+  const int16_t titleEnd = kBigLeft + d.textWidth(title) + 8;
+  d.setFont(&fonts::Font2);
+  d.setTextColor(muted);
+  const int16_t rightX = kBigRight - d.textWidth(right);
+  d.setCursor(rightX, 3);
+  d.print(right);
+  d.setFont(&fonts::Font0);
+  const int16_t hintEnd = right.isEmpty() ? kBigRight : rightX - 8;
+  const auto printHint = [&](const String& text, int16_t y) {
+    const String shown = fitCurrentFontToWidth(text, hintEnd - titleEnd);
+    d.setCursor(hintEnd - d.textWidth(shown), y);
+    d.print(shown);
+  };
+  if (hint2.isEmpty()) printHint(hint, 7);
+  else {
+    printHint(hint, 2);
+    printHint(hint2, 12);
+  }
+  d.drawFastHLine(0, 22, 240, accent);
+  d.setFont(&fonts::Font2);
+}
+
+void drawBigRow(int row, const String& label, const String& value, bool selected, uint16_t accent,
+                uint16_t labelInk, uint16_t valueInk) {
+  auto& d = gCanvas;
+  const uint16_t black = TFT_BLACK;
+  const int16_t y = kBigListY + row * kBigRowH;
+  if (selected) d.fillRoundRect(1, y, 233, kBigRowH - 1, 6, accent);
+  useBigTextFont(value);
+  const int16_t valueW = d.textWidth(value);
+  const int16_t labelY = y + useBigTextFont(label);
+  // Text in the screen's own colour would vanish on its bar.
+  d.setTextColor(selected ? black : labelInk);
+  d.setCursor(kBigLeft, labelY);
+  const String shownLabel = fitCurrentFontToWidth(label, kBigRight - kBigLeft - min<int>(valueW, 96) - (value.isEmpty() ? 0 : 10));
+  d.print(shownLabel);
+  const int16_t labelW = d.textWidth(shownLabel);
+  const int16_t valueY = y + useBigTextFont(value);
+  const String shownValue = fitCurrentFontToWidth(value, kBigRight - kBigLeft - labelW - 10);
+  d.setTextColor(selected ? black : valueInk);
+  d.setCursor(kBigRight - d.textWidth(shownValue), valueY);
+  d.print(shownValue);
+  d.setFont(&fonts::Font2);
+}
+
+void drawBigScrollbar(int first, int count, uint16_t accent) {
+  if (count <= kBigVisibleRows) return;
+  auto& d = gCanvas;
+  const int16_t trackH = kBigVisibleRows * kBigRowH - 1;
+  const int16_t thumbH = trackH * kBigVisibleRows / count;
+  d.fillRect(236, kBigListY, 3, trackH, rgb565_local(36, 36, 85));
+  d.fillRect(236, kBigListY + (trackH - thumbH) * first / (count - kBigVisibleRows), 3, thumbH, accent);
+}
+
+// Over the last row, because a message matters more than one row while it's showing.
+void drawBigNotice(const String& text, uint16_t color) {
+  auto& d = gCanvas;
+  const uint16_t black = TFT_BLACK;
+  d.fillRoundRect(1, kBigListY + 4 * kBigRowH, 233, kBigRowH - 1, 6, color);
+  d.setFont(&fonts::Font2);
+  d.setTextColor(black);
+  d.setCursor(kBigLeft, kBigListY + 4 * kBigRowH + 2);
+  d.print(fitCurrentFontToWidth(text, kBigRight - kBigLeft));
+}
+
 void drawTinyFooter(uint16_t bg, uint16_t fg, const String& text, int16_t x, int16_t y, int16_t w) {
   auto& d = gCanvas;
   const int16_t textY = min<int16_t>(y, 118);

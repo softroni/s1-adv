@@ -1224,6 +1224,7 @@ bool handleLocalCommand(const String& input) {
     pushSystem("Voice: tap Alt, Ctrl x2, Ctrl+V, or hold G0; Realtime: Ctrl+R");
     pushSystem("Tab = menu; Tab+Down/Right = next group");
     pushSystem("Ctrl+L = launcher; Up/Down item, Left/Right group, Enter open");
+    pushSystem("Menu letters: A AI, M Media, F Focus, T Tools, G Games, R Arcade, S Settings, Y System, L Lab");
     pushSystem("Ctrl+K = assistant commands; Ctrl+D = debug");
     pushSystem("Pet: F food P play C clean S sleep H hunt");
     pushSystem("Agent actions: focus, ui.open, audio/voice, pet, settings");

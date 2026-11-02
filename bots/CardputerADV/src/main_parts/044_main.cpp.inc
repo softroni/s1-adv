@@ -432,7 +432,6 @@ void submitInput() {
 }
 
 void handleLauncherKey(char key, const Keyboard_Class::KeysState& keys) {
-  char lowerKey = static_cast<char>(tolower(static_cast<unsigned char>(key)));
   char shortcutKey = key;
   if (keys.ctrl) {
     for (uint8_t hidCode : keys.hid_keys) {
@@ -466,19 +465,20 @@ void handleLauncherKey(char key, const Keyboard_Class::KeysState& keys) {
     applyLauncherSelection();
     return;
   }
-  if (key == ';' || lowerKey == 'w' || lowerKey == 'k') {
+  // Letters jump to a group, so only the arrow keys move.
+  if (key == ';') {
     moveLauncherSubSelection(-1);
     return;
   }
-  if (key == '.' || lowerKey == 's' || lowerKey == 'j') {
+  if (key == '.') {
     moveLauncherSubSelection(1);
     return;
   }
-  if (key == ',' || lowerKey == 'a' || lowerKey == 'h') {
+  if (key == ',') {
     moveLauncherSelection(-1);
     return;
   }
-  if (key == '/' || lowerKey == 'd' || lowerKey == 'l') {
+  if (key == '/') {
     moveLauncherSelection(1);
     return;
   }

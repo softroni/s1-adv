@@ -177,91 +177,60 @@ void renderOtaUi() {
   auto& d = gCanvas;
   const bool hasCandidate = gOtaManifest.parsed && !gOtaManifest.version.isEmpty();
   const bool updateReady = homeFirmwareUpdateAvailable();
-  const uint16_t bg = rgb565_local(3, 5, 10);
-  const uint16_t panel = rgb565_local(12, 12, 20);
-  const uint16_t panel2 = rgb565_local(25, 16, 24);
-  const uint16_t row = rgb565_local(18, 24, 35);
   const uint16_t red = rgb565_local(255, 83, 92);
   const uint16_t amber = rgb565_local(255,136,64);
   const uint16_t green = rgb565_local(88, 240, 141);
   const uint16_t cyan = rgb565_local(47, 227, 255);
-  const uint16_t muted = rgb565_local(126, 143, 157);
+  const uint16_t muted = rgb565_local(182, 219, 255);
+  const uint16_t white = TFT_WHITE;
   const uint16_t accent = gOtaPendingVerify ? amber : (updateReady ? red : green);
 
-  d.fillScreen(bg);
-  d.fillRoundRect(6, 5, 228, 124, 14, panel);
-  d.drawRoundRect(6, 5, 228, 124, 14, accent);
-  d.drawRoundRect(10, 9, 220, 116, 11, rgb565_local(42, 36, 48));
-
-  d.setFont(&fonts::Font2);
-  d.setTextColor(accent, panel);
-  d.setCursor(16, 14);
-  d.print("FIRMWARE");
-  d.setFont(&fonts::Font0);
-  String state = gOtaPendingVerify ? "VERIFY" : updateReady ? "UPDATE" :
+  const String state = gOtaPendingVerify ? "VERIFY" : updateReady ? "UPDATE" :
       (gPendingOtaCheckAction || gInboxHttpBusy) ? "CHECKING" : hasCandidate ? "CURRENT" : "CHECKING";
-  d.setTextColor(accent, panel);
-  d.setCursor(224 - d.textWidth(state), 17);
-  d.print(state);
+  drawBigHeader("Firmware", accent, state);
 
-  drawServiceOrb(48, 66, accent, cyan, "OTA", updateReady || gOtaPendingVerify);
-
-  int x = 91;
   FirmwareCapacityInfo fw = firmwareCapacityInfo();
-  String freeValue = fw.usableBytes > 0 ? compactFlashKb(fw.freeBytes) + "/" + compactFlashKb(fw.usableBytes) : "-";
   updateBatterySnapshot();
-  bool externalPower = batteryExternalPowerPresent();
-  String powerValue = externalPower ? "charging" : (gBatterySnapshot.level >= 0 ? String(gBatterySnapshot.level) + "%" : "--");
-  drawInfoRow(x, 34, 128, "current", String(kAppVersion), row, muted, TFT_WHITE);
-  drawInfoRow(x, 49, 128, "new", gOtaManifest.version.isEmpty() ? "-" : gOtaManifest.version,
-              row, muted, updateReady ? red : green);
-  drawInfoRow(x, 64, 128, "power", powerValue,
-              row, muted, externalPower ? green : amber);
-  drawInfoRow(x, 79, 128, "fw free", freeValue,
-              row, muted, cyan);
+  const bool externalPower = batteryExternalPowerPresent();
+  const String powerValue = externalPower ? "charging" : (gBatterySnapshot.level >= 0 ? String(gBatterySnapshot.level) + "%" : "--");
+  drawBigRow(0, "Installed", String(kAppVersion), false, accent, white, white);
+  drawBigRow(1, "New", gOtaManifest.version.isEmpty() ? "-" : gOtaManifest.version, false, accent, white, updateReady ? red : green);
+  drawBigRow(2, "Power", powerValue, false, accent, white, externalPower ? green : amber);
 
-  d.setFont(&fonts::Font0);
-  d.setTextColor(gOtaConfirmedThisBoot ? green : (gOtaPendingVerify ? amber : muted), panel);
-  d.setCursor(18, 99);
   const uint8_t minimum = max<uint8_t>(gDeviceSettings.minBatteryForUpdate, gOtaManifest.minBattery);
+  String note;
+  uint16_t noteInk = gOtaConfirmedThisBoot ? green : (gOtaPendingVerify ? amber : muted);
   if (updateReady && !release_delivery::otaPowerAllowed(gBatterySnapshot.level, externalPower, minimum)) {
-    d.setTextColor(amber, panel);
-    d.print(fitCurrentFontToWidth("Charge to " + String(minimum) + "% or connect USB", 202));
+    noteInk = amber;
+    note = "Charge to " + String(minimum) + "% or connect USB";
   } else if (!gOtaManifest.error.isEmpty()) {
-    d.setTextColor(amber, panel);
-    d.print(fitCurrentFontToWidth(gOtaManifest.error, 202));
+    noteInk = amber;
+    note = gOtaManifest.error;
   } else if (gOtaPendingVerify) {
-    d.print("new app is pending verification");
+    note = "New app is pending verification";
   } else if (updateReady) {
-    String note = gOtaManifest.notes;
+    note = gOtaManifest.notes;
     note.trim();
-    if (!note.isEmpty()) {
-      d.print(fitCurrentFontToWidth(note, 202));
-    } else if (externalPower) {
-      d.print("keep charger connected during update");
-    } else {
-      d.print(fitCurrentFontToWidth("image " + compactBytes(gOtaManifest.size) + "; reserve " + compactFlashKb(fw.reserveBytes), 202));
-    }
+    if (note.isEmpty())
+      note = externalPower ? String("Keep the charger connected") : "Image " + compactBytes(gOtaManifest.size) + ", " + compactFlashKb(fw.freeBytes) + " free";
   } else if (hasCandidate) {
-    d.print(fitCurrentFontToWidth(gOtaRunningSlot + " " + gOtaBootState + "; reserve " + compactFlashKb(fw.reserveBytes), 202));
+    note = gOtaRunningSlot + " " + gOtaBootState + ", " + compactFlashKb(fw.freeBytes) + " free";
   } else {
-    d.print("Automatically checks every 5s");
+    note = "Checks automatically every 5s";
   }
+  d.setFont(&fonts::Font2);
+  d.setTextColor(noteInk);
+  d.setCursor(kBigLeft, kBigListY + 3 * kBigRowH + 2);
+  d.print(fitCurrentFontToWidth(note, kBigRight - kBigLeft));
 
-  d.setFont(&fonts::Font0);
   if (updateReady && !gOtaPendingVerify) {
-    d.fillRoundRect(17, 110, 202, 16, 5, panel2);
-    d.drawRoundRect(17, 110, 202, 16, 5, amber);
-    const char* action = "Enter  Install update";
-    d.setTextColor(amber, panel2);
-    d.setCursor(118 - d.textWidth(action) / 2, 114);
-    d.print(action);
+    drawBigRow(4, "Enter  Install update", "", true, amber);
   } else {
     const char* status = gOtaPendingVerify ? "Verifying installed update" :
         !gOtaManifest.error.isEmpty() ? "Check failed; retrying" :
         hasCandidate ? "Up to date; checks every 5s" : "Checking for updates...";
-    d.setTextColor(gOtaPendingVerify ? amber : muted, panel);
-    d.setCursor(118 - d.textWidth(status) / 2, 114);
+    d.setTextColor(gOtaPendingVerify ? amber : cyan);
+    d.setCursor(kBigLeft, kBigListY + 4 * kBigRowH + 2);
     d.print(status);
   }
   renderLauncherOverlay();

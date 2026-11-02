@@ -106,62 +106,16 @@ void drawWeatherPlaceEditor() {
 
 void renderSettingsUi() {
   auto& d = gCanvas;
-  constexpr int16_t kScreenW = 240;
-  constexpr int16_t kListY = 24;
-  constexpr int16_t kRowH = 22;
-  constexpr int16_t kLeft = 8;
-  constexpr int16_t kRight = 229;
-  constexpr int kVisibleRows = 5;
-  const uint16_t black = TFT_BLACK;
-  const uint16_t white = TFT_WHITE;
   const uint16_t accent = rgb565_local(203, 216, 226);
-  const uint16_t valueInk = rgb565_local(47, 227, 255);
-  const uint16_t muted = rgb565_local(109, 109, 85);
-  const uint16_t scrollTrack = rgb565_local(36, 36, 85);
   const int count = currentSettingsItemCount();
   gSelectedSetting = clampValue<int>(gSelectedSetting, 0, count - 1);
-
-  d.fillScreen(black);
-  d.setFont(&fonts::FreeSansBold9pt7b);
-  d.setTextColor(accent);
-  d.setCursor(kLeft, 3);
-  d.print(currentSettingsTitle());
-  d.setFont(&fonts::Font2);
-  d.setTextColor(muted);
-  const String place = String(gSelectedSetting + 1) + "/" + String(count);
-  const int16_t placeX = kRight - d.textWidth(place);
-  d.setCursor(placeX, 3);
-  d.print(place);
-  d.setFont(&fonts::Font0);
-  d.setCursor(placeX - 8 - d.textWidth("<> change"), 7);
-  d.print("<> change");
-  d.drawFastHLine(0, 22, kScreenW, accent);
-
-  const int first = max<int>(0, min<int>(gSelectedSetting - kVisibleRows / 2, count - kVisibleRows));
-  d.setFont(&fonts::FreeSansBold9pt7b);
-  for (int row = 0; row < min<int>(kVisibleRows, count); ++row) {
+  drawBigHeader(currentSettingsTitle(), accent, String(gSelectedSetting + 1) + "/" + String(count), "<> change");
+  const int first = bigListFirstRow(gSelectedSetting, count);
+  for (int row = 0; row < min<int>(kBigVisibleRows, count); ++row) {
     const int index = first + row;
-    const int16_t y = kListY + row * kRowH;
-    const bool selected = index == gSelectedSetting;
-    if (selected) {
-      d.fillRoundRect(1, y, 233, kRowH - 1, 6, accent);
-    }
-    const String label = settingLabel(index);
-    d.setTextColor(selected ? black : white);
-    d.setCursor(kLeft, y + 3);
-    d.print(label);
-    // The label is the shorter and fixed one, so a long value such as a city gets cut instead.
-    const String value = fitCurrentFontToWidth(settingValue(index), kRight - kLeft - d.textWidth(label) - 10);
-    d.setTextColor(selected ? black : valueInk);
-    d.setCursor(kRight - d.textWidth(value), y + 3);
-    d.print(value);
+    drawBigRow(row, settingLabel(index), settingValue(index), index == gSelectedSetting, accent);
   }
-  if (count > kVisibleRows) {
-    const int16_t trackH = kVisibleRows * kRowH - 1;
-    const int16_t thumbH = trackH * kVisibleRows / count;
-    d.fillRect(236, kListY, 3, trackH, scrollTrack);
-    d.fillRect(236, kListY + (trackH - thumbH) * first / (count - kVisibleRows), 3, thumbH, accent);
-  }
+  drawBigScrollbar(first, count, accent);
   d.setFont(&fonts::Font2);
   if (gPlaceEditing) drawWeatherPlaceEditor();
   renderLauncherOverlay();
@@ -1090,78 +1044,60 @@ void renderStopwatchUi() {
 
 void renderAlarmUi() {
   auto& d = gCanvas;
-  const uint16_t bg = rgb565_local(5, 5, 10);
-  const uint16_t panel = rgb565_local(13, 15, 24);
-  const uint16_t panel2 = rgb565_local(6, 10, 18);
   const uint16_t cyan = rgb565_local(47, 227, 255);
   const uint16_t green = rgb565_local(88, 240, 141);
   const uint16_t amber = rgb565_local(255,136,64);
   const uint16_t red = rgb565_local(255, 82, 82);
-  const uint16_t muted = rgb565_local(126, 143, 157);
+  const uint16_t muted = rgb565_local(182, 219, 255);
+  const uint16_t black = TFT_BLACK;
   uint32_t nowMs = millis();
   bool flash = gAlarmRinging && ((nowMs / 320U) % 2U == 0U);
   uint16_t accent = gAlarmRinging ? (flash ? red : amber) : (gAlarmSettings.enabled ? green : muted);
 
-  d.fillScreen(bg);
-  d.fillRoundRect(6, 5, 228, 124, 12, panel);
-  d.drawRoundRect(6, 5, 228, 124, 12, accent);
-  d.drawRoundRect(10, 9, 220, 116, 9, rgb565_local(28, 37, 52));
+  drawBigHeader(gAlarmRinging ? "Alarm ringing" : "Alarm", accent, gAlarmRinging ? "RING" : (gAlarmSettings.enabled ? "ON" : "OFF"));
 
   d.setFont(&fonts::Font2);
-  d.setTextColor(accent, panel);
-  d.setCursor(16, 14);
-  d.print(gAlarmRinging ? "ALARM RINGING" : "ALARM");
-  String state = gAlarmRinging ? "RING" : (gAlarmSettings.enabled ? "ON" : "OFF");
-  d.setCursor(224 - d.textWidth(state), 14);
-  d.print(state);
-
-  d.setFont(&fonts::Font0);
-  d.setTextColor(muted, panel);
-  d.setCursor(18, 29);
-  d.print("now ");
-  d.setTextColor(cyan, panel);
+  d.setTextColor(muted);
+  d.setCursor(kBigLeft, 25);
+  d.print("Now ");
+  d.setTextColor(cyan);
   d.print(alarmClockText());
   String snooze = alarmSnoozeUntilText();
   if (!snooze.isEmpty()) {
-    d.setTextColor(amber, panel);
-    d.setCursor(146, 29);
-    d.print("snooze ");
-    d.print(snooze);
+    const String label = "Snooze " + snooze;
+    d.setTextColor(amber);
+    d.setCursor(kBigRight - d.textWidth(label), 25);
+    d.print(label);
   }
 
-  d.fillRoundRect(19, 43, 202, 45, 10, panel2);
-  d.drawRoundRect(19, 43, 202, 45, 10, accent);
   d.setFont(&fonts::Font6);
-  d.setTextColor(accent, panel2);
+  d.setTextColor(accent, black);
   String alarmText = alarmTimeString(gAlarmSettings.hour, gAlarmSettings.minute);
-  d.setCursor((240 - d.textWidth(alarmText)) / 2, 43);
+  d.setCursor((240 - d.textWidth(alarmText)) / 2, 41);
   d.print(alarmText);
 
-  d.setFont(&fonts::Font0);
-  d.setTextColor(muted, panel2);
-  d.setCursor(33, 78);
+  d.setFont(&fonts::Font2);
+  d.setCursor(kBigLeft, 88);
   if (!gAlarmEditBuffer.isEmpty()) {
-    d.print("entry HHMM: ");
-    d.setTextColor(amber, panel2);
+    d.setTextColor(muted);
+    d.print("Time HHMM: ");
+    d.setTextColor(amber);
     d.print(gAlarmEditBuffer);
   } else if (gAlarmRinging) {
-    d.setTextColor(red, panel2);
-    d.print("Enter dismiss  S snooze  Esc dismiss");
+    d.setTextColor(red);
+    d.print("Enter dismiss   S snooze 5m");
   } else {
-    d.print(gAlarmSettings.enabled ? "daily alarm armed" : "toggle on to arm daily alarm");
+    d.setTextColor(muted);
+    d.print(gAlarmSettings.enabled ? "Daily alarm is on" : "T turns the daily alarm on");
   }
-
-  d.fillRoundRect(18, 94, 204, 15, 5, rgb565_local(7, 13, 20));
-  d.setTextColor(gAlarmRinging ? red : amber, rgb565_local(7, 13, 20));
-  d.setCursor(25, 99);
-  d.print(fitCurrentFontToWidth(gAlarmStatus, 190));
+  d.setTextColor(gAlarmRinging ? red : amber);
+  d.setCursor(kBigLeft, 105);
+  d.print(fitCurrentFontToWidth(gAlarmStatus, 222));
 
   d.setFont(&fonts::Font0);
-  if (gAlarmRinging) {
-    drawTinyFooter(panel, muted, "Enter/Space dismiss   S snooze 5m", 16, 120, 208);
-  } else {
-    drawTinyFooter(panel, muted, "0-9 HHMM  +/- min  Z/X 5m  T toggle", 10, 120, 220);
-  }
+  d.setTextColor(muted);
+  d.setCursor(kBigLeft, 124);
+  d.print(gAlarmRinging ? "Enter/Space dismiss   S snooze 5m" : "0-9 HHMM  +/- min  Z/X 5m  T toggle");
   d.setFont(&fonts::Font2);
 
   renderLauncherOverlay();
@@ -1199,45 +1135,41 @@ void renderLogsUi() {
 
 void renderFileManagerUi() {
   auto& d = gCanvas;
-  const uint16_t bg = rgb565_local(3, 7, 13), panel = rgb565_local(6, 18, 27);
-  const uint16_t cyan = rgb565_local(47, 227, 255), muted = rgb565_local(150, 165, 178);
-  const uint16_t amber = rgb565_local(255, 150, 80);
-  d.fillScreen(bg);
-  d.fillRoundRect(6, 5, 228, 124, 10, panel);
-  d.setFont(&fonts::Font2);
-  d.setTextColor(cyan, panel); d.setCursor(14, 9); d.print("SD FILES");
-  d.setFont(&fonts::Font0);
+  const uint16_t cyan = rgb565_local(47, 227, 255), muted = rgb565_local(182, 219, 255);
+  const uint16_t amber = rgb565_local(255, 150, 80), white = TFT_WHITE;
   if (gFileDelete.pending()) {
-    d.setTextColor(amber, panel); d.setCursor(14, 34); d.print("Delete this file permanently?");
-    d.setTextColor(TFT_WHITE, panel); d.setCursor(14, 51);
-    d.print(marqueeText(filenameFromPath(String(gFileDelete.path.c_str())), 208, 160));
-    d.setTextColor(muted, panel); d.setCursor(14, 68);
-    d.print(marqueeText(String(gFileDelete.path.c_str()), 208, 160));
-    d.setCursor(14, 84);
+    drawBigHeader("Delete file?", amber);
+    useBigTextFont(filenameFromPath(String(gFileDelete.path.c_str())));
+    d.setTextColor(white);
+    d.setCursor(8, 28);
+    d.print(marqueeText(filenameFromPath(String(gFileDelete.path.c_str())), 222, 160));
+    d.setFont(&fonts::Font2);
+    d.setTextColor(muted);
+    d.setCursor(8, 49);
+    d.print(marqueeText(String(gFileDelete.path.c_str()), 222, 160));
+    d.setCursor(8, 67);
     d.print(String(static_cast<unsigned long>(gFileDelete.size)) + " bytes");
-    d.setCursor(14, 101); d.print("No undo. Folders cannot be deleted.");
-    drawTinyFooter(panel, amber, "Y delete   any other key cancels", 14, 118, 210);
+    d.setTextColor(amber);
+    d.setCursor(8, 85);
+    d.print("No undo. Folders can't be deleted.");
+    drawBigNotice("Y delete   any other key cancels", amber);
   } else {
-    d.setTextColor(muted, panel); d.setCursor(14, 29);
-    d.print(fitCurrentFontToWidth(gFilesDir, 208));
     const int count = static_cast<int>(gFileEntries.size());
-    const int start = max<int>(0, min<int>(gSelectedFile - 2, count - 6));
+    drawBigHeader("Files", cyan, count ? String(gSelectedFile + 1) + "/" + String(count) : String(""),
+                  gFilesDir, "D delete  R rescan");
     if (!gSdReady || count == 0) {
-      d.setCursor(14, 53); d.print(fitCurrentFontToWidth(gFilesStatus, 208));
+      d.setTextColor(white);
+      d.setCursor(8, 44);
+      d.print(fitCurrentFontToWidth(gFilesStatus, 222));
     }
-    for (int i = start; i < min<int>(count, start + 6); ++i) {
-      const auto& entry = gFileEntries[i];
-      const int y = 42 + (i - start) * 12;
-      const uint16_t row = i == gSelectedFile ? rgb565_local(17, 49, 62) : panel;
-      d.fillRoundRect(11, y - 1, 218, 11, 3, row);
-      d.setTextColor(entry.directory ? cyan : TFT_WHITE, row); d.setCursor(15, y);
-      d.print(fitCurrentFontToWidth((entry.directory ? "/" : " ") + entry.name, 154));
-      String size = entry.directory ? "DIR" : String(static_cast<unsigned long>((entry.size + 1023) / 1024)) + "k";
-      d.setTextColor(muted, row); d.setCursor(222 - d.textWidth(size), y); d.print(size);
+    const int first = bigListFirstRow(gSelectedFile, count);
+    for (int row = 0; row < kBigVisibleRows && first + row < count; ++row) {
+      const auto& entry = gFileEntries[first + row];
+      const String size = entry.directory ? "DIR" : String(static_cast<unsigned long>((entry.size + 1023) / 1024)) + "k";
+      drawBigRow(row, (entry.directory ? "/" : "") + entry.name, size, first + row == gSelectedFile, cyan,
+                 entry.directory ? cyan : white, muted);
     }
-    d.setTextColor(muted, panel); d.setCursor(104, 13);
-    d.print(fitCurrentFontToWidth(gFilesStatus, 118));
-    drawTinyFooter(panel, muted, "Up/Dn pick Ent open D del R Esc up", 12, 118, 216);
+    drawBigScrollbar(first, count, cyan);
   }
   renderLauncherOverlay(); renderDebugOverlay();
 }

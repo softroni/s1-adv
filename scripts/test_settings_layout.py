@@ -23,8 +23,14 @@ def function(signature):
 
 
 settings = function('void renderSettingsUi()')
-assert 'd.setFont(&fonts::FreeSansBold9pt7b);' in settings and 'fonts::Font0);\n  d.setCursor(placeX' in settings
-assert 'fonts::Font0' not in settings[settings.index('const int first'):], 'rows must stay at the menu size'
+assert 'drawBigRow(row, settingLabel(index), settingValue(index), index == gSelectedSetting, accent);' in settings
+assert 'fonts::Font0' not in settings, 'rows must stay at the menu size'
+
+start = joined.index('constexpr int16_t kBigListY')
+big = joined[start:joined.index('\n', start) + 1] + ''.join(function(signature) for signature in [
+    'int16_t useBigTextFont(', 'int bigListFirstRow(', 'void drawBigHeader(', 'void drawBigRow(', 'void drawBigScrollbar(', 'void drawBigNotice('])
+big = big.replace('const String& right, const String& hint, const String& hint2', 'const String& right = "", const String& hint = "", const String& hint2 = ""')
+big = big.replace('uint16_t labelInk, uint16_t valueInk', 'uint16_t labelInk = TFT_WHITE, uint16_t valueInk = rgb565_local(47, 227, 255)')
 
 code = r'''
 #include <algorithm>
@@ -36,8 +42,9 @@ code = r'''
 #include <vector>
 using std::min;using std::max;
 struct String:std::string{using std::string::string;String(const std::string&s):std::string(s){}explicit String(int n):std::string(std::to_string(n)){}
- String operator+(const char*o)const{return String(std::string(*this)+o);}String operator+(const String&o)const{return String(std::string(*this)+std::string(o));}};
-namespace fonts{const int Font0=0,Font2=2,FreeSansBold9pt7b=9;}
+ String operator+(const char*o)const{return String(std::string(*this)+o);}String operator+(const String&o)const{return String(std::string(*this)+std::string(o));}
+ bool isEmpty()const{return empty();}size_t length()const{return size();}};
+namespace fonts{const int Font0=0,Font2=2,FreeSansBold9pt7b=9,efontCN_12=12;}
 const uint16_t TFT_BLACK=0,TFT_WHITE=0xffff;
 constexpr uint16_t rgb565_local(int r,int g,int b){return ((r&0xf8)<<8)|((g&0xfc)<<3)|(b>>3);}
 template<class T>T clampValue(T x,T lo,T hi){return std::min(hi,std::max(lo,x));}
@@ -48,21 +55,22 @@ uint8_t currentSettingsItemCount(){return gUiMode==UiMode::Settings?kDeviceSetti
 const char* currentSettingsTitle(){return "Device";}
 std::string longest="Rancho Santa Margarita, CA";
 String settingLabel(uint8_t i);
-String settingValue(uint8_t i){return i==kWeatherPlaceSetting?String(longest):String("12h AM/PM");}
+String settingValue(uint8_t i){return gUiMode==UiMode::Settings&&i==kWeatherPlaceSetting?String(longest):String("on");}
+constexpr int kBigVisibleRows=5;
 struct Text{std::string s;int x,y,font;uint16_t color;};struct Fill{int x,y,w,h;uint16_t color;};
 struct Canvas{int x=0,y=0,font=2;uint16_t ink=0;std::vector<Text> printed;std::vector<Fill> fills;
  static void check(int a,int b,int w,int h){assert(a>=0&&b>=0&&a+w<=240&&b+h<=135);}
  void fillScreen(uint16_t){}void setFont(const int*f){font=*f;}void setTextColor(uint16_t c){ink=c;}void setCursor(int a,int b){x=a;y=b;}
- // An upper bound for the bold font: real rows run about 8.5 px per character.
- int textWidth(const std::string&s){return int(s.size())*(font==9?10:font==0?6:8);}
- void print(const std::string&s){check(x,y,textWidth(s),font==9?19:font==0?8:16);printed.push_back({s,x,y,font,ink});x+=textWidth(s);}
+ // A little over the bold font: real rows run about 8.5 px per character.
+ int textWidth(const std::string&s){return int(s.size())*(font==9?9:font==0?6:font==12?6:8);}
+ void print(const std::string&s){if(s.empty())return;check(x,y,textWidth(s),font==9?19:font==0?8:16);printed.push_back({s,x,y,font,ink});x+=textWidth(s);}
  void fillRoundRect(int a,int b,int w,int h,int,uint16_t c){check(a,b,w,h);fills.push_back({a,b,w,h,c});}
  void fillRect(int a,int b,int w,int h,uint16_t c){fillRoundRect(a,b,w,h,0,c);}
  void drawFastHLine(int a,int b,int w,uint16_t){check(a,b,w,1);}
 }gCanvas;
-String fitCurrentFontToWidth(const String&s,int w){return String(s.substr(0,size_t(max(0,w)/10)));}
+String fitCurrentFontToWidth(const String&s,int w){return String(s.substr(0,size_t(max(0,w)/9)));}
 void drawWeatherPlaceEditor(){++editors;}void renderLauncherOverlay(){++overlays;}void renderDebugOverlay(){}
-''' + function('String settingLabel(uint8_t index)') + function('void renderSettingsUi()') + r'''
+''' + big + function('String settingLabel(uint8_t index)') + function('void renderSettingsUi()') + r'''
 void adjustCurrentSetting(int delta){adjusted+=delta;}void toggleCurrentSetting(){++toggles;}
 void loadDeviceSettings(){}void loadFocusSettings(){}void applyDisplayBrightness(){}void applySpeakerVolumeSetting(){}
 void saveDeviceSettings(){}void saveFocusSettings(){}void setStatus(const char*,int){}
@@ -96,6 +104,22 @@ int main(){
    assert(overlays>0);
   }
  }
+ // Any screen's text: a name the bold font can't show switches font rather than vanish.
+ gCanvas=Canvas();drawBigRow(0,String("\xD0\x9C\xD1\x83\xD0\xB7\xD1\x8B\xD0\xBA\xD0\xB0"),String(""),false,1);assert(gCanvas.printed[0].font==12);
+ gCanvas=Canvas();drawBigRow(0,String("Salem"),String(""),false,1);assert(gCanvas.printed[0].font==9&&gCanvas.font==2);
+ // A selected row's text is black on its bar, whatever colour it asked for.
+ gCanvas=Canvas();drawBigRow(1,String("Label"),String("Value"),true,0xF800,0x07E0,0x001F);
+ assert(gCanvas.printed[0].color==TFT_BLACK&&gCanvas.printed[1].color==TFT_BLACK&&gCanvas.fills[0].y==46);
+ // Long words can't run off the row or into each other, with the label kept readable.
+ gCanvas=Canvas();drawBigRow(0,String("A very long file name that keeps going on and on.wav"),String("1234567890123456k"),false,1);
+ {const Text&l=gCanvas.printed[0],&v=gCanvas.printed[1];assert(l.x+int(l.s.size())*9<v.x&&v.x+int(v.s.size())*9<=229&&l.s.size()>=11);}
+ // Short lists have no bar, and the header fits however long its hints are.
+ gCanvas=Canvas();drawBigScrollbar(0,5,1);assert(gCanvas.fills.empty());
+ gCanvas=Canvas();drawBigHeader(String("Internet Radio"),1,String("12:45"),String(std::string(80,'x')),String(std::string(80,'y')));
+ // A notice sits on the bottom row, in view, and leaves the default font set.
+ gCanvas=Canvas();drawBigNotice(String(std::string(90,'z')),1);assert(gCanvas.fills[0].y==112&&gCanvas.font==2);
+ // A short list's window starts at the top.
+ assert(bigListFirstRow(3,4)==0&&bigListFirstRow(0,20)==0&&bigListFirstRow(19,20)==15&&bigListFirstRow(10,20)==8);
  // The box for typing a city only appears while typing.
  gUiMode=UiMode::Settings;gSelectedSetting=0;editors=0;renderSettingsUi();assert(editors==0);
  gPlaceEditing=true;renderSettingsUi();assert(editors==1);gPlaceEditing=false;

@@ -124,6 +124,8 @@ void renderLauncherOverlay() {
 
   static_assert(sizeof(launcher_icons::kGroups) / sizeof(launcher_icons::kGroups[0]) == kLauncherGroupCount,
                 "launcher_icons::kGroups needs one icon per group");
+  static_assert(launcher_shortcuts::kGroupLetterCount == kLauncherGroupCount,
+                "launcher_shortcuts::kGroupLetters needs one letter per group");
   constexpr int16_t kScreenW = 240;
   constexpr int16_t kTabH = 21;
   constexpr int16_t kListY = 24;
@@ -150,6 +152,13 @@ void renderLauncherOverlay() {
       d.setTextColor(black);
       d.setCursor(tabX + 21, 3);
       d.print(group.title);
+      // The letter that jumps here, underlined the way a menu shows its shortcut.
+      const int mark = launcher_shortcuts::letterPosition(group.title, i);
+      if (mark >= 0) {
+        const String title(group.title);
+        const int16_t start = d.textWidth(title.substring(0, mark));
+        d.drawFastHLine(tabX + 21 + start, 18, d.textWidth(title.substring(0, mark + 1)) - start - 1, black);
+      }
       tabX += selectedTabW;
     } else {
       d.drawBitmap(tabX + (otherTabW - iconSize) / 2, 2, icon, iconSize, iconSize, kLauncherGroups[i].accent);

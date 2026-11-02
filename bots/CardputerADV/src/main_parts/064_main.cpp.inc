@@ -343,27 +343,21 @@ void scanNesGames() {
 
 void renderNesMenu() {
   auto& d=gCanvas;
-  const uint16_t bg=rgb565_local(3,8,14),accent=rgb565_local(47,227,255),muted=rgb565_local(145,163,181);
-  d.fillScreen(bg);d.setFont(&fonts::Font2);d.setTextSize(1);
-  d.setTextColor(accent,bg);d.setCursor(10,5);d.print("NES GAMES");
-  d.setFont(&fonts::Font0);d.setTextColor(muted,bg);d.setCursor(184,11);d.printf("%u on SD",static_cast<unsigned>(gNesGames.size()));
-  d.drawFastHLine(8,26,224,rgb565_local(21,51,65));
+  const uint16_t accent=rgb565_local(47,227,255),amber=rgb565_local(255,194,91),white=TFT_WHITE;
+  const int count=static_cast<int>(gNesGames.size());
+  d.setTextSize(1);
+  drawBigHeader("NES Games",accent,count?String(gNesSelection+1)+"/"+String(count):String(""),
+                gNesWide?"F classic 4:3":"F fill screen");
   if (gNesGames.empty()) {
-    d.setCursor(12,44);d.print("No ROM files on the SD card.");
-    d.setCursor(12,61);d.print("Copy your .nes files to SD:/nes");
+    d.setTextColor(white);
+    d.setCursor(8,44);d.print("No ROM files on the SD card.");
+    d.setCursor(8,64);d.print("Copy your .nes files to SD:/nes");
   }
-  const int first=max<int>(0,gNesSelection-3);
-  for(int row=0;row<5 && first+row<static_cast<int>(gNesGames.size());++row) {
-    int index=first+row,y=32+row*15;
-    uint16_t panel=index==gNesSelection?rgb565_local(15,47,59):bg;
-    d.fillRoundRect(8,y,224,14,3,panel);
-    d.setTextColor(index==gNesSelection?TFT_WHITE:muted,panel);d.setCursor(13,y+3);
-    d.print(fitCurrentFontToWidth(gNesGames[index].title,210));
-  }
-  d.setCursor(8,111);
-  if(!gNesMessage.isEmpty()){d.setTextColor(rgb565_local(255,194,91),bg);d.print(fitCurrentFontToWidth(gNesMessage,224));}
-  else {d.setTextColor(muted,bg);d.print(gNesWide?"F: fill screen (switch to 4:3)":"F: classic 4:3 (switch to fill)");}
-  d.setTextColor(muted,bg);d.setCursor(8,127);d.print("W/S choose  Enter play  Esc back");
+  const int first=bigListFirstRow(gNesSelection,count);
+  for(int row=0;row<kBigVisibleRows && first+row<count;++row)
+    drawBigRow(row,gNesGames[first+row].title,"",first+row==gNesSelection,accent);
+  drawBigScrollbar(first,count,accent);
+  if(!gNesMessage.isEmpty())drawBigNotice(gNesMessage,amber);
 }
 
 bool readNesRom(void* context,size_t offset,uint8_t* destination,size_t length) {

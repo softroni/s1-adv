@@ -45,6 +45,7 @@ struct String : std::string {
   using std::string::string;
   String(const std::string& s) : std::string(s) {}
   explicit String(int i) : std::string(std::to_string(i)) {}
+  String substring(size_t a, size_t b) const { return String(substr(a, b - a)); }
   String operator+(const String& o) const { return String(std::string(*this) + std::string(o)); }
 };
 String operator+(const char* a, const String& b) { return String(std::string(a) + std::string(b)); }
@@ -71,7 +72,8 @@ struct Canvas {
   void fillScreen(uint16_t) { cleared = true; }
   void fillRoundRect(int x, int y, int w, int h, int, uint16_t c) { inScreen(x, y, w, h); fills.push_back({x, y, w, h, c}); }
   void fillRect(int x, int y, int w, int h, uint16_t c) { fillRoundRect(x, y, w, h, 0, c); }
-  void drawFastHLine(int x, int y, int w, uint16_t) { inScreen(x, y, w, 1); }
+  int underlines = 0;
+  void drawFastHLine(int x, int y, int w, uint16_t) { inScreen(x, y, w, 1); ++underlines; }
   void drawBitmap(int x, int y, const uint8_t* b, int w, int h, uint16_t c) {
     assert(b && w == 16 && h == 16); inScreen(x, y, w, h); bitmaps.push_back({b, x, y, c});
   }
@@ -176,10 +178,28 @@ int main() {
     accents.insert(((group.accent >> 8) & 0xE0) | ((group.accent >> 6) & 0x1C) | ((group.accent >> 3) & 0x03));
   assert(accents.size() == kLauncherGroupCount);
 
-  for (char k : {';', 'w', 'W', 'k'}) press(k, 0, -1);
-  for (char k : {'.', 's', 'S', 'j'}) press(k, 0, 1);
-  for (char k : {',', 'a', 'A', 'h'}) press(k, -1, 0);
-  for (char k : {'/', 'd', 'D', 'l'}) press(k, 1, 0);
+  press(';', 0, -1); press('.', 0, 1); press(',', -1, 0); press('/', 1, 0);
+  // Letters jump to their group in either case, and the old movement letters do nothing.
+  using launcher_shortcuts::kGroupLetters;
+  for (int group = 0; group < kLauncherGroupCount; ++group) {
+    const char letter = kGroupLetters[group];
+    for (char key : {letter, char(letter - 'a' + 'A')}) {
+      gLauncherSelection = (group + 1) % kLauncherGroupCount;
+      press(key, 0, 0);
+      assert(gLauncherSelection == group);
+    }
+    // Each letter is in the name, so the tab can underline it.
+    assert(launcher_shortcuts::letterPosition(kLauncherGroups[group].title, group) >= 0);
+    gLauncherSelection = group; gLauncherSubSelection = 0; gCanvas.reset(); renderLauncherOverlay();
+    assert(gCanvas.underlines == 2);  // The rule under the tabs, and the letter.
+  }
+  std::set<char> letters(kGroupLetters, kGroupLetters + kLauncherGroupCount);
+  assert(letters.size() == kLauncherGroupCount);
+  gLauncherSelection = 2;
+  for (char key : {'w', 'd', 'h', 'j', 'k', 'x', 'z'}) { press(key, 0, 0); assert(gLauncherSelection == 2); }
+  // Ctrl+letter belongs to the rest of the device.
+  groupMove = rowMove = 0;
+  { Keyboard_Class::KeysState chord; chord.ctrl = true; handleLauncherKey('a', chord); assert(gLauncherSelection == 2); }
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-launcher-') as d:
@@ -188,4 +208,4 @@ with tempfile.TemporaryDirectory(prefix='s1-launcher-') as d:
     subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++17', '-Wall', '-Wextra', '-Werror',
                     '-I', str(root / 'bots/CardputerADV/src'), str(p / 'test.cpp'), '-o', str(p / 'test')], check=True)
     subprocess.run([str(p / 'test')], check=True)
-print('PASS actual launcher: every selection shows tabs, five rows and a selected bar on screen, each app has its own icon, and arrows, WASD and HJKL follow the layout')
+print('PASS actual launcher: every selection shows tabs, five rows and a selected bar on screen, each app has its own icon, arrows move, and each group has its letter')

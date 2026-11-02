@@ -616,6 +616,13 @@ bool homeFirmwareUpdateAvailable();
 bool handleHomeUpdateKey(char key, const Keyboard_Class::KeysState& keys);
 bool syncAssetsFromManifest(bool pomodoroOnly = false);
 String fitCurrentFontToWidth(String text, int32_t pixelLimit);
+constexpr int kBigVisibleRows = 5;
+int bigListFirstRow(int selected, int count);
+void drawBigHeader(const String& title, uint16_t accent, const String& right = "", const String& hint = "", const String& hint2 = "");
+void drawBigRow(int row, const String& label, const String& value, bool selected, uint16_t accent,
+                uint16_t labelInk = TFT_WHITE, uint16_t valueInk = rgb565_local(47, 227, 255));
+void drawBigScrollbar(int first, int count, uint16_t accent);
+void drawBigNotice(const String& text, uint16_t color);
 float chatTextScale();
 int chatWrapWidth(bool showFace);
 void drawTinyFooter(uint16_t bg, uint16_t fg, const String& text, int16_t x = 12, int16_t y = 124,

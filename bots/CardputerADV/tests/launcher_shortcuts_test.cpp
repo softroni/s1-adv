@@ -37,5 +37,20 @@ int main() {
   assert(launcher_shortcuts::resolve('7', true, 7, 7).index == 6);
   checks += 2;
 
+  // Letters jump to groups in menu order, in either case, and only for groups that exist.
+  const char letters[] = "amftgrsyl";
+  for (int group = 0; group < 9; ++group) {
+    assert(launcher_shortcuts::resolve(letters[group], false, 9, 6).kind == Kind::Group);
+    assert(launcher_shortcuts::resolve(letters[group], false, 9, 6).index == group);
+    assert(launcher_shortcuts::resolve(static_cast<char>(letters[group] - 'a' + 'A'), false, 9, 6).index == group);
+    assert(launcher_shortcuts::resolve(letters[group], true, 9, 6).kind == Kind::None);
+    checks += 4;
+  }
+  assert(launcher_shortcuts::resolve('l', false, 8, 6).kind == Kind::None);
+  assert(launcher_shortcuts::resolve('w', false, 9, 6).kind == Kind::None);
+  assert(launcher_shortcuts::letterPosition("Arcade", 5) == 1 && launcher_shortcuts::letterPosition("System", 7) == 1);
+  assert(launcher_shortcuts::letterPosition("AI Agent", 0) == 0 && launcher_shortcuts::letterPosition("Nope", 99) == -1);
+  checks += 4;
+
   std::cout << "launcher_shortcut_checks=" << checks << '\n';
 }

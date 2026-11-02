@@ -125,59 +125,38 @@ void renderNotesUi() {
   }
 
   if (gNotesMode == NotesMode::List) {
-    drawNotesHeader("Notes", accent, bg, panel);
-    d.setFont(&fonts::Font0);
-    d.setTextColor(muted, panel);
-    d.setCursor(16, 31);
-    d.print(fitCurrentFontToWidth(gNotesStatus, 208));
-
+    const int count = static_cast<int>(gNotes.size());
     if (gNotes.empty()) {
-      d.fillRoundRect(20, 48, 200, 42, 9, rowBg);
-      d.drawRoundRect(20, 48, 200, 42, 9, accent);
-      d.setFont(&fonts::Font2);
-      d.setTextColor(accent, rowBg);
-      d.setCursor(54, 61);
+      drawBigHeader("Notes", accent, "", gNotesStatus);
+      d.setFont(&fonts::FreeSansBold9pt7b);
+      d.setTextColor(accent);
+      d.setCursor(8, 44);
       d.print("No notes yet");
-      d.setFont(&fonts::Font0);
-      d.setTextColor(muted, rowBg);
-      d.setCursor(44, 77);
-      d.print("Press N to create first note");
-      drawTinyFooter(panel, muted, "N new  R rescan  Tab menu", 16, 118, 208);
+      d.setFont(&fonts::Font2);
+      d.setTextColor(muted);
+      d.setCursor(8, 68);
+      d.print("Press N to create your first");
       renderLauncherOverlay();
       renderDebugOverlay();
       return;
     }
 
     clampNoteSelection();
-    constexpr int visible = 6;
-    int maxStart = max<int>(0, static_cast<int>(gNotes.size()) - visible);
+    drawBigHeader("Notes", accent, String(gSelectedNote + 1) + "/" + String(count), gNotesStatus, "N new  E edit");
+    int maxStart = max<int>(0, count - kBigVisibleRows);
     int start = clampValue<int>(min<int>(gNoteListScrollOffset, gSelectedNote), 0, maxStart);
     if (gSelectedNote < start) {
       start = gSelectedNote;
-    } else if (gSelectedNote >= start + visible) {
-      start = gSelectedNote - visible + 1;
+    } else if (gSelectedNote >= start + kBigVisibleRows) {
+      start = gSelectedNote - kBigVisibleRows + 1;
     }
     gNoteListScrollOffset = start;
-    for (int i = 0; i < visible; ++i) {
-      int idx = start + i;
-      if (idx >= static_cast<int>(gNotes.size())) {
-        break;
-      }
-      const NoteFile& note = gNotes[idx];
-      bool isSelected = idx == gSelectedNote;
-      int y = 43 + i * 12;
-      uint16_t fill = isSelected ? selected : rowBg;
-      d.fillRoundRect(14, y, 212, 10, 4, fill);
-      d.drawRoundRect(14, y, 212, 10, 4, isSelected ? accent : line);
-      d.setTextColor(isSelected ? TFT_WHITE : TFT_LIGHTGREY, fill);
-      d.setCursor(20, y + 2);
-      d.print(fitCurrentFontToWidth(note.name, 145));
-      String meta = String(note.lineCount) + "l " + compactBytes(note.size);
-      d.setTextColor(isSelected ? accent : muted, fill);
-      d.setCursor(222 - d.textWidth(meta), y + 2);
-      d.print(meta);
+    for (int row = 0; row < kBigVisibleRows && start + row < count; ++row) {
+      const NoteFile& note = gNotes[start + row];
+      drawBigRow(row, note.name, String(note.lineCount) + "l " + compactBytes(note.size), start + row == gSelectedNote,
+                 accent, TFT_WHITE, muted);
     }
-    drawTinyFooter(panel, muted, "< > pick  Ent open  N new  E edit", 13, 118, 214);
+    drawBigScrollbar(start, count, accent);
     renderLauncherOverlay();
     renderDebugOverlay();
     return;
