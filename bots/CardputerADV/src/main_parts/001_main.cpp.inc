@@ -66,6 +66,8 @@
 #include "balloon.h"
 #include "balloon_audio.h"
 #include "ball_catch.h"
+#include "lab.h"
+#include "lab_gps.h"
 #include "activity_cue.h"
 #include "assistant_activity.h"
 #include "weather_view.h"
@@ -106,7 +108,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.231-dev"
+#define APP_VERSION "0.2.232-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"
@@ -225,7 +227,7 @@ constexpr size_t kHttpStageChunkBytes = 4 * 1024;
 constexpr uint32_t kVoiceSocketSettleMs = 300;
 constexpr uint32_t kCtrlDoubleTapWindowMs = 420;
 constexpr uint32_t kLauncherToggleDebounceMs = 140;
-constexpr uint8_t kLauncherGroupCount = 8;
+constexpr uint8_t kLauncherGroupCount = 9;
 constexpr uint8_t kLauncherMaxSubItems = 8;
 constexpr uint32_t kKeyRushDurationMs = 30000;
 constexpr const char* kKeyRushPrefsNs = "keyrush";

@@ -2,13 +2,13 @@
 .env
 .env.*
 !.env.example
-.venv/
+.venv
 __pycache__/
 *.pyc
 
 # PlatformIO and build artifacts
 .pio/
-.platformio/
+.platformio
 *.bin
 *.elf
 *.map

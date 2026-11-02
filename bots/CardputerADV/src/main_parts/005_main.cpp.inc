@@ -539,6 +539,13 @@ void stopBallCatch();
 void serviceBallCatch();
 bool handleBallCatchKey(char key, const Keyboard_Class::KeysState& keys);
 void renderBallCatchUi();
+bool labMode(UiMode mode) { return mode == UiMode::LabDevices || mode == UiMode::LabRules; }
+void beginLab();
+void stopLab();
+void serviceLab();
+bool handleLabKey(char key, const Keyboard_Class::KeysState& keys);
+void renderLabUi();
+bool routeLabEscape();
 void beginNfcNotes();
 void serviceNfcNotes();
 bool cancelNfcNotes();

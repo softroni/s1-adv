@@ -48,7 +48,7 @@ code = r'''
 #include <string>
 using std::min;using std::max;
 constexpr uint16_t rgb565_local(int,int,int){return 0;}
-constexpr uint8_t kLauncherGroupCount=8,kLauncherMaxSubItems=8;
+constexpr uint8_t kLauncherGroupCount=9,kLauncherMaxSubItems=8;
 ''' + block((parts / '002_main.cpp.inc').read_text(), 'enum class UiMode : uint8_t') + \
     block(table, 'struct LauncherSubItem {') + block(table, 'struct LauncherGroup {') + block(table, 'constexpr LauncherGroup kLauncherGroups') + r'''
 template<class T>T clampValue(T x,T lo,T hi){return std::max(lo,std::min(x,hi));}

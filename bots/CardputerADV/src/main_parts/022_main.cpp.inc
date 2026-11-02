@@ -251,6 +251,10 @@ bool mapActionUiMode(String mode, UiMode& out) {
     out = UiMode::Balloon;
   } else if (mode == "ball_catch" || mode == "catch") {
     out = UiMode::BallCatch;
+  } else if (mode == "lab" || mode == "devices") {
+    out = UiMode::LabDevices;
+  } else if (mode == "rules") {
+    out = UiMode::LabRules;
   } else if (mode == "folders") {
     out = UiMode::AudioFolders;
   } else if (mode == "notes" || mode == "note" || mode == "notepad") {

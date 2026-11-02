@@ -79,3 +79,5 @@
 #include "main_parts/078_main.cpp.inc"
 #include "main_parts/079_main.cpp.inc"
 #include "main_parts/080_main.cpp.inc"
+#include "main_parts/081_main.cpp.inc"
+#include "main_parts/082_main.cpp.inc"

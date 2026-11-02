@@ -1400,6 +1400,14 @@ bool handleLocalCommand(const String& input) {
     setUiMode(UiMode::Balloon);
     return true;
   }
+  if (cmd == "/lab") {
+    setUiMode(UiMode::LabDevices);
+    return true;
+  }
+  if (cmd == "/rules") {
+    setUiMode(UiMode::LabRules);
+    return true;
+  }
   if (cmd == "/catch") {
     setUiMode(UiMode::BallCatch);
     return true;

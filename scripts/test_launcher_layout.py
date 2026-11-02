@@ -52,11 +52,11 @@ namespace fonts { const int Font2 = 2, FreeSansBold9pt7b = 9; }
 const uint16_t TFT_BLACK = 0, TFT_WHITE = 0xffff;
 constexpr uint16_t rgb565_local(int r, int g, int b) { return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3); }
 template <class T> T clampValue(T x, T lo, T hi) { return std::min(hi, std::max(lo, x)); }
-constexpr uint8_t kLauncherGroupCount = 8, kLauncherMaxSubItems = 8;
+constexpr uint8_t kLauncherGroupCount = 9, kLauncherMaxSubItems = 8;
 ''' + block((parts / '002_main.cpp.inc').read_text(), 'enum class UiMode : uint8_t') + \
     block(table, 'struct LauncherSubItem {') + block(table, 'struct LauncherGroup {') + \
     block(table, 'constexpr LauncherGroup kLauncherGroups') + r'''
-int gLauncherSelection = 0, gLauncherSubSelection = 0, gLauncherLastSub[8] = {};
+int gLauncherSelection = 0, gLauncherSubSelection = 0, gLauncherLastSub[9] = {};
 bool gLauncherVisible = true;
 struct Text { std::string value; int x, y, font; uint16_t color; };
 struct Bitmap { const uint8_t* data; int x, y; uint16_t color; };
@@ -168,7 +168,7 @@ int main() {
     const bool first = seen.insert(icon).second;
     assert(first || std::strcmp(group.items[i].label, "Pomodoro") == 0);
   }
-  assert(items == 46 && seen.size() == 45);
+  assert(items == 48 && seen.size() == 47);
 
   // Accents must stay apart once the canvas reduces them to 8 bits.
   std::set<int> accents;

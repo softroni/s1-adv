@@ -67,6 +67,25 @@ Open it from Arcade, or type `/balloon`.
 **Ball Catch** uses a Joystick 2 on the Grove port: its button drops the ball and the stick
 moves the basket. The keyboard also plays it. Open it from Arcade, or type `/catch`.
 
+## Lab
+
+**The Lab** is a tab in the launcher, and `/lab` or `/rules` opens it. Devices tests every sensor
+and output, and Rules saves "if this, then that" rules and plays them with live status. It uses:
+
+| Connection | Parts |
+| --- | --- |
+| Grove port, directly or through a passive hub | Ultrasonic (RCWL-9620, 0x57), ENV III (SHT30, 0x44), Joystick 2 (0x63), NFC (0x50), DLight (BH1750, 0x23) |
+| I/O Hub (Unit PbHub, 0x61) on the Grove port | Mini Angle, Light, PIR, 2-channel relay, SG90 servo, 30-LED SK6812 strip |
+| Cap LoRa-1262 | GPS on G15 (receive) and G13 (transmit), 115200 baud, NMEA |
+| Built in | BMI270 tilt, RGB LED, speaker |
+
+A servo or single-wire strip needs a signal line of its own, and on a passive hub the only two
+lines are the I2C ones, so those parts go on the I/O hub. See
+[Lab in the controls guide](../../docs/CONTROLS.md#lab) for the wiring and every key.
+
+The ENV III's pressure sensor isn't read. The M5StickS3 and M5StickC Plus2 are separate computers
+with no sensor mode, so they would need firmware of their own.
+
 ## NFC Notes
 
 **NFC Notes** works with the M5Stack NFC unit (ST25R3916), plugged into the Grove port.

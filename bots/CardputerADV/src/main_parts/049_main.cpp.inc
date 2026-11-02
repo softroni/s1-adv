@@ -1,5 +1,5 @@
   if (escDown) {
-    if (!routeBrainFlowEscape()) {
+    if (!routeBrainFlowEscape() && !routeLabEscape()) {
       handleGlobalEscape();
     }
   } else if (gChatCommandsVisible) {
@@ -33,6 +33,8 @@
     moveLauncherSelection(1);
   } else if ((gUiMode == UiMode::Mesh || gUiMode == UiMode::NfcNotes || gUiMode == UiMode::WifiSettings) && (upDown || downDown)) {
     handleTypingKey(upDown ? char(1) : char(2),keys);
+  } else if (labMode(gUiMode) && (upDown || downDown || leftDown || rightDown)) {
+    handleTypingKey(upDown ? ';' : downDown ? '.' : leftDown ? ',' : '/', keys);
   } else if (gUiMode == UiMode::Files && (upDown || downDown || leftDown || rightDown)) {
     handleTypingKey((upDown || leftDown) ? ',' : '.', keys);
   } else if ((gUiMode == UiMode::Minesweeper || gUiMode == UiMode::Snake || gUiMode == UiMode::Balloon || gUiMode == UiMode::BallCatch || gUiMode == UiMode::Radio || gUiMode == UiMode::VlcRemote) && (upDown || downDown || leftDown || rightDown)) {

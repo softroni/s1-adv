@@ -38,6 +38,9 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
     if (routeBrainFlowEscape()) {
       return;
     }
+    if (routeLabEscape()) {
+      return;
+    }
     handleGlobalEscape();
     return;
   }
@@ -164,6 +167,7 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
   if (gUiMode == UiMode::Flappy && handleFlappyKey(key, keys)) return;
   if (gUiMode == UiMode::Balloon && handleBalloonKey(key, keys)) return;
   if (gUiMode == UiMode::BallCatch && handleBallCatchKey(key, keys)) return;
+  if (labMode(gUiMode) && handleLabKey(key, keys)) return;
   if (gUiMode == UiMode::NfcNotes && handleNfcNotesKey(key, keys)) return;
   if (gUiMode == UiMode::WifiSettings && handleWifiSettingsKey(key, keys)) return;
   if (gUiMode == UiMode::Radio && handleInternetRadioKey(key, keys)) return;

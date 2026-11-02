@@ -78,6 +78,10 @@ const char* uiModeName(UiMode mode) {
       return "Ball Catch";
     case UiMode::NfcNotes:
       return "NFC Notes";
+    case UiMode::LabDevices:
+      return "Lab Devices";
+    case UiMode::LabRules:
+      return "Lab Rules";
     case UiMode::CMatrix:
       return "C-Matrix";
     case UiMode::Logs:

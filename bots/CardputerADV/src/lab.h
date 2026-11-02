@@ -1,0 +1,488 @@
+#pragma once
+// The Lab: every sensor and output the Cardputer can reach, and saved rules that join them. Rules
+// read a value for each sensor and say what each output should be, so all of it runs on the host.
+// No heap, storage or network, and nothing here touches hardware.
+#include <stdint.h>
+#include <string.h>
+#include "pbhub.h"
+
+namespace lab {
+// --- What can be read -----------------------------------------------------------------------
+enum class Sig : uint8_t { Distance, Temperature, Humidity, Knob, Light, Motion, StickX, StickY, StickPress, Tilt,
+                           Satellites, Count };
+constexpr uint8_t kSigCount = static_cast<uint8_t>(Sig::Count);
+
+// lo to hi is what a follow spreads across its output. A reading can go past it. `step` is how
+// far a value must move to count as changed, so a noisy sensor doesn't look busy.
+struct SigInfo { const char* name; const char* unit; int16_t lo, hi, step; bool onOff; };
+constexpr SigInfo kSigs[kSigCount] = {
+    {"Distance", "cm", 2, 100, 3, false},
+    {"Temperature", "C", -10, 50, 1, false},
+    {"Humidity", "%", 0, 100, 2, false},
+    {"Knob", "%", 0, 100, 2, false},
+    {"Light", "%", 0, 100, 3, false},
+    {"Motion", "", 0, 1, 1, true},
+    {"Stick X", "", -100, 100, 8, false},
+    {"Stick Y", "", -100, 100, 8, false},
+    {"Stick button", "", 0, 1, 1, true},
+    {"Tilt", "deg", -90, 90, 5, false},
+    {"Satellites", "", 0, 32, 1, false},
+};
+constexpr const SigInfo& info(Sig sig) { return kSigs[static_cast<uint8_t>(sig)]; }
+
+// --- What can be driven ---------------------------------------------------------------------
+enum class Out : uint8_t { Servo, StripColor, StripBright, StripLength, Relay1, Relay2, Led, Tone, Count };
+constexpr uint8_t kOutCount = static_cast<uint8_t>(Out::Count);
+
+constexpr int kStripLeds = 30;
+struct OutInfo { const char* name; const char* unit; int16_t lo, hi, step; bool onOff; };
+constexpr OutInfo kOuts[kOutCount] = {
+    {"Servo", "deg", 0, 180, 5, false},
+    {"Strip color", "", 0, 359, 15, false},
+    {"Strip bright", "%", 0, 100, 5, false},
+    {"Strip length", "LEDs", 0, kStripLeds, 1, false},
+    {"Relay 1", "", 0, 1, 1, true},
+    {"Relay 2", "", 0, 1, 1, true},
+    {"Built-in LED", "", 0, 359, 15, false},
+    {"Speaker", "Hz", 200, 2000, 50, false},
+};
+constexpr const OutInfo& info(Out out) { return kOuts[static_cast<uint8_t>(out)]; }
+
+// What an output should be right now. Off means nothing is asking, so it goes back to rest.
+struct Drive {
+  bool on = false;
+  int16_t value = 0;
+};
+
+template <class T>
+constexpr T clampTo(T value, T lo, T hi) { return value < lo ? lo : value > hi ? hi : value; }
+
+// Maps across two ranges, rounded, and either one can run backwards.
+inline int16_t mapRange(int32_t value, int32_t fromLo, int32_t fromHi, int32_t toLo, int32_t toHi) {
+  if (fromHi == fromLo) return static_cast<int16_t>(toLo);
+  if (fromHi < fromLo) return mapRange(value, fromHi, fromLo, toHi, toLo);
+  value = clampTo(value, fromLo, fromHi);
+  const int32_t span = fromHi - fromLo;
+  const int32_t scaled = (value - fromLo) * (toHi - toLo);
+  const int32_t rounded = (scaled >= 0 ? scaled + span / 2 : scaled - span / 2) / span;
+  return static_cast<int16_t>(toLo + rounded);
+}
+
+// --- Readings -------------------------------------------------------------------------------
+constexpr uint32_t kChangedMs = 400;  // How long "it just changed" stays true.
+
+struct Reading {
+  int16_t value = 0, anchor = 0;
+  bool live = false, moved = false;
+  uint32_t changedMs = 0;
+};
+
+class Inputs {
+ public:
+  void set(Sig sig, int16_t value, uint32_t now) {
+    Reading& r = mReadings[static_cast<uint8_t>(sig)];
+    if (!r.live) {
+      // A sensor coming back isn't a change, or plugging one in would fire its rules.
+      r.live = true;
+      r.value = r.anchor = value;
+      return;
+    }
+    r.value = value;
+    const int32_t gap = static_cast<int32_t>(value) - r.anchor;
+    if (gap >= info(sig).step || -gap >= info(sig).step) {
+      r.anchor = value;
+      r.moved = true;
+      r.changedMs = now;
+    }
+  }
+  void lose(Sig sig) {
+    Reading& r = mReadings[static_cast<uint8_t>(sig)];
+    r.live = false;
+    r.moved = false;
+  }
+  const Reading& get(Sig sig) const { return mReadings[static_cast<uint8_t>(sig)]; }
+
+ private:
+  Reading mReadings[kSigCount];
+};
+
+// --- Rules ----------------------------------------------------------------------------------
+constexpr uint8_t kMaxRules = 8, kMaxConds = 3, kMaxActions = 3, kNameChars = 15;
+constexpr uint16_t kMaxHoldMs = 30000, kHoldStepMs = 500;
+
+enum class Op : uint8_t { Below, Above, Changes };
+struct Cond {
+  Sig sig = Sig::Distance;
+  Op op = Op::Below;
+  int16_t value = 30;
+};
+
+enum class How : uint8_t { Set, Follow, FollowBack };
+struct Action {
+  Out out = Out::Servo;
+  How how = How::Set;
+  int16_t value = 90;
+  Sig source = Sig::Knob;
+};
+
+struct Rule {
+  char name[kNameChars + 1] = "";
+  bool on = true, any = true;
+  uint8_t conds = 0, actions = 0;
+  uint16_t holdMs = 2000;
+  Cond cond[kMaxConds];
+  Action action[kMaxActions];
+};
+
+// An on or off signal is "above 0" for on and "below 1" for off.
+inline void setOnOff(Cond& cond, bool on) {
+  cond.op = on ? Op::Above : Op::Below;
+  cond.value = on ? 0 : 1;
+}
+
+inline bool condHolds(const Cond& cond, const Inputs& inputs, uint32_t now) {
+  const Reading& r = inputs.get(cond.sig);
+  if (!r.live) return false;
+  switch (cond.op) {
+    case Op::Below: return r.value < cond.value;
+    case Op::Above: return r.value > cond.value;
+    case Op::Changes: return r.moved && now - r.changedMs < kChangedMs;
+  }
+  return false;
+}
+
+inline bool ruleHolds(const Rule& rule, const Inputs& inputs, uint32_t now) {
+  if (!rule.conds) return false;
+  for (uint8_t i = 0; i < rule.conds; ++i) {
+    const bool holds = condHolds(rule.cond[i], inputs, now);
+    if (holds == rule.any) return holds;
+  }
+  return !rule.any;
+}
+
+inline bool actionValue(const Action& action, const Inputs& inputs, int16_t& value) {
+  if (action.how == How::Set) {
+    value = action.value;
+    return true;
+  }
+  const Reading& r = inputs.get(action.source);
+  if (!r.live) return false;
+  const SigInfo& from = info(action.source);
+  const OutInfo& to = info(action.out);
+  value = action.how == How::Follow ? mapRange(r.value, from.lo, from.hi, to.lo, to.hi)
+                                    : mapRange(r.value, from.lo, from.hi, to.hi, to.lo);
+  return true;
+}
+
+// How close a waiting condition is to coming true, from 0 to 100, for the bar on the board.
+inline int closeness(const Cond& cond, int16_t value) {
+  const SigInfo& sig = info(cond.sig);
+  if (cond.op == Op::Above) return mapRange(value, sig.lo, cond.value, 0, 100);
+  if (cond.op == Op::Below) return mapRange(value, sig.hi, cond.value, 0, 100);
+  return 0;
+}
+
+struct RuleState {
+  bool active = false;
+  uint16_t fires = 0;
+  uint32_t heldMs = 0, firedMs = 0;
+};
+
+// One pass over the rules in order, so when two want the same output the later one wins.
+inline void step(const Rule* rules, uint8_t count, RuleState* states, const Inputs& inputs, uint32_t now,
+                 Drive* drive) {
+  for (uint8_t i = 0; i < kOutCount; ++i) drive[i] = Drive{};
+  for (uint8_t i = 0; i < count; ++i) {
+    const Rule& rule = rules[i];
+    RuleState& state = states[i];
+    if (!rule.on) {
+      state.active = false;
+      continue;
+    }
+    if (ruleHolds(rule, inputs, now)) {
+      if (!state.active) {
+        state.active = true;
+        state.firedMs = now;
+        if (state.fires < 0xFFFF) ++state.fires;
+      }
+      state.heldMs = now;
+    } else if (state.active && now - state.heldMs >= rule.holdMs) {
+      state.active = false;
+    }
+    if (!state.active) continue;
+    for (uint8_t a = 0; a < rule.actions; ++a) {
+      int16_t value = 0;
+      if (!actionValue(rule.action[a], inputs, value)) continue;
+      Drive& out = drive[static_cast<uint8_t>(rule.action[a].out)];
+      out.on = true;
+      out.value = value;
+    }
+  }
+}
+
+// The first thing to try with the Lab: the rule that started it, ready on a new device.
+inline Rule starterRule() {
+  Rule rule;
+  strcpy(rule.name, "Wave lights");
+  rule.conds = 2;
+  rule.cond[0].sig = Sig::Knob;
+  rule.cond[0].op = Op::Changes;
+  rule.cond[1].sig = Sig::Distance;
+  rule.cond[1].op = Op::Below;
+  rule.cond[1].value = 30;
+  rule.actions = 2;
+  rule.action[0].out = Out::StripColor;
+  rule.action[0].how = How::Follow;
+  rule.action[0].source = Sig::Distance;
+  rule.action[1].out = Out::Servo;
+  rule.action[1].how = How::Follow;
+  rule.action[1].source = Sig::Knob;
+  return rule;
+}
+
+// --- The I/O hub's six ports ------------------------------------------------------------------
+// Nothing on a hub port can say what it is, so the owner says, and the Lab remembers.
+enum class Part : uint8_t { None, Knob, Light, Motion, Relay, Servo, Strip, Count };
+constexpr uint8_t kPartCount = static_cast<uint8_t>(Part::Count);
+constexpr const char* kPartNames[kPartCount] = {"Nothing", "Mini Angle", "Light", "PIR motion", "2 relays", "Servo",
+                                                "LED strip"};
+
+struct Wiring {
+  Part port[pbhub::kPorts] = {Part::Knob, Part::Light, Part::Motion, Part::Relay, Part::Servo, Part::Strip};
+
+  int8_t portOf(Part part) const {
+    for (uint8_t i = 0; i < pbhub::kPorts; ++i) if (port[i] == part) return static_cast<int8_t>(i);
+    return -1;
+  }
+  // Steps one port to the next part that isn't on another port, so a change never touches any
+  // row but its own. To swap two parts, set one to Nothing first.
+  void cycle(uint8_t target, int delta) {
+    int next = static_cast<int>(port[target]);
+    do {
+      next = (next + delta + kPartCount) % kPartCount;
+    } while (next != 0 && portOf(static_cast<Part>(next)) >= 0);
+    port[target] = static_cast<Part>(next);
+  }
+};
+
+// --- Everything the Lab lists -----------------------------------------------------------------
+enum class Dev : uint8_t { Ultrasonic, Env, Joystick, Knob, Light, Motion, Relay, Servo, Strip, Hub, Nfc, Gps, Tilt,
+                           Led, Speaker, Count };
+constexpr uint8_t kDevCount = static_cast<uint8_t>(Dev::Count);
+constexpr const char* kDevNames[kDevCount] = {"Ultrasonic", "ENV III", "Joystick 2", "Mini Angle", "Light", "PIR motion",
+                                              "2 relays", "Servo", "LED strip", "I/O hub", "NFC", "LoRa Cap GPS",
+                                              "Tilt", "Cardputer LED", "Speaker"};
+
+// I2C units found by asking. The Light unit is analog, but the digital one (DLight) answers here.
+enum class Unit : uint8_t { Ultrasonic, Env, Joystick, Hub, Nfc, DLight, Count };
+constexpr uint8_t kUnitCount = static_cast<uint8_t>(Unit::Count);
+constexpr uint8_t kUnitAddresses[kUnitCount] = {0x57, 0x44, 0x63, pbhub::kAddress, 0x50, 0x23};
+constexpr const char* kUnitNames[kUnitCount] = {"Ultrasonic", "ENV III", "Joystick 2", "I/O hub", "NFC", "DLight"};
+
+inline Part partFor(Dev dev) {
+  switch (dev) {
+    case Dev::Knob: return Part::Knob;
+    case Dev::Light: return Part::Light;
+    case Dev::Motion: return Part::Motion;
+    case Dev::Relay: return Part::Relay;
+    case Dev::Servo: return Part::Servo;
+    case Dev::Strip: return Part::Strip;
+    default: return Part::None;
+  }
+}
+
+// A knob's top depends on the unit and the hub, so the top seen so far is the top.
+struct AnalogRange {
+  uint16_t top = 512;
+  uint8_t percent(uint16_t raw) {
+    if (raw > top) top = raw;
+    return static_cast<uint8_t>((static_cast<uint32_t>(raw) * 100U + top / 2) / top);
+  }
+};
+
+// Hue is 0 to 359, and the color comes out at full strength.
+inline void hueToRgb(int hue, uint8_t& r, uint8_t& g, uint8_t& b) {
+  hue = ((hue % 360) + 360) % 360;
+  const int sector = hue / 60, rise = (hue % 60) * 255 / 60, fall = 255 - rise;
+  const uint8_t up = static_cast<uint8_t>(rise), down = static_cast<uint8_t>(fall);
+  const uint8_t rows[6][3] = {{255, up, 0}, {down, 255, 0}, {0, 255, up}, {0, down, 255}, {up, 0, 255}, {255, 0, down}};
+  r = rows[sector][0];
+  g = rows[sector][1];
+  b = rows[sector][2];
+}
+
+// What the strip should show. The cap is a share of full power, so nothing can ask for more.
+struct StripFrame {
+  bool on = false;
+  uint8_t r = 0, g = 0, b = 0, lit = 0;
+  bool operator==(const StripFrame& o) const { return on == o.on && r == o.r && g == o.g && b == o.b && lit == o.lit; }
+  bool operator!=(const StripFrame& o) const { return !(*this == o); }
+};
+constexpr uint8_t kDefaultCapPercent = 25;
+constexpr uint8_t kCaps[3] = {25, 50, 100};
+constexpr int kStripRestHue = 200;
+
+inline StripFrame stripFrame(const Drive* drive, uint8_t capPercent) {
+  const Drive& color = drive[static_cast<uint8_t>(Out::StripColor)];
+  const Drive& bright = drive[static_cast<uint8_t>(Out::StripBright)];
+  const Drive& length = drive[static_cast<uint8_t>(Out::StripLength)];
+  StripFrame frame;
+  if (!color.on && !bright.on && !length.on) return frame;
+  const int percent = (bright.on ? clampTo<int>(bright.value, 0, 100) : 100) * clampTo<int>(capPercent, 0, 100) / 100;
+  frame.lit = static_cast<uint8_t>(length.on ? clampTo<int>(length.value, 0, kStripLeds) : kStripLeds);
+  frame.on = frame.lit > 0 && percent > 0;
+  if (!frame.on) return StripFrame{};
+  hueToRgb(color.on ? color.value : kStripRestHue, frame.r, frame.g, frame.b);
+  frame.r = static_cast<uint8_t>(frame.r * percent / 100);
+  frame.g = static_cast<uint8_t>(frame.g * percent / 100);
+  frame.b = static_cast<uint8_t>(frame.b * percent / 100);
+  return frame;
+}
+
+// A relay is mechanical and a sensor can flicker, so it may only change this often.
+constexpr uint32_t kRelayGapMs = 300;
+class RelayGuard {
+ public:
+  // Whether to pass a new state on now. A held-back change is asked for again next pass.
+  bool allow(bool wanted, uint32_t now) {
+    if (mKnown && wanted == mState) return false;
+    if (mKnown && now - mChangedMs < kRelayGapMs) return false;
+    mKnown = true;
+    mState = wanted;
+    mChangedMs = now;
+    return true;
+  }
+  void forget() { mKnown = false; }
+  bool state() const { return mKnown && mState; }
+
+ private:
+  bool mKnown = false, mState = false;
+  uint32_t mChangedMs = 0;
+};
+
+// --- Saving ----------------------------------------------------------------------------------
+// The file holds only these numbers, and every one is checked on the way back in, so a damaged
+// card can't point a rule at something that doesn't exist.
+constexpr uint8_t kFileMagic[3] = {'S', 'L', 'B'};
+constexpr uint8_t kFileVersion = 1;
+constexpr size_t kRuleBytes = kNameChars + 1 + 6 + kMaxConds * 4 + kMaxActions * 5;
+constexpr size_t kHeaderBytes = 4 + 1 + pbhub::kPorts + 3;
+constexpr size_t kFileBytes = kHeaderBytes + kMaxRules * kRuleBytes + 2;
+
+struct Book {
+  Rule rules[kMaxRules];
+  uint8_t count = 0;
+  Wiring wiring;
+  uint8_t capPercent = kDefaultCapPercent;
+  bool lightFlipped = true;   // Most units read lower as it gets brighter.
+  uint8_t showMode = 0;
+};
+
+inline uint16_t checksum(const uint8_t* bytes, size_t length) {
+  uint16_t low = 1, high = 0;
+  for (size_t i = 0; i < length; ++i) {
+    low = static_cast<uint16_t>((low + bytes[i]) % 251);
+    high = static_cast<uint16_t>((high + low) % 251);
+  }
+  return static_cast<uint16_t>((high << 8) | low);
+}
+
+inline size_t encode(const Book& book, uint8_t* out) {
+  size_t at = 0;
+  auto put = [&](uint8_t value) { out[at++] = value; };
+  auto put16 = [&](int16_t value) {
+    put(static_cast<uint8_t>(value & 0xFF));
+    put(static_cast<uint8_t>((value >> 8) & 0xFF));
+  };
+  for (uint8_t b : kFileMagic) put(b);
+  put(kFileVersion);
+  put(book.count);
+  for (Part part : book.wiring.port) put(static_cast<uint8_t>(part));
+  put(book.capPercent);
+  put(book.lightFlipped ? 1 : 0);
+  put(book.showMode);
+  for (uint8_t i = 0; i < book.count; ++i) {
+    const Rule& rule = book.rules[i];
+    for (uint8_t c = 0; c <= kNameChars; ++c) put(static_cast<uint8_t>(rule.name[c]));
+    put(rule.on ? 1 : 0);
+    put(rule.any ? 1 : 0);
+    put(rule.conds);
+    put(rule.actions);
+    put16(static_cast<int16_t>(rule.holdMs));
+    for (const Cond& cond : rule.cond) {
+      put(static_cast<uint8_t>(cond.sig));
+      put(static_cast<uint8_t>(cond.op));
+      put16(cond.value);
+    }
+    for (const Action& action : rule.action) {
+      put(static_cast<uint8_t>(action.out));
+      put(static_cast<uint8_t>(action.how));
+      put16(action.value);
+      put(static_cast<uint8_t>(action.source));
+    }
+  }
+  const uint16_t sum = checksum(out, at);
+  put(static_cast<uint8_t>(sum & 0xFF));
+  put(static_cast<uint8_t>(sum >> 8));
+  return at;
+}
+
+inline bool decode(const uint8_t* bytes, size_t length, Book& book) {
+  if (length < kHeaderBytes + 2 || length > kFileBytes) return false;
+  if (memcmp(bytes, kFileMagic, sizeof(kFileMagic)) != 0 || bytes[3] != kFileVersion) return false;
+  const uint16_t sum = static_cast<uint16_t>(bytes[length - 2] | (bytes[length - 1] << 8));
+  if (checksum(bytes, length - 2) != sum) return false;
+  const uint8_t count = bytes[4];
+  if (count > kMaxRules || length != kHeaderBytes + count * kRuleBytes + 2) return false;
+  Book in;
+  in.count = count;
+  size_t at = 5;
+  auto get = [&]() { return bytes[at++]; };
+  auto get16 = [&]() {
+    const int16_t value = static_cast<int16_t>(bytes[at] | (bytes[at + 1] << 8));
+    at += 2;
+    return value;
+  };
+  bool seen[kPartCount] = {};
+  for (Part& part : in.wiring.port) {
+    const uint8_t value = get();
+    if (value >= kPartCount || (value != 0 && seen[value])) return false;
+    seen[value] = true;
+    part = static_cast<Part>(value);
+  }
+  const uint8_t cap = get();
+  if (cap != kCaps[0] && cap != kCaps[1] && cap != kCaps[2]) return false;
+  in.capPercent = cap;
+  in.lightFlipped = get() != 0;
+  in.showMode = get() ? 1 : 0;
+  for (uint8_t i = 0; i < count; ++i) {
+    Rule& rule = in.rules[i];
+    for (uint8_t c = 0; c <= kNameChars; ++c) rule.name[c] = static_cast<char>(get());
+    rule.name[kNameChars] = '\0';
+    rule.on = get() != 0;
+    rule.any = get() != 0;
+    rule.conds = get();
+    rule.actions = get();
+    rule.holdMs = static_cast<uint16_t>(get16());
+    if (rule.conds > kMaxConds || rule.actions > kMaxActions || rule.holdMs > kMaxHoldMs) return false;
+    for (Cond& cond : rule.cond) {
+      const uint8_t sig = get(), op = get();
+      cond.value = get16();
+      if (sig >= kSigCount || op > static_cast<uint8_t>(Op::Changes)) return false;
+      cond.sig = static_cast<Sig>(sig);
+      cond.op = static_cast<Op>(op);
+    }
+    for (Action& action : rule.action) {
+      const uint8_t out = get(), how = get();
+      action.value = get16();
+      const uint8_t source = get();
+      if (out >= kOutCount || how > static_cast<uint8_t>(How::FollowBack) || source >= kSigCount) return false;
+      action.out = static_cast<Out>(out);
+      action.how = static_cast<How>(how);
+      action.source = static_cast<Sig>(source);
+    }
+  }
+  book = in;
+  return true;
+}
+}  // namespace lab

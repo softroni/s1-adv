@@ -34,7 +34,7 @@ assert change.index('stopAirMusic();') < change.index('gUiMode = mode;')
 menu = (parts / '004_main.cpp.inc').read_text()
 table = menu[menu.index('kLauncherGroups[kLauncherGroupCount] = {'):menu.index('Preferences gPrefs;')]
 groups = re.findall(r'rgb565_local\([^)]*\), (\d+),\s*\{(.*?)\}\}\}', table, re.S)
-assert len(groups) == 8
+assert len(groups) == 9
 for count, items in groups:
     assert int(count) == items.count('UiMode::') <= 8, (count, items)
 

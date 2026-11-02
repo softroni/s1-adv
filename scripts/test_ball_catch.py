@@ -10,7 +10,7 @@ src = root / 'bots/CardputerADV/src'
 parts = src / 'main_parts'
 for file, text in [
         ('001_main.cpp.inc', '#include "ball_catch.h"'),
-        ('001_main.cpp.inc', 'kLauncherGroupCount = 8'),
+        ('001_main.cpp.inc', 'kLauncherGroupCount = 9'),
         ('004_main.cpp.inc', '{"Ball Catch", UiMode::BallCatch}'),
         ('004_main.cpp.inc', '{"Arcade", "Sensor and joystick games"'),
         ('022_main.cpp.inc', 'mode == "ball_catch"'),

@@ -21,6 +21,8 @@
 - `/flappy` opens Flappy Bird, steered by hand over the same unit or flapped with Space.
 - `/balloon` opens Hot Air Balloon, flown by blowing on an ENV III and steered with a Joystick 2.
 - `/catch` opens Ball Catch, where you drop a ball and catch it in a basket with a Joystick 2.
+- `/lab` lists every sensor and output so you can test them, and `/rules` opens the saved rules
+  that join them. See [Lab](#lab).
 
 This firmware has evolved across development versions. Prefer the command help
 on your built device for current shortcuts. Specialized IR, RFID and sonar
@@ -167,6 +169,99 @@ port, or play on the keyboard.
 - The rail runs out while a ball waits. When it's gone, the ball drops by itself.
 - The ball speeds up as you score, and every 5 catches the basket shrinks, bombs get more
   common and the rail gets shorter.
+
+## Lab
+
+The Lab is its own tab in the app menu, and the 9 key jumps to it. Devices tests everything the
+Cardputer can reach, and Rules joins them together, like "if this, then that". The Grove port
+is only held while a Lab screen is open.
+
+### Wiring
+
+Plug the I/O hub into the Grove port through the 1-to-3 hub. Its six ports run the parts that
+can't share the Grove wires, and the other two sockets on the 1-to-3 hub take any two of the
+Ultrasonic, ENV III, Joystick 2 and NFC units. Swap them as you need them, because the Lab
+notices what's plugged in.
+
+Nothing on an I/O hub port can say what it is, so Devices, W sets which part is on which port.
+This is the starting layout:
+
+| Port | Part |
+| --- | --- |
+| CH0 | Mini Angle |
+| CH1 | Light |
+| CH2 | PIR motion |
+| CH3 | 2 relays |
+| CH4 | Servo |
+| CH5 | LED strip |
+
+In that screen, up and down pick a port, and left and right change only that port. To swap two
+parts, set one to Nothing first. A digital light unit (DLight) on the Grove port needs no port
+and is used instead.
+
+### Devices
+
+Up and down pick a device, and Enter opens it. A solid dot means it answered just now. A ring
+means it only takes orders, so it can be reached but can't reply. Esc goes back, and everything
+turns off when you leave a test screen.
+
+- **Ultrasonic, Light, Tilt and PIR:** a live number and the last 30 seconds. R resets the lowest
+  and highest. If the Light reads backwards, F flips it.
+- **ENV III:** temperature and humidity.
+- **Mini Angle:** turn it end to end once so it learns its range.
+- **Joystick 2:** the stick's position and its button.
+- **Servo:** left and right turn it 5 degrees, A and D turn it 1, C centers it and S sweeps it. It
+  goes limp when you leave.
+- **LED strip:** left and right change the color, and up and down the brightness. M steps through
+  Solid, Rainbow, Chase and Count, where the arrows move one lit LED to check them all. L changes
+  the power limit, which starts at 25%. If the strip flickers or shows the wrong colors, T tries
+  the hub's other LED timing.
+- **2 relays:** 1 and 2 switch them. Both open when you leave.
+- **I/O hub:** what's on each port, and its firmware.
+- **NFC:** Enter opens NFC Notes, which is the full test for that unit.
+- **LoRa Cap GPS:** satellites, position and speed, with the Cap fitted. M opens Mesh.
+- **Cardputer LED and Speaker:** the built-in ones. They work with nothing plugged in.
+
+If a unit stops answering, its screen shows what else still answers, which tells you whether to
+look at that unit's cable or at the Grove port. Units reconnect by themselves.
+
+The strip and the servo run off the Cardputer's Grove power, and M5 publishes no limit for it. At
+full white 30 LEDs can draw 1 A and a stalled servo 750 mA, so keep the limit low. If the
+Cardputer restarts, give the strip its own 5 V supply and join the grounds.
+
+### Rules
+
+Rules lists what's saved. A solid dot means the rule is on, Space turns it off or on, and P plays
+the ones that are on. "Wave lights" is there to start with: when the Mini Angle turns or something
+comes within 30 cm, the strip's color follows the distance and the servo follows the Mini Angle.
+
+**+ New rule** asks one question a screen: what to watch, when it counts, and what to do. To set a
+distance, put your hand there and press Enter, or nudge the number with left and right.
+
+Enter on a rule opens its card, which shows the whole rule with live values:
+
+- WHEN ANY or ALL: Enter switches. A rule can watch up to 3 things.
+- Enter on a line changes it, and X removes it. A rule can do up to 3 things.
+- **Keep going** sets how long it carries on after it stops being true. Use left and right.
+- A rule can **set** an output to a value, or **follow** a sensor so the output moves with it.
+  Do the opposite follows it backwards.
+- Name: type to rename it. Delete this rule takes two presses of Enter.
+
+Esc saves. Rules are kept on the SD card in `/lab/rules.dat`, with the hub wiring, so they survive
+a firmware install. With no card they last until the next restart.
+
+### Playing
+
+Rules only run on the Playing screen, because the Grove port can't be shared with other apps.
+The screen stays on while they play.
+
+- The board shows each rule as firing, following or waiting, and how close a waiting rule is.
+- Left and right switch to a picture of one rule, with dots moving from what set it off to what
+  it drives.
+- Space pauses, and Esc stops. Either one turns everything off, and so does opening the menu.
+
+When two rules want the same output, the lower one in the list wins. A relay can switch at most
+about three times a second, however much a sensor flickers.
 
 Realtime shows CONNECT, LISTEN, THINK, SPEAK, READY or ERROR above the large eyes.
 MIC ON and the input meter appear only during recording. Connection errors remain
