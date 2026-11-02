@@ -553,6 +553,7 @@ void renderLabUi();
 bool routeLabEscape();
 bool labAllowsNetwork();
 void labOfferRule(const lab::Rule& rule);
+bool labVoiceSet(const char* output, int value);
 void beginNfcNotes();
 void serviceNfcNotes();
 bool cancelNfcNotes();

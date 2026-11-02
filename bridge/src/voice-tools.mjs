@@ -34,6 +34,14 @@ export const LAB_HELP =
   "through the 1-to-3 hub, and a Mini Angle there stops them answering. To use both, put the I/O hub in the 1-to-3 " +
   "hub, and the I2C units in its other two sockets.";
 
+// The device checks all of this again, and acts only on the part whose screen is open.
+export const LAB_SET_POLICY =
+  "On a part's test screen, if they ask to set what that screen drives, append lab.set actions instead of a " +
+  "rule, like [[cardputer_actions:[{\"type\":\"lab.set\",\"output\":\"servo\",\"set\":90}]]]. The Servo screen sets " +
+  "servo. The LED strip screen sets strip_color and strip_bright. The Cardputer LED screen sets led. The Speaker " +
+  "screen sets speaker. Use the test values line for words like brighter or a bit more. Nothing else can be set " +
+  "this way, so for relays, the lamp and the air conditioner, say to use the keys on that screen.";
+
 // Said on every question, so what was heard can only ever be a request.
 const spokenRequest = words =>
   "You are answering one spoken request on a Cardputer ADV, a pocket computer with a tiny screen. " +
@@ -68,8 +76,8 @@ export const VOICE_TOOLS = new Map([
   ["lab.ask", {
     instructions: `${LAB_HELP} Answer from the device state, using its real readings and rules, and say what to ` +
       "do next. If they ask what they could make, suggest up to 3 rules using parts that are answering, each as " +
-      `a lab.rule action, and say in one sentence what they do. ${LAB_RULE_POLICY}`,
-    actions: ["lab.rule"],
+      `a lab.rule action, and say in one sentence what they do. ${LAB_RULE_POLICY} ${LAB_SET_POLICY}`,
+    actions: ["lab.rule", "lab.set"],
     words: 35
   }]
 ]);

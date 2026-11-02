@@ -297,6 +297,11 @@ Try "why didn't my rule fire?", "why won't the strip light up?" or "what can I m
 The answer shows and is read aloud. If it suggests rules you get up to three: left and right move
 between them, Enter saves the one showing, and Esc drops them all.
 
+**Say it** on the Servo, LED strip, Cardputer LED and Speaker screens, so your hands stay on the
+parts. Tap Alt and say "set it to 90", "make it blue and a bit brighter" or "a bit more". A spoken
+setting only moves the part whose screen is open. Relays, the lamp and the air conditioner keep to
+their keys, because speech can be misheard and they can switch mains.
+
 Rules are kept on the SD card in `/lab/rules.dat`, with the hub wiring, so they survive a firmware
 install. With no card they last until the next restart.
 

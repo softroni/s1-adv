@@ -91,6 +91,7 @@ bool executeDeviceAction(JsonObjectConst action) {
     return false;
   }
 
+  if (type == "lab.set") return labVoiceSet(action["output"] | "", action["set"] | 0);
   if (type == "lab.rule") {
     lab::Rule rule;
     if (!lab::ruleFromJson(action, rule)) {

@@ -241,6 +241,8 @@ Stuck? Tap Alt on Devices or on a part's screen and just ask. Claude can see wha
 
 The answer shows on the screen and is read aloud. When it suggests rules, you get up to three to choose from.
 
+On the Servo, LED strip, Cardputer LED and Speaker screens you can also say what to do, like "set it to 90" or "make it blue and a bit brighter". Relays, the lamp and the air conditioner stay on their keys, because speech can be misheard and they can switch mains.
+
 ## If a part doesn't answer
 
 The Lab tells you where to look, and units reconnect by themselves.

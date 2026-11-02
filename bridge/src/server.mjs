@@ -369,7 +369,8 @@ const CARDPUTER_FIRMWARE_CAPABILITIES = {
 
 export { LAB_RULE_POLICY };
 
-const DEVICE_ACTION_TYPES = new Set(DEVICE_ACTION_CATALOG.map((action) => action.type));
+// lab.set isn't in the catalog because the chat isn't told about it. Only a voice tool can send it.
+const DEVICE_ACTION_TYPES = new Set([...DEVICE_ACTION_CATALOG.map((action) => action.type), "lab.set"]);
 
 const DEVICE_UI_MODES = new Set([
   "lab",
@@ -483,6 +484,12 @@ export function sanitizeDeviceAction(raw) {
     action.value = Boolean(raw.value ?? raw.enabled);
   } else if (type === "settings.set_ota_min_battery") {
     action.value = clampNumber(raw.value ?? raw.percent, 5, 95, 40);
+  } else if (type === "lab.set") {
+    action.output = boundedString(raw.output, 16);
+    action.set = clampNumber(raw.set, -32000, 32000, 0);
+    if (!action.output) {
+      return null;
+    }
   } else if (type === "lab.rule") {
     // Only the shape is checked here. The device refuses any name it doesn't know.
     const lines = (value) => (Array.isArray(value) ? value : []).filter((line) => line && typeof line === "object").slice(0, 3);
@@ -876,7 +883,7 @@ function fastCommandReplyFromText(text) {
   return null;
 }
 
-function buildDeviceActionsPayload() {
+export function buildDeviceActionsPayload() {
   return {
     ok: true,
     catalog_version: DEVICE_ACTION_CATALOG_VERSION,

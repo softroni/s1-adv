@@ -73,6 +73,7 @@ int gLabOfferCount = 0, gLabOfferAt = 0;
 bool gLabOfferBatch = false;    // These arrived together, so they're choices, not replacements.
 int gLabOfferChanges = -1;      // The saved rule it would replace, or -1 for a new one.
 int gLabOfferNext = -1;         // What the next offer replaces. Only a change sets this.
+bool gLabVoiceSetting = false;  // Only an answer to a question asked here can move a part.
 
 // --- Words ------------------------------------------------------------------------------------
 String labNumberText(int value, const char* unit, const char* degree) {
@@ -478,7 +479,7 @@ void renderLabServo() {
   labTextAt(&fonts::Font0, 190, 102, "180", kLabSoft);
   labTextAt(&fonts::Font4, 2, 24, String(angle) + "`", TFT_WHITE);
   labStat(198, 26, "STEP", String(kLabServoStep) + "`");
-  labTextCenter(&fonts::Font0, 120, 117, gLabUi.sweeping ? "Sweeping" : "A servo cannot reply: watch it move", kLabAmber);
+  labTextCenter(&fonts::Font0, 120, 117, gLabUi.sweeping ? "Sweeping" : "Watch it move  ALT say it", kLabAmber);
   if (labOnHub(Dev::Servo)) labKeys(String(kLabArrowLeftRight) + " turn AD fine C center S sweep P port");
   else labKeys(String(kLabArrowLeftRight) + " turn  A D fine  C center  S sweep");
 }
@@ -698,6 +699,9 @@ void renderLabMissing(Dev dev) {
   }
   labKeys("It reconnects by itself  ESC back");
 }
+// What can be set by voice. A misheard word should only ever move something small and in view, so
+// nothing here can switch mains.
+bool labTakesVoiceSet(Dev dev) { return dev == Dev::Servo || dev == Dev::Strip || dev == Dev::Led || dev == Dev::Speaker; }
 void renderLabDevice() {
   const Dev dev = static_cast<Dev>(gLabUi.devRow);
   if (dev == Dev::Gps) { renderLabGps(); return; }
@@ -720,6 +724,7 @@ void renderLabDevice() {
     case Dev::Led: renderLabLed(); break;
     default: renderLabSpeaker(); break;
   }
+  if (dev != Dev::Servo && labTakesVoiceSet(dev)) labTextRight(&fonts::Font0, 236, 116, "ALT say it", kLabMuted);
 }
 
 // --- Rules list --------------------------------------------------------------------------------
@@ -818,7 +823,7 @@ void renderLabSay() {
     }
     labKeys("ALT try again  ESC back");
   } else if (ask) {
-    labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "What do you want to know?", TFT_WHITE);
+    labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "What's your question?", TFT_WHITE);
     labTextAt(&fonts::Font0, 6, 52, "For example:", kLabSoft);
     labTextAt(&fonts::Font0, 6, 63, "\"Why didn't my rule fire?\"", kLabCyan);
     labTextAt(&fonts::Font0, 6, 74, "\"What can I make with these parts?\"", kLabCyan);
@@ -1545,6 +1550,34 @@ void labPlayKey(char key, char lower, bool left, bool right, bool up, bool down)
     if (gLabPaused) labReleaseOutputs();
   }
 }
+// Moves what's on the screen right now. It needs that screen open, so a word can't reach anything
+// else, and a chat message can't do this at all.
+bool labVoiceSet(const char* output, int value) {
+  LabUi& ui = gLabUi;
+  Out out = Out::Servo;
+  if (!gLabVoiceSetting || !labMode(gUiMode) || ui.view != LabView::Device || !lab::outFromKey(output, out)) return false;
+  const Dev dev = static_cast<Dev>(ui.devRow);
+  const lab::OutInfo& info = lab::info(out);
+  value = lab::clampTo<int>(value, info.lo, info.hi);
+  if (out == Out::Servo && dev == Dev::Servo) {
+    ui.sweeping = false;
+    labServoGoTo(value);
+  } else if ((out == Out::StripColor || out == Out::StripBright) && dev == Dev::Strip) {
+    (out == Out::StripColor ? ui.stripHue : ui.stripBright) = value;
+    labStripPick(gLabStripTest);
+  } else if (out == Out::Led && dev == Dev::Led) {
+    ui.ledHue = value;
+    ui.ledOn = true;
+    labDriveSet(Out::Led, value);
+  } else if (out == Out::Tone && dev == Dev::Speaker) {
+    ui.toneHz = value;
+    ui.beepUntilMs = millis() + kLabBeepMs;
+    labDriveSet(Out::Tone, value);
+  } else {
+    return false;
+  }
+  return true;
+}
 // The screens where Alt talks to Claude. The steps have keys of their own, and an offer waits for Enter.
 bool labVoiceScreen() {
   if (!labMode(gUiMode)) return false;
@@ -1582,7 +1615,10 @@ void labChangeAnswered(const VoiceToolAnswer& answer) { labRuleAnswered(answer, 
 // An answer shows and speaks, and Esc goes back to wherever the question came from. Asking what to
 // build brings rules instead, which go straight to being looked at.
 void labAskAnswered(const VoiceToolAnswer& answer) {
-  if (answer.ok && labTakeOffers(answer.actionsJson)) return;
+  gLabVoiceSetting = true;
+  const bool acted = answer.ok && labTakeOffers(answer.actionsJson);
+  gLabVoiceSetting = false;
+  if (acted) return;
   LabUi& ui = gLabUi;
   if (ui.view != LabView::Say) ui.sayBack = ui.view;
   ui.voice = LabVoice::Ask;
@@ -1615,7 +1651,14 @@ String labVoiceContext() {
     if (reading.live) text.add(" ").add(lab::kSigs[i].key).add("=").add(reading.value);
   }
   text.add(gLabPlaying ? "\nrules are playing" : "\nrules are not playing");
-  if (gLabUi.view == LabView::Device) text.add("\nlooking at the test screen for: ").add(lab::kDevNames[gLabUi.devRow]);
+  if (gLabUi.view == LabView::Device) {
+    const LabUi& ui = gLabUi;
+    text.add("\nlooking at the test screen for: ").add(lab::kDevNames[ui.devRow]);
+    if (labTakesVoiceSet(static_cast<Dev>(ui.devRow))) {
+      text.add("\ntest values: servo=").add(ui.servoAngle).add(" strip_color=").add(ui.stripHue).add(" strip_bright=").add(ui.stripBright);
+      text.add(" led=").add(ui.ledHue).add(" speaker=").add(ui.toneHz);
+    }
+  }
   for (uint8_t i = 0; i < gLabBook.count; ++i) {
     const lab::Rule& rule = gLabBook.rules[i];
     text.add("\nrule ").add(i + 1).add(rule.on ? "" : " (switched off)");

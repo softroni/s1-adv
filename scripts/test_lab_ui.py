@@ -752,7 +752,7 @@ void testSay() {
   // Ask the Lab: its own row, and Alt from anywhere that isn't a saved rule.
   {
     goToRow(gLabBook.count + 3); show("rules-ask"); assert(gCanvas.shows("Ask the Lab") && labAskOnScreen() && !labChangeOnScreen());
-    key(ENTER); assert(gLabUi.view == LabView::Say && labAskOnScreen()); show("ask"); assert(gCanvas.shows("What do you want to know?") && gCanvas.shows("What can I make with these parts?"));
+    key(ENTER); assert(gLabUi.view == LabView::Say && labAskOnScreen()); show("ask"); assert(gCanvas.shows("What's your question?") && gCanvas.shows("What can I make with these parts?"));
     gRecording = true; show("ask-listening"); assert(gCanvas.shows("Ask about your parts and rules."));
     gRecording = false; gThinking = true; show("ask-working"); assert(gCanvas.shows("Claude is looking") && gCanvas.shows("LOOKING")); gThinking = false;
     { VoiceToolAnswer a; a.ok = true; a.heard = "why didn't my rule fire"; a.reply = "Distance is 42 cm and Wave red needs under 30. Move closer, or say change it to 50."; labAskAnswered(a); }
@@ -782,6 +782,33 @@ void testSay() {
     key('x'); key('x'); assert(gLabBook.count == count);
     // A rule from the chat is a single offer again, whatever came before.
     labOfferRule(d.rule); assert(gLabOfferCount == 1); renderLabUi(); assert(!gCanvas.shows(" OF ")); esc();
+    gLabUi.view = LabView::Rules; goToRow(gLabBook.count + 1);
+  }
+  // Set a part by voice: only the one on the screen, only something small, only from the Lab.
+  {
+    gLabUi.view = LabView::Devices;
+    const auto openPart = [](Dev dev) { gLabUi.devRow = int(dev); labOpenDevice(dev); };
+    const auto spoken = [](const char* output, int value) { gLabVoiceSetting = true; const bool done = labVoiceSet(output, value); gLabVoiceSetting = false; return done; };
+    openPart(Dev::Servo); show("servo-voice"); assert(gCanvas.shows("ALT say it"));
+    gLabUi.sweeping = true; assert(spoken("servo", 135) && gLabUi.servoAngle == 135 && !gLabUi.sweeping && gLabDrive[int(Out::Servo)].on && gLabDrive[int(Out::Servo)].value == 135);
+    assert(spoken("servo", 900) && gLabUi.servoAngle == 180);  // Past the end stops at the end.
+    assert(!spoken("strip_color", 0));                         // Not what's on the screen.
+    assert(!spoken("relay_1", 1) && !gLabDrive[int(Out::Relay1)].on);
+    assert(!spoken("ghost", 1));
+    assert(!labVoiceSet("servo", 10) && gLabUi.servoAngle == 180);  // Not an answer: a chat message can't do this.
+    // What Claude is told on this screen includes where things are now, for "a bit more".
+    assert(std::string(labVoiceContext()).find("test values: servo=180") != std::string::npos);
+    labCloseDevice(); assert(std::string(labVoiceContext()).find("test values") == std::string::npos);
+    assert(!spoken("servo", 5));                               // Off its screen it does nothing.
+    openPart(Dev::Strip); assert(spoken("strip_color", 240) && gLabUi.stripHue == 240 && gLabDrive[int(Out::StripColor)].value == 240);
+    assert(spoken("strip_bright", 60) && gLabUi.stripBright == 60 && gLabDrive[int(Out::StripBright)].value == 60); assert(!spoken("servo", 90)); labCloseDevice();
+    openPart(Dev::Led); assert(spoken("led", 120) && gLabUi.ledOn && gLabDrive[int(Out::Led)].value == 120); labCloseDevice();
+    openPart(Dev::Speaker); assert(spoken("speaker", 5000) && gLabUi.toneHz == 2000 && gLabUi.beepUntilMs && gLabDrive[int(Out::Tone)].on); run(600); assert(!gLabDrive[int(Out::Tone)].on); labCloseDevice();
+    // A sensor's screen or the relays can't be set, and say nothing about it.
+    openPart(Dev::Relay); show("relay-voice"); assert(!gCanvas.shows("ALT say it") && !spoken("relay_1", 1) && !gLabUi.relays[0]); labCloseDevice();
+    // Something set by voice stays on its screen with no answer to read.
+    openPart(Dev::Servo); gActionsRun = true; { VoiceToolAnswer a; a.ok = true; a.reply = "Set."; a.actionsJson = "[{}]"; labAskAnswered(a); } gActionsRun = false;
+    assert(gLabUi.view == LabView::Device && std::string(gQueuedVoiceReplySpeech).empty()); labCloseDevice();
     gLabUi.view = LabView::Rules; goToRow(gLabBook.count + 1);
   }
   // With no Wi-Fi it says so instead of trying.

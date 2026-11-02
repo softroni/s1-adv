@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LAB_HELP, LAB_RULE_POLICY, VOICE_TOOLS, answerVoiceTool, readVoiceContext, voiceToolMessage, voiceToolPrompt } from "./voice-tools.mjs";
-import { extractDeviceActionsFromText, LAB_RULE_POLICY as FROM_SERVER } from "./server.mjs";
+import { LAB_HELP, LAB_RULE_POLICY, LAB_SET_POLICY, VOICE_TOOLS, answerVoiceTool, readVoiceContext, voiceToolMessage, voiceToolPrompt } from "./voice-tools.mjs";
+import { buildDeviceActionsPayload, extractDeviceActionsFromText, LAB_RULE_POLICY as FROM_SERVER, sanitizeDeviceAction } from "./server.mjs";
 
 const readReply = text => {
   const { visibleText, actions } = extractDeviceActionsFromText(text);
@@ -99,7 +99,7 @@ test("changing a rule can only send a rule back", () => {
 
 test("asking the Lab can bring rules back, and nothing else", async () => {
   const tool = VOICE_TOOLS.get("lab.ask");
-  assert.deepEqual(tool.actions, ["lab.rule"]);
+  assert.deepEqual(tool.actions, ["lab.rule", "lab.set"]);
   assert.ok(tool.instructions.includes(LAB_HELP) && tool.instructions.includes(LAB_RULE_POLICY));
   assert.match(voiceToolPrompt(tool), /in under 35 words/, "the answer screen has room");
   assert.match(voiceToolPrompt(VOICE_TOOLS.get("lab.rule")), /in under 15 words/);
@@ -107,6 +107,26 @@ test("asking the Lab can bring rules back, and nothing else", async () => {
   const answer = await answerVoiceTool("lab.ask", "what can I make", {
     ask: async () => `Three ideas. ${marker([...rules, { type: "ota.apply" }])}`, readReply });
   assert.deepEqual(answer.device_actions.map(action => action.name), ["Idea 1", "Idea 2", "Idea 3"]);
+});
+
+test("a spoken setting gets through to the device, and only from the tool that lists it", async () => {
+  const set = { type: "lab.set", output: "servo", set: 90 };
+  const asked = await answerVoiceTool("lab.ask", "set it to ninety", { ask: async () => `Done. ${marker([set])}`, readReply });
+  assert.deepEqual(asked.device_actions, [set]);
+  const rule = await answerVoiceTool("lab.rule", "set it to ninety", { ask: async () => `Done. ${marker([set])}`, readReply });
+  assert.equal(rule.device_actions, undefined);
+  assert.equal(sanitizeDeviceAction({ type: "lab.set", set: 90 }), null, "it has to name an output");
+  assert.equal(sanitizeDeviceAction({ type: "lab.set", output: "servo", set: 999999 }).set, 32000);
+});
+
+test("the chat is never told how to set a part", () => {
+  assert.ok(!LAB_RULE_POLICY.includes("lab.set"));
+  assert.ok(!buildDeviceActionsPayload().actions.some(action => action.type === "lab.set"));
+});
+
+test("a spoken setting never reaches anything that can switch mains", () => {
+  for (const output of ["relay_1", "relay_2", "lamp_power", "ac_tcl", "ac_daikin"]) assert.ok(!LAB_SET_POLICY.includes(`sets ${output}`), output);
+  assert.match(LAB_SET_POLICY, /relays, the lamp and the air conditioner/);
 });
 
 test("the wiring advice names only parts the Lab has", () => {
