@@ -244,7 +244,11 @@ Stuck? Tap Alt on Devices or on a part's screen and just ask. Claude can see wha
 - "Why won't the strip light up?"
 - "What can I make with these parts?"
 
+- "Was there motion last night?"
+
 The answer shows on the screen and is read aloud. When it suggests rules, you get up to three to choose from.
+
+That last one works because the Lab keeps a diary while rules play, one line an hour, in `/lab/diary.txt` on the SD card. Leave rules playing overnight and ask in the morning. About the last day goes to Claude when you ask, and at no other time.
 
 On the Servo, LED strip, Cardputer LED and Speaker screens you can also say what to do, like "set it to 90" or "make it blue and a bit brighter". Relays, the lamp and the air conditioner stay on their keys, because speech can be misheard and they can switch mains.
 

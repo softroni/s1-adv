@@ -537,6 +537,41 @@ inline void ruleJson(const Rule& rule, Text& out) {
   out.add("]}");
 }
 
+// --- The diary ---------------------------------------------------------------------------------
+// What happened in an hour, in one line, because a day of these has to fit in a question to Claude.
+constexpr size_t kDiaryLineChars = 384;  // With every sensor at its widest.
+class Diary {
+ public:
+  void note(const Inputs& inputs) {
+    mNoted = true;
+    for (uint8_t i = 0; i < kSigCount; ++i) {
+      const Reading& reading = inputs.get(static_cast<Sig>(i));
+      if (!reading.live || kSigs[i].onOff) continue;
+      if (!mSeen[i] || reading.value < mLow[i]) mLow[i] = reading.value;
+      if (!mSeen[i] || reading.value > mHigh[i]) mHigh[i] = reading.value;
+      mSeen[i] = true;
+    }
+  }
+  void count(uint16_t motions, uint16_t fires) {
+    mMotions = static_cast<uint16_t>(mMotions + motions);
+    mFires = static_cast<uint16_t>(mFires + fires);
+  }
+  bool empty() const { return !mNoted; }
+  void write(const char* hour, Text& out) const {
+    out.add(hour).add(": motion ").add(static_cast<int>(mMotions)).add(", rules fired ").add(static_cast<int>(mFires));
+    for (uint8_t i = 0; i < kSigCount; ++i) {
+      if (mSeen[i]) out.add(", ").add(kSigs[i].key).add(" ").add(mLow[i]).add(" to ").add(mHigh[i]);
+    }
+    out.add("\n");
+  }
+  void clear() { *this = Diary{}; }
+
+ private:
+  bool mNoted = false, mSeen[kSigCount] = {};
+  int16_t mLow[kSigCount] = {}, mHigh[kSigCount] = {};
+  uint16_t mMotions = 0, mFires = 0;
+};
+
 // --- The I/O hub's six ports ------------------------------------------------------------------
 // Nothing on a hub port can say what it is, so the owner says, and the Lab remembers.
 enum class Part : uint8_t { None, Knob, Light, Motion, Relay, Servo, Strip, Count };

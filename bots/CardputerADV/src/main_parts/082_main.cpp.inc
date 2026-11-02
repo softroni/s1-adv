@@ -1689,8 +1689,8 @@ void labCommandAnswered(const VoiceToolAnswer& answer) {
   ui.playNote = String(gLabBook.rules[index].name) + ((gLabNamed >> index) & 1 ? " on" : " off");
 }
 // What Claude can't see from the words: what's plugged in, what it reads, and the rules so far.
-String labVoiceContext() {
-  constexpr size_t kChars = 2800;  // A full set of rules fits, and a header this size is fine.
+String labDescribe(bool withDiary) {
+  constexpr size_t kChars = 3900;  // A full set of rules and a day of the diary fit in a header.
   std::unique_ptr<char[]> buffer(new (std::nothrow) char[kChars]);
   if (!buffer) return String();
   lab::Text text(buffer.get(), kChars);
@@ -1725,8 +1725,11 @@ String labVoiceContext() {
     lab::ruleJson(rule, text);
   }
   if (labChangeOnScreen()) text.add("\nchanging rule ").add(gLabUi.ruleRow + 1);
+  if (withDiary) labDiaryTail(text);
   return String(buffer.get());
 }
+String labVoiceContext() { return labDescribe(false); }
+String labAskContext() { return labDescribe(true); }
 // A rule from Claude waits here until someone presses Enter, because rules can switch mains.
 void labOfferRule(const lab::Rule& rule) {
   if (!gLabOfferBatch) gLabOfferCount = 0;

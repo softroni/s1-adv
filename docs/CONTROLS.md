@@ -309,6 +309,13 @@ Try "why didn't my rule fire?", "why won't the strip light up?" or "what can I m
 The answer shows and is read aloud. If it suggests rules you get up to three: left and right move
 between them, Enter saves the one showing, and Esc drops them all.
 
+The Lab keeps a **diary** while rules play: one line an hour with how many times motion was seen, how
+many times rules fired, and each sensor's lowest and highest reading. So you can leave rules playing
+overnight and ask "was there motion last night?" or "how hot did it get?". It's in
+`/lab/diary.txt` on the SD card, and about the last day goes to Claude when you Ask the Lab, and at no
+other time. Nothing is recorded while rules aren't playing, or if the clock hasn't been set. Delete
+the file to clear it.
+
 **Say it** on the Servo, LED strip, Cardputer LED and Speaker screens, so your hands stay on the
 parts. Tap Alt and say "set it to 90", "make it blue and a bit brighter" or "a bit more". A spoken
 setting only moves the part whose screen is open. Relays, the lamp and the air conditioner keep to

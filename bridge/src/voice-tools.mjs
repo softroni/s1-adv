@@ -36,7 +36,10 @@ export const LAB_HELP =
   "one Mini Angle, Light or PIR, the yellow wire takes one Servo or LED strip, and the 2 relays take both, and " +
   "opening the part in Devices tells the Lab it's there. I2C units can't share the port with those parts, even " +
   "through the 1-to-3 hub, and a Mini Angle there stops them answering. To use both, put the I/O hub in the 1-to-3 " +
-  "hub, and the I2C units in its other two sockets.";
+  "hub, and the I2C units in its other two sockets. The device state can end with a diary: a line for each hour " +
+  "rules were playing, with how many times motion was seen, how many times rules fired, and each sensor's lowest " +
+  "and highest reading. Nothing is recorded while rules aren't playing, so if the diary has no line for a time, " +
+  "say that rather than guessing. The hours are in the owner's local time.";
 
 // The device checks all of this again, and acts only on the part whose screen is open.
 export const LAB_SET_POLICY =

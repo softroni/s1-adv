@@ -12,7 +12,7 @@ struct VoiceTool {
 const VoiceTool kVoiceTools[] = {
     {"lab.rule", labSayOnScreen, labSayAnswered, labVoiceContext},
     {"lab.change", labChangeOnScreen, labChangeAnswered, labVoiceContext},
-    {"lab.ask", labAskOnScreen, labAskAnswered, labVoiceContext},
+    {"lab.ask", labAskOnScreen, labAskAnswered, labAskContext},
     {"transcribe", labCommandOnScreen, labCommandAnswered, nullptr},
 };
 

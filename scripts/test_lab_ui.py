@@ -253,6 +253,9 @@ void gpsLine(const std::string& body) {
   char tail[8]; std::snprintf(tail, sizeof(tail), "*%02X\r\n", sum); Serial1.data += "$" + body + tail;
 }
 constexpr const char* FILE_WRITE = "w";
+constexpr const char* FILE_APPEND = "a";
+bool gClockOk = true;
+bool hasValidSystemTime() { return gClockOk; }
 struct Disk { std::map<std::string, std::vector<uint8_t>> files; bool broken = false; } gDisk;
 struct File {
   std::string path; size_t at = 0; bool ok = false, writing = false;
@@ -260,11 +263,12 @@ struct File {
   size_t size() { return gDisk.files[path].size(); }
   size_t read(uint8_t* out, size_t n) { auto& f = gDisk.files[path]; const size_t got = min(n, f.size() - at); std::memcpy(out, f.data() + at, got); at += got; return got; }
   size_t write(const uint8_t* b, size_t n) { auto& f = gDisk.files[path]; f.insert(f.end(), b, b + n); return n; }
+  bool seek(size_t to) { at = to; return true; }
   void close() {}
 };
 struct SdClass {
   bool exists(const char* p) { return gDisk.files.count(p) > 0; }
-  File open(const char* p, const char* mode) { File f; f.path = p; f.ok = !gDisk.broken && (mode[0] == 'w' || exists(p)); return f; }
+  File open(const char* p, const char* mode) { File f; f.path = p; f.ok = !gDisk.broken && (mode[0] != 'r' || exists(p)); return f; }
   bool remove(const char* p) { return gDisk.files.erase(p) > 0; }
   bool rename(const char* a, const char* b) { auto it = gDisk.files.find(a); if (it == gDisk.files.end()) return false; gDisk.files[b] = it->second; gDisk.files.erase(it); return true; }
 } SD;
@@ -848,6 +852,35 @@ void testSay() {
     esc(); assert(!gLabPlaying && gLabNamed == 0); gLabBook.count = count; gLabUi.view = LabView::Rules; goToRow(gLabBook.count + 1);
     // The steps put it in words.
     labWizardStart(-1, nullptr); gLabWizard.rule.cond[0].sig = Sig::Spoken; gLabWizard.step = LabStep::Op; assert(labWizardRowCount() == 2 && std::string(labWizardRow(0)) == "is said"); gLabWizard = LabWizard{}; gLabUi.view = LabView::Rules;
+  }
+  // The diary: a line an hour while rules play, kept for questions, and nowhere else.
+  {
+    const std::string diary = "/lab/diary.txt";
+    const auto text = [&]() { const auto& f = gDisk.files[diary]; return std::string(f.begin(), f.end()); };
+    gDisk.files.erase(diary); M5.Imu.ay = 0.5f;
+    keys("p"); assert(gLabPlaying); run(10100); assert(!gLabDiary.empty() && !gDisk.files.count(diary));  // Nothing yet: the hour isn't over.
+    // When the hour turns, the last one goes on the card with its own time.
+    std::strcpy(gLabDiaryHour, "Nov 02 03h"); run(10100);
+    assert(text().rfind("Nov 02 03h: motion 0, rules fired ", 0) == 0 && text().find("tilt 30 to 30") != std::string::npos && text().back() == '\n');
+    // Stopping saves what there is, so nothing is lost.
+    const size_t size = gDisk.files[diary].size(); esc(); assert(gDisk.files[diary].size() > size && gLabDiary.empty()); gLabUi.view = LabView::Rules;
+    // It goes with a question, but not with writing a rule.
+    assert(std::string(labAskContext()).find("diary, an hour a line, newest last:\nNov 02 03h: motion 0") != std::string::npos);
+    assert(std::string(labVoiceContext()).find("diary") == std::string::npos);
+    // A long file sends only its newest whole lines, and the rest of the state still fits.
+    { std::string many; for (int i = 0; i < 2000; ++i) many += "Nov 01 " + std::to_string(i) + "h: motion 1, rules fired 2, tilt 1 to 2\n"; gDisk.files[diary].assign(many.begin(), many.end()); }
+    { const std::string asked = labAskContext(); const size_t at = asked.find("newest last:\n"); assert(at != std::string::npos && asked.find("h: motion", at) != std::string::npos);
+      assert(asked.compare(at + 13, 7, "Nov 01 ") == 0 && asked.back() == '\n' && asked.find("1999h") != std::string::npos && asked.size() < 3900); }
+    // Past its limit the file starts over, and the old part is kept once.
+    { std::string big(kLabDiaryMaxBytes + 10, 'x'); gDisk.files[diary].assign(big.begin(), big.end()); gDisk.files["/lab/diary.old"] = {1}; }
+    keys("p"); run(10100); esc(); gLabUi.view = LabView::Rules; assert(gDisk.files["/lab/diary.old"].size() > kLabDiaryMaxBytes && gDisk.files[diary].size() < 300);
+    // Practice isn't what really happened, and with no clock a line can't say when.
+    gDisk.files.erase(diary); gLabDiary.clear(); keys("p"); key('t'); key(UP); run(10100); assert(gLabDiary.empty()); key('t'); gLabPractice.clear(); esc(); gLabUi.view = LabView::Rules;
+    gClockOk = false; keys("p"); run(10100); assert(gLabDiary.empty()); esc(); gLabUi.view = LabView::Rules; gClockOk = true;
+    assert(!gDisk.files.count(diary));
+    // No card: it doesn't get in the way.
+    gSdReady = false; keys("p"); run(10100); esc(); gLabUi.view = LabView::Rules; assert(std::string(labAskContext()).find("diary") == std::string::npos); gSdReady = true;
+    goToRow(gLabBook.count + 1);
   }
   // Set a part by voice: only the one on the screen, only something small, only from the Lab.
   {

@@ -129,6 +129,11 @@ test("a spoken setting never reaches anything that can switch mains", () => {
   assert.match(LAB_SET_POLICY, /relays, the lamp and the air conditioner/);
 });
 
+test("Claude is told a gap in the diary isn't the same as nothing happening", () => {
+  assert.match(LAB_HELP, /diary/);
+  assert.match(LAB_HELP, /rather than guessing/);
+});
+
 test("the wiring advice names only parts the Lab has", () => {
   for (const part of ["Ultrasonic", "ENV III", "Joystick 2", "NFC", "Mini Angle", "Light", "PIR", "2 relays", "Servo", "LED strip", "I/O hub", "1-to-3 hub"])
     assert.ok(LAB_HELP.includes(part), part);

@@ -322,7 +322,8 @@ session is locked down so that token reaches as little as possible:
   turns instead of falling back to anything else.
 - [Voice tools](VOICE-TOOLS.md) ask Claude one question at a time, in their own empty
   folder. Each has no tools, notes or project folder, even if the chat does, and no
-  transcript is kept.
+  transcript is kept. In the Lab, a question also sends what's plugged in, the readings,
+  your rules and, for Ask the Lab, about the last day of the sensor diary.
 
 If a token leaks, someone could chat in that conversation, read it and use up your
 plan limits, and change your project folder if you've set one. Generate a new token and

@@ -320,6 +320,12 @@ void testSaving(){
    uint8_t old[kFileBytes];std::memcpy(old,c,kHeaderBytes);std::memcpy(old+kHeaderBytes,c+kHeaderBytes,kOldRuleBytes);std::memcpy(old+kHeaderBytes+kOldRuleBytes,c+kHeaderBytes+kRuleBytes,kOldRuleBytes);old[3]=2;
    const size_t oldSize=kHeaderBytes+2*kOldRuleBytes+2;const uint16_t k=checksum(old,oldSize-2);old[oldSize-2]=uint8_t(k&255);old[oldSize-1]=uint8_t(k>>8);
    Book o;assert(decode(old,oldSize,o)&&o.count==2&&!std::strcmp(o.rules[1].name,"Air theremin")&&o.direct.white==Part::Knob&&o.rules[0].say[0]==0&&o.rules[1].say[0]==0);}
+  // The diary keeps an hour in a line, and only what was really read.
+  {Diary d;assert(d.empty());Inputs in;in.set(Sig::Distance,40,0);in.set(Sig::Motion,1,0);d.note(in);assert(!d.empty());in.set(Sig::Distance,12,100);d.note(in);in.set(Sig::Temperature,-3,100);d.note(in);in.lose(Sig::Distance);d.note(in);d.count(1,0);d.count(2,5);
+   char line[200];Text t(line,sizeof(line));d.write("Nov 02 03h",t);assert(!strcmp(line,"Nov 02 03h: motion 3, rules fired 5, distance 12 to 40, temperature -3 to -3\n"));
+   d.clear();assert(d.empty());Text u(line,sizeof(line));d.write("Nov 02 04h",u);assert(!strcmp(line,"Nov 02 04h: motion 0, rules fired 0\n"));
+   // The longest line fits the buffer that writes it, with every sensor live at its widest.
+   Inputs all;for(uint8_t i=0;i<kSigCount;++i)all.set(static_cast<Sig>(i),-30000,0);Diary w;w.note(all);w.count(65535,65535);char big[kDiaryLineChars];Text b(big,sizeof(big));w.write("Nov 02 03h",b);assert(big[strlen(big)-1]=='\n');}
   // A rule listens for its name: on once said, for that rule only, and off when said again.
   {Rule movie;strcpy(movie.name,"Movie time");Draft d;d.addCond("spoken","on",0);d.addSet("strip_color",240);assert(d.usable());std::memcpy(movie.cond,d.rule.cond,sizeof(movie.cond));std::memcpy(movie.action,d.rule.action,sizeof(movie.action));movie.conds=1;movie.actions=1;movie.holdMs=0;
    Rule lights=movie;strcpy(lights.name,"Lights");Rule off=movie;strcpy(off.name,"Time");Rule deaf=starterRule();strcpy(deaf.name,"Deaf");

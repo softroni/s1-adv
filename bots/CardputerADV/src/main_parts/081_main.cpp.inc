@@ -35,6 +35,11 @@ constexpr const char* kLabDir = "/lab";
 constexpr const char* kLabPath = "/lab/rules.dat";
 constexpr const char* kLabNewPath = "/lab/rules.new";
 constexpr const char* kLabSayDir = "/lab/say";
+constexpr const char* kLabDiaryPath = "/lab/diary.txt";
+constexpr const char* kLabDiaryOldPath = "/lab/diary.old";
+constexpr uint32_t kLabDiaryMs = 10000;
+constexpr size_t kLabDiaryMaxBytes = 32768;  // Well over a month.
+constexpr size_t kLabDiaryTailBytes = 1100;  // What goes with a question, about a day.
 
 void serviceLabTests();
 void labEnterView(UiMode mode);
@@ -87,6 +92,10 @@ lab::RuleState gLabStates[lab::kMaxRules];
 uint16_t gLabSaidFires[lab::kMaxRules] = {};  // How many of each rule's firings have been spoken.
 uint8_t gLabNamed = 0;             // A bit for each rule whose name has been said while playing.
 bool gLabFetchingSpeech = false;
+lab::Diary gLabDiary;
+char gLabDiaryHour[16] = "";
+uint32_t gLabDiaryMs = 0;
+uint16_t gLabDiaryMotions = 0, gLabDiaryFires = 0;  // What's already been counted.
 lab::Drive gLabDrive[lab::kOutCount];
 lab_gps::Parser gLabGps;
 bool gLabFound[lab::kUnitCount] = {};
@@ -806,6 +815,69 @@ void labSpeakNewFirings() {
   }
 }
 
+// --- The diary ---------------------------------------------------------------------------------
+// While rules play, because that's when the Lab is left watching. It's only ever read back to go
+// with a question, and the old half goes when the file gets long.
+void labDiarySave() {
+  if (gLabDiary.empty()) return;
+  char line[lab::kDiaryLineChars];
+  lab::Text text(line, sizeof(line));
+  gLabDiary.write(gLabDiaryHour, text);
+  gLabDiary.clear();
+  if (!gSdReady || !ensureDirRecursive(SD, kLabDir)) return;
+  File old = SD.open(kLabDiaryPath, "r");
+  const size_t size = old ? old.size() : 0;
+  if (old) old.close();
+  if (size > kLabDiaryMaxBytes) {
+    SD.remove(kLabDiaryOldPath);
+    SD.rename(kLabDiaryPath, kLabDiaryOldPath);
+  }
+  File file = SD.open(kLabDiaryPath, FILE_APPEND);
+  if (!file) return;
+  file.write(reinterpret_cast<const uint8_t*>(line), text.length());
+  file.close();
+}
+void labDiaryCounted() {
+  gLabDiaryMotions = gLabMotionCount;
+  gLabDiaryFires = 0;
+}
+void labDiaryNote(uint32_t now) {
+  if (now - gLabDiaryMs < kLabDiaryMs) return;
+  gLabDiaryMs = now;
+  // With no clock a line can't say when, and practice isn't what really happened.
+  if (!hasValidSystemTime() || gLabPractice.any()) return;
+  const time_t clock = time(nullptr);
+  struct tm local;
+  localtime_r(&clock, &local);
+  char hour[sizeof(gLabDiaryHour)];
+  strftime(hour, sizeof(hour), "%b %d %Hh", &local);
+  if (strcmp(hour, gLabDiaryHour) != 0) {
+    labDiarySave();
+    strcpy(gLabDiaryHour, hour);
+  }
+  uint16_t fires = 0;
+  for (uint8_t i = 0; i < gLabBook.count; ++i) fires = static_cast<uint16_t>(fires + gLabStates[i].fires);
+  gLabDiary.count(static_cast<uint16_t>(gLabMotionCount - gLabDiaryMotions), static_cast<uint16_t>(fires - gLabDiaryFires));
+  gLabDiaryMotions = gLabMotionCount;
+  gLabDiaryFires = fires;
+  gLabDiary.note(gLabInputs);
+}
+// The newest lines, starting on a whole one.
+void labDiaryTail(lab::Text& out) {
+  if (!gSdReady || !SD.exists(kLabDiaryPath)) return;
+  File file = SD.open(kLabDiaryPath, "r");
+  if (!file) return;
+  char tail[kLabDiaryTailBytes + 1];
+  const size_t size = file.size(), from = size > kLabDiaryTailBytes ? size - kLabDiaryTailBytes : 0;
+  const bool moved = file.seek(from);
+  const size_t got = moved ? file.read(reinterpret_cast<uint8_t*>(tail), size - from) : 0;
+  file.close();
+  tail[got] = '\0';
+  const char* start = from ? strchr(tail, '\n') : tail;
+  if (!start || !got) return;
+  out.add("\ndiary, an hour a line, newest last:\n").add(from ? start + 1 : start);
+}
+
 // --- The loop --------------------------------------------------------------------------------
 void labHistoryReset(lab::Sig sig) {
   gLabHistorySig = sig;
@@ -831,6 +903,7 @@ uint8_t labNamedNow() {
   return practice.live && practice.value ? 0xFF : gLabNamed;
 }
 void labStopPlaying() {
+  labDiarySave();
   gLabNamed = 0;
   gLabPlaying = false;
   gLabPaused = false;
@@ -841,6 +914,7 @@ void labPlay() {
   for (lab::RuleState& state : gLabStates) state = lab::RuleState{};
   for (uint16_t& said : gLabSaidFires) said = 0;
   gLabNamed = 0;
+  labDiaryCounted();
   gLabPractice.clear();
   labReleaseOutputs();
   gLabPlaying = true;
@@ -921,6 +995,7 @@ void serviceLab() {
   if (gLabPlaying && !gLabPaused) {
     lab::step(gLabBook.rules, gLabBook.count, gLabStates, gLabSeen, now, gLabDrive, labNamedNow());
     labSpeakNewFirings();
+    labDiaryNote(now);
     labKeepAwake(now);
   } else if (gLabPlaying) {
     labDriveClear();
