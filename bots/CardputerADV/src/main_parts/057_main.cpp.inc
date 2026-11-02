@@ -82,54 +82,88 @@ void drawWeatherPlaceEditor() {
   const uint16_t accent = rgb565_local(47, 227, 255);
   const uint16_t field = TFT_BLACK;
   const uint16_t white = TFT_WHITE;
-  d.fillRoundRect(14, 30, 212, 80, 8, panel);
-  d.drawRoundRect(14, 30, 212, 80, 8, accent);
+  d.fillRect(0, 23, 240, 112, field);  // Rows peeking around the box would look like part of it.
+  d.fillRoundRect(14, 26, 212, 92, 8, panel);
+  d.drawRoundRect(14, 26, 212, 92, 8, accent);
   d.setFont(&fonts::Font2);
   d.setTextColor(accent);
-  d.setCursor(24, 35);
+  d.setCursor(24, 30);
   d.print("Weather city");
-  d.fillRoundRect(22, 54, 196, 22, 5, field);
+  d.fillRoundRect(22, 48, 196, 22, 5, field);
   d.setTextColor(white);
-  d.setCursor(28, 57);
+  d.setCursor(28, 51);
   d.print(tailUtf8ToFit(gPlaceDraft + "_", 184));
   d.setFont(&fonts::Font0);
   d.setTextColor(rgb565_local(182, 219, 255));
-  d.setCursor(24, 83);
+  d.setCursor(24, 76);
   d.print("Add the state, like Salem, MA");
-  d.setCursor(24, 95);
+  d.setCursor(24, 88);
   d.print(fitCurrentFontToWidth("Now: " + gDeviceSettings.weatherPlace, 192));
+  d.setCursor(24, 104);
+  d.print("Enter save  Esc cancel");
   d.setFont(&fonts::Font2);
 }
 
 void renderSettingsUi() {
-  drawCardHeader(currentSettingsTitle(), 0x7BEF);
   auto& d = gCanvas;
-  uint8_t count = currentSettingsItemCount();
+  constexpr int16_t kScreenW = 240;
+  constexpr int16_t kListY = 24;
+  constexpr int16_t kRowH = 22;
+  constexpr int16_t kLeft = 8;
+  constexpr int16_t kRight = 229;
+  constexpr int kVisibleRows = 5;
+  const uint16_t black = TFT_BLACK;
+  const uint16_t white = TFT_WHITE;
+  const uint16_t accent = rgb565_local(203, 216, 226);
+  const uint16_t valueInk = rgb565_local(47, 227, 255);
+  const uint16_t muted = rgb565_local(109, 109, 85);
+  const uint16_t scrollTrack = rgb565_local(36, 36, 85);
+  const int count = currentSettingsItemCount();
   gSelectedSetting = clampValue<int>(gSelectedSetting, 0, count - 1);
-  constexpr int visible = 7;
-  int start = max<int>(0, min<int>(gSelectedSetting - visible / 2, static_cast<int>(count) - visible));
+
+  d.fillScreen(black);
+  d.setFont(&fonts::FreeSansBold9pt7b);
+  d.setTextColor(accent);
+  d.setCursor(kLeft, 3);
+  d.print(currentSettingsTitle());
+  d.setFont(&fonts::Font2);
+  d.setTextColor(muted);
+  const String place = String(gSelectedSetting + 1) + "/" + String(count);
+  const int16_t placeX = kRight - d.textWidth(place);
+  d.setCursor(placeX, 3);
+  d.print(place);
   d.setFont(&fonts::Font0);
-  for (int i = 0; i < visible; ++i) {
-    int idx = start + i;
-    if (idx >= count) {
-      break;
+  d.setCursor(placeX - 8 - d.textWidth("<> change"), 7);
+  d.print("<> change");
+  d.drawFastHLine(0, 22, kScreenW, accent);
+
+  const int first = max<int>(0, min<int>(gSelectedSetting - kVisibleRows / 2, count - kVisibleRows));
+  d.setFont(&fonts::FreeSansBold9pt7b);
+  for (int row = 0; row < min<int>(kVisibleRows, count); ++row) {
+    const int index = first + row;
+    const int16_t y = kListY + row * kRowH;
+    const bool selected = index == gSelectedSetting;
+    if (selected) {
+      d.fillRoundRect(1, y, 233, kRowH - 1, 6, accent);
     }
-    int y = 34 + i * 11;
-    bool selected = idx == gSelectedSetting;
-    uint16_t bg = selected ? 0x4208 : 0x0841;
-    d.fillRoundRect(14, y - 1, 212, 10, 3, bg);
-    d.setTextColor(selected ? TFT_WHITE : TFT_LIGHTGREY, bg);
-    d.setCursor(18, y + 1);
-    d.print(fitCurrentFontToWidth(settingLabel(idx), 126));
-    String value = settingValue(idx);
-    String fittedValue = fitCurrentFontToWidth(value, 72);
-    int w = d.textWidth(fittedValue);
-    d.setCursor(max<int>(144, 222 - w), y + 1);
-    d.print(fittedValue);
+    const String label = settingLabel(index);
+    d.setTextColor(selected ? black : white);
+    d.setCursor(kLeft, y + 3);
+    d.print(label);
+    // The label is the shorter and fixed one, so a long value such as a city gets cut instead.
+    const String value = fitCurrentFontToWidth(settingValue(index), kRight - kLeft - d.textWidth(label) - 10);
+    d.setTextColor(selected ? black : valueInk);
+    d.setCursor(kRight - d.textWidth(value), y + 3);
+    d.print(value);
+  }
+  if (count > kVisibleRows) {
+    const int16_t trackH = kVisibleRows * kRowH - 1;
+    const int16_t thumbH = trackH * kVisibleRows / count;
+    d.fillRect(236, kListY, 3, trackH, scrollTrack);
+    d.fillRect(236, kListY + (trackH - thumbH) * first / (count - kVisibleRows), 3, thumbH, accent);
   }
   d.setFont(&fonts::Font2);
   if (gPlaceEditing) drawWeatherPlaceEditor();
-  drawTinyFooter(0x0841, TFT_LIGHTGREY, gPlaceEditing ? "Enter save  Esc cancel" : "^v pick  <> edit  Enter OK  Esc", 16, 116, 208);
   renderLauncherOverlay();
   renderDebugOverlay();
 }

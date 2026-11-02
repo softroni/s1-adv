@@ -285,12 +285,17 @@ bool handleSettingsKey(char key) {
   if (count == 0) {
     return false;
   }
-  if (key == ',' || key == ';') {
+  // The plain arrow keys, matching Fn and the arrows: up and down pick, left and right change.
+  if (key == ';') {
     gSelectedSetting = (gSelectedSetting + count - 1) % count;
     return true;
   }
-  if (key == '.' || key == '/') {
+  if (key == '.') {
     gSelectedSetting = (gSelectedSetting + 1) % count;
+    return true;
+  }
+  if (key == ',' || key == '/') {
+    adjustCurrentSetting(key == ',' ? -1 : 1);
     return true;
   }
   if (lowerKey == 'r') {

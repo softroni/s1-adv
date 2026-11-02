@@ -58,6 +58,11 @@ available.
 If the setup screen appears because the old network is gone, press Enter on it to do all of
 this on the device. It restarts once it has joined.
 
+## Settings
+
+Press Tab and open Settings, then pick a section. Up and down move through the rows, and longer
+lists scroll. Left and right change a value, and Enter toggles it or opens it.
+
 ## Weather on Pulse
 
 When nothing is happening, the Pulse screen shows the date and the weather where the orb usually
