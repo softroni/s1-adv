@@ -291,6 +291,12 @@ for example "make it stay on longer" or "only when it's dark". Claude sees the r
 sends it back. What changed stands out and the rest is grey. Enter replaces the old rule, E walks
 through it in the steps, and Esc keeps the rule you had.
 
+**Ask the Lab** is at the bottom of the rules list, and tapping Alt on Devices, on a part's own screen
+or on the wiring screen asks it too. Claude sees what's plugged in, the live readings and your rules.
+Try "why didn't my rule fire?", "why won't the strip light up?" or "what can I make with these parts?".
+The answer shows and is read aloud. If it suggests rules you get up to three: left and right move
+between them, Enter saves the one showing, and Esc drops them all.
+
 Rules are kept on the SD card in `/lab/rules.dat`, with the hub wiring, so they survive a firmware
 install. With no card they last until the next restart.
 

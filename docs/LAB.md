@@ -231,6 +231,16 @@ Nothing happens until you've looked at it. If Claude can't make a rule from what
 
 To change a rule, pick it in the list and tap Alt, then say what should be different, like "make it stay on longer" or "only when it's dark". You see what changed before anything is saved.
 
+### Ask the Lab
+
+Stuck? Tap Alt on Devices or on a part's screen and just ask. Claude can see what's plugged in, the live readings and your rules.
+
+- "Why didn't my rule fire?"
+- "Why won't the strip light up?"
+- "What can I make with these parts?"
+
+The answer shows on the screen and is read aloud. When it suggests rules, you get up to three to choose from.
+
 ## If a part doesn't answer
 
 The Lab tells you where to look, and units reconnect by themselves.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LAB_RULE_POLICY, VOICE_TOOLS, answerVoiceTool, readVoiceContext, voiceToolMessage, voiceToolPrompt } from "./voice-tools.mjs";
+import { LAB_HELP, LAB_RULE_POLICY, VOICE_TOOLS, answerVoiceTool, readVoiceContext, voiceToolMessage, voiceToolPrompt } from "./voice-tools.mjs";
 import { extractDeviceActionsFromText, LAB_RULE_POLICY as FROM_SERVER } from "./server.mjs";
 
 const readReply = text => {
@@ -95,6 +95,23 @@ test("changing a rule can only send a rule back", () => {
   assert.deepEqual(tool.actions, ["lab.rule"]);
   assert.ok(tool.instructions.includes(LAB_RULE_POLICY));
   assert.match(tool.instructions, /changing|change/);
+});
+
+test("asking the Lab can bring rules back, and nothing else", async () => {
+  const tool = VOICE_TOOLS.get("lab.ask");
+  assert.deepEqual(tool.actions, ["lab.rule"]);
+  assert.ok(tool.instructions.includes(LAB_HELP) && tool.instructions.includes(LAB_RULE_POLICY));
+  assert.match(voiceToolPrompt(tool), /in under 35 words/, "the answer screen has room");
+  assert.match(voiceToolPrompt(VOICE_TOOLS.get("lab.rule")), /in under 15 words/);
+  const rules = [1, 2, 3].map(n => ({ type: "lab.rule", ...RULE, name: `Idea ${n}` }));
+  const answer = await answerVoiceTool("lab.ask", "what can I make", {
+    ask: async () => `Three ideas. ${marker([...rules, { type: "ota.apply" }])}`, readReply });
+  assert.deepEqual(answer.device_actions.map(action => action.name), ["Idea 1", "Idea 2", "Idea 3"]);
+});
+
+test("the wiring advice names only parts the Lab has", () => {
+  for (const part of ["Ultrasonic", "ENV III", "Joystick 2", "NFC", "Mini Angle", "Light", "PIR", "2 relays", "Servo", "LED strip", "I/O hub", "1-to-3 hub"])
+    assert.ok(LAB_HELP.includes(part), part);
 });
 
 test("a provider that can't answer beside the chat says so", async () => {

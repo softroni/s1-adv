@@ -12,6 +12,7 @@ struct VoiceTool {
 const VoiceTool kVoiceTools[] = {
     {"lab.rule", labSayOnScreen, labSayAnswered, labVoiceContext},
     {"lab.change", labChangeOnScreen, labChangeAnswered, labVoiceContext},
+    {"lab.ask", labAskOnScreen, labAskAnswered, labVoiceContext},
 };
 
 const VoiceTool* gVoiceTool = nullptr;  // Who this recording is for. Nobody means the chat.

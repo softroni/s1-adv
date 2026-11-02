@@ -27,7 +27,7 @@ enum class LabView : uint8_t { Devices, Device, PickPort, Wiring, Rules, Wizard,
 enum class LabStep : uint8_t { Sig, Op, Value, MoreConds, Join, Out, How, OutValue, Source, MoreActions, Hold, Name };
 
 // What a recording in the Lab is for, which sets the words on the screen around it.
-enum class LabVoice : uint8_t { NewRule, Change };
+enum class LabVoice : uint8_t { NewRule, Change, Ask };
 
 struct LabUi {
   LabView view = LabView::Devices;
@@ -40,8 +40,9 @@ struct LabUi {
   bool practicing = false;
   int practiceCond = 0;
   LabVoice voice = LabVoice::NewRule;
-  bool sayFailed = false;
-  String sayNote, sayHeard;  // What to show when no rule came back.
+  LabView sayBack = LabView::Rules;  // Where Esc goes from the Say screen.
+  bool sayFailed = false;            // There's an answer to show, or a reason there isn't one.
+  String sayNote, sayHeard;
   // The test screens.
   int servoAngle = 90, stripHue = 200, stripBright = 40, stripLed = 0, ledHue = 120, toneHz = 880;
   bool sweeping = false, sweepUp = true, ledOn = false, relays[2] = {false, false};
@@ -65,7 +66,11 @@ struct LabWizard {
   LabTrail trail[kLabTrailSteps];
   uint8_t depth = 0;
 } gLabWizard;
-lab::Rule gLabOffer;            // A rule from Claude, waiting for Enter.
+constexpr int kLabOffers = 3;   // One to pick from, for "what can I build?".
+lab::Rule gLabOffer;            // The rule from Claude being shown, waiting for Enter.
+lab::Rule gLabOffers[kLabOffers];
+int gLabOfferCount = 0, gLabOfferAt = 0;
+bool gLabOfferBatch = false;    // These arrived together, so they're choices, not replacements.
 int gLabOfferChanges = -1;      // The saved rule it would replace, or -1 for a new one.
 int gLabOfferNext = -1;         // What the next offer replaces. Only a change sets this.
 
@@ -323,7 +328,7 @@ void renderLabDevices() {
     else d.drawCircle(227, y + 10, 3, dot);
   }
   labScrollBar(gLabUi.devTop, kLabListRows, lab::kDevCount, kLabListY, kLabListRows * kLabRowH - 1);
-  labKeys(String(kLabArrowUpDown) + " pick  ENTER open  W hub wiring");
+  labKeys(String(kLabArrowUpDown) + " pick ENTER open W wiring ALT ask");
 }
 
 // --- A sensor's screen -------------------------------------------------------------------------
@@ -718,11 +723,11 @@ void renderLabDevice() {
 }
 
 // --- Rules list --------------------------------------------------------------------------------
-int labRuleRows() { return gLabBook.count < lab::kMaxRules ? gLabBook.count + 3 : gLabBook.count; }
+int labRuleRows() { return gLabBook.count < lab::kMaxRules ? gLabBook.count + 4 : gLabBook.count; }
 void renderLabRules() {
   auto& d = gCanvas;
   labHead("Rules", launcher_icons::kFlow, kLabLime, String(int(gLabBook.count)) + " SAVED", gLabSaved ? kLabSoft : kLabAmber);
-  static constexpr const char* kExtras[3] = {"+ New rule", "Say a rule", "Recipes"};
+  static constexpr const char* kExtras[4] = {"+ New rule", "Say a rule", "Recipes", "Ask the Lab"};
   const int rows = labRuleRows();
   for (int row = 0; row < min(kLabListRows, rows); ++row) {
     const int i = gLabUi.ruleTop + row;
@@ -758,14 +763,31 @@ void renderLabRecipes() {
   labTextAt(&fonts::Font0, 4, 113, lab::kRecipes[gLabUi.recipeRow].about, kLabAmber);
   labKeys(String(kLabArrowUpDown) + " pick  ENTER add  ESC back");
 }
-LabVoice labVoiceNow() { return gLabUi.view == LabView::Say ? gLabUi.voice : LabVoice::Change; }
+// The screen decides what a recording is for, so a tap of Alt needs no menu.
+LabVoice labVoiceNow() {
+  const LabUi& ui = gLabUi;
+  if (ui.view == LabView::Say) return ui.voice;
+  if (ui.view != LabView::Rules) return LabVoice::Ask;
+  if (ui.ruleRow < gLabBook.count) return LabVoice::Change;
+  return ui.ruleRow == gLabBook.count + 1 ? LabVoice::NewRule : LabVoice::Ask;
+}
+void renderLabAnswer() {
+  gCanvas.setFont(&fonts::efontCN_12);
+  const auto lines = wrapText(gLabUi.sayNote.isEmpty() ? String("Claude had nothing to say. Try asking another way.") : gLabUi.sayNote, 228);
+  for (size_t i = 0; i < lines.size() && i < 6; ++i) labTextAt(&fonts::efontCN_12, 6, 21 + static_cast<int>(i) * 14, lines[i], TFT_WHITE);
+  if (!gLabUi.sayHeard.isEmpty()) {
+    gCanvas.setFont(&fonts::efontCN_12);
+    labTextAt(&fonts::efontCN_12, 6, 108, fitCurrentFontToWidth("Heard: " + gLabUi.sayHeard, 228), kLabCyan);
+  }
+  labKeys("ALT ask again  ESC back");
+}
 void renderLabSay() {
   const LabVoice voice = labVoiceNow();
-  const bool change = voice == LabVoice::Change;
+  const bool change = voice == LabVoice::Change, ask = voice == LabVoice::Ask;
   const bool listening = voiceToolListening(), working = voiceToolWorking();
   const bool starting = voiceToolStarting();
-  const char* chip = listening ? "LISTENING" : working ? "WRITING" : starting ? "STARTING" : "READY";
-  const char* title = change ? gLabBook.rules[gLabUi.ruleRow].name : "Say a rule";
+  const char* chip = listening ? "LISTENING" : working ? (ask ? "LOOKING" : "WRITING") : starting ? "STARTING" : "READY";
+  const char* title = change ? gLabBook.rules[gLabUi.ruleRow].name : ask ? "Ask the Lab" : "Say a rule";
   labHead(title, launcher_icons::kMic, kLabLime, chip, listening ? kLabGreen : working || starting ? kLabAmber : kLabSoft);
   if (starting) {
     labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Getting ready...", TFT_WHITE);
@@ -773,16 +795,18 @@ void renderLabSay() {
     labKeys("ESC cancel");
   } else if (listening) {
     labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Listening...", kLabGreen);
-    labTextAt(&fonts::Font0, 6, 52, change ? "Say what should be different." : "Say what to watch and what to do.", kLabSoft);
+    labTextAt(&fonts::Font0, 6, 52, ask ? "Ask about your parts and rules." : change ? "Say what should be different." : "Say what to watch and what to do.", kLabSoft);
     labKeys("ALT send  ESC cancel");
   } else if (working) {
-    labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, change ? "Claude is changing it" : "Claude is writing it", TFT_WHITE);
-    labTextAt(&fonts::Font0, 6, 52, "You'll see it before it's saved.", kLabSoft);
+    labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, ask ? "Claude is looking" : change ? "Claude is changing it" : "Claude is writing it", TFT_WHITE);
+    labTextAt(&fonts::Font0, 6, 52, ask ? "It can see your parts and readings." : "You'll see it before it's saved.", kLabSoft);
     labKeys("ESC back");
   } else if (!gWifiReady || gHubHost.isEmpty()) {
     labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Needs Wi-Fi", TFT_WHITE);
     labTextAt(&fonts::Font0, 6, 52, "Claude writes this on the bridge.", kLabSoft);
     labKeys("ESC back");
+  } else if (gLabUi.sayFailed && ask) {
+    renderLabAnswer();
   } else if (gLabUi.sayFailed) {
     labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, change ? "Nothing changed" : "No rule came back", TFT_WHITE);
     gCanvas.setFont(&fonts::efontCN_12);
@@ -793,6 +817,13 @@ void renderLabSay() {
       labTextAt(&fonts::efontCN_12, 6, 96, fitCurrentFontToWidth("Heard: " + gLabUi.sayHeard, 228), kLabCyan);
     }
     labKeys("ALT try again  ESC back");
+  } else if (ask) {
+    labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "What do you want to know?", TFT_WHITE);
+    labTextAt(&fonts::Font0, 6, 52, "For example:", kLabSoft);
+    labTextAt(&fonts::Font0, 6, 63, "\"Why didn't my rule fire?\"", kLabCyan);
+    labTextAt(&fonts::Font0, 6, 74, "\"What can I make with these parts?\"", kLabCyan);
+    labTextAt(&fonts::Font0, 6, 85, "\"Why won't the strip light up?\"", kLabCyan);
+    labKeys("ALT talk  ESC back");
   } else {
     labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Tell Claude what you want", TFT_WHITE);
     labTextAt(&fonts::Font0, 6, 52, "For example:", kLabSoft);
@@ -810,7 +841,8 @@ void renderLabOffer() {
   const lab::Rule& rule = gLabOffer;
   // A change greys out what stayed the same, so what's different is what stands out.
   const lab::Rule* was = gLabOfferChanges >= 0 && gLabOfferChanges < gLabBook.count ? &gLabBook.rules[gLabOfferChanges] : nullptr;
-  labHead(was ? "Claude changed this" : "Claude wrote this", launcher_icons::kFlow, kLabLime, rule.conds > 1 ? (rule.any ? "ANY" : "ALL") : "", kLabSoft);
+  const String chip = gLabOfferCount > 1 ? String(gLabOfferAt + 1) + " OF " + String(gLabOfferCount) : String(rule.conds > 1 ? (rule.any ? "ANY" : "ALL") : "");
+  labHead(was ? "Claude changed this" : "Claude wrote this", launcher_icons::kFlow, kLabLime, chip, kLabSoft);
   int y = 20;
   gCanvas.setFont(&fonts::Font2);
   for (uint8_t i = 0; i < rule.conds; ++i, y += 15) {
@@ -822,7 +854,7 @@ void renderLabOffer() {
     labTextAt(&fonts::Font2, 6, y, fitCurrentFontToWidth(labActionText(rule.action[i]), 228), same ? kLabMuted : kLabLime);
   }
   labTextAt(&fonts::Font0, 6, 117, String("Name: ") + rule.name, kLabMuted);
-  labKeys("ENTER save  E edit  ESC drop it");
+  labKeys(gLabOfferCount > 1 ? String(kLabArrowLeftRight) + " next  ENTER save  E edit  ESC drop" : String("ENTER save  E edit  ESC drop it"));
 }
 
 // --- The steps -----------------------------------------------------------------------------------
@@ -1392,6 +1424,12 @@ void labStartPlaying() {
   labPlay();
   gLabUi.view = LabView::Play;
 }
+void labOpenSay(LabVoice voice) {
+  gLabUi.sayFailed = false;
+  gLabUi.voice = voice;
+  gLabUi.sayBack = LabView::Rules;
+  gLabUi.view = LabView::Say;
+}
 void labRulesKey(char key, char lower, bool up, bool down, bool enter) {
   LabUi& ui = gLabUi;
   const int rows = labRuleRows();
@@ -1405,11 +1443,11 @@ void labRulesKey(char key, char lower, bool up, bool down, bool enter) {
   } else if (enter && ui.ruleRow == gLabBook.count) {
     labWizardStart(-1, nullptr);
   } else if (enter && ui.ruleRow == gLabBook.count + 1) {
-    ui.sayFailed = false;
-    ui.voice = LabVoice::NewRule;
-    ui.view = LabView::Say;
-  } else if (enter) {
+    labOpenSay(LabVoice::NewRule);
+  } else if (enter && ui.ruleRow == gLabBook.count + 2) {
     ui.view = LabView::Recipes;
+  } else if (enter) {
+    labOpenSay(LabVoice::Ask);
   } else if (key == ' ' && onRule) {
     gLabBook.rules[ui.ruleRow].on = !gLabBook.rules[ui.ruleRow].on;
     labSaveBook();
@@ -1507,20 +1545,32 @@ void labPlayKey(char key, char lower, bool left, bool right, bool up, bool down)
     if (gLabPaused) labReleaseOutputs();
   }
 }
-bool labSayOnScreen() { return labMode(gUiMode) && gLabUi.view == LabView::Say && gLabUi.voice == LabVoice::NewRule; }
-bool labOnSavedRule() { return gLabUi.ruleRow < gLabBook.count; }
-bool labChangeOnScreen() {
-  if (!labMode(gUiMode) || !labOnSavedRule()) return false;
-  return gLabUi.view == LabView::Rules || (gLabUi.view == LabView::Say && gLabUi.voice == LabVoice::Change);
+// The screens where Alt talks to Claude. The steps have keys of their own, and an offer waits for Enter.
+bool labVoiceScreen() {
+  if (!labMode(gUiMode)) return false;
+  const LabView view = gLabUi.view;
+  return view == LabView::Devices || view == LabView::Device || view == LabView::Wiring || view == LabView::Rules || view == LabView::Say;
+}
+bool labSayOnScreen() { return labVoiceScreen() && labVoiceNow() == LabVoice::NewRule; }
+bool labChangeOnScreen() { return labVoiceScreen() && labVoiceNow() == LabVoice::Change; }
+bool labAskOnScreen() { return labVoiceScreen() && labVoiceNow() == LabVoice::Ask; }
+// Several rules at once are choices. They stay in order, and the first is shown.
+bool labTakeOffers(const String& json) {
+  gLabOfferCount = 0;
+  gLabOfferBatch = true;
+  const bool offered = executeDeviceActionsJson(json);
+  gLabOfferBatch = false;
+  return offered;
 }
 // A rule changes the screen by itself. Anything else is Claude saying what it needs.
 void labRuleAnswered(const VoiceToolAnswer& answer, LabVoice voice) {
   LabUi& ui = gLabUi;
   gLabOfferNext = voice == LabVoice::Change ? ui.ruleRow : -1;
-  const bool offered = answer.ok && executeDeviceActionsJson(answer.actionsJson);
+  const bool offered = answer.ok && labTakeOffers(answer.actionsJson);
   gLabOfferNext = -1;
   if (offered) return;
   ui.voice = voice;
+  ui.sayBack = LabView::Rules;
   ui.view = LabView::Say;
   ui.sayFailed = true;
   ui.sayNote = answer.ok ? answer.reply : answer.problem;
@@ -1529,6 +1579,20 @@ void labRuleAnswered(const VoiceToolAnswer& answer, LabVoice voice) {
 }
 void labSayAnswered(const VoiceToolAnswer& answer) { labRuleAnswered(answer, LabVoice::NewRule); }
 void labChangeAnswered(const VoiceToolAnswer& answer) { labRuleAnswered(answer, LabVoice::Change); }
+// An answer shows and speaks, and Esc goes back to wherever the question came from. Asking what to
+// build brings rules instead, which go straight to being looked at.
+void labAskAnswered(const VoiceToolAnswer& answer) {
+  if (answer.ok && labTakeOffers(answer.actionsJson)) return;
+  LabUi& ui = gLabUi;
+  if (ui.view != LabView::Say) ui.sayBack = ui.view;
+  ui.voice = LabVoice::Ask;
+  ui.view = LabView::Say;
+  ui.sayFailed = true;
+  ui.sayNote = answer.ok ? answer.reply : answer.problem;
+  ui.sayHeard = answer.heard;
+  if (answer.ok && !answer.reply.isEmpty()) gQueuedVoiceReplySpeech = cleanReplyForDevice(answer.reply);
+  labRedraw();
+}
 // What Claude can't see from the words: what's plugged in, what it reads, and the rules so far.
 String labVoiceContext() {
   constexpr size_t kChars = 2800;  // A full set of rules fits, and a header this size is fine.
@@ -1551,6 +1615,7 @@ String labVoiceContext() {
     if (reading.live) text.add(" ").add(lab::kSigs[i].key).add("=").add(reading.value);
   }
   text.add(gLabPlaying ? "\nrules are playing" : "\nrules are not playing");
+  if (gLabUi.view == LabView::Device) text.add("\nlooking at the test screen for: ").add(lab::kDevNames[gLabUi.devRow]);
   for (uint8_t i = 0; i < gLabBook.count; ++i) {
     const lab::Rule& rule = gLabBook.rules[i];
     text.add("\nrule ").add(i + 1).add(rule.on ? "" : " (switched off)");
@@ -1562,7 +1627,10 @@ String labVoiceContext() {
 }
 // A rule from Claude waits here until someone presses Enter, because rules can switch mains.
 void labOfferRule(const lab::Rule& rule) {
-  gLabOffer = rule;
+  if (!gLabOfferBatch) gLabOfferCount = 0;
+  if (gLabOfferCount < kLabOffers) gLabOffers[gLabOfferCount++] = rule;
+  gLabOfferAt = 0;
+  gLabOffer = gLabOffers[0];
   gLabOfferChanges = gLabOfferNext;
   if (!labMode(gUiMode)) setUiMode(UiMode::LabRules);
   labStopPlaying();
@@ -1638,7 +1706,10 @@ bool handleLabKey(char key, const Keyboard_Class::KeysState& keys) {
       if (enter && gWifiReady && !gSubmitting && !gThinking) toggleVoiceByTap();
       break;
     case LabView::Offer:
-      if (lower == 'e') {
+      if ((left || right) && gLabOfferCount > 1) {
+        gLabOfferAt = (gLabOfferAt + (right ? 1 : gLabOfferCount - 1)) % gLabOfferCount;
+        gLabOffer = gLabOffers[gLabOfferAt];
+      } else if (lower == 'e') {
         labWizardStart(gLabOfferChanges, &gLabOffer);
       } else if (enter && gLabOfferChanges >= 0 && gLabOfferChanges < gLabBook.count) {
         gLabOffer.on = gLabBook.rules[gLabOfferChanges].on;
@@ -1682,7 +1753,8 @@ bool routeLabEscape() {
       ui.view = gUiMode == UiMode::LabDevices ? LabView::Devices : LabView::Rules;
       break;
     case LabView::Wizard: labWizardBack(); break;
-    case LabView::Recipes: case LabView::Offer: case LabView::Say: ui.view = LabView::Rules; break;
+    case LabView::Recipes: case LabView::Offer: ui.view = LabView::Rules; break;
+    case LabView::Say: ui.view = ui.sayBack; break;
     default:
       if (ui.practicing) {
         ui.practicing = false;

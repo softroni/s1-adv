@@ -284,10 +284,13 @@ bool gVoiceStarting = false;
 bool voiceToolStarting() { return gVoiceStarting; }
 bool voiceToolListening() { return gRecording; }
 bool voiceToolWorking() { return gThinking; }
+String gQueuedVoiceReplySpeech;
+String cleanReplyForDevice(const String& text) { return text; }
 bool gActionsRun = false;
 const void* gActionRule = nullptr;  // Offered the way the real device action does.
+int gActionRepeats = 1;
 void offerFromAction(const void* rule);
-bool executeDeviceActionsJson(const String& json) { if (gActionRule) offerFromAction(gActionRule); return !std::string(json).empty() && gActionsRun; }
+bool executeDeviceActionsJson(const String& json) { if (gActionRule) for (int i = 0; i < gActionRepeats; ++i) offerFromAction(static_cast<const char*>(gActionRule) + 0); return !std::string(json).empty() && gActionsRun; }
 std::vector<String> wrapText(const String& raw, int) {
   std::vector<String> lines; std::string text = raw;
   for (size_t at = 0; at < text.size(); at += 38) lines.push_back(String(text.substr(at, 38).c_str()));
@@ -315,7 +318,8 @@ void setUiMode(UiMode mode) { if (labMode(gUiMode) && mode != gUiMode) stopLab()
 ''' + (parts / '081_main.cpp.inc').read_text() + (parts / '082_main.cpp.inc').read_text() + r'''
 // --- Driving it ----------------------------------------------------------------------------------
 FILE* gDump = nullptr;
-void offerFromAction(const void* rule) { labOfferRule(*static_cast<const lab::Rule*>(rule)); }
+lab::Rule gOfferSteps[4]; int gOfferStepAt = -1;
+void offerFromAction(const void* rule) { labOfferRule(gOfferStepAt >= 0 ? gOfferSteps[gOfferStepAt++] : *static_cast<const lab::Rule*>(rule)); }
 void show(const char* scene) {
   renderLabUi();
   if (!gDump) return;
@@ -722,7 +726,7 @@ void testSay() {
     gThinking = false;
     // The rule comes back to look at, and only saving replaces the old one.
     lab::Rule before = gLabBook.rules[0]; lab::Rule changed = before; changed.holdMs = 9000; changed.action[0].how = lab::How::Set; changed.action[0].value = 240;
-    gActionRule = &changed; gActionsRun = true; { VoiceToolAnswer a; a.ok = true; a.heard = "make it blue"; a.actionsJson = "[{}]"; labChangeAnswered(a); } gActionRule = nullptr; gActionsRun = false;
+    gOfferStepAt = -1; gActionRule = &changed; gActionsRun = true; { VoiceToolAnswer a; a.ok = true; a.heard = "make it blue"; a.actionsJson = "[{}]"; labChangeAnswered(a); } gActionRule = nullptr; gActionsRun = false;
     assert(gLabUi.view == LabView::Offer && gLabOfferChanges == 0); show("change-offer"); assert(gCanvas.shows("Claude changed this"));
     const int count = gLabBook.count; esc(); assert(gLabUi.view == LabView::Rules && gLabBook.count == count && gLabBook.rules[0].holdMs == before.holdMs);
     // A rule that was switched off stays off, and nothing is added.
@@ -744,6 +748,41 @@ void testSay() {
     assert(text.find("rule 1:") != std::string::npos && text.find("\"name\":\"Wave lights\"") != std::string::npos && text.find("rules are not playing") != std::string::npos);
     assert(text.find("changing rule 1") != std::string::npos);
     goToRow(gLabBook.count + 1); assert(std::string(labVoiceContext()).find("changing rule") == std::string::npos);
+  }
+  // Ask the Lab: its own row, and Alt from anywhere that isn't a saved rule.
+  {
+    goToRow(gLabBook.count + 3); show("rules-ask"); assert(gCanvas.shows("Ask the Lab") && labAskOnScreen() && !labChangeOnScreen());
+    key(ENTER); assert(gLabUi.view == LabView::Say && labAskOnScreen()); show("ask"); assert(gCanvas.shows("What do you want to know?") && gCanvas.shows("What can I make with these parts?"));
+    gRecording = true; show("ask-listening"); assert(gCanvas.shows("Ask about your parts and rules."));
+    gRecording = false; gThinking = true; show("ask-working"); assert(gCanvas.shows("Claude is looking") && gCanvas.shows("LOOKING")); gThinking = false;
+    { VoiceToolAnswer a; a.ok = true; a.heard = "why didn't my rule fire"; a.reply = "Distance is 42 cm and Wave red needs under 30. Move closer, or say change it to 50."; labAskAnswered(a); }
+    assert(std::string(gQueuedVoiceReplySpeech).find("Distance is 42") == 0); gQueuedVoiceReplySpeech = "";
+    show("ask-answer"); assert(gCanvas.shows("Distance is 42") && gCanvas.shows("Heard: why didn't my rule fire") && gCanvas.shows("ALT ask again"));
+    esc(); assert(gLabUi.view == LabView::Rules);
+    // A reason it couldn't answer shows, but nothing is read aloud.
+    gLabUi.view = LabView::Devices; assert(labAskOnScreen());
+    { VoiceToolAnswer a; a.problem = "Your Claude plan limit has been reached."; labAskAnswered(a); } assert(gLabUi.view == LabView::Say && std::string(gQueuedVoiceReplySpeech).empty());
+    renderLabUi(); assert(gCanvas.shows("Your Claude plan limit"));
+    // Esc goes back to where the question came from, here the Devices list, and asking again stays put.
+    gRecording = false; { VoiceToolAnswer a; a.ok = true; a.reply = "Again."; labAskAnswered(a); } esc(); assert(gLabUi.view == LabView::Devices); gQueuedVoiceReplySpeech = "";
+    show("devices-ask"); assert(gCanvas.shows("ALT ask"));
+    // From a part's own test screen, the question says so, and Esc goes back there.
+    labOpenDevice(Dev::Servo); assert(labAskOnScreen()); assert(std::string(labVoiceContext()).find("test screen for: Servo") != std::string::npos);
+    { VoiceToolAnswer a; a.ok = true; a.reply = "Check its port."; labAskAnswered(a); } assert(gLabUi.view == LabView::Say); esc(); assert(gLabUi.view == LabView::Device); labCloseDevice(); gQueuedVoiceReplySpeech = "";
+    // "What can I build?" brings up to three rules to pick from, and Esc drops them all.
+    gLabUi.view = LabView::Rules; goToRow(gLabBook.count + 3);
+    lab::Draft d; d.name("Idea"); d.addCond("distance", "under", 30); d.addSet("strip_color", 0);
+    gOfferSteps[0] = d.rule; std::strcpy(gOfferSteps[0].name, "First"); gOfferSteps[1] = d.rule; std::strcpy(gOfferSteps[1].name, "Second"); gOfferSteps[2] = d.rule; std::strcpy(gOfferSteps[2].name, "Third"); gOfferSteps[3] = d.rule;
+    gOfferStepAt = 0; gActionRule = gOfferSteps; gActionRepeats = 4; gActionsRun = true; { VoiceToolAnswer a; a.ok = true; a.reply = "Three ideas."; a.actionsJson = "[{}]"; labAskAnswered(a); } gActionRule = nullptr; gActionRepeats = 1; gActionsRun = false;
+    assert(gLabUi.view == LabView::Offer && gLabOfferCount == 3 && gLabOfferAt == 0 && gLabOfferChanges < 0 && std::string(gQueuedVoiceReplySpeech).empty());
+    show("ask-offers"); assert(gCanvas.shows("1 OF 3") && gCanvas.shows("Name: First") && gCanvas.shows(" next"));
+    key(RIGHT); show("ask-offers-2"); assert(gCanvas.shows("2 OF 3") && gCanvas.shows("Name: Second")); key(RIGHT); key(RIGHT); assert(gLabOfferAt == 0); key(LEFT); assert(gLabOfferAt == 2);
+    // Enter saves the one showing.
+    const int count = gLabBook.count; key(ENTER); assert(gLabBook.count == count + 1 && !std::strcmp(gLabBook.rules[count].name, "Third") && gLabUi.view == LabView::Rules);
+    key('x'); key('x'); assert(gLabBook.count == count);
+    // A rule from the chat is a single offer again, whatever came before.
+    labOfferRule(d.rule); assert(gLabOfferCount == 1); renderLabUi(); assert(!gCanvas.shows(" OF ")); esc();
+    gLabUi.view = LabView::Rules; goToRow(gLabBook.count + 1);
   }
   // With no Wi-Fi it says so instead of trying.
   key(ENTER); gWifiReady = false; show("say-offline"); assert(gCanvas.shows("Needs Wi-Fi")); { const int t = gVoiceTaps; key(ENTER); assert(gVoiceTaps == t); } gWifiReady = true; esc();
