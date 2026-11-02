@@ -83,6 +83,33 @@ void drawChatComposerPrompt(int16_t composerY, int16_t composerH, uint16_t fill,
   d.drawLine(cx + 2, cy, cx - 2, cy + 3, ink);
 }
 
+// A solid bar in the activity's colour, so the state reads from across a desk.
+void drawAssistantActivityStrip(int16_t y) {
+  auto& d = gCanvas;
+  const assistant_activity::Look look = assistant_activity::look(currentAssistantActivity());
+  const uint16_t ink = TFT_BLACK;
+  constexpr int16_t kRight = 230;
+  d.fillRoundRect(6, y, 228, 18, 6, look.accent);
+  d.drawBitmap(9, y + 1, look.icon, launcher_icons::kSize, launcher_icons::kSize, ink);
+  d.setFont(&fonts::Font2);
+  d.setTextColor(ink);
+  d.setCursor(28, y + 1);
+  d.print(look.title);
+  int16_t textEnd = kRight;
+  if (gVoiceReplyPending) {
+    const String seconds = String((millis() - gVoiceReplyPendingMs) / 1000U) + "s";
+    textEnd = kRight - d.textWidth(seconds) - 6;
+    d.setCursor(kRight - d.textWidth(seconds), y + 1);
+    d.print(seconds);
+  }
+  if (!gActivityDetail.isEmpty()) {
+    const int16_t detailX = 34 + d.textWidth(look.title);
+    d.setFont(&fonts::efontCN_12);
+    d.setCursor(detailX, y + 3);
+    d.print(fitCurrentFontToWidth(gActivityDetail, textEnd - detailX));
+  }
+}
+
 void renderChatUi() {
   auto& d = gCanvas;
   const uint16_t bg = rgb565_local(3, 7, 13);
@@ -122,7 +149,8 @@ void renderChatUi() {
   int composerH = max<int>(17 + (inputLines - 1) * 11, inputHeight + 6);
   int composerY = 135 - composerH - 13;
   int transcriptTop = showFace ? 88 : 8;
-  int transcriptBottom = composerY - (showStatus ? 14 : 4);
+  const bool activityStrip = !showFace && currentAssistantActivity() != assistant_activity::State::None;
+  int transcriptBottom = composerY - (activityStrip ? 22 : showStatus ? 14 : 4);
 
   d.setFont(&fonts::efontCN_12);
   d.setTextSize(textScale);
@@ -177,7 +205,9 @@ void renderChatUi() {
     d.fillRoundRect(railX, knobY, 3, knobH, 2, accent);
   }
 
-  if (showStatus) {
+  if (activityStrip) {
+    drawAssistantActivityStrip(composerY - 20);
+  } else if (showStatus) {
     d.setFont(&fonts::Font0);
     d.setTextColor(amber, bg);
     d.setCursor(8, composerY - 11);

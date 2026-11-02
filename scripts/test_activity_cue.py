@@ -13,7 +13,8 @@ for file, text in [
         ('001_main.cpp.inc', '#include "activity_cue.h"'),
         ('037_main.cpp.inc', 'playActivityCue(activity_cue::Cue::Sending);'),
         ('065_main.cpp.inc', 'playActivityCue(activity_cue::Cue::Thinking);'),
-        ('020_main.cpp.inc', 'playActivityCue(activity_cue::Cue::ReplyReady);'),
+        ('020_main.cpp.inc', 'activity_cue::Cue::ReplyReady : activity_cue::Cue::Loading'),
+        ('065_main.cpp.inc', 'playActivityCue(activity_cue::Cue::Speaking)'),
         ('065_main.cpp.inc', 'gPlaybackSpeech = started;'),
         ('059_main.cpp.inc', 'gPlaybackSpeech ? "SPEAK" : "PLAY"')]:
     assert text in (parts / file).read_text(), (file, text)
@@ -76,6 +77,19 @@ int main(){
  for(const Sound*s:{&send,&think,&reply}){
   assert(s->peak>800&&s->peak<3000);assert(std::abs(int(s->pcm[0]))<5&&std::abs(int(s->pcm[kN-1]))<5);
   assert(s->step<int(2*kTwoPi*988*kLevel/kRate));}
+ // Every cue, however busy: quiet, silent at both ends, no clicks, and unlike all the others.
+ const Cue all[]={Cue::Sending,Cue::Thinking,Cue::ReplyReady,Cue::Searching,Cue::Researching,Cue::Reading,Cue::Coding,
+                  Cue::Working,Cue::Building,Cue::Testing,Cue::Writing,Cue::Loading,Cue::Speaking};
+ std::vector<Sound> sounds;
+ for(Cue cue:all){
+  const Motif motif=motifFor(cue);sounds.push_back(make(cue));const Sound&s=sounds.back();
+  float top=0;for(int n=0;n<motif.count;++n){top=std::max(top,motif.hz[n]);assert(motif.hz[n]>=300&&motif.hz[n]*2<kRate);assert(motif.at[n]<0.2f);}
+  assert(motif.count>=2&&motif.count<=kMaxNotes);
+  assert(s.peak>700&&s.peak<3000);assert(std::abs(int(s.pcm[0]))<5&&std::abs(int(s.pcm[kN-1]))<5);
+  assert(s.step<int(2.2f*kTwoPi*top*kLevel/kRate));}
+ for(size_t a=0;a<sounds.size();++a)for(size_t b=a+1;b<sounds.size();++b){
+  long long gap=0;for(size_t i=0;i<kN;++i)gap+=std::abs(int(sounds[a].pcm[i])-int(sounds[b].pcm[i]));
+  assert(gap/long(kN)>40);}
  // Their shapes differ: sending climbs, a ready reply falls, and thinking is lower than both.
  const size_t a=size_t(kRate*0.002),b=size_t(kRate*0.06);
  const size_t c=size_t(kRate*0.09),d=size_t(kRate*0.15);
@@ -99,7 +113,7 @@ int main(){
  nowMs+=kSendingShowMs-1;assert(activitySending());nowMs+=1;assert(!activitySending());
  // Millis wrapping around doesn't stick it on.
  nowMs=0xfffffff0U;gTextSendUntilMs=nowMs+kSendingShowMs;assert(activitySending());nowMs+=kSendingShowMs;assert(!activitySending());
- std::cout<<"PASS activity cues: three quiet distinct sounds, speaker guards, voice and text sending labels\n";
+ std::cout<<"PASS activity cues: thirteen quiet distinct sounds, speaker guards, voice and text sending labels\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-activity-cue-') as directory:

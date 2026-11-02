@@ -20,14 +20,31 @@ export function audioTerminalReady(bufferedBytes, audioDonePending) {
   return bufferedBytes === 0 && !audioDonePending;
 }
 
-export function voiceReplyWaitMs(requested, configured, provider) {
+export function voiceReplyWaitMs(requested, configured, provider, liveStatus = false) {
   const fallback = Math.min(10000, Number(configured) || 10000);
   // The firmware asks for 1 s because an OpenClaw agent run can take minutes.
   // Claude Code answers in about that long, so honouring it would send most
   // replies to the device's 4 s inbox poll. The device waits 65 s on this request.
-  if (provider === "claude-code") return fallback;
+  if (provider === "claude-code" && !liveStatus) return fallback;
   if (typeof requested !== "string" || !/^\d+$/u.test(requested)) return fallback;
   return Math.min(fallback, Math.max(250, Number(requested)));
+}
+
+// While a turn request stays open the device can't hear anything else, because it
+// runs one TLS connection at a time. Firmware that shows live status asks for a
+// short wait, then watches held inbox polls, which end the moment anything changes.
+export const MAX_HELD_POLL_MS = 2500;
+
+export function textReplyWaitMs(requested, configured, liveStatus = false) {
+  const fallback = Number(configured) || 60000;
+  if (!liveStatus || typeof requested !== "string" || !/^\d+$/u.test(requested)) return fallback;
+  return Math.min(fallback, Math.max(250, Number(requested)));
+}
+
+// The device's read timeout is 4 s, so a held poll has to answer well before it.
+export function heldPollMs(requested) {
+  const value = Number(requested);
+  return Number.isFinite(value) ? Math.max(0, Math.min(MAX_HELD_POLL_MS, value)) : 0;
 }
 
 // OpenClaw session.message/chat.history expose the originating run in

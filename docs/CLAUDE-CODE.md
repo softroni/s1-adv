@@ -278,6 +278,19 @@ your project or send out what Claude can read. So keep secrets out of the projec
 your work pushed, and be careful with unexpected firmware updates. Using web access without
 `projectDir` is the safest setup, because there's nothing for it to change.
 
+## See what Claude is doing
+
+While Claude works, the Cardputer shows what it's doing and plays a sound for each kind of work:
+searching, reading, coding, running commands, building, testing and more. The
+[status table](CONTROLS.md#status-and-sounds) lists them all. There's nothing to set up, but both
+the bridge and the firmware have to be new enough, so restart the bridge after updating it.
+
+The bridge reads Claude's progress as it happens and answers the device's next poll as soon as
+anything changes. The device gets a short detail with each status: a search's words, a site's
+name, a file's name, or Claude's own one-line note about a command. Commands themselves and full
+web addresses never go to the device, and a file path is cut down to its name. Details stay in
+memory and aren't logged.
+
 ## Privacy and isolation
 
 Your device token is the only thing between the internet and this bridge. The

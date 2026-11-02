@@ -12,7 +12,7 @@ assert 'modeChanged && mode == UiMode::Ota' in part(24)
 assert 'gPendingOtaCheckAction = true' in part(24)
 # Executable owner/OTA tests cover the current background worker implementation.
 assert 'bool autoInboxPollAllowed()' in part(20)
-assert 'gVoiceReplyPending ? 4000U' in part(20)
+assert 'gReplyWaitLive ? kHeldPollGapMs : 4000U' in part(20) and 'gVoiceReplyPending ? replyWaitPollMs' in part(20)
 assert 'seq > gVoiceReplyAfterSeq' in part(20)
 pending=part(39).split('if (resp["pending"] | false) {',1)[1].split('gVoiceReplyPending = false;',1)[0]
 assert 'return true;' in pending and 'requestAndPlayTts(' not in pending

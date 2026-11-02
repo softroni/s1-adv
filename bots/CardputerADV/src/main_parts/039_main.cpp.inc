@@ -122,7 +122,7 @@ bool finishVoiceSubmission(bool transportOk, int statusCode, const String& respo
                           resp["firmware_job"]["request_id"] | "");
   if (resp["pending"] | false) {
     acceptPendingAssistantRequest(transcript, reply, resp["after_seq"] | 0,
-                                  resp["reply_seq"] | 0);
+                                  resp["reply_seq"] | 0, resp["activity_status"] | false);
     // Only a real semantic first reply is speech. A generic transport receipt
     // remains silent; both keep waiting for the main agent's final response.
     if ((resp["speak_reply"] | (resp["front_reply_is_agent"] | false)) && !reply.isEmpty())

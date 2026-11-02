@@ -48,9 +48,14 @@ bool consumeStoredAssistantSeq(uint32_t seq) {
 }
 
 void acceptPendingAssistantRequest(const String& transcript, const String& acknowledgement,
-                                   uint32_t afterSeq, uint32_t receiptSeq) {
+                                   uint32_t afterSeq, uint32_t receiptSeq, bool liveStatus) {
   gVoiceRequestTranscript = cleanReplyForDevice(transcript);
   gVoiceReplyPending = true;
+  gReplyWaitLive = liveStatus;
+  gReplyWaitFromText = false;
+  gActivityState = assistant_activity::State::Thinking;
+  gActivityDetail = "";
+  gActivityCueGate.reset();
   gAssistantPendingVisible = false;
   gVoiceReplyAfterSeq = afterSeq;
   gVoiceReplyPendingMs = millis();
@@ -60,7 +65,8 @@ void acceptPendingAssistantRequest(const String& transcript, const String& ackno
       ? String("Request accepted. The reply will arrive here.") : acknowledgement;
   // Persist the acknowledgement in the conversation before advancing the inbox
   // cursor. Its durable device event can then be ACKed without hiding its text.
-  appendAssistantReply(receipt);
+  // Live status already says this, on every turn, so it would only fill the chat.
+  if (!liveStatus) appendAssistantReply(receipt);
   // Do not skip an older final reply that raced this HTTP acknowledgement.
   // The ordered inbox drain advances its cursor when it sees this stored seq.
   rememberStoredAssistantSeq(receiptSeq);
@@ -76,17 +82,39 @@ void acceptPendingAssistantRequest(const String& transcript, const String& ackno
 // The assistant can work for minutes after the upload finishes. Keep saying so
 // until the reply arrives, or the device looks idle while it waits.
 void serviceReplyWaitStatus() {
-  static bool shown = false;
+  static String shown;
   if (gVoiceReplyPending && !gRecording && !gSubmitting) {
-    const String text = "Thinking... " + String((millis() - gVoiceReplyPendingMs) / 1000U) + "s";
+    const String text = String(assistant_activity::look(currentAssistantActivity()).title) + "... " +
+                        String((millis() - gVoiceReplyPendingMs) / 1000U) + "s";
     if (gStatusText != text) setStatus(text, 0);
     if (gFaceMode == FaceMode::Idle) setFaceMode(FaceMode::Thinking);
-    shown = true;
-  } else if (shown) {
-    shown = false;
-    if (gStatusText.startsWith("Thinking...")) setStatus("Ready", 0);
+    shown = text;
+  } else if (!shown.isEmpty()) {
+    if (gStatusText == shown) setStatus("Ready", 0);
+    shown = "";
     if (gFaceMode == FaceMode::Thinking && !gThinking && !gSubmitting) setFaceMode(FaceMode::Idle);
   }
+  if (!gVoiceReplyPending) {
+    gActivityState = assistant_activity::State::None;
+    gActivityDetail = "";
+    gReplyWaitLive = false;
+    gReplyWaitFromText = false;
+  }
+}
+
+// The bridge's answer to a poll. A late one must not put a status back after the reply came.
+void applyAssistantActivity(const char* state, const char* detail, uint32_t seq) {
+  using assistant_activity::State;
+  gActivitySeq = seq;
+  const State next = assistant_activity::fromWire(state);
+  if (!gVoiceReplyPending || next == State::None) return;
+  const bool changed = next != gActivityState;
+  if (!changed && gActivityDetail == detail) return;
+  gActivityState = next;
+  gActivityDetail = detail;
+  gLastRenderMs = 0;
+  if (changed && gActivityCueGate.allow(next, millis()))
+    playActivityCue(assistant_activity::look(next).cue);
 }
 
 void applyFirmwareJobState(const String& state, const String& requestId) {
@@ -119,11 +147,20 @@ bool activitySending() {
   return gSubmitting && static_cast<int32_t>(gTextSendUntilMs - millis()) > 0;
 }
 
+assistant_activity::State currentAssistantActivity() {
+  using assistant_activity::State;
+  if (gG0VoicePending || gVoiceCapturePreparing) return State::Loading;
+  if (activitySending()) return State::Sending;
+  if (gVoiceReplyPending && !gSubmitting && !gThinking && gActivityState != State::None) return gActivityState;
+  if (gSubmitting || gThinking || gVoiceReplyPending || voiceRequestBusyUi()) return State::Thinking;
+  if (gVoiceReplySpeechBusy || !gQueuedVoiceReplySpeech.isEmpty()) return State::Loading;
+  if (gPlaybackActive && gPlaybackSpeech) return State::Speaking;
+  return State::None;
+}
+
 const char* homeStatusLabel(bool updateReady) {
-  if (gG0VoicePending || gVoiceCapturePreparing) return "LOADING";
-  if (activitySending()) return "SENDING";
-  if (gSubmitting || gThinking || gVoiceReplyPending || voiceRequestBusyUi()) return "THINKING";
-  if (gVoiceReplySpeechBusy || !gQueuedVoiceReplySpeech.isEmpty()) return "LOADING";
+  const assistant_activity::State activity = currentAssistantActivity();
+  if (activity != assistant_activity::State::None) return assistant_activity::look(activity).label;
   // Voice/Realtime can intentionally pause polling for minutes. An old job
   // timestamp alone is not evidence that the Bridge connection has failed.
   const bool linkFailed = !gWifiReady || (gBridgeHttpFailed && autoInboxPollAllowed());
@@ -411,6 +448,11 @@ void serviceVoiceReplySpeech() {
     initSpeaker();
     const bool current = result->generation == gVoiceReplySpeechGeneration;
     const bool play = result->ok && current && !gRecording && !gRealtimeActive && !gPlaybackActive;
+    // The stream takes the speaker as soon as it starts, so the cue finishes first.
+    if (play && playActivityCue(activity_cue::Cue::Speaking)) {
+      const uint32_t cueStarted = millis();
+      while (M5Cardputer.Speaker.isPlaying() && millis() - cueStarted < 400U) delay(5);
+    }
     bool started = play && startPlaybackStreamFromRawPcmFile(result->path, result->sampleRate, result->bytes, "voice reply",result->fs);
     gPlaybackSpeech = started;
     logf("[VOICE][LAT] speech_http start=%u headers=%u done=%u playback_request=%u started=%d",
@@ -664,7 +706,7 @@ void beginVoiceCaptureUpload() {
       "X-Audio-Sample-Rate: " + String(kMicSampleRate) + "\r\nX-Device-Id: " + gDeviceId +
       "\r\nX-Firmware-Version: " + kAppVersion + "\r\nX-Conversation-Key: " + currentConversationKey() +
       "\r\nX-Client-Msg-Id: " + capture->turnId + "\r\nX-Turn-Id: " + capture->turnId +
-      "\r\nX-Reply-Audio: false\r\nX-Save-Reply-Audio: false\r\nX-Voice-Wait-Ms: 1000\r\n";
+      "\r\nX-Reply-Audio: false\r\nX-Save-Reply-Audio: false\r\nX-Voice-Wait-Ms: 1000\r\nX-Activity-Status: 1\r\n";
   if (!gDeviceToken.isEmpty()) headers += "Authorization: Bearer " + gDeviceToken + "\r\nX-Device-Token: " + gDeviceToken + "\r\n";
   headers += "\r\n";
   gVoiceCaptureUpload = capture; gVoiceReadyStreamed = false; gVoiceDialBusy = true;

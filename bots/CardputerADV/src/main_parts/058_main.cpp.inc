@@ -160,11 +160,17 @@ void drawHomeReadyStatus(bool updateReady, bool pressed) {
   } else if (rest) label="BREAK";
   const bool ready = strcmp(label, "READY") == 0;
   const bool linkWait = strcmp(label, "CHECK LINK") == 0;
-  const bool smallText = strlen(label) > 8;
+  const assistant_activity::State activity = currentAssistantActivity();
+  const bool showActivity = !focus && !rest && activity != assistant_activity::State::None;
+  const bool smallText = !showActivity && strlen(label) > 8;
   const int y = 103 + (pressed ? 1 : 0);
   const bool wide = strlen(label) > 7;
-  const int x = wide ? 148 : 154, w = wide ? 74 : 62;
-  const uint16_t warmOrange = rgb565_local(255,136,64);
+  d.setFont(&fonts::Font2);
+  // An activity word is the point of this screen, so the badge grows to keep it readable.
+  const int activityWidth = max<int>(62, d.textWidth(label) + 10);
+  const int x = showActivity ? 224 - activityWidth : (wide ? 148 : 154);
+  const int w = showActivity ? activityWidth : (wide ? 74 : 62);
+  const uint16_t warmOrange = showActivity ? assistant_activity::look(activity).accent : rgb565_local(255,136,64);
   const uint16_t fill = ready ? rgb565_local(7,20,26) :
       rest ? rgb565_local(7,24,19) : rgb565_local(28,15,12);
   const uint16_t accent = rest ? rgb565_local(88,240,141) :
@@ -227,16 +233,21 @@ void renderAssistantPulseChatHint() {
                                  : (realtime ? rgb565_local(96, 54, 18) : rgb565_local(42, 78, 88));
   const uint16_t text = hasInput ? rgb565_local(255,136,64)
                                  : (realtime ? rgb565_local(204, 151, 86) : rgb565_local(128, 145, 155));
-  d.fillRoundRect(10, 107, 132, 19, 7, bg);
-  d.drawRoundRect(10, 107, 132, 19, 7, edge);
+  // Leaves room for the widest activity badge beside it.
+  const int16_t boxW = processing ? 118 : 132;
+  d.fillRoundRect(10, 107, boxW, 19, 7, bg);
+  d.drawRoundRect(10, 107, boxW, 19, 7, edge);
   d.setFont(&fonts::efontCN_12);
   d.setTextColor(text, bg);
   d.setCursor(17, 112);
   if (preparing) {
     d.setFont(&fonts::Font0); d.setCursor(17,113); d.print("Loading voice...");
   }
-  else if (processing)
-    d.print(fitCurrentFontToWidth(gStatusText.isEmpty() ? String("Thinking...") : gStatusText, 116));
+  else if (processing) {
+    const String wait = gActivityDetail.isEmpty() ? (gStatusText.isEmpty() ? String("Thinking...") : gStatusText)
+        : String((millis() - gVoiceReplyPendingMs) / 1000U) + "s " + gActivityDetail;
+    d.print(fitCurrentFontToWidth(wait, boxW - 16));
+  }
   else d.print(hasInput ? tailUtf8ToFit("> " + gInputBuffer, 116) : (realtime ? "> realtime" : "> type to chat"));
 }
 

@@ -6,6 +6,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ActivityReader } from "./claude-activity.mjs";
 import { sleep, writeJsonAtomic } from "./utils.mjs";
 
 // Runs each Cardputer turn through the owner's installed, unmodified `claude`
@@ -168,7 +169,8 @@ export function recoveredConversation(messages) {
 
 export function claudeTurnArgs(settings, { appendSystemPrompt = "", sessionId = null, memoryDir = null } = {}) {
   return [
-    "-p", "--output-format", "json",
+    // Streaming is how the device learns what Claude is doing during a turn.
+    "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
     "--model", settings.model,
     "--effort", settings.effort,
     ...ISOLATION_ARGS,
@@ -184,7 +186,36 @@ export function claudeTurnArgs(settings, { appendSystemPrompt = "", sessionId = 
   ];
 }
 
-function runClaude(spawnImpl, command, args, { cwd, env, input = "", timeoutMs }) {
+// A streamed turn runs for minutes and most of its lines are thrown away, so the
+// size limit applies to one line rather than to the whole run.
+function lineReader(onLine, maxLineBytes) {
+  let pieces = [], bytes = 0, skipping = false, skipped = false;
+  const finishLine = () => {
+    if (!skipping && bytes) onLine(Buffer.concat(pieces).toString("utf8"));
+    skipped ||= skipping;
+    pieces = []; bytes = 0; skipping = false;
+  };
+  const add = piece => {
+    if (skipping) return;
+    bytes += piece.length;
+    if (bytes > maxLineBytes) { skipping = true; pieces = []; return; }
+    pieces.push(piece);
+  };
+  return {
+    write(chunk) {
+      let start = 0, end;
+      while ((end = chunk.indexOf(10, start)) !== -1) {
+        add(chunk.subarray(start, end));
+        finishLine();
+        start = end + 1;
+      }
+      if (start < chunk.length) add(chunk.subarray(start));
+    },
+    end() { finishLine(); return skipped; }
+  };
+}
+
+function runClaude(spawnImpl, command, args, { cwd, env, input = "", timeoutMs, onLine = null }) {
   return new Promise(resolve => {
     let child;
     try {
@@ -209,13 +240,15 @@ function runClaude(spawnImpl, command, args, { cwd, env, input = "", timeoutMs }
       }
       output[stream].push(chunk);
     };
-    child.stdout.on("data", collect("stdout"));
+    const lines = onLine && lineReader(onLine, MAX_OUTPUT_BYTES);
+    child.stdout.on("data", lines ? chunk => lines.write(chunk) : collect("stdout"));
     child.stderr.on("data", collect("stderr"));
     const finish = code => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       clearTimeout(escalate);
+      if (lines?.end()) overflowed = true;
       resolve({ code, timedOut, overflowed, spawnError,
         stdout: Buffer.concat(output.stdout).toString("utf8"),
         stderr: Buffer.concat(output.stderr).toString("utf8") });
@@ -252,9 +285,10 @@ function classifyFailure(detail) {
 export function parseClaudeResult({ code, stdout, stderr, timedOut, overflowed, spawnError }) {
   if (timedOut) return { category: "timeout" };
   if (spawnError) return { category: "failed" };
-  if (overflowed) return { category: "failed" };
   let result = null;
   try { result = JSON.parse(stdout); } catch {}
+  // A dropped line only matters if it was the answer.
+  if (overflowed && result?.type !== "result") return { category: "failed" };
   const sessionId = typeof result?.session_id === "string" && SESSION_ID.test(result.session_id) ? result.session_id : null;
   const text = typeof result?.result === "string" ? result.result.trim() : "";
   if (code === 0 && result?.type === "result" && result.is_error === false && text)
@@ -383,13 +417,23 @@ export class ClaudeCodeClient extends EventEmitter {
     return { runId };
   }
 
+  emitActivity(sessionKey, runId, activity) {
+    const run = this.runs.get(runId);
+    if (!run) return;
+    const shown = activity && `${activity.state}\0${activity.detail}`;
+    if (shown === run.shownActivity) return;
+    run.shownActivity = shown;
+    this.emit("activity", { sessionKey, runId, activity });
+  }
+
   async runTurn({ key, message, runId }) {
     const conversation = this.conversationKey(key);
-    let outcome = await this.invoke(key, message, this.sessions.get(conversation));
+    this.emitActivity(key, runId, { state: "thinking", detail: "" });
+    let outcome = await this.invoke(key, message, this.sessions.get(conversation), runId);
     if (outcome.category === "missing-session") {
       // Claude Code expires old transcripts. Continue in a new conversation.
       this.sessions.delete(conversation);
-      outcome = await this.invoke(key, message, null);
+      outcome = await this.invoke(key, message, null, runId);
     }
     if (outcome.sessionId) {
       this.sessions.set(conversation, outcome.sessionId);
@@ -403,6 +447,7 @@ export class ClaudeCodeClient extends EventEmitter {
     if (failed) console.warn(`[claude-code] turn failed category=${outcome.category}`);
     const text = await this.withPublishedFirmware(outcome.text || FAILURE_REPLIES[outcome.category]);
     if (text) this.emitReply(key, runId, text);
+    this.emitActivity(key, runId, null);
     this.finishRun(key, runId, failed ? "error" : "ok");
   }
 
@@ -422,16 +467,24 @@ export class ClaudeCodeClient extends EventEmitter {
     try { return recoveredConversation(this.recentMessages(key)); } catch { return ""; }
   }
 
-  async invoke(key, message, sessionId) {
+  async invoke(key, message, sessionId, runId) {
     const args = claudeTurnArgs(this.settings, { appendSystemPrompt: await this.memoryPrompt(), sessionId,
       memoryDir: this.memoryDir });
-    let tracked;
+    const activities = new ActivityReader();
+    let tracked, finalLine = "";
+    const onLine = line => {
+      let event = null;
+      try { event = JSON.parse(line); } catch { return; }
+      if (event?.type === "result") { finalLine = line; return; }
+      const activity = activities.read(event);
+      if (activity) this.emitActivity(key, runId, activity);
+    };
     const run = runClaude(this.trackedSpawn(child => { tracked = child; }), this.settings.command, args, {
       cwd: this.workspace, env: claudeEnv(this.env), input: this.restoredHistory(key, sessionId) + message,
-      timeoutMs: this.settings.turnTimeoutMs });
+      timeoutMs: this.settings.turnTimeoutMs, onLine });
     return run.then(result => {
       if (tracked) this.children.delete(tracked);
-      return parseClaudeResult(result);
+      return parseClaudeResult({ ...result, stdout: finalLine });
     });
   }
 

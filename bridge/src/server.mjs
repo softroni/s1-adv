@@ -47,7 +47,7 @@ import {
   stripMarkdownForDevice,
   stripTelegramEnvelope
 } from "./utils.mjs";
-import { CARDPUTER_EXECUTION_POLICY, voiceThinking, unwrapCardputerEnvelope, audioTerminalReady, voiceReplyWaitMs, gatewayTurnCorrelation, assistantReplyMatchesTurn } from "./turn-delivery-policy.mjs";
+import { CARDPUTER_EXECUTION_POLICY, voiceThinking, unwrapCardputerEnvelope, audioTerminalReady, voiceReplyWaitMs, textReplyWaitMs, heldPollMs, gatewayTurnCorrelation, assistantReplyMatchesTurn } from "./turn-delivery-policy.mjs";
 import { DurableTurnOutbox } from "./turn-outbox.mjs";
 import { SemanticFront, frontPrompt, FRONT_RECEIPT, validateModelRouting } from './semantic-front.mjs';
 import { decodeVoiceUpload } from "./voice-upload-codec.mjs";
@@ -3592,6 +3592,9 @@ class BridgeRuntime {
 	      ? { id: "claude-code:main", name: "Claude" }
 	      : { id: "openclaw:main", name: "OpenClaw" };
 	    this.clients = new Set();
+	    this.turnActivity = new Map();
+	    this.activitySeq = 0;
+	    this.heldPolls = new Set();
 	    this.topicBySessionKey = new Map(config.topics.map((topic) => [topic.session_key, topic]));
 	    this.bootstrapPromise = null;
     this.pendingMirrors = new Map();
@@ -3682,6 +3685,7 @@ class BridgeRuntime {
     }
     await this.store.load();
     this.upstream.on("event", (frame) => void this.handleUpstreamEvent(frame));
+    this.upstream.on("activity", (frame) => this.noteTurnActivity(frame));
     this.upstream.on("reconnected", () => {
       void this.scheduleBootstrap();
       this.turnOutbox.kick();
@@ -4367,6 +4371,7 @@ class BridgeRuntime {
     if (!queued) {
       throw new Error("ota_event_not_queued");
     }
+    this.wakeHeldPolls();
     await this.store.save();
     this.broadcast(topicKey, {
       type: "new_message",
@@ -4716,8 +4721,49 @@ class BridgeRuntime {
     });
     if (count > 0) {
       console.info(`[device-events] queued topic=${topicKey} seq=${message.seq || "-"} devices=${count}`);
+      this.wakeHeldPolls();
     }
     return count;
+  }
+
+  // In memory on purpose: after a restart no turn is running, so there's nothing to report.
+  noteTurnActivity({ sessionKey, activity }) {
+    const topic = this.topicBySessionKey.get(sessionKey);
+    if (!topic) return;
+    this.activitySeq += 1;
+    if (activity) this.turnActivity.set(topic.topic_key, activity);
+    else this.turnActivity.delete(topic.topic_key);
+    this.wakeHeldPolls();
+  }
+
+  activityForTopic(topicKey) {
+    const activity = this.turnActivity.get(topicKey);
+    return { state: activity?.state || "idle", detail: activity?.detail || "", seq: this.activitySeq };
+  }
+
+  wakeHeldPolls() {
+    for (const wake of [...this.heldPolls]) wake();
+  }
+
+  // Resolves when something changes, the time is up, or the device hangs up.
+  holdPoll(ms, res) {
+    return new Promise(resolve => {
+      const finish = () => {
+        clearTimeout(timer);
+        res.off("close", finish);
+        this.heldPolls.delete(finish);
+        resolve();
+      };
+      const timer = setTimeout(finish, ms);
+      timer.unref?.();
+      res.once("close", finish);
+      this.heldPolls.add(finish);
+    });
+  }
+
+  // Only firmware that asks gets the short wait, and only Claude Code reports activity.
+  liveStatusRequested(req) {
+    return req?.headers?.["x-activity-status"] === "1" && this.upstream instanceof ClaudeCodeClient;
   }
 
   async appendInjectedInboxMessage({ topicKey, text, senderKind = "human", senderName = "Serial smoke", source = "cardputer_inbox_inject" }) {
@@ -5064,7 +5110,8 @@ class BridgeRuntime {
       delivery_state: ack.delivery_state,
       reply_seq: 0,
       status_text: receipt,
-      inbox_hint: true
+      inbox_hint: true,
+      ...(this.liveStatusRequested(req) ? { activity_status: true } : {})
     };
   }
 
@@ -6405,16 +6452,17 @@ async function main() {
           }),
           waitForUpstream: true
         });
+        const textWaitMs = textReplyWaitMs(req.headers["x-turn-wait-ms"], config.omnibotShim.turnWaitMs, runtime.liveStatusRequested(req));
         const reply = await runtime.waitForAssistantReply(
           topic.topic_key,
           ack.seq,
-          config.omnibotShim.turnWaitMs,
+          textWaitMs,
           config.omnibotShim.turnPollMs,
           replyStartedAtMs,
           ack
         );
         if (!reply) {
-          console.info(`[turn] assistant pending topic=${topic.topic_key} client=${clientMsgId} wait=${config.omnibotShim.turnWaitMs}`);
+          console.info(`[turn] assistant pending topic=${topic.topic_key} client=${clientMsgId} wait=${textWaitMs}`);
           const receipt = await runtime.buildPendingTurnResponse({ req, device, topic, transcript: message, ack });
           json(res, receipt.pending ? 202 : 200, receipt);
           return;
@@ -6650,7 +6698,7 @@ async function main() {
           }),
           waitForUpstream: true
         });
-        const voiceWaitMs = voiceReplyWaitMs(req.headers["x-voice-wait-ms"], config.omnibotShim.voiceTurnWaitMs || config.omnibotShim.turnWaitMs, config.upstream?.provider);
+        const voiceWaitMs = voiceReplyWaitMs(req.headers["x-voice-wait-ms"], config.omnibotShim.voiceTurnWaitMs || config.omnibotShim.turnWaitMs, config.upstream?.provider, runtime.liveStatusRequested(req));
         const reply = await runtime.waitForAssistantReply(
           topic.topic_key,
           ack.seq,
@@ -6996,19 +7044,27 @@ async function main() {
         json(res, 404, { error: "not_found" });
         return;
       }
-      const items = runtime.store.listPendingDeviceEvents(device.device_id, {
+      const pendingEvents = () => runtime.store.listPendingDeviceEvents(device.device_id, {
         limit,
         topicKey,
         senderKind
-      }).map((event) => ({
-        ...event,
-        message: trimDeviceEventMessage(event.message, maxTextChars)
-      }));
+      });
+      // A held poll gives the device each status change as it happens, at about
+      // the rate of the plain 4 s poll it replaces.
+      const holdMs = heldPollMs(url.searchParams.get("wait_ms"));
+      const knownActivity = Number(url.searchParams.get("activity_seq"));
+      if (holdMs > 0 && !pendingEvents().length && knownActivity === runtime.activitySeq)
+        await runtime.holdPoll(holdMs, res);
+      if (res.destroyed) return;
       json(res, 200, {
         type: "device_events_pending",
         device_id: device.device_id,
         firmware_job: runtime.firmwareJobStatusForDevice(device),
-        items
+        activity: runtime.activityForTopic(topicKey),
+        items: pendingEvents().map((event) => ({
+          ...event,
+          message: trimDeviceEventMessage(event.message, maxTextChars)
+        }))
       });
       return;
     }

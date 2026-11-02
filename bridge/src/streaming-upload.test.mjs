@@ -57,6 +57,7 @@ async function withRoute(t, run, { maxBytes = 1024, holdStt = false } = {}) {
     async sendText(input) { calls.dispatch.push(input); return { seq: 1, client_msg_id: input.clientMsgId }; },
     async waitForAssistantReply() { return { seq: 2, content: { text: "Fixture answer." } }; },
     async buildTurnResponse({ transcript, replyText }) { return { transcript, reply: replyText }; },
+    liveStatusRequested() { return false; },
     async buildPendingTurnResponse() { throw new Error("unexpected pending path"); }
   };
   const context = vm.createContext({

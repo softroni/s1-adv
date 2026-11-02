@@ -112,6 +112,10 @@ bool applyInboxResponse(String& body, bool forcePlay, bool speak, bool quiet, bo
   if (doc["firmware_job"].is<JsonObject>())
     applyFirmwareJobState(doc["firmware_job"]["state"] | "idle",
                           doc["firmware_job"]["request_id"] | "");
+  // A bridge that stops reporting can't be holding polls either, so go back to the plain rate.
+  if (doc["activity"].is<JsonObject>())
+    applyAssistantActivity(doc["activity"]["state"] | "", doc["activity"]["detail"] | "", doc["activity"]["seq"] | 0U);
+  else gReplyWaitLive = false;
   bool found = false;
   bool firmwareNotice = false;
   bool inlineActionsAllowed = true;
@@ -165,10 +169,11 @@ bool applyInboxResponse(String& body, bool forcePlay, bool speak, bool quiet, bo
     if (voiceReplyArrived || (quiet && !forcePlay && gInboxLastFromAssistant)) {
       if(gVoiceNoticeVisible || (gUiMode!=UiMode::ChatFull && gUiMode!=UiMode::ChatFace))
         showVoiceNotice(gInboxLastText, false);
-      if (voiceReplyArrived || static_cast<int32_t>(gVoiceReplyNotifyUntilMs - millis()) > 0)
+      const bool speakReply = !gReplyWaitFromText || shouldSpeakAssistantTextReply(gInboxLastText);
+      if (speakReply && (voiceReplyArrived || static_cast<int32_t>(gVoiceReplyNotifyUntilMs - millis()) > 0))
         gQueuedVoiceReplySpeech = cleanReplyForDevice(gInboxLastText);
       if(firmwareNotice) playUpdateChime();
-      else playActivityCue(activity_cue::Cue::ReplyReady);
+      else playActivityCue(gQueuedVoiceReplySpeech.isEmpty() ? activity_cue::Cue::ReplyReady : activity_cue::Cue::Loading);
       setStatus("AI Agent replied",4000);
     }
     if (speak) {
@@ -406,7 +411,8 @@ void serviceAutoInboxPoll() {
   const uint32_t otaInterval = gUiMode == UiMode::Ota ? kOtaScreenCheckIntervalMs : kOtaAutoCheckIntervalMs;
   const bool otaDue = now - gOtaLastAutoCheckMs >= otaInterval &&
                       !gPendingOtaCheckAction && !gPendingOtaApplyAction;
-  const uint32_t interval = !gInboxAckQueue.empty() ? 250U : (gVoiceReplyPending ? 4000U : kInboxAutoPollIntervalMs);
+  const uint32_t replyWaitPollMs = gReplyWaitLive ? kHeldPollGapMs : 4000U;
+  const uint32_t interval = !gInboxAckQueue.empty() ? 250U : (gVoiceReplyPending ? replyWaitPollMs : kInboxAutoPollIntervalMs);
   if (gInboxRetryAfterMs && static_cast<int32_t>(now-gInboxRetryAfterMs)<0) return;
   // A retained ACK must never starve release discovery. Keep the ACK queued
   // and let the same worker retry it after this bounded manifest request.
@@ -426,6 +432,8 @@ void serviceAutoInboxPoll() {
     payload->url = hubBaseUrl() + "/api/cardputer/device-events/ack";
   } else {
     payload->url = hubBaseUrl() + "/api/cardputer/device-events/pending?limit=2&text_chars=1024&sender_kind=assistant&firmware_version=" + String(kAppVersion) + "&firmware_git=" + String(kBuildGitSha);
+    // The bridge holds this until something changes, so it stays under the 4 s read timeout.
+    if (gVoiceReplyPending && gReplyWaitLive) payload->url += "&wait_ms=2500&activity_seq=" + String(gActivitySeq);
   }
   startInboxNetworkRequest(std::move(payload));
 }

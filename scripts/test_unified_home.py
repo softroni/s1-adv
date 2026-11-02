@@ -32,6 +32,7 @@ code = r'''
 #include <string>
 #include <vector>
 #include "firmware_job_display.h"
+#include "assistant_activity.h"
 #include "release_delivery.h"
 using std::min;using std::max;
 struct String:std::string {
@@ -50,6 +51,9 @@ uint32_t nowMs=13000,gRecordStartMs=1000,gHomeUpdatePreviewUntilMs=0,gAssistantP
 uint32_t millis(){return nowMs;}
 String gInputBuffer,gStatusText="Sending voice...",gBootBackgroundLabel,gQueuedVoiceReplySpeech;
 bool gVoiceReplySpeechBusy=false,gPlaybackSpeech=false;
+assistant_activity::State shownActivity=assistant_activity::State::None;
+assistant_activity::State currentAssistantActivity(){return shownActivity;}
+String gActivityDetail;uint32_t gVoiceReplyPendingMs=0;const uint8_t* orbIcon=nullptr;
 firmware_job_display::State gFirmwareJobState=firmware_job_display::State::Idle;
 struct{bool clockTwelveHour=false;uint8_t minBatteryForUpdate=25;}gDeviceSettings;
 struct{int level=72;}gBatterySnapshot;
@@ -64,7 +68,7 @@ struct Canvas {
  std::vector<std::string> printed;std::vector<uint16_t> arcs;std::vector<std::vector<int>> shapes;
  void fillScreen(uint16_t){}
  template<class...T>void fillCircle(T...a){shapes.push_back({int(a)...});}template<class...T>void drawCircle(T...a){shapes.push_back({int(a)...});}
- template<class...T>void fillTriangle(T...){}template<class...T>void drawFastHLine(T...a){shapes.push_back({int(a)...});}
+ template<class...T>void fillTriangle(T...){}void drawBitmap(int,int,const uint8_t*b,int,int,uint16_t){orbIcon=b;}template<class...T>void drawFastHLine(T...a){shapes.push_back({int(a)...});}
  void fillRoundRect(int xx,int yy,int w,int h,int,uint16_t){
   shapes.push_back({xx,yy,w,h});
   if(xx==10&&yy==107)++chatRects;
@@ -82,7 +86,7 @@ void drawHomeReadyStatus(bool,bool){++badges;}
 void drawHomeBatteryStatus(int32_t){++batteries;}
 void drawAssistantPulseArc(int,int,int,int,float a,float b,uint16_t c){gCanvas.arcs.push_back(c);gCanvas.shapes.push_back({int(a*1000),int(b*1000)});}
 void renderLauncherOverlay(){}void renderDebugOverlay(){}void ensureDeviceTimezone(){}
-String fitCurrentFontToWidth(const String&s,int w){return s.substr(0,w/8);}
+String fitCurrentFontToWidth(const String&s,int w){return s.substr(0,w/6);}
 String tailUtf8ToFit(const String&s,int w){return s.substr(0,w/8);}
 uint32_t playbackProgressPct(){return 10;}uint32_t playbackRemainingMs(){return 1000;}
 String formatPlaybackMs(uint32_t){return "00:01";}
@@ -153,7 +157,7 @@ int main(){
  gRecording=false;gVoiceNoticeVisible=true;gVoiceRequestPhase=VoiceRequestPhase::Sending;
  reset();renderAssistantPulseUi();
  assert(gCanvas.clockRects==1&&gCanvas.chatRects==1&&badges==1&&batteries==1);
- assert(printed("Sending voice."));assert(!printed("AI AGENT")&&!printed("THINK"));
+ assert(printed("Sending voice..."));assert(!printed("AI AGENT")&&!printed("THINK"));
  assert(gInputBuffer=="saved draft");
  gVoiceNoticeVisible=false;gVoiceRequestPhase=VoiceRequestPhase::Accepted;
  reset();renderAssistantPulseUi();assert(badges==1&&batteries==1);

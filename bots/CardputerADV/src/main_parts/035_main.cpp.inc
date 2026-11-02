@@ -149,7 +149,7 @@ bool postRawVoiceTurn(const uint8_t* ramPayload, const String& filePath, size_t 
   headers += turnId;
   headers += "\r\nX-Turn-Id: ";
   headers += turnId;
-  headers += "\r\nX-Reply-Audio: false\r\nX-Save-Reply-Audio: false\r\nX-Voice-Wait-Ms: 1000\r\n";
+  headers += "\r\nX-Reply-Audio: false\r\nX-Save-Reply-Audio: false\r\nX-Voice-Wait-Ms: 1000\r\nX-Activity-Status: 1\r\n";
   if (!gDeviceToken.isEmpty()) {
     headers += "Authorization: Bearer ";
     headers += gDeviceToken;

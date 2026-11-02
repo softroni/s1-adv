@@ -21,13 +21,16 @@ def function(file, signature):
 
 
 code = r'''
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
 #include <string>
 #include <vector>
+using std::max;
 #include "release_delivery.h"
 #include "firmware_job_display.h"
+#include "assistant_activity.h"
 struct String:std::string {
  using std::string::string;
  String(const std::string& s):std::string(s){}
@@ -41,7 +44,8 @@ struct {bool parsed=false;String url,sha256,version;uint32_t size=0;} gOtaManife
 const char* kAppVersion="0.2.161-dev";
 bool gLauncherVisible=false,gChatCommandsVisible=false,gVoiceNoticeVisible=false;
 bool gBlockingInputPumpActive=false,gVoiceReplyPending=false,gRecording=false,gSubmitting=false,gThinking=false;
-bool gPlaybackActive=false,gRealtimeActive=false,gRealtimeDialBusy=false,gOtaApplyInProgress=false;
+bool gPlaybackActive=false,gRealtimeActive=false,gRealtimeDialBusy=false,gOtaApplyInProgress=false,gPlaybackSpeech=false;
+assistant_activity::State gActivityState=assistant_activity::State::None;
 bool gPendingOtaCheckAction=false,gPendingOtaApplyAction=false,gInboxHttpBusy=false;
 bool gVoiceDialBusy=false,gVoiceReplySpeechBusy=false,gTextTurnTaskHandle=false,sendingNow=false;
 bool activitySending(){return sendingNow;}
@@ -99,6 +103,7 @@ code += function('064_main.cpp.inc', 'bool handleHomeUpdateKey(')
 code += function('045_main.cpp.inc', 'bool handleOtaKey(')
 code += function('024_main.cpp.inc', 'void servicePendingOtaAction()')
 code += function('065_main.cpp.inc', 'void applyFirmwareJobState(')
+code += function('065_main.cpp.inc', 'assistant_activity::State currentAssistantActivity(')
 code += function('065_main.cpp.inc', 'const char* homeStatusLabel(')
 code += function('058_main.cpp.inc', 'void drawHomeReadyStatus(')
 code += function('064_main.cpp.inc', 'bool handleHomeLinkRetryKey(')

@@ -59,17 +59,34 @@ this on the device. It restarts once it has joined.
 
 ## Status and sounds
 
-The Home screen shows what the assistant is doing, and a soft sound marks most stages.
+While you wait, AI Chat and the Pulse screen show what Claude is doing right now, and each kind
+of work has its own short sound. The colour, the icon and the sound all change together. In AI
+Chat a bar above the text box also shows the detail and how long it has taken. On Pulse, the
+badge has the word, the middle of the orb has the icon, and the box at the bottom has the detail.
 
-| Status | Means | Sound |
-| --- | --- | --- |
-| SENDING | Your message is going out | Two rising notes, for typed messages. A voice message is silent here, because the speaker is off while it uploads |
-| THINKING | The assistant has your message | Two low taps |
-| LOADING | The reply's voice is downloading | The reply sound plays just before this: two falling notes |
-| SPEAK | The assistant is talking | The speech itself |
+| Status | What's happening | Detail shown | Sound |
+| --- | --- | --- | --- |
+| SENDING | Your message is going out | | Two rising notes, for typed messages. A voice message is silent here, because the speaker is off while it uploads. |
+| THINKING | Claude is working out what to do | | Two low taps |
+| SEARCHING | Searching the web | What it's searching for | A sonar ping and its echo |
+| RESEARCHING | Reading a web page | The site's name | Three steps up |
+| READING | Reading or searching your project | The file or search | Two soft taps, stepping down |
+| CODING | Editing a file | The file | Four quick key presses |
+| WORKING | Running a command | Claude's note on what it's for | A plain low-high |
+| BUILDING | Building the firmware or an app | Claude's note | Two knocks and a higher third |
+| TESTING | Running tests | Claude's note | Up, down, up |
+| WRITING | Writing the answer | | A quick soft run |
+| LOADING | The reply's voice is downloading | | Two slow notes, in place of the reply sound |
+| SPEAKING | Claude is talking | | A bright lift, then the speech |
 
-The bridge doesn't tell the device whether Claude is searching or writing code, so those all
-show as THINKING.
+A reply that won't be spoken plays two falling notes when it arrives.
+
+Claude can change tools several times a second, so a sound only plays for a real change, at most
+every 2.5 seconds, and the same one doesn't repeat for 30 seconds. Going back to THINKING between
+steps is silent. Sounds follow the notification volume.
+
+The status comes from the tools Claude really uses, so it needs the Claude Code bridge. With
+OpenClaw, or an older bridge, it stays on THINKING until the reply arrives.
 
 ## NFC Notes
 
@@ -136,7 +153,7 @@ Device Settings → Clock format switches between 12h AM/PM (default) and 24h.
 Display Settings → Text size switches chat and voice replies between Small, Medium
 and Large.
 Ordinary voice keeps the original REC graphics during capture and THINK until the
-reply arrives, with the status line counting how long the assistant has been working.
+reply arrives, with the status showing how long the assistant has been working.
 A background task stops blocking the device as soon as its receipt arrives. Holding
 G0 on Home or the clock opens AI Chat, so your words and the answer appear there as
 a conversation: yours on the right, the assistant's on the left. From another app, a

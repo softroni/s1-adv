@@ -210,6 +210,7 @@ struct TextTurnTaskResult {
   bool hasReply = false;
   bool hasDeviceActions = false;
   bool hasAudio = false;
+  bool liveStatus = false;
   bool telegramDelivered = false;
   bool pending = false;
   bool frontReplyIsAgent = false;

@@ -51,7 +51,8 @@ void processCompletedTextTurn() {
     setFaceMode(FaceMode::Error);
     setStatus("Text turn failed", 2000);
   } else if (done->ok && done->pending) {
-    acceptPendingAssistantRequest(submittedText, done->reply, done->afterSeq, done->replySeq);
+    acceptPendingAssistantRequest(submittedText, done->reply, done->afterSeq, done->replySeq, done->liveStatus);
+    gReplyWaitFromText = true;
     if (done->frontReplyIsAgent && shouldSpeakAssistantTextReply(done->reply))
       gQueuedVoiceReplySpeech = cleanReplyForDevice(done->reply);
     logf("[TEXT] async accepted receipt_seq=%u", static_cast<unsigned>(done->replySeq));

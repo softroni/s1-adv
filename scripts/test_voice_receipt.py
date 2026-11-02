@@ -53,7 +53,9 @@ std::vector<String> history;unsigned cursorAtStorage=0;
 void appendAssistantReply(String s){cursorAtStorage=gInboxLastSeq;replyText=s;history.push_back(s);}void setStatus(String,int){}
 void setVoiceDiag(String){}void setHttpDiag(String s){gLastHttpDiag=s;}
 void executeOrDeferDeviceActionsJson(String){++actions;}
-namespace activity_cue {enum class Cue {Sending,Thinking,ReplyReady};}
+#include "assistant_activity.h"
+bool gReplyWaitLive=false,gReplyWaitFromText=false;assistant_activity::State gActivityState=assistant_activity::State::None;
+String gActivityDetail;assistant_activity::CueGate gActivityCueGate;
 bool playActivityCue(activity_cue::Cue){assert(painted);++tones;return true;}
 struct HTTPClient{static String errorToString(int){return "connection";}};
 // Parsing is separately covered by bridge contract tests. Inject decoded values
@@ -130,6 +132,12 @@ int main(){
   decoded["reply"]={"Receipt only",0,false,false};
   assert(finishVoiceSubmission(true,202,"json","saved.wav",749568));
   assert(gVoiceReplyPending&&gQueuedVoiceReplySpeech.empty());
+  // With live status the receipt stays out of the chat, and the turn starts at thinking.
+  reset();history.clear();decoded["pending"]={"",0,true,false};decoded["activity_status"]={"",0,true,false};
+  decoded["reply"]={"Claude is working on it.",0,false,false};
+  assert(finishVoiceSubmission(true,202,"json","saved.wav",749568));
+  assert(gVoiceReplyPending&&gReplyWaitLive&&history.empty());
+  assert(gActivityState==assistant_activity::State::Thinking&&gVoiceRequestPhase==VoiceRequestPhase::Accepted);
   reset();decoded["speak_reply"]={"",0,true,false};decoded["reply"]={"Four.",0,false,false};
   assert(finishVoiceSubmission(true,200,"json","saved.wav",749568));
   assert(!gVoiceReplyPending&&gQueuedVoiceReplySpeech=="Four.");
@@ -183,7 +191,7 @@ int main(){
  assert(gVoiceReplyPending&&gQueuedVoiceReplySpeech=="I will check that");
  assert(gStoredAssistantSeqs.back()==33&&!gSubmitting&&!gThinking);
  // A later HTTP receipt must not advance past an unseen earlier final.
- reset();acceptPendingAssistantRequest("second","Second accepted",30,30);
+ reset();acceptPendingAssistantRequest("second","Second accepted",30,30,false);
  assert(gInboxLastSeq==20&&consumeStoredAssistantSeq(30)&&!consumeStoredAssistantSeq(29));
  assert(!consumeStoredAssistantSeq(30));
  reset();gPendingTextTurns.push_back("second");gActiveTextTurn="first";
@@ -195,7 +203,7 @@ int main(){
 with tempfile.TemporaryDirectory(prefix='s1-voice-receipt-') as directory:
     path = Path(directory)
     (path / 'test.cpp').write_text(code)
-    subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++17', '-Wall', '-Wextra',
+    subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++17', '-Wall', '-Wextra', '-I', str(Path(__file__).resolve().parents[1] / 'bots/CardputerADV/src'),
                     str(path / 'test.cpp'), '-o', str(path / 'test')], check=True)
     subprocess.run([str(path / 'test')], check=True)
 print('PASS actual voice receipt handler: pending ACK, reply, empty 2xx, invalid JSON, HTTP 503 and ambiguous transport failure on Home/chat')

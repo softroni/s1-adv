@@ -243,6 +243,9 @@ TextTurnTaskResult* performTextTurnRequest(void* arg) {
       http.addHeader("X-Conversation-Key", payload->conversationKey);
       http.addHeader("X-Client-Msg-Id", payload->clientMsgId);
       http.addHeader("X-Turn-Id", payload->turnId);
+      // Answer soon and let this connection go: only held polls can bring status while Claude works.
+      http.addHeader("X-Activity-Status", "1");
+      http.addHeader("X-Turn-Wait-Ms", "1000");
       if (!payload->deviceToken.isEmpty()) {
         http.addHeader("Authorization", "Bearer " + payload->deviceToken);
       }
@@ -280,6 +283,7 @@ TextTurnTaskResult* performTextTurnRequest(void* arg) {
           }
           result->shortText = shortText;
           result->pending = resp["pending"] | false;
+          result->liveStatus = resp["activity_status"] | false;
           result->frontReplyIsAgent = resp["front_reply_is_agent"] | false;
           result->afterSeq = resp["after_seq"] | 0;
           result->replySeq = resp["reply_seq"] | 0;

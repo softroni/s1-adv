@@ -19,7 +19,7 @@ template<class T>bool deferInternetRadioMode(T){return false;}
 #include <memory>
 #include <string>
 #include <vector>
-struct String:std::string {using std::string::string;String(const std::string&s):std::string(s){}bool isEmpty()const{return empty();}};
+struct String:std::string {using std::string::string;String(const std::string&s):std::string(s){}explicit String(uint32_t n):std::string(std::to_string(n)){}bool isEmpty()const{return empty();}};
 enum class UiMode{Home,ChatFace,Face,Hero,ChatFull,Ota,Clock,Focus,Settings,FocusSettings,ScreenSettings,WifiSettings,Nes,Sonar,RfidLab,IrRemote,NfcNotes,Tetris,KeyRush,BrainFlow,Files,Chess,Checkers,Minesweeper,Snake,AirMusic,Flappy,Balloon,BallCatch,Radio,VlcRemote};UiMode gUiMode=UiMode::Home;
 namespace brainflow {enum class Phase {Menu,Playing,Feedback,Paused,Finished};}
 struct{brainflow::Phase phase=brainflow::Phase::Menu;}gBrainFlow;
@@ -40,7 +40,8 @@ constexpr uint32_t kOtaAutoCheckIntervalMs=20000,kOtaScreenCheckIntervalMs=5000,
 constexpr const char* kFirmwareManifestFetchPath="/api/cardputer/firmware/manifest";
 constexpr const char* kAppVersion="0.2.167-dev";constexpr const char* kBuildGitSha="test";
 bool gInboxHttpBusy=false,gVoiceReplyPending=false,gPendingOtaCheckAction=false,gPendingOtaApplyAction=false,failStart=false;
-uint32_t gVoiceReplyPendingMs=0;
+uint32_t gVoiceReplyPendingMs=0,gActivitySeq=0;
+bool gReplyWaitLive=false;constexpr uint32_t kHeldPollGapMs=250;
 uint32_t millis(){return now;}void logf(const char*,...){}
 String hubBaseUrl(){return "https://bridge.invalid";}
 struct InboxHttpPayload {String url,token,eventId;bool otaManifest=false,applyAfter=false,announce=false;};
@@ -93,6 +94,18 @@ int main(){
  assert(manifestTimes.size()>=firstManifest+12);
  for(auto i=firstManifest;i<manifestTimes.size();++i)assert(manifestTimes[i]-manifestTimes[i-1]<=24000);
  gInboxAckQueue.clear();gInboxRetryAfterMs=0;
+ // A live reply wait polls again as soon as a held answer comes back, and says what it has seen.
+ const auto liveDue=[&](uint32_t gap){const auto n=dispatched.size();now+=gap;serviceAutoInboxPoll();
+  const bool sent=dispatched.size()>n;if(sent)finish();return sent;};
+ gVoiceReplyPending=true;gVoiceReplyPendingMs=now;gReplyWaitLive=true;gActivitySeq=42;
+ gOtaLastAutoCheckMs=now;assert(liveDue(250));
+ assert(dispatched.back().url.find("&wait_ms=2500&activity_seq=42")!=std::string::npos);
+ assert(!liveDue(100));assert(liveDue(150));
+ // Without live status it stays at the plain 4 s poll and never asks to be held.
+ gReplyWaitLive=false;gOtaLastAutoCheckMs=now;assert(liveDue(4000));
+ assert(dispatched.back().url.find("wait_ms")==std::string::npos);
+ gOtaLastAutoCheckMs=now;assert(!liveDue(3000));assert(liveDue(1000));
+ gVoiceReplyPending=false;
  // An idle saved draft suppresses incoming chat, never release discovery.
  gInputBuffer="unfinished draft";now=manifestTimes.back()+20000;
  serviceAutoInboxPoll();assert(manifestTimes.back()==now);finish();

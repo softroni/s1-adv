@@ -12,6 +12,7 @@
   uint16_t fg = white;
   const char* label = "READY";
   const bool realtime = state == AssistantPulseState::Realtime;
+  const assistant_activity::Look activityLook = assistant_activity::look(currentAssistantActivity());
   const char* rtPhase = gRealtimeRecording ? "MIC"
                         : gRealtimeAwaiting ? "WAIT"
                         : gPlaybackActive ? "TALK"
@@ -25,7 +26,7 @@
     fg = rgb565_local(255, 241, 239);
     label = "REC";
   } else if (state == AssistantPulseState::Thinking) {
-    c1 = amber;
+    c1 = activityLook.accent;
     c2 = cyan;
     c3 = rgb565_local(64, 52, 26);
     fg = rgb565_local(255, 248, 232);
@@ -120,6 +121,10 @@
                  cy + static_cast<int16_t>(sinf(spin * 2.4f) * 21.0f), 4, c1);
     d.fillCircle(cx + static_cast<int16_t>(cosf(spin * 2.0f + 2.1f) * 26.0f),
                  cy + static_cast<int16_t>(sinf(spin * 2.0f + 2.1f) * 23.0f), 3, c2);
+    if (state == AssistantPulseState::Thinking) {
+      d.fillCircle(cx, cy, 13, bg);
+      d.drawBitmap(cx - 8, cy - 8, activityLook.icon, launcher_icons::kSize, launcher_icons::kSize, c1);
+    }
   } else if (state == AssistantPulseState::Playback || (realtime && gPlaybackActive)) {
     d.fillCircle(cx, cy, 16, fg);
     d.fillTriangle(cx - 4, cy - 8, cx - 4, cy + 8, cx + 9, cy, bg);
