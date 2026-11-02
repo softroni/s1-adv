@@ -68,11 +68,37 @@ String settingValue(uint8_t index) {
       return gDeviceSettings.beepOnUpdate ? "on" : "off";
     case 7:
       return gDeviceSettings.clockTwelveHour ? "12h AM/PM" : "24h";
-    case kWeatherZipSetting:
-      return gZipEditing ? gZipDraft + "_" : gDeviceSettings.weatherZip;
+    case kWeatherPlaceSetting:
+      return gDeviceSettings.weatherPlace;
     default:
       return "-";
   }
+}
+
+// A city can be long, and the settings rows are small, so typing gets its own box.
+void drawWeatherPlaceEditor() {
+  auto& d = gCanvas;
+  const uint16_t panel = rgb565_local(0, 36, 85);
+  const uint16_t accent = rgb565_local(47, 227, 255);
+  const uint16_t field = TFT_BLACK;
+  const uint16_t white = TFT_WHITE;
+  d.fillRoundRect(14, 30, 212, 80, 8, panel);
+  d.drawRoundRect(14, 30, 212, 80, 8, accent);
+  d.setFont(&fonts::Font2);
+  d.setTextColor(accent);
+  d.setCursor(24, 35);
+  d.print("Weather city");
+  d.fillRoundRect(22, 54, 196, 22, 5, field);
+  d.setTextColor(white);
+  d.setCursor(28, 57);
+  d.print(tailUtf8ToFit(gPlaceDraft + "_", 184));
+  d.setFont(&fonts::Font0);
+  d.setTextColor(rgb565_local(182, 219, 255));
+  d.setCursor(24, 83);
+  d.print("Add the state, like Salem, MA");
+  d.setCursor(24, 95);
+  d.print(fitCurrentFontToWidth("Now: " + gDeviceSettings.weatherPlace, 192));
+  d.setFont(&fonts::Font2);
 }
 
 void renderSettingsUi() {
@@ -102,7 +128,8 @@ void renderSettingsUi() {
     d.print(fittedValue);
   }
   d.setFont(&fonts::Font2);
-  drawTinyFooter(0x0841, TFT_LIGHTGREY, gZipEditing ? "Type ZIP  Enter save  Esc cancel" : "^v pick  <> edit  Enter OK  Esc", 16, 116, 208);
+  if (gPlaceEditing) drawWeatherPlaceEditor();
+  drawTinyFooter(0x0841, TFT_LIGHTGREY, gPlaceEditing ? "Enter save  Esc cancel" : "^v pick  <> edit  Enter OK  Esc", 16, 116, 208);
   renderLauncherOverlay();
   renderDebugOverlay();
 }

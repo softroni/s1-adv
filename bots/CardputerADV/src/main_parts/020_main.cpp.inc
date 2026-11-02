@@ -433,7 +433,7 @@ void serviceAutoInboxPoll() {
     if (!weather) { gInboxRetryAfterMs = now + 4000U; return; }
     weather->token = gDeviceToken;
     weather->weather = true;
-    weather->url = hubBaseUrl() + "/api/cardputer/weather?zip=" + gDeviceSettings.weatherZip;
+    weather->url = hubBaseUrl() + "/api/cardputer/weather?place=" + urlEncodePathSegment(gDeviceSettings.weatherPlace);
     gWeatherSchedule.retrySoon(now);  // Until the answer comes, nothing asks again.
     startInboxNetworkRequest(std::move(weather));
     return;
@@ -466,9 +466,9 @@ void applyWeatherResponse(int code, const String& body) {
   }
   gWeatherSchedule.asked(now);
   if (code != 200) {
-    if (body.indexOf("unknown_zip") >= 0) {
+    if (body.indexOf("unknown_place") >= 0) {
       gWeather = WeatherReport();
-      gWeatherNote = "Check your ZIP";
+      gWeatherNote = "Check your city";
     } else if (!gWeather.valid) gWeatherNote = "No weather yet";
     logf("[WEATHER] http=%d", code);
     return;

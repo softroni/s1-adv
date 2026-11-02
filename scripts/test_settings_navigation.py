@@ -24,7 +24,7 @@ source=(p/'004_main.cpp.inc').read_text()
 for marker in ['struct LauncherSubItem {','struct LauncherGroup {','constexpr LauncherGroup kLauncherGroups']:
  code+=block(source,marker)
 code+=r'''
-UiMode gUiMode=UiMode::Home,lastHub=UiMode::Home;bool gLauncherVisible=false;bool gZipEditing=false;int gSelectedSetting=0,adjusted=0;
+UiMode gUiMode=UiMode::Home,lastHub=UiMode::Home;bool gLauncherVisible=false;bool gPlaceEditing=false;int gSelectedSetting=0,adjusted=0;
 int currentSettingsItemCount(){return 11;}
 void adjustCurrentSetting(int d){adjusted+=d;}
 void setUiMode(UiMode m){gUiMode=m;}

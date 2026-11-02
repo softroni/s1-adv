@@ -197,8 +197,8 @@ void loadDeviceSettings() {
   gDeviceSettings.notificationVolumePct = static_cast<uint8_t>(gPrefs.getUChar("vol_notif", kDefaultNotificationVolumePct));
   gDeviceSettings.updateChannel = gPrefs.getString("fw_chan", "dev");
   gDeviceSettings.audioLanguage = gPrefs.getString("aud_lang", "en");
-  gDeviceSettings.weatherZip = gPrefs.getString("wx_zip", weather_view::kDefaultZip);
-  if (!weather_view::validZip(gDeviceSettings.weatherZip.c_str())) gDeviceSettings.weatherZip = weather_view::kDefaultZip;
+  gDeviceSettings.weatherPlace = gPrefs.getString("wx_place", weather_view::kDefaultPlace);
+  if (!weather_view::validPlace(gDeviceSettings.weatherPlace.c_str())) gDeviceSettings.weatherPlace = weather_view::kDefaultPlace;
   // The menu can change between firmware versions, so what's saved is only a suggestion.
   gLauncherSelection = min<int>(gPrefs.getUChar("menu_group", 0), kLauncherGroupCount - 1);
   gLauncherSubSelection = min<int>(gPrefs.getUChar("menu_item", 0), kLauncherGroups[gLauncherSelection].count - 1);
@@ -244,7 +244,7 @@ void saveDeviceSettings() {
   gPrefs.putUChar("vol_notif", gDeviceSettings.notificationVolumePct);
   gPrefs.putString("fw_chan", gDeviceSettings.updateChannel);
   gPrefs.putString("aud_lang", gDeviceSettings.audioLanguage);
-  gPrefs.putString("wx_zip", gDeviceSettings.weatherZip);
+  gPrefs.putString("wx_place", gDeviceSettings.weatherPlace);
   gPrefs.end();
 }
 

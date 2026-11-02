@@ -68,8 +68,12 @@ Weather loads about 30 seconds after the device starts and connects, then every 
 refresh fails, the last weather stays on screen and the device tries again in 2 minutes. Once a
 refresh has been missed, the bottom line changes to "As of" and the time it was last updated.
 
-To change the place, press Tab, open Settings, then Device, and pick **Weather ZIP**. Press Enter,
-type the 5-digit US ZIP code, and press Enter again. The default is 10001.
+To change the place, press Tab, open Settings, then Device, and pick **Weather city**. Press Enter,
+type the city and press Enter again. The default is Salem, MA.
+
+Add the state, like `Salem, MA` or `Salem, Massachusetts`, because many towns share a name. Without one
+you get the largest town with that name. US places only, and a state that has no such town shows
+"Check your city" rather than another state's weather.
 
 ## Status and sounds
 

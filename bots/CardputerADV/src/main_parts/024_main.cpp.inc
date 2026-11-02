@@ -345,7 +345,7 @@ void setUiMode(UiMode mode) {
     applyDisplayBrightness();
   }
   gLauncherVisible = false;
-  gZipEditing = false;
+  gPlaceEditing = false;
   if (mode != UiMode::Tetris) {
     gTetrisHelpVisible = false;
   }

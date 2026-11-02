@@ -46,7 +46,7 @@ uint32_t millis(){return now;}void logf(const char*,...){}
 String hubBaseUrl(){return "https://bridge.invalid";}
 struct InboxHttpPayload {String url,token,eventId;bool otaManifest=false,applyAfter=false,announce=false,weather=false;};
 #include "weather_view.h"
-weather_view::Schedule gWeatherSchedule;
+weather_view::Schedule gWeatherSchedule;String urlEncodePathSegment(const String&){return "Salem%2C%20MA";}
 std::vector<InboxHttpPayload> dispatched;std::vector<uint32_t> manifestTimes;
 bool startInboxNetworkRequest(std::unique_ptr<InboxHttpPayload> p){assert(!gInboxHttpBusy);if(failStart)return false;gInboxHttpBusy=true;
  if(p->otaManifest)manifestTimes.push_back(now);dispatched.push_back(*p);gLastInboxAutoPollMs=now;return true;}
@@ -57,7 +57,7 @@ using std::max;
 bool gVoiceNoticeVisible=false,gScreenOffActive=false,gScreensaverActive=false,gScreensaverDimmed=false,gPendingRestart=false;
 uint32_t gScreensaverStartedMs=0;
 UiMode gScreensaverPreviousMode=UiMode::Home;
-struct{uint8_t screensaverTimeoutMin=1,screenOffAfterMin=5,screensaverDimAfterMin=1;bool screensaverEnabled=false,screenAutoOffEnabled=false;String weatherZip="10001";}gDeviceSettings;
+struct{uint8_t screensaverTimeoutMin=1,screenOffAfterMin=5,screensaverDimAfterMin=1;bool screensaverEnabled=false,screenAutoOffEnabled=false;String weatherPlace="Salem, MA";}gDeviceSettings;
 void applyDisplayBrightness(){}void enterScreensaver(){gScreensaverActive=true;}
 '''
 for sig in ['bool screensaverMayRun()', 'void markUserActivity()', 'void serviceIdleScreensaver()']:
@@ -112,7 +112,7 @@ int main(){
  gVoiceReplyPending=false;
  // Weather: asked for as soon as it may, with the saved ZIP, and on a schedule from then on.
  gOtaLastAutoCheckMs=now;gWeatherSchedule.reset();assert(liveDue(1));
- assert(dispatched.back().weather&&dispatched.back().url.find("/api/cardputer/weather?zip=10001")!=std::string::npos);
+ assert(dispatched.back().weather&&dispatched.back().url.find("/api/cardputer/weather?place=Salem%2C%20MA")!=std::string::npos);
  gOtaLastAutoCheckMs=now;assert(!gWeatherSchedule.due(now));
  // It waits for a live reply and for queued receipts, and an unsent draft doesn't hold it back.
  gWeatherSchedule.reset();gVoiceReplyPending=true;gReplyWaitLive=true;gOtaLastAutoCheckMs=now;

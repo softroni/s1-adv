@@ -348,25 +348,29 @@ test("the weather route answers the device, and only the device", async t => {
   const services = createHttpServer((req, res) => {
     seen.push(req.url);
     res.setHeader("content-type", "application/json");
-    if (req.url.startsWith("/zip/99999")) { res.statusCode = 404; return res.end("{}"); }
-    if (req.url.startsWith("/zip/")) return res.end(JSON.stringify({ places: [{ "place name": "Salem", latitude: "42.52", longitude: "-70.90" }] }));
+    const name = new URL(req.url, "http://x").searchParams.get("name");
+    if (name === "Nowhereville") return res.end("{}");
+    if (name) return res.end(JSON.stringify({ results: [
+      { name: "Salem", admin1: "North Carolina", latitude: 35.1, longitude: -84, feature_code: "PPLA2", population: 1615 },
+      { name: "Salem", admin1: "Massachusetts", latitude: 42.519, longitude: -70.897, feature_code: "PPL", population: 20610 }] }));
     res.end(JSON.stringify({ current: { temperature_2m: 70, apparent_temperature: 71, relative_humidity_2m: 50, weather_code: 0, is_day: 1, wind_speed_10m: 4 },
       daily: { temperature_2m_max: [78], temperature_2m_min: [60], precipitation_probability_max: [10] } }));
   });
   await new Promise(resolve => services.listen(0, "127.0.0.1", resolve));
   t.after(() => services.close());
   const url = `http://127.0.0.1:${services.address().port}`;
-  const bridge = await startBridge(t, fake, { weather: { zipUrl: `${url}/zip/`, forecastUrl: `${url}/forecast` } });
-  const get = (zip, headers = { authorization: bridge.authorization }) =>
-    fetch(`${bridge.base}/api/cardputer/weather?zip=${zip}`, { headers });
-  const good = await get("10001");
+  const bridge = await startBridge(t, fake, { weather: { geocodeUrl: `${url}/geocoding`, forecastUrl: `${url}/forecast` } });
+  const get = (place, headers = { authorization: bridge.authorization }) =>
+    fetch(`${bridge.base}/api/cardputer/weather?place=${encodeURIComponent(place)}`, { headers });
+  const good = await get("Salem, MA");
   assert.equal(good.status, 200);
-  assert.deepEqual(await good.json(), { zip: "10001", place: "Salem", condition: "Sunny", icon: "sun",
+  assert.deepEqual(await good.json(), { place: "Salem", condition: "Sunny", icon: "sun",
     temp: 70, feels: 71, humidity: 50, wind: 4, high: 78, low: 60, rain: 10 });
-  assert.equal((await get("10001", {})).status, 401);
-  assert.equal((await get("abc")).status, 400);
+  assert.ok(seen.some(item => item.includes("latitude=42.519")), "the Massachusetts town, not the first one listed");
+  assert.equal((await get("Salem, MA", {})).status, 401);
+  assert.equal((await get("<script>")).status, 400);
   assert.equal(seen.length, 2, "a bad request reaches no service");
-  const unknown = await get("99999");
+  const unknown = await get("Nowhereville");
   assert.equal(unknown.status, 404);
-  assert.match(await unknown.text(), /unknown_zip/u);
+  assert.match(await unknown.text(), /unknown_place/u);
 });

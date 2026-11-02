@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise weather on the Pulse screen: when it's asked for, what happens to the answer, and the ZIP setting."""
+"""Exercise weather on the Pulse screen: when it's asked for, what happens to the answer, and the city setting."""
 from pathlib import Path
 import os
 import subprocess
@@ -24,9 +24,17 @@ def function(signature):
 
 pulse = function('void renderAssistantPulseUi()')
 assert 'if (state == AssistantPulseState::Ready && !working) {\n    drawHomeWeather();' in pulse, 'the orb still shows while anything is happening'
-assert 'kDeviceSettingsItemCount = 9;' in joined and 'kWeatherZipSetting = 8;' in joined
-assert 'gPrefs.getString("wx_zip", weather_view::kDefaultZip)' in joined and 'gPrefs.putString("wx_zip", gDeviceSettings.weatherZip)' in joined
-assert 'if (!weather_view::validZip(gDeviceSettings.weatherZip.c_str())) gDeviceSettings.weatherZip = weather_view::kDefaultZip;' in joined
+assert 'kDeviceSettingsItemCount = 9;' in joined and 'kWeatherPlaceSetting = 8;' in joined
+assert 'gPrefs.getString("wx_place", weather_view::kDefaultPlace)' in joined and 'gPrefs.putString("wx_place", gDeviceSettings.weatherPlace)' in joined
+assert 'if (!weather_view::validPlace(gDeviceSettings.weatherPlace.c_str())) gDeviceSettings.weatherPlace = weather_view::kDefaultPlace;' in joined
+# A comma and a space have to survive the trip to the bridge.
+assert '"/api/cardputer/weather?place=" + urlEncodePathSegment(gDeviceSettings.weatherPlace)' in joined
+# Typed keys go to the box ahead of every shortcut, as with a Wi-Fi password, or "s" would save settings.
+typing = function('void handleTypingKey(')
+assert typing.index('if (gPlaceEditing && !gLauncherVisible && !keys.tab) {') < typing.index('handleFocusShortcut(lowerKey,keys)')
+assert 'if(!isSettingsMode(gUiMode) || gLauncherVisible || gPlaceEditing) return false;' in joined, 'arrows must not move rows behind the box'
+assert 'if (gPlaceEditing && !gLauncherVisible) {\n    gPlaceEditing = false;\n    return true;' in joined, 'Esc must only close the box'
+assert 'if (gPlaceEditing) drawWeatherPlaceEditor();' in joined
 
 code = r'''
 #include <cassert>
@@ -43,6 +51,7 @@ using std::min;using std::max;
 struct String:std::string{using std::string::string;String()=default;String(const std::string&s):std::string(s){}
  explicit String(int n):std::string(std::to_string(n)){}
  bool isEmpty()const{return empty();}size_t length()const{return size();}void remove(size_t at){erase(at);}
+ void trim(){const auto a=find_first_not_of(' ');if(a==npos){clear();return;}const auto b=find_last_not_of(' ');*this=String(substr(a,b-a+1));}
  int indexOf(const char*s)const{auto p=find(s);return p==npos?-1:int(p);}
  String operator+(const char*o)const{return String(std::string(*this)+o);}String operator+(const String&o)const{return String(std::string(*this)+std::string(o));}};
 String operator+(const char*a,const String&b){return String(std::string(a)+std::string(b));}
@@ -54,8 +63,8 @@ const uint16_t TFT_WHITE=0xffff;
 constexpr uint16_t rgb565_local(int r,int g,int b){return ((r&0xf8)<<8)|((g&0xfc)<<3)|(b>>3);}
 struct WeatherReport{bool valid=false;int temp=0,high=0,low=0,rain=0;Icon icon=Icon::Cloud;String condition,place;char updated[10]="";uint32_t receivedMs=0;};
 WeatherReport gWeather;String gWeatherNote="Getting weather";Schedule gWeatherSchedule;
-bool gZipEditing=false;String gZipDraft;int saves=0;std::string statusText;
-struct{String weatherZip="10001";bool clockTwelveHour=true;}gDeviceSettings;
+bool gPlaceEditing=false;String gPlaceDraft;int saves=0;std::string statusText;
+struct{String weatherPlace="Salem, MA";bool clockTwelveHour=true;}gDeviceSettings;
 void saveDeviceSettings(){++saves;}void setStatus(const String&s,int){statusText=s;}void logf(const char*,...){}
 namespace clock_display{void format(char*p,size_t n,int,int,bool){snprintf(p,n,"6:30 PM");}}
 // The parts of ArduinoJson this uses, reading a fake document.
@@ -76,19 +85,28 @@ struct Canvas{int x=0,y=0,font=2;std::vector<Text> printed;int fills=0;
  void fillRect(int a,int b,int w,int h,uint16_t){check(a,b,w,h);++fills;}void drawCircle(int a,int b,int r,uint16_t){check(a-r,b-r,2*r,2*r);}
 }gCanvas;
 String fitCurrentFontToWidth(const String&s,int w){return String(s.substr(0,size_t(w/6)));}
-''' + function('void applyWeatherResponse(') + function('bool handleZipEditKey(') + function('void drawHomeWeather()') + r'''
+''' + function('void applyWeatherResponse(') + function('bool handlePlaceEditKey(') + function('void drawHomeWeather()') + r'''
 bool printed(const char*t){for(auto&p:gCanvas.printed)if(p.s==t)return true;return false;}
-void type(const char*keys){for(;*keys;++keys)handleZipEditKey(*keys);}
+void type(const char*keys){for(;*keys;++keys)handlePlaceEditKey(*keys);}
 int main(){
- // ZIPs.
- assert(validZip("10001")&&validZip("00501"));
- for(const char*bad:{"1000","100011","1000a",""," 1000"})assert(!validZip(bad));assert(!validZip(nullptr));
- // Pictures and colours.
- std::set<const uint8_t*> pictures;std::set<int> tints;
+ // Places.
+ assert(std::string(kDefaultPlace)=="Salem, MA"&&validPlace(kDefaultPlace));
+ for(const char*good:{"Salem","St. Louis, MO","O'Fallon, IL","Winston-Salem","New York","10001"})assert(validPlace(good));
+ for(const char*bad:{"","a"," Salem",",MA","123","Sal;em","x<y","a/b"})assert(!validPlace(bad));
+ assert(!validPlace(nullptr));assert(!validPlace(std::string(kMaxPlaceChars+1,'a').c_str()));
+ // Pictures: full size, more than one colour, and colours the 8-bit canvas shows unchanged.
+ std::set<const void*> pictures;std::set<int> tints;std::set<char> known;
  for(const char*name:{"sun","moon","partly","cloud","fog","rain","snow","storm"}){
-  Icon icon=iconFromWire(name);pictures.insert(bitmap(icon));uint16_t c=tint(icon);
-  tints.insert(((c>>8)&0xE0)|((c>>6)&0x1C)|((c>>3)&0x03));assert(c!=0);}
- assert(pictures.size()==8&&tints.size()>=6);
+  Icon icon=iconFromWire(name);const char*const*rows=picture(icon);pictures.insert(rows);std::set<char> used;
+  for(int r=0;r<16;++r){assert(std::string(rows[r]).size()==16);for(int c=0;c<16;++c)if(rows[r][c]!='.'){used.insert(rows[r][c]);known.insert(rows[r][c]);}}
+  assert(used.size()>=2);uint16_t t=tint(icon);
+  tints.insert(((t>>8)&0xE0)|((t>>6)&0x1C)|((t>>3)&0x03));assert(t!=0);}
+ assert(pictures.size()==8&&tints.size()>=6&&known.size()==9);
+ std::set<uint16_t> inks;for(char name:known)inks.insert(ink(name));assert(inks.size()==known.size());
+ // The 8-bit canvas keeps three bits of red and green and two of blue. Each colour comes back
+ // unchanged from that, so what's drawn here is what's on screen.
+ const auto wide=[](int v){return (((v<<3)+v)<<2)+(v>>1);};
+ for(uint16_t c:inks){assert(color(wide(c>>13),wide((c>>8)&7),((c>>3)&3)*0x55)==c);}
  assert(iconFromWire("hail")==Icon::Cloud&&iconFromWire(nullptr)==Icon::Cloud);
 
  // After boot it's due at once, and then not for 30 minutes.
@@ -114,8 +132,8 @@ int main(){
  // An older bridge has no such route, and that isn't a fault with the ZIP.
  gWeather=WeatherReport();gWeatherNote="";applyWeatherResponse(404,"{\"error\":\"not_found\"}");assert(gWeatherNote=="No weather yet");
  // A ZIP that doesn't exist says where to fix it, and drops the old place's weather.
- applyWeatherResponse(200,"{}");applyWeatherResponse(404,"{\"error\":\"unknown_zip\"}");
- assert(!gWeather.valid&&gWeatherNote=="Check your ZIP");
+ applyWeatherResponse(200,"{}");applyWeatherResponse(404,"{\"error\":\"unknown_place\"}");
+ assert(!gWeather.valid&&gWeatherNote=="Check your city");
  // Time unknown: still shows, without a made-up time.
  clockNow=5;applyWeatherResponse(200,"{}");assert(std::string(gWeather.updated).empty());clockNow=1800000000;
 
@@ -136,19 +154,23 @@ int main(){
  gWeather=WeatherReport();gWeatherNote="Getting weather";gCanvas=Canvas();clockNow=5;drawHomeWeather();
  assert(gCanvas.printed.size()==1&&gCanvas.printed[0].s=="Getting weather");clockNow=1800000000;
 
- // Typing a ZIP: digits only, five at most, and every other key is ignored.
- gZipEditing=true;gZipDraft="";type("7a5;0.");assert(gZipDraft=="750");
- handleZipEditKey('\b');assert(gZipDraft=="75");type("0123456");assert(gZipDraft=="75012");
- // Too short can't be saved.
- gZipDraft="100";int before=saves;handleZipEditKey('\n');assert(gZipEditing&&saves==before&&gDeviceSettings.weatherZip=="10001");
- assert(statusText=="A ZIP has 5 digits");
- // Saving a new one fetches straight away and clears the old place.
- applyWeatherResponse(200,"{}");gZipDraft="10001";handleZipEditKey('\n');
- assert(!gZipEditing&&gDeviceSettings.weatherZip=="10001"&&saves==before+1&&!gWeather.valid&&gWeatherSchedule.due(nowMs));
- // The same ZIP changes nothing.
- applyWeatherResponse(200,"{}");gZipEditing=true;gZipDraft="10001";before=saves;handleZipEditKey('\n');
- assert(!gZipEditing&&saves==before&&gWeather.valid&&!gWeatherSchedule.due(nowMs));
- std::cout<<"PASS weather: schedule, failures keep the last report, ZIP entry, panel bounds\n";
+ // Typing a city: capitals, spaces and commas are text, and anything else is ignored.
+ gPlaceEditing=true;gPlaceDraft="";type("Bos;ton, M<A");assert(gPlaceDraft=="Boston, MA");
+ handlePlaceEditKey('\b');assert(gPlaceDraft=="Boston, M");handlePlaceEditKey('A');
+ gPlaceDraft="";for(int i=0;i<60;++i)handlePlaceEditKey('a');assert(gPlaceDraft.size()==kMaxPlaceChars);
+ // Keys that are shortcuts elsewhere are just letters here.
+ gPlaceDraft="";int before=saves;type("rstzx");assert(gPlaceDraft=="rstzx"&&saves==before&&gPlaceEditing);
+ // Nothing usable can't be saved, and it says what's wanted.
+ gPlaceDraft="   ";handlePlaceEditKey('\n');assert(gPlaceEditing&&saves==before&&gDeviceSettings.weatherPlace=="Salem, MA");
+ assert(statusText=="Type a city, like Salem, MA");
+ // Saving a new one trims it, fetches straight away and clears the old place.
+ applyWeatherResponse(200,"{}");gPlaceDraft="  Boston, MA ";handlePlaceEditKey('\n');
+ assert(!gPlaceEditing&&gDeviceSettings.weatherPlace=="Boston, MA"&&saves==before+1&&!gWeather.valid&&gWeatherSchedule.due(nowMs));
+ assert(gWeatherNote=="Getting weather");
+ // The same city changes nothing.
+ applyWeatherResponse(200,"{}");gPlaceEditing=true;gPlaceDraft="Boston, MA";before=saves;handlePlaceEditKey('\n');
+ assert(!gPlaceEditing&&saves==before&&gWeather.valid&&!gWeatherSchedule.due(nowMs));
+ std::cout<<"PASS weather: schedule, failures keep the last report, city entry, colour pictures, panel bounds\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-weather-') as directory:

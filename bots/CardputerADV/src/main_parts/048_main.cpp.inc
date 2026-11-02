@@ -23,6 +23,11 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
     handleWifiSettingsKey(key, keys);
     return;
   }
+  // The same for a city's name, which uses the letters and commas that are shortcuts elsewhere.
+  if (gPlaceEditing && !gLauncherVisible && !keys.tab) {
+    handlePlaceEditKey(key);
+    return;
+  }
   if (gUiMode==UiMode::BrainFlow &&
       (keys.tab || (keys.ctrl && (lowerKey=='l'||lowerKey=='r'||lowerKey=='v')))) pauseBrainFlow();
   setKeyDiag(String("key=") + String(static_cast<int>(key)));

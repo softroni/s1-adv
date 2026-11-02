@@ -294,9 +294,9 @@ memory and aren't logged.
 ## Weather
 
 The bridge fetches the weather for the Pulse screen, because the device only trusts one root
-certificate. It sends your ZIP code to [Zippopotam.us](https://zippopotam.us) to find the place,
-and that place's coordinates to [Open-Meteo](https://open-meteo.com) for the forecast. Neither
-needs a key, and they aren't told anything else. Restart the bridge after updating it.
+certificate. It sends the city in your settings to [Open-Meteo](https://open-meteo.com) to find
+the place, then that place's coordinates to get the forecast. No key is needed. Restart the bridge
+after updating it.
 
 ## Privacy and isolation
 

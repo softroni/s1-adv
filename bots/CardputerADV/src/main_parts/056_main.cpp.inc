@@ -337,8 +337,8 @@ String settingLabel(uint8_t index) {
       return "OTA beep";
     case 7:
       return "Clock format";
-    case kWeatherZipSetting:
-      return "Weather ZIP";
+    case kWeatherPlaceSetting:
+      return "Weather city";
     default:
       return "-";
   }

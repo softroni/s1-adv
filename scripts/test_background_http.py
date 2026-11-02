@@ -137,7 +137,7 @@ int main(){
  assert(gCanvasSpriteActive&&loanCount==0);
  // Weather failing says nothing about the bridge: no link warning, no retry storm.
  gInboxAckQueue.clear();gBridgeHttpFailed=false;gInboxRetryAfterMs=0;responseCode=503;
- auto wx=std::make_unique<InboxHttpPayload>();wx->url="https://bridge.invalid/api/cardputer/weather?zip=10001";wx->weather=true;
+ auto wx=std::make_unique<InboxHttpPayload>();wx->url="https://bridge.invalid/api/cardputer/weather?place=Salem";wx->weather=true;
  assert(startInboxNetworkRequest(std::move(wx)));complete();
  assert(weatherCode==503&&!gBridgeHttpFailed&&gInboxRetryAfterMs==0&&!gInboxHttpBusy);
  // Execute actual manifest completion: Ctrl+U installs a newly discovered

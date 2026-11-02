@@ -242,12 +242,12 @@ void drawHomeWeather() {
     return;
   }
   // Doubled, because a 16 px picture is lost next to the temperature.
-  const uint8_t* icon = weather_view::bitmap(gWeather.icon);
-  const uint16_t tint = weather_view::tint(gWeather.icon);
+  const char* const* picture = weather_view::picture(gWeather.icon);
   for (int16_t row = 0; row < 16; ++row)
     for (int16_t col = 0; col < 16; ++col)
-      if (icon[row * 2 + (col >> 3)] & (0x80 >> (col & 7)))
-        d.fillRect(kLeft + col * 2, 30 + row * 2, 2, 2, tint);
+      if (picture[row][col] != '.')
+        d.fillRect(kLeft + col * 2, 30 + row * 2, 2, 2, weather_view::ink(picture[row][col]));
+  const uint16_t tint = weather_view::tint(gWeather.icon);
   const String temp(gWeather.temp);
   d.setFont(&fonts::Font4);
   d.setTextColor(white);

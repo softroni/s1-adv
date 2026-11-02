@@ -250,7 +250,7 @@ struct FocusSettings {
 };
 
 struct DeviceSettings {
-  String weatherZip = weather_view::kDefaultZip;
+  String weatherPlace = weather_view::kDefaultPlace;
   bool autoUpdateFirmware = false;
   bool checkUpdatesOnBoot = true;
   bool beepOnUpdate = true;

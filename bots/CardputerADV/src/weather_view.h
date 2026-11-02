@@ -1,163 +1,166 @@
 #pragma once
 // What the Pulse screen needs to show the weather, and when to ask for it. Nothing here touches
-// hardware. The bridge does the asking, so the device only needs its own ZIP code.
+// hardware. The bridge does the asking, so the device only needs the name of a place.
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
 namespace weather_view {
-constexpr const char* kDefaultZip = "10001";
+constexpr const char* kDefaultPlace = "Salem, MA";
+constexpr size_t kMaxPlaceChars = 32;
 constexpr uint32_t kRefreshMs = 30UL * 60UL * 1000UL;
 constexpr uint32_t kRetryMs = 2UL * 60UL * 1000UL;
 
 enum class Icon : uint8_t { Sun, Moon, Partly, Cloud, Fog, Rain, Snow, Storm };
 
-// 16x16 one-bit pictures, drawn at twice that size. Same layout as launcher_icons.h.
-constexpr uint8_t kSun[32] = {
-    0b00000001, 0b10000000,
-    0b00000001, 0b10000000,
-    0b00100000, 0b00000100,
-    0b00010011, 0b11001000,
-    0b00000111, 0b11100000,
-    0b00001111, 0b11110000,
-    0b00001111, 0b11110000,
-    0b11001111, 0b11110011,
-    0b11001111, 0b11110011,
-    0b00001111, 0b11110000,
-    0b00001111, 0b11110000,
-    0b00000111, 0b11100000,
-    0b00010011, 0b11001000,
-    0b00100000, 0b00000100,
-    0b00000001, 0b10000000,
-    0b00000001, 0b10000000,
+// 16x16 pictures, drawn at twice that size. Each letter is a colour from ink(), and a dot is
+// see-through, so the rows are the picture and can be edited directly.
+constexpr const char* kSun[16] = {
+    ".......OO.......",
+    ".......OO.......",
+    "..O..........O..",
+    "...O..YYYY..O...",
+    ".....YYYYYY.....",
+    "....YYWWYYYY....",
+    "....YWWYYYYY....",
+    "OO..YYYYYYYO..OO",
+    "OO..YYYYYYYO..OO",
+    "....YYYYYYOO....",
+    "....YYYYYOOO....",
+    ".....YYOOOO.....",
+    "...O..OOOO..O...",
+    "..O..........O..",
+    ".......OO.......",
+    ".......OO.......",
 };
-constexpr uint8_t kMoon[32] = {
-    0b00000000, 0b00000000,
-    0b00000001, 0b11110000,
-    0b00000111, 0b11000000,
-    0b00001111, 0b10000000,
-    0b00011111, 0b00000000,
-    0b00011111, 0b00000000,
-    0b00111111, 0b00000000,
-    0b00111111, 0b00000000,
-    0b00111111, 0b00000001,
-    0b00111111, 0b10000011,
-    0b00011111, 0b11110110,
-    0b00011111, 0b11111110,
-    0b00001111, 0b11111100,
-    0b00000011, 0b11110000,
-    0b00000000, 0b00000000,
-    0b00000000, 0b00000000,
+constexpr const char* kMoon[16] = {
+    ".......PPPP.....",
+    ".....PPPP.....W.",
+    "....PPPP........",
+    "...PPPP.....W...",
+    "...PPPP.........",
+    "..PPPPP.........",
+    "..PPPPP....W....",
+    "..PPPPP.........",
+    "..PPPPPP.......Y",
+    "..YPPPPPP.....PY",
+    "...YPPPPPPPPPPY.",
+    "...YYPPPPPPPPYY.",
+    "....YYYPPPPYY...",
+    "......YYYYYY....",
+    "................",
+    "................",
 };
-constexpr uint8_t kPartly[32] = {
-    0b00000000, 0b00000000,
-    0b00000000, 0b00100000,
-    0b00001000, 0b00000010,
-    0b00000001, 0b11100000,
-    0b00000011, 0b11110000,
-    0b00100011, 0b11110110,
-    0b00000011, 0b11110000,
-    0b00000001, 0b11100000,
-    0b00000000, 0b00000000,
-    0b00001111, 0b11100000,
-    0b00111111, 0b11110000,
-    0b01111111, 0b11111110,
-    0b11111111, 0b11111111,
-    0b11111111, 0b11111111,
-    0b01111111, 0b11111110,
-    0b00000000, 0b00000000,
+constexpr const char* kPartly[16] = {
+    ".........O......",
+    "....O........O..",
+    ".......YYYY.....",
+    "......YYYYYY....",
+    "..O..YYYYYYYY.OO",
+    ".....YYYYYYYY...",
+    "......YYYYYYO...",
+    ".....WWWWYYYO.O.",
+    "...WWWWWWWWYO...",
+    "..WWWWWWWWWWWWW.",
+    ".WWWWWWWWWWWWWWW",
+    "WWWWWWWWWWWWWWWW",
+    "LLLLLLLLLLLLLLLL",
+    "LLLLLLLLLLLLLLLL",
+    ".GGGGGGGGGGGGGG.",
+    "................",
 };
-constexpr uint8_t kCloud[32] = {
-    0b00000000, 0b00000000,
-    0b00000000, 0b00000000,
-    0b00000000, 0b00000000,
-    0b00000011, 0b11000000,
-    0b00001111, 0b11110000,
-    0b00011111, 0b11111000,
-    0b00111111, 0b11111000,
-    0b01111111, 0b11111110,
-    0b11111111, 0b11111111,
-    0b11111111, 0b11111111,
-    0b11111111, 0b11111111,
-    0b11111111, 0b11111111,
-    0b01111111, 0b11111110,
-    0b00000000, 0b00000000,
-    0b00000000, 0b00000000,
-    0b00000000, 0b00000000,
+constexpr const char* kCloud[16] = {
+    "................",
+    "................",
+    "................",
+    "......WWWW......",
+    "....WWWWWWWW....",
+    "...WWWWWWWWWW...",
+    "..WWWWWWWWWWW...",
+    ".WWWWWWWWWWWWWW.",
+    "WWWWWWWWWWWWWWWW",
+    "WWWWWWWWWWWWWWWW",
+    "LLLLLLLLLLLLLLLL",
+    "LLLLLLLLLLLLLLLL",
+    ".GGGGGGGGGGGGGG.",
+    "................",
+    "................",
+    "................",
 };
-constexpr uint8_t kFog[32] = {
-    0b00000000, 0b00000000,
-    0b00000000, 0b00000000,
-    0b00000000, 0b00000000,
-    0b00011111, 0b11111000,
-    0b01111111, 0b11111110,
-    0b00000000, 0b00000000,
-    0b11111111, 0b11111111,
-    0b00000000, 0b00000000,
-    0b00111111, 0b11111100,
-    0b00000000, 0b00000000,
-    0b11111111, 0b11111111,
-    0b00000000, 0b00000000,
-    0b00001111, 0b11110000,
-    0b00000000, 0b00000000,
-    0b00000000, 0b00000000,
-    0b00000000, 0b00000000,
+constexpr const char* kFog[16] = {
+    "................",
+    "................",
+    "...LLLLLLLLLL...",
+    ".LLLLLLLLLLLLLL.",
+    "................",
+    "GGGGGGGGGGGGGGGG",
+    "................",
+    "..WWWWWWWWWWWW..",
+    "................",
+    "GGGGGGGGGGGGGGGG",
+    "................",
+    "....LLLLLLLL....",
+    "................",
+    "................",
+    "................",
+    "................",
 };
-constexpr uint8_t kRain[32] = {
-    0b00000000, 0b00000000,
-    0b00000000, 0b00000000,
-    0b00000111, 0b11000000,
-    0b00011111, 0b11110000,
-    0b00111111, 0b11111000,
-    0b01111111, 0b11111110,
-    0b11111111, 0b11111111,
-    0b11111111, 0b11111111,
-    0b01111111, 0b11111110,
-    0b00000000, 0b00000000,
-    0b00010001, 0b00010000,
-    0b00100010, 0b00100000,
-    0b00100010, 0b00100000,
-    0b01000100, 0b01000000,
-    0b00000000, 0b00000000,
-    0b00000000, 0b00000000,
+constexpr const char* kRain[16] = {
+    "................",
+    ".....WWWWW......",
+    "...WWWWWWWWW....",
+    "..WWWWWWWWWWW...",
+    ".LLLLLLLLLLLLLL.",
+    "LLLLLLLLLLLLLLLL",
+    "GGGGGGGGGGGGGGGG",
+    ".GGGGGGGGGGGGGG.",
+    "................",
+    "...B...B...B....",
+    "...B...B...B....",
+    "..C...C...C.....",
+    "..B...B...B.....",
+    ".B...B...B......",
+    ".B...B...B......",
+    "................",
 };
-constexpr uint8_t kSnow[32] = {
-    0b00000000, 0b00000000,
-    0b00000111, 0b11000000,
-    0b00011111, 0b11110000,
-    0b00111111, 0b11111000,
-    0b01111111, 0b11111110,
-    0b11111111, 0b11111111,
-    0b11111111, 0b11111111,
-    0b01111111, 0b11111110,
-    0b00000000, 0b00000000,
-    0b00110001, 0b10001100,
-    0b00110001, 0b10001100,
-    0b00000000, 0b00000000,
-    0b00000110, 0b00110000,
-    0b00000110, 0b00110000,
-    0b00000000, 0b00000000,
-    0b00000000, 0b00000000,
+constexpr const char* kSnow[16] = {
+    "................",
+    ".....WWWWW......",
+    "...WWWWWWWWW....",
+    "..WWWWWWWWWWW...",
+    ".WWWWWWWWWWWWWW.",
+    "LLLLLLLLLLLLLLLL",
+    "LLLLLLLLLLLLLLLL",
+    ".GGGGGGGGGGGGGG.",
+    "................",
+    "..C....C....C...",
+    ".CWC..CWC..CWC..",
+    "..C....C....C...",
+    "................",
+    ".....C....C.....",
+    "....CWC..CWC....",
+    ".....C....C.....",
 };
-constexpr uint8_t kStorm[32] = {
-    0b00000000, 0b00000000,
-    0b00000111, 0b11000000,
-    0b00011111, 0b11110000,
-    0b00111111, 0b11111000,
-    0b01111111, 0b11111110,
-    0b11111111, 0b11111111,
-    0b11111111, 0b11111111,
-    0b01111111, 0b11111110,
-    0b00000001, 0b11000000,
-    0b00000011, 0b10000000,
-    0b00000111, 0b11000000,
-    0b00000001, 0b10000000,
-    0b00000011, 0b00000000,
-    0b00000100, 0b00000000,
-    0b00000000, 0b00000000,
-    0b00000000, 0b00000000,
+constexpr const char* kStorm[16] = {
+    "................",
+    ".....GGGGG......",
+    "...GGGGGGGGG....",
+    "..GGGGGGGGGGG...",
+    ".GGGGGGGGGGGGGG.",
+    "DDDDDDDDDDDDDDDD",
+    "DDDDDDDDDDDDDDDD",
+    ".DDDDDYYYDDDDDD.",
+    "......YYY.......",
+    ".....YYY........",
+    "....YYYYYY......",
+    "......YYO.......",
+    ".....YYO........",
+    ".....YO.........",
+    "....YO..........",
+    "................",
 };
 
-inline const uint8_t* bitmap(Icon icon) {
+inline const char* const* picture(Icon icon) {
   switch (icon) {
     case Icon::Sun: return kSun;
     case Icon::Moon: return kMoon;
@@ -175,6 +178,22 @@ constexpr uint16_t color(uint8_t r, uint8_t g, uint8_t b) {
   return static_cast<uint16_t>(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
 }
 
+// Exact 8-bit colours, so what's drawn here is what the canvas shows.
+inline uint16_t ink(char name) {
+  switch (name) {
+    case 'Y': return color(255, 219, 0);
+    case 'O': return color(255, 146, 0);
+    case 'P': return color(255, 255, 170);
+    case 'B': return color(0, 146, 255);
+    case 'C': return color(0, 255, 255);
+    case 'L': return color(182, 219, 255);
+    case 'G': return color(146, 146, 170);
+    case 'D': return color(73, 73, 85);
+    default: return color(255, 255, 255);
+  }
+}
+
+// The colour for words beside the picture.
 inline uint16_t tint(Icon icon) {
   switch (icon) {
     case Icon::Sun: case Icon::Partly: return color(255, 210, 64);
@@ -199,11 +218,24 @@ inline Icon iconFromWire(const char* name) {
   return Icon::Cloud;
 }
 
-inline bool validZip(const char* zip) {
-  if (!zip || strlen(zip) != 5) return false;
-  for (int i = 0; i < 5; ++i)
-    if (zip[i] < '0' || zip[i] > '9') return false;
-  return true;
+inline bool placeChar(char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+         c == ' ' || c == ',' || c == '.' || c == '\'' || c == '-';
+}
+
+// The bridge decides whether a place exists. This only stops what could never be one.
+inline bool validPlace(const char* place) {
+  if (!place) return false;
+  const size_t length = strlen(place);
+  if (length < 2 || length > kMaxPlaceChars || place[0] == ' ' || place[0] == ',' || place[0] == '.' ||
+      place[0] == '\'' || place[0] == '-') return false;
+  int letters = 0, digits = 0;
+  for (size_t i = 0; i < length; ++i) {
+    if (!placeChar(place[i])) return false;
+    letters += (place[i] >= 'a' && place[i] <= 'z') || (place[i] >= 'A' && place[i] <= 'Z');
+    digits += place[i] >= '0' && place[i] <= '9';
+  }
+  return letters >= 2 || digits >= 5;
 }
 
 // Asks as soon as it can after boot, then every 30 minutes. A failed attempt tries again sooner.

@@ -25,10 +25,11 @@ struct WeatherReport {
 WeatherReport gWeather;
 String gWeatherNote = "Getting weather";
 weather_view::Schedule gWeatherSchedule;
-bool gZipEditing = false;
-String gZipDraft;
+bool gPlaceEditing = false;
+String gPlaceDraft;
 void applyWeatherResponse(int code, const String& body);
 void saveLauncherSelection();
+bool handlePlaceEditKey(char key);
 void toggleVoiceByTap();
 bool gVoiceCapturePreparing = false;
 uint32_t gG0VoiceRequestedMs = 0;
