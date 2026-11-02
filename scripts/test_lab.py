@@ -343,6 +343,7 @@ void testSaving(){
    Rule blank=movie;blank.name[0]=0;assert(spokenRule("anything",&blank,1)==-1);
    // Only saying it or not saying it makes sense.
    Draft e;e.addCond("spoken","changes",0);assert(!e.ok);Draft f;f.addCond("spoken","over",1);assert(!f.ok);
+   Draft g;g.addFollow("servo","spoken",false);assert(!g.ok);  // A name has no value to follow.
    // A saved file with it still loads.
    Book b;b.count=1;b.rules[0]=movie;uint8_t c[kFileBytes];const size_t n=encode(b,c);Book o;assert(decode(c,n,o)&&o.rules[0].cond[0].sig==Sig::Spoken);}
   // A phrase saves with its rule, and a file with anything strange in one is refused.

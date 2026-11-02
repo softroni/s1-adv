@@ -851,7 +851,8 @@ void testSay() {
     // Stopping forgets what was said.
     esc(); assert(!gLabPlaying && gLabNamed == 0); gLabBook.count = count; gLabUi.view = LabView::Rules; goToRow(gLabBook.count + 1);
     // The steps put it in words.
-    labWizardStart(-1, nullptr); gLabWizard.rule.cond[0].sig = Sig::Spoken; gLabWizard.step = LabStep::Op; assert(labWizardRowCount() == 2 && std::string(labWizardRow(0)) == "is said"); gLabWizard = LabWizard{}; gLabUi.view = LabView::Rules;
+    labWizardStart(-1, nullptr); gLabWizard.rule.cond[0].sig = Sig::Spoken; gLabWizard.step = LabStep::Op; assert(labWizardRowCount() == 2 && std::string(labWizardRow(0)) == "is said");
+    gLabWizard.step = LabStep::Sig; assert(labWizardRowCount() == lab::kSigCount); gLabWizard.step = LabStep::Source; assert(labWizardRowCount() == lab::kSigCount - 1); gLabWizard = LabWizard{}; gLabUi.view = LabView::Rules;
   }
   // The diary: a line an hour while rules play, kept for questions, and nowhere else.
   {

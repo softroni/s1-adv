@@ -9,7 +9,7 @@ and not into the conversation, and it comes back as text, or as Claude's answer.
 
 While a tool's screen is showing, all of this works without any code in the tool:
 
-- Tap **Alt** to listen and tap it again to send. Holding **G0**, **Ctrl+V** and **Enter** work too.
+- Tap **Alt** to listen and tap it again to send. Holding **G0** and **Ctrl+V** work too, and **Enter** sends.
 - **Esc** cancels and stays on the screen. If the recording has already gone, whatever comes back
   is ignored.
 - Nothing joins the chat. There's no chat message, no history and no spoken reply, and Claude's

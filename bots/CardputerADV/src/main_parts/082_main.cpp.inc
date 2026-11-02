@@ -874,7 +874,8 @@ lab::Action& labWizardAction() { return gLabWizard.rule.action[gLabWizard.action
 int labWizardRowCount() {
   const LabWizard& w = gLabWizard;
   switch (w.step) {
-    case LabStep::Sig: case LabStep::Source: return lab::kSigCount;
+    case LabStep::Sig: return lab::kSigCount;
+    case LabStep::Source: return lab::kSigCount - 1;  // A rule's name has no value to follow.
     case LabStep::Op: return lab::info(w.rule.cond[w.cond].sig).onOff ? 2 : 3;
     // A phrase has to be spoken into being, so Say is only offered to a rule that has one.
     case LabStep::Out: return lab::kOutCount - (w.rule.say[0] ? 0 : 1);

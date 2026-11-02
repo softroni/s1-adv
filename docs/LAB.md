@@ -169,7 +169,7 @@ You can save up to 8 rules.
 
 <table>
 <tr>
-<td width="50%"><img src="assets/lab/rules.png" alt="The Rules list with two saved rules" width="100%"><br><sub><b>Rules.</b> A solid dot means the rule is on. Space turns it off or on, <b>P</b> plays the ones that are on, and pressing X twice deletes one.</sub></td>
+<td width="50%"><img src="assets/lab/rules.png" alt="The Rules list with a saved rule, ending in Ask the Lab" width="100%"><br><sub><b>Rules.</b> A solid dot means the rule is on. Space turns it off or on, <b>P</b> plays the ones that are on, and pressing X twice deletes one.</sub></td>
 <td width="50%"><img src="assets/lab/flow-waiting.png" alt="A rule waiting, with grey wires and no outputs running" width="100%"><br><sub><b>Waiting.</b> Sensors on the left, outputs on the right. The middle says whether <b>any</b> or <b>all</b> must be true. A single condition shows <b>IF</b>.</sub></td>
 </tr>
 <tr>

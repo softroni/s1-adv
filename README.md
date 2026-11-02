@@ -46,7 +46,7 @@ Put S1-ADV on it and you get a menu of more than 40 apps: an AI assistant that r
 
 **Play.** Tetris, Chess, Checkers, Minesweeper, Snake, and an NES emulator for your own game files. Wave a hand over a sensor to fly Flappy Bird or play notes in the air.
 
-**Connect the real world.** Plug in sensors, lights, motors and switches. The Lab tests each one, then joins them with rules you build step by step, or just say aloud: "when I wave my hand, turn the strip red." The [Lab guide](docs/LAB.md) shows how it all works.
+**Connect the real world.** Plug in sensors, lights, motors and switches. The Lab tests each one, then joins them with rules you build step by step, or just say aloud: "when I wave my hand, turn the strip red." Then talk to it: change a rule by voice, ask why one didn't fire, or have rules speak. The [Lab guide](docs/LAB.md) shows how it all works.
 
 **Use it every day.** Focus timer, alarms, calendar, notes, calculator, weather, Internet radio, a synth you play on the keyboard, an infrared remote for TCL and Daikin air conditioners.
 

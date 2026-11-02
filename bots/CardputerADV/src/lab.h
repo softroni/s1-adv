@@ -482,7 +482,7 @@ class Draft {
   void addFollow(const char* output, const char* sensor, bool backwards) {
     Action action;
     if (rule.actions >= kMaxActions || !outFromKey(output, action.out) || !sigFromKey(sensor, action.source) ||
-        info(action.out).onOff) {  // Which includes Say.
+        info(action.out).onOff || action.source == Sig::Spoken) {  // Say is on or off too, and a name has no value.
       ok = false;
       return;
     }
