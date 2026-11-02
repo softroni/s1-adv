@@ -174,7 +174,7 @@ port, or play on the keyboard.
 
 The Lab is its own tab in the app menu, and the 9 key jumps to it. Devices tests everything the
 Cardputer can reach, and Rules joins them together, like "if this, then that". The Grove port
-is only held while a Lab screen is open.
+is only held while a Lab screen is open. For a tour with pictures, see [The Lab](LAB.md).
 
 ### Wiring
 

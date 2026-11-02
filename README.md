@@ -46,7 +46,7 @@ Put S1-ADV on it and you get a menu of more than 40 apps: an AI assistant that r
 
 **Play.** Tetris, Chess, Checkers, Minesweeper, Snake, and an NES emulator for your own game files. Wave a hand over a sensor to fly Flappy Bird or play notes in the air.
 
-**Connect the real world.** Plug in sensors, lights, motors and switches. The Lab tests each one, then joins them with rules you build step by step, or just say aloud: "when I wave my hand, turn the strip red."
+**Connect the real world.** Plug in sensors, lights, motors and switches. The Lab tests each one, then joins them with rules you build step by step, or just say aloud: "when I wave my hand, turn the strip red." The [Lab guide](docs/LAB.md) shows how it all works.
 
 **Use it every day.** Focus timer, alarms, calendar, notes, calculator, weather, Internet radio, a synth you play on the keyboard, an infrared remote for TCL and Daikin air conditioners.
 
@@ -117,8 +117,8 @@ S1-ADV gives you a working device on day one. Then you go as deep as you like: p
 | **ENV III** | Blowing on the sensor in Hot Air Balloon, temperature and humidity rules |
 | **Joystick 2** | Steering in Hot Air Balloon and Ball Catch |
 | **NFC Universal unit** (ST25R3916) | NFC Notes: read tags and save notes on them |
-| **1-to-3 hub** | Two units or more on the one Grove port |
-| **I/O hub** (Unit PbHub) | Puts a Mini Angle, Light, PIR, relays, a servo and an LED strip in the Lab. [Wiring layout](docs/CONTROLS.md#wiring) |
+| **1-to-3 hub** | Two or more parts on the one Grove port |
+| **I/O hub** (Unit PbHub) | Runs a Mini Angle, Light, PIR, relays, a servo and an LED strip all at once. One at a time, they plug straight into the Grove port. [Which setup do I need?](docs/LAB.md#pick-a-setup) |
 | **Cap LoRa-1262** (about $15) | Mesh text and GPS. Read the [Mesh note](#good-to-know) first. M5Stack also sells it with the Cardputer as a Mesh Kit |
 | **Grove IR receiver** | Teaching the IR Remote new buttons. Sending needs nothing extra |
 
@@ -227,7 +227,7 @@ Then work your way down this list. Each step needs a little more than the last.
 2. **Turn on the radio.** Tab, M, Internet Radio, then pick a genre.
 3. **Say hello to Claude.** Open AI Chat, ask anything, then try it with your voice.
 4. **Plug in a sensor.** Connect the ultrasonic unit, then Tab, L, Devices. Move your hand and watch the number change. Now open Air Music and play it like a theremin.
-5. **Make your first rule.** Tab, L, Rules, then Recipes. Add **Air theremin** and press P to play it. When that works, try **+ New rule**, or **Say a rule** with Claude connected.
+5. **Make your first rule.** Tab, L, Rules, then Recipes. Add **Air theremin** and press P to play it. When that works, try **+ New rule**, or **Say a rule** with Claude connected. The [Lab guide](docs/LAB.md) walks through every step.
 6. **Change the code.** Open `bots/CardputerADV/src/flappy.h`, raise `kLargestGap` from 60 to 80, and run `python scripts/cardputer.py upload`. You've just made Flappy Bird easier, and that's real firmware development.
 7. **Let Claude change it for you.** Give it [one project folder](docs/CLAUDE-CODE.md#let-claude-work-in-a-folder), turn on [firmware updates](docs/CLAUDE-CODE.md#update-firmware-from-the-cardputer), and ask from the Cardputer for the app you want. Read the risks in those guides first.
 
@@ -250,7 +250,7 @@ Offline apps run entirely on the Cardputer.
 
 S1-ADV is a fast-moving, experimental project. Some of it is set up for one owner's Cardputer, so here's what to expect.
 
-- **The Lab has only run against simulated parts so far.** If a real part misbehaves, that's a likely first. The Light test has F to flip its reading, and the LED strip test has T to try other timing.
+- **The Lab is new and still being tuned on real parts.** Some fixes have only run against simulated ones, so a part may misbehave. The Light test has F to flip its reading, and the LED strip test has T to try other timing.
 - **Grove power has limits.** M5Stack doesn't publish one for this port. A full-white 30-LED strip can draw 1 A and a stalled servo 750 mA, so keep the strip's limit low. If the Cardputer restarts, give the strip its own 5 V supply and join the grounds.
 - **The clock is fixed to US Central time.** To change it, edit `kDeviceTz` in `bots/CardputerADV/src/main_parts/001_main.cpp.inc` and rebuild.
 - **Weather comes through the bridge and covers US places only.** Set your city in Settings, Device, Weather city.
@@ -280,6 +280,7 @@ Type `/status` on the device to see its connection and version. There's much mor
 
 | Guide | What's in it |
 | --- | --- |
+| [The Lab](docs/LAB.md) | A picture guide to connecting parts, testing them and building rules |
 | [Everyday controls](docs/CONTROLS.md) | Every key, every status sound, and the Lab in full |
 | [Use your Claude subscription](docs/CLAUDE-CODE.md) | The bridge, memory, voice, web access and firmware updates |
 | [Build and flash](docs/FLASHING.md) | Every way to flash, plus building with your own settings |
