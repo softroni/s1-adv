@@ -33,7 +33,7 @@ inbox = read('020')
 assert 'doc["activity"].is<JsonObject>()' in inbox and 'else gReplyWaitLive = false;' in inbox
 # The hold has to end before the device's own read timeout.
 hold = int(re.search(r'&wait_ms=(\d+)', inbox)[1])
-assert hold + 1000 <= int(re.search(r'http\.setTimeout\((\d+)\);', inbox)[1]), 'a held poll would time out'
+assert hold + 1000 <= int(re.search(r'http\.setTimeout\(request->weather \? \d+ : (\d+)\);', inbox)[1]), 'a held poll would time out'
 # A cue only plays when the state changes, not for each new detail.
 assert 'if (changed && gActivityCueGate.allow(next, millis()))' in read('065')
 # The status has to show on both screens.
@@ -84,13 +84,14 @@ int main(){
  assert(fromWire("idle")==State::None&&fromWire("")==State::None&&fromWire(nullptr)==State::None);
  assert(fromWire("levitating")==State::Working);
  // Each state looks and sounds like itself, and survives the 8-bit canvas.
- const State all[]={State::Sending,State::Thinking,State::Searching,State::Researching,State::Reading,State::Coding,
+ const State all[]={State::Listening,State::Sending,State::Thinking,State::Searching,State::Researching,State::Reading,State::Coding,
   State::Working,State::Building,State::Testing,State::Writing,State::Loading,State::Speaking};
  std::set<int> accents,cues;std::set<const uint8_t*> icons;std::set<std::string> labels;
  for(State s:all){const Look l=look(s);assert(l.label&&l.title&&l.icon);assert(std::string(l.label).size()<=11);
   accents.insert(((l.accent>>8)&0xE0)|((l.accent>>6)&0x1C)|((l.accent>>3)&0x03));
   cues.insert(int(l.cue));icons.insert(l.icon);labels.insert(l.label);}
- assert(accents.size()==12&&cues.size()==12&&icons.size()==12&&labels.size()==12);
+ assert(accents.size()==13&&icons.size()==13&&labels.size()==13);
+ assert(cues.size()==12);  // Listening shares one, and it never plays: the speaker is off while recording.
  assert(std::string(look(State::None).label)=="THINKING");
 
  // A burst of tools sounds once, and going back to thinking stays silent.
@@ -132,6 +133,7 @@ int main(){
 
  // Everything the device sees for itself takes its place in the order of a turn.
  assert(currentAssistantActivity()==State::None);
+ gRecording=true;assert(currentAssistantActivity()==State::Listening);gRecording=false;
  gG0VoicePending=true;assert(currentAssistantActivity()==State::Loading);gG0VoicePending=false;
  gSubmitting=true;gTextSendUntilMs=nowMs+1000;assert(currentAssistantActivity()==State::Sending);
  nowMs+=2000;assert(currentAssistantActivity()==State::Thinking);gSubmitting=false;
@@ -142,7 +144,7 @@ int main(){
  gVoiceReplySpeechBusy=true;assert(currentAssistantActivity()==State::Loading);gVoiceReplySpeechBusy=false;
  gPlaybackActive=true;assert(currentAssistantActivity()==State::None);
  gPlaybackSpeech=true;assert(currentAssistantActivity()==State::Speaking);
- std::cout<<"PASS assistant activity: bridge words, twelve looks, quiet cue gate, status text and turn order\n";
+ std::cout<<"PASS assistant activity: bridge words, thirteen looks, quiet cue gate, status text and turn order\n";
 }
 '''
 

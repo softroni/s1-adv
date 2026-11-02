@@ -9,8 +9,8 @@
 
 namespace assistant_activity {
 enum class State : uint8_t {
-  None, Sending, Thinking, Searching, Researching, Reading, Coding, Working, Building, Testing,
-  Writing, Loading, Speaking
+  None, Listening, Sending, Thinking, Searching, Researching, Reading, Coding, Working, Building,
+  Testing, Writing, Loading, Speaking
 };
 
 constexpr uint16_t color(uint8_t r, uint8_t g, uint8_t b) {
@@ -29,6 +29,8 @@ inline Look look(State state) {
   using namespace launcher_icons;
   using Cue = activity_cue::Cue;
   switch (state) {
+    // The speaker is off while the mic records, so this one's cue never plays.
+    case State::Listening: return {"LISTENING", "Listening", color(255, 63, 85), kMic, Cue::Sending};
     case State::Sending: return {"SENDING", "Sending", color(47, 150, 255), kPlane, Cue::Sending};
     case State::Searching: return {"SEARCHING", "Searching", color(47, 227, 255), kMagnifier, Cue::Searching};
     case State::Researching: return {"RESEARCHING", "Researching", color(157, 102, 255), kGlobe, Cue::Researching};

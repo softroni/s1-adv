@@ -68,6 +68,8 @@ String settingValue(uint8_t index) {
       return gDeviceSettings.beepOnUpdate ? "on" : "off";
     case 7:
       return gDeviceSettings.clockTwelveHour ? "12h AM/PM" : "24h";
+    case kWeatherZipSetting:
+      return gZipEditing ? gZipDraft + "_" : gDeviceSettings.weatherZip;
     default:
       return "-";
   }
@@ -100,7 +102,7 @@ void renderSettingsUi() {
     d.print(fittedValue);
   }
   d.setFont(&fonts::Font2);
-  drawTinyFooter(0x0841, TFT_LIGHTGREY, "^v pick  <> edit  Enter OK  Esc", 16, 116, 208);
+  drawTinyFooter(0x0841, TFT_LIGHTGREY, gZipEditing ? "Type ZIP  Enter save  Esc cancel" : "^v pick  <> edit  Enter OK  Esc", 16, 116, 208);
   renderLauncherOverlay();
   renderDebugOverlay();
 }

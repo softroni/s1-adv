@@ -253,10 +253,12 @@ InboxHttpResult* performInboxHttpRequest(void* arg) {
   result->applyAfter = request->applyAfter;
   result->announce = request->announce;
   result->logsUpload = request->logsUpload;
+  result->weather = request->weather;
   HTTPClient http;
   std::unique_ptr<WiFiClientSecure> secure;
   http.setConnectTimeout(2500);
-  http.setTimeout(4000);
+  // The bridge may have to ask two services before it can answer.
+  http.setTimeout(request->weather ? 8000 : 4000);
   http.setReuse(false);
   bool opened = false;
   if (WiFi.status() == WL_CONNECTED) {
@@ -318,6 +320,11 @@ void serviceInboxNetworkCompletion() {
   gInboxCancelRequested = false;
   if (gInboxCanvasReleased) { restoreUiCanvasAfterNetwork(); gInboxCanvasReleased = false; }
   if (result->code > 0) gNetworkRecovery.success(); // Any HTTP response proves transport progress.
+  // Weather is a nicety, so missing it says nothing about the link and needs no retry here.
+  if (result->weather) {
+    applyWeatherResponse(cancelled ? 0 : result->code, result->body);
+    return;
+  }
   if (result->code >= 200 && result->code < 300) {
     gBridgeLastSuccessMs = millis();
     gBridgeHttpFailed = false;
@@ -420,6 +427,17 @@ void serviceAutoInboxPoll() {
     startBackgroundManifestCheck(false, false);
     return;
   }
+  // Weather goes ahead of an idle draft too, but never between the polls of a live reply wait.
+  if (gInboxAckQueue.empty() && !gVoiceReplyPending && gWeatherSchedule.due(now)) {
+    std::unique_ptr<InboxHttpPayload> weather(new (std::nothrow) InboxHttpPayload());
+    if (!weather) { gInboxRetryAfterMs = now + 4000U; return; }
+    weather->token = gDeviceToken;
+    weather->weather = true;
+    weather->url = hubBaseUrl() + "/api/cardputer/weather?zip=" + gDeviceSettings.weatherZip;
+    gWeatherSchedule.retrySoon(now);  // Until the answer comes, nothing asks again.
+    startInboxNetworkRequest(std::move(weather));
+    return;
+  }
   // An idle draft can defer incoming chat, but it is not active network work
   // and must not prevent release checks or already-queued acknowledgements.
   if (gInboxAckQueue.empty() && !gInputBuffer.isEmpty()) return;
@@ -436,6 +454,49 @@ void serviceAutoInboxPoll() {
     if (gVoiceReplyPending && gReplyWaitLive) payload->url += "&wait_ms=2500&activity_seq=" + String(gActivitySeq);
   }
   startInboxNetworkRequest(std::move(payload));
+}
+
+void applyWeatherResponse(int code, const String& body) {
+  const uint32_t now = millis();
+  gLastRenderMs = 0;
+  if (code <= 0) {  // The network failed, so this says nothing about the weather.
+    gWeatherSchedule.retrySoon(now);
+    if (!gWeather.valid) gWeatherNote = "Weather offline";
+    return;
+  }
+  gWeatherSchedule.asked(now);
+  if (code != 200) {
+    if (body.indexOf("unknown_zip") >= 0) {
+      gWeather = WeatherReport();
+      gWeatherNote = "Check your ZIP";
+    } else if (!gWeather.valid) gWeatherNote = "No weather yet";
+    logf("[WEATHER] http=%d", code);
+    return;
+  }
+  DynamicJsonDocument doc(768);
+  if (deserializeJson(doc, body) || !doc["temp"].is<int>()) {
+    gWeatherSchedule.retrySoon(now);
+    return;
+  }
+  WeatherReport report;
+  report.valid = true;
+  report.receivedMs = now;
+  report.temp = doc["temp"] | 0;
+  report.high = doc["high"] | 0;
+  report.low = doc["low"] | 0;
+  report.rain = doc["rain"] | 0;
+  report.icon = weather_view::iconFromWire(doc["icon"] | "");
+  report.condition = doc["condition"] | "";
+  report.place = doc["place"] | "";
+  const time_t clock = time(nullptr);
+  if (clock > 100000) {
+    struct tm local;
+    localtime_r(&clock, &local);
+    clock_display::format(report.updated, sizeof(report.updated), local.tm_hour, local.tm_min,
+                          gDeviceSettings.clockTwelveHour);
+  }
+  gWeather = report;
+  logf("[WEATHER] %dF %s", report.temp, report.condition.c_str());
 }
 
 bool injectInboxText(const String& text, bool speakAfter) {

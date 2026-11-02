@@ -44,7 +44,9 @@ uint32_t gVoiceReplyPendingMs=0,gActivitySeq=0;
 bool gReplyWaitLive=false;constexpr uint32_t kHeldPollGapMs=250;
 uint32_t millis(){return now;}void logf(const char*,...){}
 String hubBaseUrl(){return "https://bridge.invalid";}
-struct InboxHttpPayload {String url,token,eventId;bool otaManifest=false,applyAfter=false,announce=false;};
+struct InboxHttpPayload {String url,token,eventId;bool otaManifest=false,applyAfter=false,announce=false,weather=false;};
+#include "weather_view.h"
+weather_view::Schedule gWeatherSchedule;
 std::vector<InboxHttpPayload> dispatched;std::vector<uint32_t> manifestTimes;
 bool startInboxNetworkRequest(std::unique_ptr<InboxHttpPayload> p){assert(!gInboxHttpBusy);if(failStart)return false;gInboxHttpBusy=true;
  if(p->otaManifest)manifestTimes.push_back(now);dispatched.push_back(*p);gLastInboxAutoPollMs=now;return true;}
@@ -55,7 +57,7 @@ using std::max;
 bool gVoiceNoticeVisible=false,gScreenOffActive=false,gScreensaverActive=false,gScreensaverDimmed=false,gPendingRestart=false;
 uint32_t gScreensaverStartedMs=0;
 UiMode gScreensaverPreviousMode=UiMode::Home;
-struct{uint8_t screensaverTimeoutMin=1,screenOffAfterMin=5,screensaverDimAfterMin=1;bool screensaverEnabled=false,screenAutoOffEnabled=false;}gDeviceSettings;
+struct{uint8_t screensaverTimeoutMin=1,screenOffAfterMin=5,screensaverDimAfterMin=1;bool screensaverEnabled=false,screenAutoOffEnabled=false;String weatherZip="10001";}gDeviceSettings;
 void applyDisplayBrightness(){}void enterScreensaver(){gScreensaverActive=true;}
 '''
 for sig in ['bool screensaverMayRun()', 'void markUserActivity()', 'void serviceIdleScreensaver()']:
@@ -65,6 +67,8 @@ for file,signature in [('020_main.cpp.inc','bool autoInboxPollAllowed()'),('020_
 code+=r'''
 int main(){
  serviceAutoInboxPoll();assert(dispatched.back().otaManifest);finish();
+ // Weather is off for these timing checks, and has its own at the end.
+ const auto weatherOff=[&]{gWeatherSchedule.asked(now);gWeatherSchedule.nextMs=now+0x7fffffffU;};weatherOff();
  for(uint32_t t=30001;t<=90000;++t){now=t;serviceAutoInboxPoll();finish();}
  assert((manifestTimes==std::vector<uint32_t>{30000,50000,70000,90000}));
  assert(dispatched.front().url=="https://bridge.invalid/api/cardputer/firmware/manifest");
@@ -106,6 +110,15 @@ int main(){
  assert(dispatched.back().url.find("wait_ms")==std::string::npos);
  gOtaLastAutoCheckMs=now;assert(!liveDue(3000));assert(liveDue(1000));
  gVoiceReplyPending=false;
+ // Weather: asked for as soon as it may, with the saved ZIP, and on a schedule from then on.
+ gOtaLastAutoCheckMs=now;gWeatherSchedule.reset();assert(liveDue(1));
+ assert(dispatched.back().weather&&dispatched.back().url.find("/api/cardputer/weather?zip=10001")!=std::string::npos);
+ gOtaLastAutoCheckMs=now;assert(!gWeatherSchedule.due(now));
+ // It waits for a live reply and for queued receipts, and an unsent draft doesn't hold it back.
+ gWeatherSchedule.reset();gVoiceReplyPending=true;gReplyWaitLive=true;gOtaLastAutoCheckMs=now;
+ assert(liveDue(250)&&!dispatched.back().weather);gVoiceReplyPending=gReplyWaitLive=false;
+ gInputBuffer="unsent";gOtaLastAutoCheckMs=now;assert(liveDue(1)&&dispatched.back().weather);gInputBuffer="";
+ weatherOff();
  // An idle saved draft suppresses incoming chat, never release discovery.
  gInputBuffer="unfinished draft";now=manifestTimes.back()+20000;
  serviceAutoInboxPoll();assert(manifestTimes.back()==now);finish();
@@ -176,6 +189,6 @@ int main(){
 '''
 with tempfile.TemporaryDirectory(prefix='s1-auto-ota-') as directory:
  p=Path(directory);(p/'test.cpp').write_text(code)
- subprocess.run([os.environ.get('CXX','c++'),'-std=c++17','-Wall','-Wextra',str(p/'test.cpp'),'-o',str(p/'test')],check=True)
+ subprocess.run([os.environ.get('CXX','c++'),'-std=c++17','-Wall','-Wextra','-I',str(Path(__file__).resolve().parents[1]/'bots/CardputerADV/src'),str(p/'test.cpp'),'-o',str(p/'test')],check=True)
  subprocess.run([str(p/'test')],check=True)
 print('PASS actual OTA scheduler: bounded discovery despite failed ACKs and idle drafts, resource pauses, worker failure backoff and one network owner; hardware cadence remains separate')

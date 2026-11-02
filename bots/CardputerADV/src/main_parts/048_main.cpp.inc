@@ -98,7 +98,7 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
     return;
   }
   if (gRecording) {
-    setStatus("Recording: Esc cancel, Ctrl+V send",900);
+    setStatus("Recording: Esc cancel, Alt send",900);
     return;
   }
   if (gPlaybackActive && (key == '-' || key == '_')) {
@@ -300,6 +300,7 @@ void pollTyping() {
 	  static bool pRight = false;
 	  static bool pEsc = false;
   static bool pOpt = false;
+  static bool pAlt = false;
 	  static String pWordSignature;
 
   bool enterDown = keys.enter && !pEnter;
@@ -316,6 +317,7 @@ void pollTyping() {
   bool leftDown = leftHeld && !pLeft;
 	  bool rightDown = rightHeld && !pRight;
   bool optDown = keys.opt && !pOpt;
+  bool altDown = keys.alt && !pAlt;
   String wordSignature;
   wordSignature.reserve(keys.word.size());
   for (char c : keys.word) {
@@ -335,6 +337,10 @@ void pollTyping() {
                           !keys.tab && !keys.enter && !keys.del && !keys.space &&
                           !upHeld && !downHeld && !leftHeld && !rightHeld &&
                           wordSignature.isEmpty();
+  bool altVoiceTap = altDown && !keys.opt && !keys.ctrl && !keys.fn && !keys.shift &&
+                     !keys.tab && !keys.enter && !keys.del && !keys.space &&
+                     !upHeld && !downHeld && !leftHeld && !rightHeld &&
+                     wordSignature.isEmpty();
   auto rememberInputState = [&]() {
     pEnter = keys.enter;
     pDel = keys.del;
@@ -346,10 +352,11 @@ void pollTyping() {
     pRight = rightHeld;
     pEsc = escHeld;
     pOpt = keys.opt;
+    pAlt = keys.alt;
     pWordSignature = wordSignature;
   };
   bool inputActivityEdge = enterDown || delDown || tabDown || spaceDown || upDown || downDown || leftDown ||
-                           rightDown || optDown || charDown || escDown;
+                           rightDown || optDown || altDown || charDown || escDown;
   if (inputActivityEdge) {
     noteUiInput(escDown ? "Escape" : (keys.ctrl ? "Ctrl" : "key"));
     if (handleScreensaverWake()) {

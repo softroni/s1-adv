@@ -70,7 +70,7 @@ void renderChatVoiceHint(bool awaitingInput, uint16_t bg, uint16_t muted, uint16
   gCanvas.setFont(&fonts::Font0);
   gCanvas.setTextColor(awaitingInput ? amber : muted, bg);
   gCanvas.setCursor(8,126);
-  gCanvas.print(awaitingInput ? "Hold G0: reply  Tab: menu" : "Hold G0: voice  Tab: menu");
+  gCanvas.print(awaitingInput ? "Alt: reply  Tab: menu" : "Alt: voice  Tab: menu");
 }
 
 void drawChatComposerPrompt(int16_t composerY, int16_t composerH, uint16_t fill, uint16_t ink) {
@@ -96,17 +96,18 @@ void drawAssistantActivityStrip(int16_t y) {
   d.setCursor(28, y + 1);
   d.print(look.title);
   int16_t textEnd = kRight;
-  if (gVoiceReplyPending) {
-    const String seconds = String((millis() - gVoiceReplyPendingMs) / 1000U) + "s";
+  if (gRecording || gVoiceReplyPending) {
+    const String seconds = String((millis() - (gRecording ? gRecordStartMs : gVoiceReplyPendingMs)) / 1000U) + "s";
     textEnd = kRight - d.textWidth(seconds) - 6;
     d.setCursor(kRight - d.textWidth(seconds), y + 1);
     d.print(seconds);
   }
-  if (!gActivityDetail.isEmpty()) {
+  const String detail = gRecording ? String("Alt sends") : gActivityDetail;
+  if (!detail.isEmpty()) {
     const int16_t detailX = 34 + d.textWidth(look.title);
     d.setFont(&fonts::efontCN_12);
     d.setCursor(detailX, y + 3);
-    d.print(fitCurrentFontToWidth(gActivityDetail, textEnd - detailX));
+    d.print(fitCurrentFontToWidth(detail, textEnd - detailX));
   }
 }
 

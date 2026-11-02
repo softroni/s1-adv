@@ -58,7 +58,7 @@ bool returnToSettingsHub() {
 }
 
 bool handleSettingsNavigation(bool up,bool down,bool left,bool right) {
-  if(!isSettingsMode(gUiMode) || gLauncherVisible) return false;
+  if(!isSettingsMode(gUiMode) || gLauncherVisible || gZipEditing) return false;
   if(up || down) {
     const int count=currentSettingsItemCount();
     gSelectedSetting=(gSelectedSetting+count+(up?-1:1))%count;
@@ -244,13 +244,42 @@ void toggleCurrentSetting() {
     case 7:
       gDeviceSettings.clockTwelveHour = !gDeviceSettings.clockTwelveHour;
       break;
+    case kWeatherZipSetting:
+      gZipEditing = true;
+      gZipDraft = "";
+      return;
     default:
       break;
   }
   saveDeviceSettings();
 }
 
+// Every key is text until Enter or Esc, or typing 5 would also change the row.
+bool handleZipEditKey(char key) {
+  if (key >= '0' && key <= '9') {
+    if (gZipDraft.length() < 5) gZipDraft += key;
+  } else if (key == '\b') {
+    if (!gZipDraft.isEmpty()) gZipDraft.remove(gZipDraft.length() - 1);
+  } else if (key == '\n' || key == '\r') {
+    if (!weather_view::validZip(gZipDraft.c_str())) {
+      setStatus("A ZIP has 5 digits", 1000);
+      return true;
+    }
+    gZipEditing = false;
+    if (gZipDraft != gDeviceSettings.weatherZip) {
+      gDeviceSettings.weatherZip = gZipDraft;
+      saveDeviceSettings();
+      gWeather = WeatherReport();  // The old place's weather would be wrong here.
+      gWeatherNote = "Getting weather";
+      gWeatherSchedule.reset();
+    }
+    setStatus("Weather ZIP saved", 900);
+  }
+  return true;
+}
+
 bool handleSettingsKey(char key) {
+  if (gZipEditing) return handleZipEditKey(key);
   char lowerKey = static_cast<char>(tolower(static_cast<unsigned char>(key)));
   uint8_t count = currentSettingsItemCount();
   if (count == 0) {
@@ -2068,6 +2097,10 @@ bool handleKeyRushKey(char key, const Keyboard_Class::KeysState& keys) {
 }
 
 bool handleGlobalEscape() {
+  if (gZipEditing && !gLauncherVisible) {
+    gZipEditing = false;
+    return true;
+  }
   if (handleMeshEscape()) return true;
   if (gUiMode == UiMode::NfcNotes && !gLauncherVisible && cancelNfcNotes()) return true;
   if (gUiMode == UiMode::WifiSettings && !gLauncherVisible && wifiSettingsEscape()) return true;
@@ -2076,6 +2109,7 @@ bool handleGlobalEscape() {
     return handleFileManagerKey(27, gKeyboardState);
   }
   gG0VoicePending = false;
+  gVoiceStartLatched = false;
   gPendingOtaCheckAction = gPendingOtaApplyAction = false;
   if (gInboxHttpBusy) gInboxCancelRequested = true;
   if(handleVoiceRequestEscape()) return true;

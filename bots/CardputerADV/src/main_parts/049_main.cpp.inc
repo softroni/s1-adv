@@ -11,6 +11,8 @@
   } else if (isAssistantUi() && !gLauncherVisible && keys.ctrl && (leftDown || rightDown)) {
     runChatCommand(leftDown?4:5);
 
+  } else if (altVoiceTap && isAssistantUi() && !gLauncherVisible) {
+    toggleVoiceByTap();
   } else if (optionViewToggle) {
     togglePulseChatDisplay();
 	  } else if (gUiMode == UiMode::Tetris && (tabDown || tabPrevCombo || tabNextCombo)) {
@@ -106,6 +108,37 @@ bool ctrlAlonePressedNow() {
          gKeyboardState.word.empty();
 }
 
+// One tap listens and the next sends, for when holding G0 is too much. It has to work whenever
+// it's pressed, because a tap can't be held down until the device is ready.
+void toggleVoiceByTap() {
+  if (gRecording) {
+    logf("[VOICE] Alt stop");
+    stopRecordingAndSend();
+    return;
+  }
+  if (gG0VoicePending) {
+    gG0VoicePending = false;
+    gVoiceStartLatched = false;
+    setStatus("Voice cancelled", 900);
+    return;
+  }
+  if (gSubmitting || gThinking) {
+    setStatus("Sending; tap Alt again", 1200);
+    return;
+  }
+  if (gPlaybackActive) stopPlaybackStream();  // Talking over the reply is the natural moment.
+  logf("[VOICE] Alt start");
+  if (gInboxHttpBusy) {
+    gG0VoicePending = true;
+    gVoiceStartLatched = true;
+    gInboxCancelRequested = true;
+    setStatus("Loading voice...", 0);
+    render();
+    return;
+  }
+  startRecording();
+}
+
 void updateVoiceTrigger() {
   bool held = ctrlAlonePressedNow();
   bool ctrlComboActive = gKeyboardState.ctrl &&
@@ -169,8 +202,10 @@ void updateG0VoiceTrigger() {
     noteUiInput("G0");
     handleScreensaverWake();
   }
-  if (pressed && gG0VoicePending && !gInboxHttpBusy) {
+  if (!gG0VoicePending) gVoiceStartLatched = false;
+  if ((pressed || gVoiceStartLatched) && gG0VoicePending && !gInboxHttpBusy) {
     gG0VoicePending = false;
+    gVoiceStartLatched = false;
     startRecording();
   }
   if (gUiMode == UiMode::Ota) {

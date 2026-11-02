@@ -93,7 +93,7 @@ void beginVoiceCaptureUpload(){assert(gRecording&&gRecordingToFile&&gActiveRecor
 bool handleScreensaverWake(){++wakes;bool was=sleeping;sleeping=false;return was;}
 struct {void printf(const char*,...){} } Serial;
 void noteUiInput(const char*){}
-bool gG0VoicePending=false,gInboxCancelRequested=false;uint32_t gG0VoiceRequestedMs=0;
+bool gG0VoicePending=false,gVoiceStartLatched=false,gInboxCancelRequested=false;uint32_t gG0VoiceRequestedMs=0;
 bool gG0VoiceHeld=false,gCtrlSoloCandidate=false;uint32_t gLastCtrlTapMs=0;
 bool stopRecordingAndSend(){++stops;gRecording=false;return true;}
 void appendRuntimeLog(const char*,const char*,bool){}void applyOtaFromManifest(){assert(false);}

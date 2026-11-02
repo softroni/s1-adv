@@ -244,6 +244,13 @@ bool findLauncherEntryForMode(UiMode mode, int& groupIndex, int& subIndex) {
   return false;
 }
 
+// Coming back to an assistant screen isn't choosing something from the menu, so the menu stays
+// on what you last used. These are also menu items, but opening one from there keeps its row.
+bool launcherKeepsPlaceFor(UiMode mode) {
+  return mode == UiMode::Home || mode == UiMode::ChatFull || mode == UiMode::ChatFace ||
+         mode == UiMode::Face || mode == UiMode::Hero || mode == UiMode::Clock;
+}
+
 void syncLauncherToMode(UiMode mode) {
   int groupIndex = 0;
   int subIndex = 0;
@@ -338,6 +345,7 @@ void setUiMode(UiMode mode) {
     applyDisplayBrightness();
   }
   gLauncherVisible = false;
+  gZipEditing = false;
   if (mode != UiMode::Tetris) {
     gTetrisHelpVisible = false;
   }
@@ -357,7 +365,7 @@ void setUiMode(UiMode mode) {
       gLauncherSubSelection >= 0 && gLauncherSubSelection < kLauncherGroups[gLauncherSelection].count &&
       kLauncherGroups[gLauncherSelection].items[gLauncherSubSelection].mode == mode) {
     gLauncherLastSub[gLauncherSelection] = gLauncherSubSelection;
-  } else {
+  } else if (!launcherKeepsPlaceFor(mode)) {
     syncLauncherToMode(mode);
   }
   setStatus(String("Mode: ") + uiModeName(mode), 900);
@@ -405,4 +413,5 @@ void applyLauncherSelection() {
     if (!gRealtimeActive) startRealtimeSession(true);
   }
   syncLauncherToMode(target);
+  saveLauncherSelection();
 }

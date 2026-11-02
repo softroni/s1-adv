@@ -1,8 +1,9 @@
 # Everyday controls
 
 - Type a question and press Enter in chat.
-- Hold **G0**, speak, then release to send. **Ctrl+V** or double **Ctrl** toggles recording.
-- **Tab** opens the app menu from Home and the chat/eyes screens. Up/down or W/S picks a row, left/right or A/D switches group, and Enter opens. **1-8** jumps to a group, and **Ctrl+1-8** opens that row.
+- Tap **Alt** on Pulse, AI Chat or the other assistant screens to start listening, then tap it again to send. Tapping it while Claude is talking stops the reply and listens. Esc cancels.
+- You can also hold **G0**, speak and release, or use **Ctrl+V** or double **Ctrl**.
+- **Tab** opens the app menu from Home and the chat/eyes screens. Up/down or W/S picks a row, left/right or A/D switches group, and Enter opens. **1-8** jumps to a group, and **Ctrl+1-8** opens that row. The menu opens on what you last used, even after a restart.
 - **Ctrl+K** opens assistant commands. R selects Realtime, C AI Chat, E Chat Eyes, F Big Eyes.
 - **Ctrl+U** on the Home clock installs an available update. An orange **NEW UPDATE / Ctrl+U** badge replaces READY until the newer firmware is installed. Without a candidate, Ctrl+U checks for updates.
 - **Ctrl+R** starts Realtime or commits the current speech turn. While awaiting a reply, it stops Realtime.
@@ -57,6 +58,19 @@ available.
 If the setup screen appears because the old network is gone, press Enter on it to do all of
 this on the device. It restarts once it has joined.
 
+## Weather on Pulse
+
+When nothing is happening, the Pulse screen shows the date and the weather where the orb usually
+sits: temperature, conditions, today's high and low, the chance of rain, and the place. The orb
+comes back as soon as the assistant is doing something.
+
+Weather loads about 30 seconds after the device starts and connects, then every 30 minutes. If a
+refresh fails, the last weather stays on screen and the device tries again in 2 minutes. Once a
+refresh has been missed, the bottom line changes to "As of" and the time it was last updated.
+
+To change the place, press Tab, open Settings, then Device, and pick **Weather ZIP**. Press Enter,
+type the 5-digit US ZIP code, and press Enter again. The default is 10001.
+
 ## Status and sounds
 
 While you wait, AI Chat and the Pulse screen show what Claude is doing right now, and each kind
@@ -66,6 +80,7 @@ badge has the word, the middle of the orb has the icon, and the box at the botto
 
 | Status | What's happening | Detail shown | Sound |
 | --- | --- | --- | --- |
+| LISTENING | The microphone is on | Tap Alt to send | None, because the speaker is off while recording |
 | SENDING | Your message is going out | | Two rising notes, for typed messages. A voice message is silent here, because the speaker is off while it uploads. |
 | THINKING | Claude is working out what to do | | Two low taps |
 | SEARCHING | Searching the web | What it's searching for | A sonar ping and its echo |

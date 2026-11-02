@@ -72,7 +72,7 @@ void runChatCommand(uint8_t);
 '''
 code+=r'''
 bool gPendingOtaCheckAction=false,gPendingOtaApplyAction=false,gInboxCancelRequested=false;
-bool gG0VoicePending=false,gAlarmRinging=false,gDebugOverlayVisible=false,gTetrisHelpVisible=false;
+bool gZipEditing=false,gVoiceStartLatched=false,gG0VoicePending=false,gAlarmRinging=false,gDebugOverlayVisible=false,gTetrisHelpVisible=false;
 bool gCtrlSoloHeld=false,gCtrlSoloCandidate=false;uint32_t gLastCtrlTapMs=0;
 struct{bool helpVisible=false;}gFocus;String gQueuedVoiceReplySpeech,gNoteInputBuffer;
 enum class NotesMode{List,Edit};NotesMode gNotesMode=NotesMode::List;

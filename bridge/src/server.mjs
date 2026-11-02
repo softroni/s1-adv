@@ -1,4 +1,5 @@
 import { REPLY_LANGUAGE_POLICY, requestedReplyLanguage } from "./reply-language.mjs";
+import { WeatherService, validZip } from "./weather.mjs";
 import { startFirmwareJob, updateFirmwareJob, publicFirmwareJob, firmwareJobDeliveryUncertain } from "./firmware-job-status.mjs";
 import { firmwareCapability, firmwareWorkflowPaths } from "./firmware-automation.mjs";
 import { AGENT_STATES, WORK_KINDS, hasAgentStatusAccess, publishedAfterTask } from './agent-status.mjs';
@@ -3592,6 +3593,7 @@ class BridgeRuntime {
 	      ? { id: "claude-code:main", name: "Claude" }
 	      : { id: "openclaw:main", name: "OpenClaw" };
 	    this.clients = new Set();
+	    this.weather = new WeatherService(config.weather || {});
 	    this.turnActivity = new Map();
 	    this.activitySeq = 0;
 	    this.heldPolls = new Set();
@@ -6379,6 +6381,21 @@ async function main() {
         }
         releaseRequest = () => { lease.release(); storage.release(); };
       }
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/cardputer/weather") {
+      const zip = url.searchParams.get("zip");
+      if (!validZip(zip)) {
+        json(res, 400, { error: "invalid_zip" });
+        return;
+      }
+      try {
+        json(res, 200, await runtime.weather.report(zip));
+      } catch (error) {
+        console.warn(`[weather] failed: ${String(error.code || error.message || error).slice(0, 120)}`);
+        json(res, error.code === "unknown_zip" ? 404 : 503, { error: error.code || "weather_unavailable", retryable: error.code !== "unknown_zip" });
+      }
+      return;
     }
 
     if (req.method === "GET" && url.pathname === "/api/cardputer/device-actions") {

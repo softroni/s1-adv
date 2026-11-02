@@ -1,6 +1,6 @@
 // Network workers publish immutable results; only loopTask owns UI/history.
-struct InboxHttpPayload { String url, token, eventId, body; bool otaManifest = false, applyAfter = false, announce = false, logsUpload = false; };
-struct InboxHttpResult { int code=0; String body, eventId; bool otaManifest = false, applyAfter = false, announce = false, logsUpload = false; };
+struct InboxHttpPayload { String url, token, eventId, body; bool otaManifest = false, applyAfter = false, announce = false, logsUpload = false, weather = false; };
+struct InboxHttpResult { int code=0; String body, eventId; bool otaManifest = false, applyAfter = false, announce = false, logsUpload = false, weather = false; };
 constexpr uint32_t kOtaAutoCheckIntervalMs = 20000U;
 constexpr uint32_t kOtaScreenCheckIntervalMs = 5000U;
 uint32_t gOtaLastAutoCheckMs = 0;
@@ -13,6 +13,23 @@ bool startInboxNetworkRequest(std::unique_ptr<InboxHttpPayload> payload);
 void servicePendingLogsUpload();
 volatile bool gInboxCancelRequested = false;
 bool gG0VoicePending = false;
+bool gVoiceStartLatched = false;  // An Alt tap can't stay held while the network finishes.
+struct WeatherReport {
+  bool valid = false;
+  int temp = 0, high = 0, low = 0, rain = 0;
+  weather_view::Icon icon = weather_view::Icon::Cloud;
+  String condition, place;
+  char updated[10] = "";
+  uint32_t receivedMs = 0;
+};
+WeatherReport gWeather;
+String gWeatherNote = "Getting weather";
+weather_view::Schedule gWeatherSchedule;
+bool gZipEditing = false;
+String gZipDraft;
+void applyWeatherResponse(int code, const String& body);
+void saveLauncherSelection();
+void toggleVoiceByTap();
 bool gVoiceCapturePreparing = false;
 uint32_t gG0VoiceRequestedMs = 0;
 bool gUiInputPending = false;

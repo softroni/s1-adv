@@ -217,6 +217,62 @@ void drawHomeBatteryStatus(int32_t rawLevel) {
   d.setFont(&fonts::Font2);
 }
 
+// Where the orb sits when nothing is happening.
+void drawHomeWeather() {
+  auto& d = gCanvas;
+  constexpr int16_t kLeft = 12, kWidth = 104;
+  const uint16_t white = TFT_WHITE;
+  const uint16_t muted = rgb565_local(146, 182, 170);
+  d.setTextSize(1);
+  d.setFont(&fonts::Font2);
+  const time_t clock = time(nullptr);
+  if (clock > 100000) {
+    struct tm local;
+    localtime_r(&clock, &local);
+    char date[16];
+    strftime(date, sizeof(date), "%a, %b ", &local);
+    d.setTextColor(white);
+    d.setCursor(kLeft, 12);
+    d.print(String(date) + String(local.tm_mday));
+  }
+  if (!gWeather.valid) {
+    d.setTextColor(muted);
+    d.setCursor(kLeft, 54);
+    d.print(fitCurrentFontToWidth(gWeatherNote, kWidth));
+    return;
+  }
+  // Doubled, because a 16 px picture is lost next to the temperature.
+  const uint8_t* icon = weather_view::bitmap(gWeather.icon);
+  const uint16_t tint = weather_view::tint(gWeather.icon);
+  for (int16_t row = 0; row < 16; ++row)
+    for (int16_t col = 0; col < 16; ++col)
+      if (icon[row * 2 + (col >> 3)] & (0x80 >> (col & 7)))
+        d.fillRect(kLeft + col * 2, 30 + row * 2, 2, 2, tint);
+  const String temp(gWeather.temp);
+  d.setFont(&fonts::Font4);
+  d.setTextColor(white);
+  d.setCursor(kLeft + 37, 33);
+  d.print(temp);
+  const int16_t ringX = kLeft + 37 + d.textWidth(temp) + 4;
+  d.drawCircle(ringX, 38, 3, white);
+  d.drawCircle(ringX, 38, 2, white);
+  d.setFont(&fonts::Font2);
+  d.setTextColor(tint);
+  d.setCursor(kLeft, 63);
+  d.print(fitCurrentFontToWidth(gWeather.condition, kWidth));
+  d.setTextColor(white);
+  d.setCursor(kLeft, 79);
+  d.print("H" + String(gWeather.high) + " L" + String(gWeather.low));
+  d.setFont(&fonts::Font0);
+  d.setTextColor(muted);
+  d.setCursor(kLeft, 97);
+  // The time only matters once a refresh has been missed, so it replaces this line then.
+  const bool overdue = millis() - gWeather.receivedMs > weather_view::kRefreshMs + weather_view::kRefreshMs / 2;
+  d.print(fitCurrentFontToWidth(overdue && gWeather.updated[0] ? String("As of ") + gWeather.updated
+      : "Rain " + String(gWeather.rain) + "%  " + gWeather.place, kWidth));
+  d.setFont(&fonts::Font2);
+}
+
 void renderAssistantPulseChatHint() {
   const bool hasInput = !gInputBuffer.isEmpty();
   const bool preparing = gG0VoicePending || gVoiceCapturePreparing;

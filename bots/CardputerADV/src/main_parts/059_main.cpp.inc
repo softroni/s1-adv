@@ -98,43 +98,47 @@
     gVoiceLevel8 = static_cast<uint8_t>(max<int>(28, static_cast<int>(gVoiceLevel8) - 2));
   }
 
-  const int16_t cx = 58;
-  const int16_t cy = 68;
-  d.fillCircle(cx, cy, 50 + static_cast<int16_t>(breathe), realtime ? rgb565_local(24, 12, 5) : rgb565_local(4, 16, 21));
-  d.drawCircle(cx, cy, 51 + static_cast<int16_t>(breathe), realtime ? rgb565_local(95, 49, 17) : rgb565_local(8, 34, 43));
-  d.drawCircle(cx, cy, 49 + static_cast<int16_t>(breathe), c3);
-  drawAssistantPulseArc(cx, cy, 45, 36, -2.25f, 1.00f, realtime ? rgb565_local(58, 29, 10) : rgb565_local(10, 38, 48));
-  drawAssistantPulseArc(cx, cy, 31, 23, 0.58f, 4.54f, realtime ? rgb565_local(50, 27, 11) : rgb565_local(11, 35, 48));
-  drawAssistantPulseArc(cx, cy, 45, 36, -2.25f + spin, 1.00f + spin, c1);
-  drawAssistantPulseArc(cx, cy, 31, 23, 0.58f - spin * 1.08f, 4.54f - spin * 1.08f, c2);
-
-  if (state == AssistantPulseState::Recording || (realtime && gRealtimeRecording)) {
-    int16_t pulseR = 18 + static_cast<int16_t>(level * 14.0f + sinf(t * 12.0f));
-    d.fillCircle(cx, cy, pulseR, c1);
-    d.fillCircle(cx, cy, 9, fg);
-  } else if (state == AssistantPulseState::Thinking || (realtime && gRealtimeAwaiting)) {
-    for (int i = 0; i < 4; ++i) {
-      float a = spin * 1.9f + i * 1.55f;
-      drawAssistantPulseArc(cx, cy, 22, 16, a, a + 0.72f, (i % 2) ? c2 : c1);
-    }
-    d.fillCircle(cx + static_cast<int16_t>(cosf(spin * 2.4f) * 27.0f),
-                 cy + static_cast<int16_t>(sinf(spin * 2.4f) * 21.0f), 4, c1);
-    d.fillCircle(cx + static_cast<int16_t>(cosf(spin * 2.0f + 2.1f) * 26.0f),
-                 cy + static_cast<int16_t>(sinf(spin * 2.0f + 2.1f) * 23.0f), 3, c2);
-    if (state == AssistantPulseState::Thinking) {
-      d.fillCircle(cx, cy, 13, bg);
-      d.drawBitmap(cx - 8, cy - 8, activityLook.icon, launcher_icons::kSize, launcher_icons::kSize, c1);
-    }
-  } else if (state == AssistantPulseState::Playback || (realtime && gPlaybackActive)) {
-    d.fillCircle(cx, cy, 16, fg);
-    d.fillTriangle(cx - 4, cy - 8, cx - 4, cy + 8, cx + 9, cy, bg);
-  } else if (realtime) {
-    int16_t coreR = 11 + static_cast<int16_t>(sinf(t * 4.4f) * 2.0f);
-    d.fillCircle(cx, cy, 21, rgb565_local(83, 42, 13));
-    d.fillCircle(cx, cy, coreR, fg);
-    d.drawCircle(cx, cy, 26 + static_cast<int16_t>(sinf(t * 3.0f) * 3.0f), c1);
+  if (state == AssistantPulseState::Ready && !working) {
+    drawHomeWeather();
   } else {
-    d.fillCircle(cx, cy, 14 + static_cast<int16_t>(sinf(t * 2.2f) * 1.4f), fg);
+    const int16_t cx = 58;
+    const int16_t cy = 68;
+    d.fillCircle(cx, cy, 50 + static_cast<int16_t>(breathe), realtime ? rgb565_local(24, 12, 5) : rgb565_local(4, 16, 21));
+    d.drawCircle(cx, cy, 51 + static_cast<int16_t>(breathe), realtime ? rgb565_local(95, 49, 17) : rgb565_local(8, 34, 43));
+    d.drawCircle(cx, cy, 49 + static_cast<int16_t>(breathe), c3);
+    drawAssistantPulseArc(cx, cy, 45, 36, -2.25f, 1.00f, realtime ? rgb565_local(58, 29, 10) : rgb565_local(10, 38, 48));
+    drawAssistantPulseArc(cx, cy, 31, 23, 0.58f, 4.54f, realtime ? rgb565_local(50, 27, 11) : rgb565_local(11, 35, 48));
+    drawAssistantPulseArc(cx, cy, 45, 36, -2.25f + spin, 1.00f + spin, c1);
+    drawAssistantPulseArc(cx, cy, 31, 23, 0.58f - spin * 1.08f, 4.54f - spin * 1.08f, c2);
+
+    if (state == AssistantPulseState::Recording || (realtime && gRealtimeRecording)) {
+      int16_t pulseR = 18 + static_cast<int16_t>(level * 14.0f + sinf(t * 12.0f));
+      d.fillCircle(cx, cy, pulseR, c1);
+      d.fillCircle(cx, cy, 9, fg);
+    } else if (state == AssistantPulseState::Thinking || (realtime && gRealtimeAwaiting)) {
+      for (int i = 0; i < 4; ++i) {
+        float a = spin * 1.9f + i * 1.55f;
+        drawAssistantPulseArc(cx, cy, 22, 16, a, a + 0.72f, (i % 2) ? c2 : c1);
+      }
+      d.fillCircle(cx + static_cast<int16_t>(cosf(spin * 2.4f) * 27.0f),
+                   cy + static_cast<int16_t>(sinf(spin * 2.4f) * 21.0f), 4, c1);
+      d.fillCircle(cx + static_cast<int16_t>(cosf(spin * 2.0f + 2.1f) * 26.0f),
+                   cy + static_cast<int16_t>(sinf(spin * 2.0f + 2.1f) * 23.0f), 3, c2);
+      if (state == AssistantPulseState::Thinking) {
+        d.fillCircle(cx, cy, 13, bg);
+        d.drawBitmap(cx - 8, cy - 8, activityLook.icon, launcher_icons::kSize, launcher_icons::kSize, c1);
+      }
+    } else if (state == AssistantPulseState::Playback || (realtime && gPlaybackActive)) {
+      d.fillCircle(cx, cy, 16, fg);
+      d.fillTriangle(cx - 4, cy - 8, cx - 4, cy + 8, cx + 9, cy, bg);
+    } else if (realtime) {
+      int16_t coreR = 11 + static_cast<int16_t>(sinf(t * 4.4f) * 2.0f);
+      d.fillCircle(cx, cy, 21, rgb565_local(83, 42, 13));
+      d.fillCircle(cx, cy, coreR, fg);
+      d.drawCircle(cx, cy, 26 + static_cast<int16_t>(sinf(t * 3.0f) * 3.0f), c1);
+    } else {
+      d.fillCircle(cx, cy, 14 + static_cast<int16_t>(sinf(t * 2.2f) * 1.4f), fg);
+    }
   }
 
   String hhmm = "--:--";

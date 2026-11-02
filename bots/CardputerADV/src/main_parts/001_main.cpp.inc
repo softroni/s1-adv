@@ -68,6 +68,7 @@
 #include "ball_catch.h"
 #include "activity_cue.h"
 #include "assistant_activity.h"
+#include "weather_view.h"
 #include "radio_catalog.h"
 #include "internet_radio_transport.h"
 #include "vlc_remote.h"
@@ -105,7 +106,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.228-dev"
+#define APP_VERSION "0.2.229-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"
@@ -234,7 +235,8 @@ constexpr uint32_t kSmartLampOnlineTimeoutMs = 3500;
 constexpr uint32_t kSmartLampPresetSendDelayMs = 250;
 constexpr uint32_t kSmartLampMinCommandGapMs = 520;
 constexpr const char* kSmartLampPrefsNs = "smartlamp";
-constexpr uint8_t kDeviceSettingsItemCount = 8;
+constexpr uint8_t kDeviceSettingsItemCount = 9;
+constexpr uint8_t kWeatherZipSetting = 8;
 constexpr uint8_t kFocusSettingsItemCount = 11;
 constexpr uint8_t kScreenSettingsItemCount = 11;
 constexpr uint8_t kTextSizeCount = 3;

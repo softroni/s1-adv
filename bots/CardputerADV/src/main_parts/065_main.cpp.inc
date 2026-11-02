@@ -149,6 +149,7 @@ bool activitySending() {
 
 assistant_activity::State currentAssistantActivity() {
   using assistant_activity::State;
+  if (gRecording) return State::Listening;
   if (gG0VoicePending || gVoiceCapturePreparing) return State::Loading;
   if (activitySending()) return State::Sending;
   if (gVoiceReplyPending && !gSubmitting && !gThinking && gActivityState != State::None) return gActivityState;

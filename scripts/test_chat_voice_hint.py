@@ -24,8 +24,8 @@ struct Canvas {
 } gCanvas;
 '''+source[start:end]+r'''
 int main(){
- renderChatVoiceHint(false,0,1,2);assert(gCanvas.text=="Hold G0: voice  Tab: menu"&&gCanvas.ink==1);
- renderChatVoiceHint(true,0,1,2);assert(gCanvas.text=="Hold G0: reply  Tab: menu"&&gCanvas.ink==2);
+ renderChatVoiceHint(false,0,1,2);assert(gCanvas.text=="Alt: voice  Tab: menu"&&gCanvas.ink==1);
+ renderChatVoiceHint(true,0,1,2);assert(gCanvas.text=="Alt: reply  Tab: menu"&&gCanvas.ink==2);
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-chat-hint-') as temp:

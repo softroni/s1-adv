@@ -1221,7 +1221,7 @@ bool handleLocalCommand(const String& input) {
   if (cmd == "/help" || cmd == "help" || cmd == "commands" || cmd == "actions" ||
       cmd == "команды" || cmd == "помощь") {
     pushSystem("Ctrl+Space = EN/RU");
-    pushSystem("Voice: Ctrl x2, Ctrl+V, or hold G0; Realtime: Ctrl+R");
+    pushSystem("Voice: tap Alt, Ctrl x2, Ctrl+V, or hold G0; Realtime: Ctrl+R");
     pushSystem("Tab = menu; Tab+Down/Right = next group");
     pushSystem("Ctrl+L = launcher; Up/Down item, Left/Right group, Enter open");
     pushSystem("Ctrl+K = assistant commands; Ctrl+D = debug");

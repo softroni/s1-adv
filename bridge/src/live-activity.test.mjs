@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -181,13 +182,13 @@ async function freePort() {
 }
 
 // The real server process, spoken to over HTTP the way the firmware does.
-async function startBridge(t, fake) {
+async function startBridge(t, fake, extra = {}) {
   const config = JSON.parse(await readFile(path.join(bridgeRoot, "config.smoke.json"), "utf8"));
   const port = await freePort();
   Object.assign(config, {
     server: { host: "127.0.0.1", port }, stateDir: path.join(fake.dir, "state"),
     upstream: { provider: "claude-code", claudeCode: { command: fake.command, turnTimeoutMs: 30000 } },
-    omnibotShim: { enabled: true, sttProvider: "none", turnWaitMs: 60000, turnPollMs: 20 }
+    omnibotShim: { enabled: true, sttProvider: "none", turnWaitMs: 60000, turnPollMs: 20 }, ...extra
   });
   config.devices[0].device_token = TOKEN;
   config.security.inboxInjectEnabled = true;
@@ -337,4 +338,35 @@ test("a short wait alone can't be used without asking for live status", async t 
   const response = await bridge.send({ "x-turn-wait-ms": "1000" });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).reply, "Still here");
+});
+
+test("the weather route answers the device, and only the device", async t => {
+  const fake = await makeFake(t);
+  await fake.script([{ line: result("ok") }]);
+  // Stands in for both weather services, so this test needs no internet.
+  const seen = [];
+  const services = createHttpServer((req, res) => {
+    seen.push(req.url);
+    res.setHeader("content-type", "application/json");
+    if (req.url.startsWith("/zip/99999")) { res.statusCode = 404; return res.end("{}"); }
+    if (req.url.startsWith("/zip/")) return res.end(JSON.stringify({ places: [{ "place name": "Salem", latitude: "42.52", longitude: "-70.90" }] }));
+    res.end(JSON.stringify({ current: { temperature_2m: 70, apparent_temperature: 71, relative_humidity_2m: 50, weather_code: 0, is_day: 1, wind_speed_10m: 4 },
+      daily: { temperature_2m_max: [78], temperature_2m_min: [60], precipitation_probability_max: [10] } }));
+  });
+  await new Promise(resolve => services.listen(0, "127.0.0.1", resolve));
+  t.after(() => services.close());
+  const url = `http://127.0.0.1:${services.address().port}`;
+  const bridge = await startBridge(t, fake, { weather: { zipUrl: `${url}/zip/`, forecastUrl: `${url}/forecast` } });
+  const get = (zip, headers = { authorization: bridge.authorization }) =>
+    fetch(`${bridge.base}/api/cardputer/weather?zip=${zip}`, { headers });
+  const good = await get("10001");
+  assert.equal(good.status, 200);
+  assert.deepEqual(await good.json(), { zip: "10001", place: "Salem", condition: "Sunny", icon: "sun",
+    temp: 70, feels: 71, humidity: 50, wind: 4, high: 78, low: 60, rain: 10 });
+  assert.equal((await get("10001", {})).status, 401);
+  assert.equal((await get("abc")).status, 400);
+  assert.equal(seen.length, 2, "a bad request reaches no service");
+  const unknown = await get("99999");
+  assert.equal(unknown.status, 404);
+  assert.match(await unknown.text(), /unknown_zip/u);
 });

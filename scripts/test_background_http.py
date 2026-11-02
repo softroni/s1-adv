@@ -50,6 +50,7 @@ bool gPendingOtaApplyAction=false,allowed=true,taskFails=false;
 bool gWifiReady=true;int gInboxHttpMux=0,loanCount=0,restoreCount=0;
 uint32_t gBridgeLastSuccessMs=0;bool gBridgeHttpFailed=false;
 InboxHttpResult* gInboxHttpResult=nullptr;
+int weatherCode=-1;void applyWeatherResponse(int code,const String&){weatherCode=code;}
 std::deque<String>gInboxAckQueue;
 String status,diag;
 enum class UiMode{Home,Ota};UiMode mode=UiMode::Home;
@@ -134,6 +135,11 @@ int main(){
  gInboxAckQueue.push_back("event-one");responseCode=500;
  assert(startInboxNetworkRequest(std::move(p)));complete();assert(gInboxAckQueue.size()==1);
  assert(gCanvasSpriteActive&&loanCount==0);
+ // Weather failing says nothing about the bridge: no link warning, no retry storm.
+ gInboxAckQueue.clear();gBridgeHttpFailed=false;gInboxRetryAfterMs=0;responseCode=503;
+ auto wx=std::make_unique<InboxHttpPayload>();wx->url="https://bridge.invalid/api/cardputer/weather?zip=10001";wx->weather=true;
+ assert(startInboxNetworkRequest(std::move(wx)));complete();
+ assert(weatherCode==503&&!gBridgeHttpFailed&&gInboxRetryAfterMs==0&&!gInboxHttpBusy);
  // Execute actual manifest completion: Ctrl+U installs a newly discovered
  // candidate; no candidate or a failed check returns Home without applying.
  gInboxAckQueue.clear();responseCode=200;

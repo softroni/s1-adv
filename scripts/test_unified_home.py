@@ -53,7 +53,8 @@ String gInputBuffer,gStatusText="Sending voice...",gBootBackgroundLabel,gQueuedV
 bool gVoiceReplySpeechBusy=false,gPlaybackSpeech=false;
 assistant_activity::State shownActivity=assistant_activity::State::None;
 assistant_activity::State currentAssistantActivity(){return shownActivity;}
-String gActivityDetail;uint32_t gVoiceReplyPendingMs=0;const uint8_t* orbIcon=nullptr;
+String gActivityDetail;uint32_t gVoiceReplyPendingMs=0;const uint8_t* orbIcon=nullptr;int weatherPanels=0;
+void drawHomeWeather(){++weatherPanels;}
 firmware_job_display::State gFirmwareJobState=firmware_job_display::State::Idle;
 struct{bool clockTwelveHour=false;uint8_t minBatteryForUpdate=25;}gDeviceSettings;
 struct{int level=72;}gBatterySnapshot;

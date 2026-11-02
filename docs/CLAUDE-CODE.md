@@ -291,6 +291,13 @@ name, a file's name, or Claude's own one-line note about a command. Commands the
 web addresses never go to the device, and a file path is cut down to its name. Details stay in
 memory and aren't logged.
 
+## Weather
+
+The bridge fetches the weather for the Pulse screen, because the device only trusts one root
+certificate. It sends your ZIP code to [Zippopotam.us](https://zippopotam.us) to find the place,
+and that place's coordinates to [Open-Meteo](https://open-meteo.com) for the forecast. Neither
+needs a key, and they aren't told anything else. Restart the bridge after updating it.
+
 ## Privacy and isolation
 
 Your device token is the only thing between the internet and this bridge. The
