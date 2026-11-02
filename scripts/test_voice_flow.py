@@ -104,7 +104,7 @@ int main(){
  gCanvasSpriteActive=false;gUiFramePolicy.full=false;
  trace.clear();render();assert(trace.empty()&&gCanvas.pushed==0);
  gUiFramePolicy.full=true;gCanvasSpriteActive=true;
- for(auto mode:{UiMode::Home,UiMode::Clock,UiMode::ChatFull,UiMode::ChatFace}){
+ for(auto mode:{UiMode::Home,UiMode::Clock,UiMode::ChatFull}){
   gUiMode=mode;beginVoiceRequestUi();gRecording=true;expect({"REC"});
   gRecording=false;gVoiceRequestPhase=VoiceRequestPhase::Sending;
   expect({"THINK"}); // SD finalization precedes the submitting flag: no READY flash.
@@ -135,7 +135,7 @@ int main(){
  gCanvasSpriteActive=false;assert(!voiceReplyFeedbackReady());
  // Even with the sprite loaned to TLS, the real dispatcher must render Home,
  // the clock, and chat immediately. This used to return before drawing.
- for(auto mode:{UiMode::Home,UiMode::Clock,UiMode::ChatFull,UiMode::ChatFace}) {
+ for(auto mode:{UiMode::Home,UiMode::Clock,UiMode::ChatFull}) {
   gUiMode=mode;showVoiceNotice("Background poll stays responsive",false);
   if(mode==UiMode::Home||mode==UiMode::Clock)expect({"READY"});else expect({"CHAT"});
  }

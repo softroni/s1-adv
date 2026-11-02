@@ -124,7 +124,7 @@ notice=r'''
 #include <string>
 #include <cstdint>
 struct String:std::string {using std::string::string;String(const std::string& s):std::string(s){}bool isEmpty()const{return empty();}};
-enum class UiMode {Home,Clock,Face,Hero,ChatFull,ChatFace,Other}; UiMode gUiMode=UiMode::Home;
+enum class UiMode {Home,Clock,Face,ChatFull,Other}; UiMode gUiMode=UiMode::Home;
 struct Keyboard_Class {struct KeysState {bool enter=false,ctrl=false,alt=false,fn=false;};};
 bool gVoiceNoticeVisible=false,gInboxUnread=true;
 enum class VoiceRequestPhase {None,Recording,Sending,Processing,Accepted,Reply,Error};
@@ -164,7 +164,7 @@ int main(){
  Keyboard_Class::KeysState keys;
  // Clock draws the same unread Home badge, but previously only Home had an
  // Enter/open path. Opening must preserve a draft and pending background work.
- for(auto mode:{UiMode::Home,UiMode::Clock,UiMode::Face,UiMode::Hero}){
+ for(auto mode:{UiMode::Home,UiMode::Clock,UiMode::Face}){
   gUiMode=mode;gInboxUnread=true;gVoiceNoticeVisible=true;
   gVoiceRequestPhase=VoiceRequestPhase::Processing;gSubmitting=gThinking=true;
   gChatScrollOffset=13;gInputBuffer="Unsent draft";gLastRenderMs=90;
@@ -229,7 +229,7 @@ int main(){
  assert(!gVoiceNoticeVisible); // Already in chat: errors and replies stay inline.
  gUiMode=UiMode::Home;showVoiceRequestError("Connection interrupted");
  assert(handleVoiceRequestEscape()&&!gVoiceNoticeVisible&&gUiMode==UiMode::Home);
- for(auto mode:{UiMode::ChatFull,UiMode::ChatFace}){
+ for(auto mode:{UiMode::ChatFull}){
   gUiMode=mode;beginVoiceRequestUi();gRecording=true;assert(voiceRequestBusyUi());
   gRecording=false;gVoiceRequestPhase=VoiceRequestPhase::Sending;
   assert(voiceRequestBusyUi()&&assistantPulseState()==AssistantPulseState::Thinking);
@@ -252,7 +252,7 @@ state=function('009_main.cpp.inc','AssistantPulseState assistantPulseState()')
 assert 'gVoiceReplyPending' in state  # A pending reply is work in progress, never idle.
 print('PASS voice transitions, busy dismissal guard, accepted receipt, Enter chat, Esc Home; pending server task survives UI dismissal')
 typing=function('048_main.cpp.inc','void handleTypingKey(')
-assert typing.index('handleUnreadAssistantKey(')<typing.index('handleVoiceNoticeKey(')<typing.index('handlePetKey(')
+assert typing.index('handleUnreadAssistantKey(')<typing.index('handleVoiceNoticeKey(')<typing.index('handleFocusKey(')
 
 record=r'''
 #include <cassert>

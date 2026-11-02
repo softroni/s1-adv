@@ -109,7 +109,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.239-dev"
+#define APP_VERSION "0.2.240-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"
@@ -150,7 +150,6 @@ constexpr const char* kPrefsHubNs = "hub_ep";
 constexpr const char* kPrefsDeviceNs = "device_cfg";
 constexpr const char* kPrefsFocusNs = "focus_cfg";
 constexpr const char* kPrefsOtaGuardNs = "ota_guard";
-constexpr const char* kPrefsPetNs = "pet_v1";
 constexpr const char* kPrefsAlarmNs = "alarm_cfg";
 constexpr const char* kPrefsIrRemoteNs = "ir_remote";
 constexpr const char* kLegacyBridgeHost = "";
@@ -282,16 +281,6 @@ constexpr uint32_t kAlarmSnoozeSec = 5UL * 60UL;
 constexpr uint32_t kAlarmBeepIntervalMs = 650;
 constexpr uint16_t kFocusMinBpm = 30;
 constexpr uint16_t kFocusMaxBpm = 160;
-constexpr uint32_t kPetMinuteMs = 60UL * 1000UL;
-constexpr uint32_t kPetTickMs = 1000;
-constexpr uint32_t kPetAutoSaveMs = 45UL * 1000UL;
-constexpr uint32_t kPetActionMs = 5UL * 1000UL;
-constexpr uint32_t kPetRestMinMs = 90UL * 1000UL;
-constexpr uint32_t kPetRestMaxMs = 180UL * 1000UL;
-constexpr uint32_t kPetDecisionMinMs = 45UL * 1000UL;
-constexpr uint32_t kPetDecisionMaxMs = 120UL * 1000UL;
-constexpr uint32_t kPetOfflineMaxMinutes = 8UL * 60UL;
-constexpr uint8_t kPetMaxPoop = 5;
 constexpr uint32_t kTextTurnTaskStackSize = 8192;
 constexpr size_t kMaxFlashVoiceNotes = 12;
 constexpr size_t kMaxSdVoiceNotes = 48;

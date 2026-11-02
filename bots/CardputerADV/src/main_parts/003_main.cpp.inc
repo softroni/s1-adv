@@ -32,7 +32,7 @@ struct DeviceActionCatalogEntry {
   const char* example;
 };
 
-constexpr const char* kDeviceActionCatalogVersion = "2026-05-03.2";
+constexpr const char* kDeviceActionCatalogVersion = "2026-11-02.1";
 constexpr DeviceActionCatalogEntry kDeviceActionCatalog[] = {
     {"focus.start", "start focus", "set pomodoro to 45 minutes"},
     {"lab.rule", "make a Lab rule", "when I wave, turn the strip red"},
@@ -55,15 +55,6 @@ constexpr DeviceActionCatalogEntry kDeviceActionCatalog[] = {
     {"settings.set_ota_min_battery", "OTA battery", "update above 50 percent"},
     {"ota.check", "OTA check", "check for firmware update"},
     {"ota.apply", "OTA apply", "install firmware update"},
-    {"pet.feed", "pet food", "feed the AI pet"},
-    {"pet.play", "pet play", "play with the pet"},
-    {"pet.clean", "pet clean", "clean the pet"},
-    {"pet.sleep", "pet sleep", "put the pet to sleep"},
-    {"pet.medicine", "pet medicine", "heal the sick pet"},
-    {"pet.discipline", "pet discipline", "discipline the pet"},
-    {"pet.hunt", "pet hunt", "send the pet hunting Wi-Fi"},
-    {"pet.explore", "pet explore", "let the pet explore"},
-    {"pet.reset", "pet reset", "reset the pet"},
 };
 constexpr size_t kDeviceActionCatalogCount = sizeof(kDeviceActionCatalog) / sizeof(kDeviceActionCatalog[0]);
 

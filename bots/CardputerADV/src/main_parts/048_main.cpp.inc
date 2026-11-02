@@ -56,20 +56,16 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
     if (keys.enter || key=='\r' || key=='\n') runChatCommand(gChatCommandSelection);
     else if (lowerKey=='r') runChatCommand(0);
     else if (lowerKey=='c') runChatCommand(1);
-    else if (lowerKey=='e') runChatCommand(2);
-    else if (lowerKey=='f') runChatCommand(3);
-    else if (lowerKey=='b') runChatCommand(6);
-    else if (key=='[') runChatCommand(4);
-    else if (key==']') runChatCommand(5);
+    else if (lowerKey=='b') runChatCommand(4);
+    else if (key=='[') runChatCommand(2);
+    else if (key==']') runChatCommand(3);
     return;
   }
   if (handleEyeSkinKey(key,keys)) return;
   if (isAssistantUi() && keys.ctrl) {
     if (lowerKey=='c') { runChatCommand(1); return; }
-    if (lowerKey=='e') { runChatCommand(2); return; }
-    if (lowerKey=='f') { runChatCommand(3); return; }
-    if (key==',' || key=='[') { runChatCommand(4); return; }
-    if (key=='.' || key==']') { runChatCommand(5); return; }
+    if (key==',' || key=='[') { runChatCommand(2); return; }
+    if (key=='.' || key==']') { runChatCommand(3); return; }
   }
   if (gBlockingInputPumpActive) {
     const bool networkAction =
@@ -184,9 +180,6 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
     handleVoicePlayerKey(key, keys);
     return;
   }
-  if (gUiMode == UiMode::Hero && handlePetKey(key, keys)) {
-    return;
-  }
   if (gUiMode == UiMode::Focus && handleFocusKey(key, keys)) {
     return;
   }
@@ -271,7 +264,7 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
     return;
   }
   if (keys.enter || key == '\r' || key == '\n') {
-    if ((gUiMode == UiMode::ChatFull || gUiMode == UiMode::ChatFace) && playVisibleVoiceHistoryLine()) {
+    if (gUiMode == UiMode::ChatFull && playVisibleVoiceHistoryLine()) {
       return;
     }
     submitInput();

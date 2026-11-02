@@ -61,9 +61,6 @@ const uint8_t* launcherItemIcon(const LauncherSubItem& item) {
   switch (item.mode) {
     case UiMode::Home: return item.startRealtime ? kWaveform : kHeart;
     case UiMode::ChatFull: return kChat;
-    case UiMode::ChatFace: return kChatEyes;
-    case UiMode::Face: return kEyes;
-    case UiMode::Hero: return kPaw;
     case UiMode::Library: return kBooks;
     case UiMode::AudioFolders: return kFolder;
     case UiMode::Voice: return kMic;

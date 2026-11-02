@@ -54,6 +54,12 @@ def main() -> None:
     require("Saver style" in labels and "Eye skin" in labels and "Big Eyes" in labels and "C-Matrix" in labels,
             "screensaver picker labels are incomplete")
 
+    all_parts = "\n".join(p.read_text(encoding="utf-8") for p in sorted((ROOT / "src/main_parts").glob("*.inc")))
+    for gone in ("UiMode::ChatFace", "UiMode::Hero", "gPet", "Chat Eyes", "AI Pet", '"/face"', '"/pet"', '"pet.'):
+        require(gone not in all_parts, f"removed app came back: {gone}")
+    require('{"Big Eyes",' not in all_parts and "F  Big Eyes" not in all_parts,
+            "Big Eyes is a screensaver style, not an app")
+
     shortcut_header = read("src/launcher_shortcuts.h")
     require("digitFromHid" in shortcut_header, "Ctrl+digit must normalize physical HID codes")
     require("launcher_shortcuts::digitFromHid" in keyboard,

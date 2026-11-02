@@ -45,7 +45,7 @@ JsonObject decoded;
 struct DynamicJsonDocument {JsonObject root;DynamicJsonDocument(int){}Value operator[](const char*k){return root[k];}void clear(){}};
 struct ParseError{operator bool()const{return false;}const char*c_str(){return "";}};
 ParseError deserializeJson(DynamicJsonDocument&d,const String&){d.root=decoded;return {};}
-enum class UiMode{Home,ChatFull,ChatFace};UiMode gUiMode=UiMode::Home;
+enum class UiMode{Home,ChatFull};UiMode gUiMode=UiMode::Home;
 enum class LineKind{Assistant,User};
 bool gVoiceReplyPending=true,gAssistantPendingVisible=false,gSubmitting=false,gThinking=false,gInboxUnread=false;
 bool gInboxLastFromAssistant=false,gVoiceNoticeVisible=true;

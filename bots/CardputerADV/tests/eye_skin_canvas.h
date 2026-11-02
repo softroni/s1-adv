@@ -103,15 +103,6 @@ int main(int argc,char**argv) {
     gCanvas.raster=true;gDeviceSettings.eyeSkin=skin;renderUncannyEyesUi();
     gCanvas.save(std::string(argv[1])+"/skin-"+std::to_string(skin)+".ppm");gCanvas.raster=false;
   }
-  for(int skin=0;skin<6;++skin) {
-    gCanvas.raster=true;gDeviceSettings.eyeSkin=skin;
-    gCanvas.fillScreen(rgb565_local(3,7,13));
-    renderEyeSkinRegion(48,13,144,73);
-    assert(gCanvas.pixels[0]==rgb565_local(3,7,13));
-    assert(gCanvas.pixels[90*240+120]==rgb565_local(3,7,13));
-    gCanvas.save(std::string(argv[1])+"/compact-"+std::to_string(skin)+".ppm");
-    gCanvas.raster=false;
-  }
   int cases=0;
   for(int e=0;e<6;++e)for(int f=0;f<5;++f)for(int blink=0;blink<256;++blink)for(int gaze=-1;gaze<=1;gaze+=2) {
     emotion=static_cast<EyeEmotion>(e);gFaceMode=static_cast<FaceMode>(f);

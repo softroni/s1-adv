@@ -57,9 +57,6 @@
       case UiMode::Face:
         renderFaceOnlyUi();
         break;
-      case UiMode::Hero:
-        renderHeroUi();
-        break;
       case UiMode::Clock:
         renderClockUi();
         break;
@@ -135,7 +132,6 @@
         renderLogsUi();
         break;
       case UiMode::ChatFull:
-      case UiMode::ChatFace:
       default:
         renderChatUi();
         break;
@@ -323,12 +319,10 @@ void setup() {
     setStatus("Update skipped. Ready",2200);
   }
 
-  loadPetState();
   pushSystem("Device ready: " + gDeviceId);
   pushSystem("Ctrl+Space = EN/RU");
   pushSystem("Voice: Ctrl x2 / Ctrl+V / hold G0");
   pushSystem("Tab menu, Ctrl+K commands, Ctrl+R Realtime");
-  pushSystem("/pet = AI pet, /petreset resets");
   pushSystem(String("FW ") + kAppVersion + " " + String(kBuildGitSha).substring(0, 10));
   logf("[BOOT] device_id=%s", gDeviceId.c_str());
   logf("[BOOT] version=%s git=%s build=%s", kAppVersion, kBuildGitSha, kBuildTime);
@@ -489,7 +483,6 @@ void loop() {
     serviceIrRemote();
   }
   serviceRfidLab();
-  servicePet();
   traceUiService("processCompletedTextTurn", [] { processCompletedTextTurn(); });
   if (!gPendingTextTurns.empty()) maybeStartNextTextTurn();
   serviceMemoryGuard();

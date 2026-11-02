@@ -120,13 +120,11 @@ struct WifiRadio {
     gWifiReady = false;
   }
   bool startScan() {
-    if (gPet.env.scanPending) return false;  // The pet would take these results for its own.
     gWifiScanError = ESP_OK;
     WiFi.scanDelete();
     return WiFi.scanNetworks(true, true) != WIFI_SCAN_FAILED;
   }
   std::string scanTrouble() {
-    if (gPet.env.scanPending) return "Pet is scanning. R to try again";
     char text[40];
     if (gWifiScanError != ESP_OK) {
       snprintf(text, sizeof(text), "Scan failed %x, %uK. R to retry", static_cast<unsigned>(gWifiScanError),

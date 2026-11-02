@@ -191,60 +191,6 @@ void serviceFocusMetronome() {
   focusTone(660, 35);
 }
 
-uint8_t petClampStat(int value) {
-  return static_cast<uint8_t>(clampValue<int>(value, 0, 100));
-}
-
-uint32_t petEpochNow() {
-  if (!hasValidSystemTime()) {
-    return 0;
-  }
-  time_t now = time(nullptr);
-  return now > 0 ? static_cast<uint32_t>(now) : 0;
-}
-
-const char* petStageName(PetStage stage) {
-  switch (stage) {
-    case PetStage::Egg:
-      return "EGG";
-    case PetStage::Baby:
-      return "BABY";
-    case PetStage::Teen:
-      return "TEEN";
-    case PetStage::Adult:
-      return "ADULT";
-    case PetStage::Elder:
-    default:
-      return "ELDER";
-  }
-}
-
-const char* petMoodName(PetMood mood) {
-  switch (mood) {
-    case PetMood::Happy:
-      return "HAPPY";
-    case PetMood::Hungry:
-      return "HUNGRY";
-    case PetMood::Bored:
-      return "BORED";
-    case PetMood::Curious:
-      return "CURIOUS";
-    case PetMood::Sick:
-      return "SICK";
-    case PetMood::Excited:
-      return "EXCITED";
-    case PetMood::Sleepy:
-      return "SLEEPY";
-    case PetMood::Dirty:
-      return "DIRTY";
-    case PetMood::Dead:
-      return "DEAD";
-    case PetMood::Calm:
-    default:
-      return "CALM";
-  }
-}
-
 void toggleFocusGuidedAudio() {
   gFocusSettings.guidedAudio=!gFocusSettings.guidedAudio;
   if(!gFocusSettings.guidedAudio && isPomodoroMeditationAssetPath(gPlaybackStreamPath)) {

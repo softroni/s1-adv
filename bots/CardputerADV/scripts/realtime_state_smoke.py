@@ -272,7 +272,7 @@ def test_firmware_wiring() -> None:
                      loop.index("void loop()")]
     for forbidden_service in (
         "serviceSetupPortal", "gWs.loop", "syncClockFromNtp", "serviceOtaBootGuard",
-        "servicePet", "serviceTetris", "serviceRfidLab", "serviceIrRemote",
+        "serviceTetris", "serviceRfidLab", "serviceIrRemote",
         "updateFocusTimer", "serviceFocusMetronome", "serviceAlarm", "serviceAutoInboxPoll",
     ):
         assert forbidden_service not in exclusive

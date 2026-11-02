@@ -167,7 +167,7 @@ bool applyInboxResponse(String& body, bool forcePlay, bool speak, bool quiet, bo
   if (found) {
     const bool voiceReplyArrived = voiceReplyWasPending && !gVoiceReplyPending;
     if (voiceReplyArrived || (quiet && !forcePlay && gInboxLastFromAssistant)) {
-      if(gVoiceNoticeVisible || (gUiMode!=UiMode::ChatFull && gUiMode!=UiMode::ChatFace))
+      if(gVoiceNoticeVisible || gUiMode!=UiMode::ChatFull)
         showVoiceNotice(gInboxLastText, false);
       const bool speakReply = !gReplyWaitFromText || shouldSpeakAssistantTextReply(gInboxLastText);
       if (speakReply && (voiceReplyArrived || static_cast<int32_t>(gVoiceReplyNotifyUntilMs - millis()) > 0))

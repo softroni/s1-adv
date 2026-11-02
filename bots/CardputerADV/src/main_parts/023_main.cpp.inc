@@ -85,55 +85,6 @@ bool playVoiceNoteByAction(JsonObjectConst action) {
   return playVoiceNoteAt(index);
 }
 
-
-
-String normalizePetActionText(String value) {
-  value.trim();
-  value.toLowerCase();
-  value.replace("-", ".");
-  value.replace("_", ".");
-  if (value.startsWith("pet.")) {
-    value = value.substring(4);
-  } else if (value.startsWith("tama.")) {
-    value = value.substring(5);
-  } else if (value.startsWith("tamagotchi.")) {
-    value = value.substring(11);
-  }
-  return value;
-}
-
-bool executePetActionByName(String actionName) {
-  String op = normalizePetActionText(actionName);
-  bool executed = false;
-  if (op == "open" || op == "status" || op == "show") {
-    executed = true;
-    setStatus("Pet screen", 900);
-  } else if (op == "feed" || op == "food" || op == "eat") {
-    executed = applyPetCare(PetCareAction::Feed);
-  } else if (op == "play" || op == "fun") {
-    executed = applyPetCare(PetCareAction::Play);
-  } else if (op == "clean" || op == "wash" || op == "bath") {
-    executed = applyPetCare(PetCareAction::Clean);
-  } else if (op == "sleep" || op == "rest") {
-    executed = applyPetCare(PetCareAction::Sleep);
-  } else if (op == "medicine" || op == "heal" || op == "doctor") {
-    executed = applyPetCare(PetCareAction::Medicine);
-  } else if (op == "discipline" || op == "train" || op == "scold") {
-    executed = applyPetCare(PetCareAction::Discipline);
-  } else if (op == "hunt" || op == "wifi" || op == "forage") {
-    executed = applyPetCare(PetCareAction::Hunt);
-  } else if (op == "explore" || op == "scan") {
-    executed = applyPetCare(PetCareAction::Explore);
-  } else if (op == "reset" || op == "new") {
-    resetPet(true);
-    executed = true;
-  }
-  if (executed) {
-    setUiMode(UiMode::Hero);
-  }
-  return executed;
-}
-
 bool executeDeviceAction(JsonObjectConst action) {
   String type = normalizeActionText(action["type"] | "");
   if (type.isEmpty()) {
@@ -150,16 +101,3 @@ bool executeDeviceAction(JsonObjectConst action) {
     return true;
   }
 
-  String petType = type;
-  petType.replace("_", ".");
-  if (petType == "pet.care" || petType == "tama.care" || petType == "tamagotchi.care") {
-    String care = action["action"] | "";
-    if (care.isEmpty()) {
-      care = action["value"] | "";
-    }
-    return executePetActionByName(care);
-  }
-  if (petType == "pet" || petType == "tama" || petType == "tamagotchi" ||
-      petType.startsWith("pet.") || petType.startsWith("tama.") || petType.startsWith("tamagotchi.")) {
-    return executePetActionByName(petType);
-  }

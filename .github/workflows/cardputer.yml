@@ -71,6 +71,7 @@ jobs:
       - run: g++ -std=c++17 -Wall -Wextra -pedantic bots/CardputerADV/tests/release_delivery_test.cpp -o /tmp/release-delivery-test && /tmp/release-delivery-test
       - run: node bots/CardputerADV/tests/render_eye_skins.mjs /tmp/cardputer-eye-skins
       - run: python scripts/test_assistant_ui.py
+      - run: python scripts/test_screensaver_wake.py
       - run: python scripts/test_unified_home.py
       - run: python scripts/test_sd_file_manager.py
       - run: python scripts/test_sd_shared_spi.py

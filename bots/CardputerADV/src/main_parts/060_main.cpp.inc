@@ -126,21 +126,15 @@ void renderChatUi() {
   d.setTextSize(1);
   d.setFont(&fonts::Font2);
 
-  bool showFace = gUiMode == UiMode::ChatFace;
-  if (showFace) {
-    renderFacePanel(false);
-  }
-
-  bool showStatus = !showFace && !gStatusText.isEmpty() && gStatusText != "Ready";
+  bool showStatus = !gStatusText.isEmpty() && gStatusText != "Ready";
   int inputLines = 1;
-  if (!showFace && gInputBuffer.length() > 36) {
+  if (gInputBuffer.length() > 36) {
     inputLines = 2;
   }
-  if (!showFace && gInputBuffer.length() > 78) {
+  if (gInputBuffer.length() > 78) {
     inputLines = 3;
   }
-  // The face panel leaves room for one line, so it keeps the small size.
-  const float textScale = showFace ? 1.0f : chatTextScale();
+  const float textScale = chatTextScale();
   // Typing stops growing at Medium so Large keeps three transcript rows.
   const float inputScale = min(textScale, kTextSizeScales[1]);
   d.setFont(&fonts::efontCN_12);
@@ -149,8 +143,8 @@ void renderChatUi() {
   d.setTextSize(1);
   int composerH = max<int>(17 + (inputLines - 1) * 11, inputHeight + 6);
   int composerY = 135 - composerH - 13;
-  int transcriptTop = showFace ? 88 : 8;
-  const bool activityStrip = !showFace && currentAssistantActivity() != assistant_activity::State::None;
+  int transcriptTop = 8;
+  const bool activityStrip = currentAssistantActivity() != assistant_activity::State::None;
   int transcriptBottom = composerY - (activityStrip ? 22 : showStatus ? 14 : 4);
 
   d.setFont(&fonts::efontCN_12);
@@ -159,7 +153,7 @@ void renderChatUi() {
   int visibleRows = max<int>(1, (transcriptBottom - transcriptTop) / max<int>(1, lineHeight + 2));
   gChatVisibleRows = visibleRows;
   int y = transcriptTop;
-  auto lines = buildVisualLines(chatWrapWidth(showFace));
+  auto lines = buildVisualLines(chatWrapWidth());
   int maxOffset = max<int>(0, static_cast<int>(lines.size()) - visibleRows);
   if (gChatScrollOffset > maxOffset) {
     gChatScrollOffset = maxOffset;
@@ -167,10 +161,8 @@ void renderChatUi() {
   int startIndex = max<int>(0, static_cast<int>(lines.size()) - visibleRows - gChatScrollOffset);
   int endIndex = min<int>(static_cast<int>(lines.size()), startIndex + visibleRows);
 
-  if (!showFace) {
-    d.fillRoundRect(4, 4, 232, transcriptBottom - 2, 10, panel);
-    d.drawRoundRect(4, 4, 232, transcriptBottom - 2, 10, rgb565_local(18, 35, 50));
-  }
+  d.fillRoundRect(4, 4, 232, transcriptBottom - 2, 10, panel);
+  d.drawRoundRect(4, 4, 232, transcriptBottom - 2, 10, rgb565_local(18, 35, 50));
 
   const int bubbleRight = 230;
   for (int i = startIndex; i < endIndex;) {
@@ -185,7 +177,7 @@ void renderChatUi() {
     const LineKind kind = lines[i].kind;
     uint16_t bubble = kind == LineKind::User ? userBg : (kind == LineKind::Assistant ? aiBg : sysBg);
     uint16_t ink = kind == LineKind::User ? accent : (kind == LineKind::Assistant ? green : muted);
-    const int bw = min<int>(widest + 10, chatWrapWidth(showFace) + 10);
+    const int bw = min<int>(widest + 10, chatWrapWidth() + 10);
     const int bx = kind == LineKind::User ? bubbleRight - bw : 8;
     d.fillRoundRect(bx, y - 1, bw, rows * (lineHeight + 2) - 1, 4, bubble);
     d.setTextColor(ink, bubble);
@@ -197,7 +189,7 @@ void renderChatUi() {
     i = last;
   }
   d.setTextSize(1);
-  if (maxOffset > 0 && !showFace) {
+  if (maxOffset > 0) {
     int railX = 232;
     int railH = max<int>(12, transcriptBottom - transcriptTop - 8);
     int knobH = max<int>(8, railH / (maxOffset + 1));

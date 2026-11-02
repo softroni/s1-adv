@@ -18,51 +18,6 @@ bool gFocusCompletionTonePending=false;
 uint32_t gPendingFocusCueAtMs = 0;
 ui_frame::Policy gUiFramePolicy;
 
-struct PetEnvironment {
-  int16_t netCount = 0;
-  int16_t hiddenCount = 0;
-  int16_t openCount = 0;
-  int16_t strongCount = 0;
-  int16_t avgRssi = -100;
-  uint32_t lastScanMs = 0;
-  bool scanPending = false;
-  bool scanFresh = false;
-};
-
-struct PetRuntime {
-  uint8_t hunger = 70;
-  uint8_t happiness = 70;
-  uint8_t health = 75;
-  uint8_t energy = 80;
-  uint8_t cleanliness = 80;
-  uint8_t discipline = 45;
-  uint8_t poop = 0;
-  uint8_t careMistakes = 0;
-  uint8_t traitCuriosity = 70;
-  uint8_t traitActivity = 60;
-  uint8_t traitStress = 40;
-  uint32_t ageMinutes = 0;
-  uint32_t bornEpoch = 0;
-  uint32_t lastSavedEpoch = 0;
-  uint32_t lastTickMs = 0;
-  uint32_t lastMinuteMs = 0;
-  uint32_t lastSaveMs = 0;
-  uint32_t actionUntilMs = 0;
-  uint32_t lastInteractionMs = 0;
-  uint32_t lastDecisionMs = 0;
-  uint32_t nextDecisionMs = kPetDecisionMinMs;
-  uint32_t restPhaseStartMs = 0;
-  uint32_t restDurationMs = kPetRestMinMs;
-  bool alive = true;
-  bool sick = false;
-  bool restStatsApplied = false;
-  PetStage stage = PetStage::Egg;
-  PetMood mood = PetMood::Calm;
-  PetActivity activity = PetActivity::Idle;
-  PetRestPhase restPhase = PetRestPhase::None;
-  PetEnvironment env;
-};
-
 struct LauncherSubItem {
   const char* label;
   UiMode mode;
@@ -144,9 +99,8 @@ struct KeyRushRuntime {
 };
 
 constexpr LauncherGroup kLauncherGroups[kLauncherGroupCount] = {
-    {"AI Agent", "Assistant and chat", rgb565_local(47, 227, 255), 6,
-     {{"Realtime", UiMode::Home, true}, {"Pulse", UiMode::Home}, {"AI Chat", UiMode::ChatFull},
-      {"Chat Eyes", UiMode::ChatFace}, {"Big Eyes", UiMode::Face}, {"AI Pet", UiMode::Hero}}},
+    {"AI Agent", "Assistant and chat", rgb565_local(47, 227, 255), 3,
+     {{"Realtime", UiMode::Home, true}, {"Pulse", UiMode::Home}, {"AI Chat", UiMode::ChatFull}}},
     {"Media", "Listen and capture", rgb565_local(88, 240, 141), 8,
      {{"Library", UiMode::Library}, {"Folders", UiMode::AudioFolders}, {"Voice Notes", UiMode::Voice},
       {"Notes", UiMode::Notes}, {"Assets", UiMode::Assets}, {"Files", UiMode::Files}, {"Internet Radio", UiMode::Radio},

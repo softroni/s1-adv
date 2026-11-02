@@ -286,7 +286,7 @@ function authErrorPayload(message) {
   };
 }
 
-const DEVICE_ACTION_CATALOG_VERSION = "2026-11-01.1";
+const DEVICE_ACTION_CATALOG_VERSION = "2026-11-02.1";
 const DEVICE_ACTION_CATALOG = [
   { type: "lab.rule", group: "lab", description: "Offer the owner a rule joining sensors to outputs", example: "when I wave, turn the strip red" },
   { type: "focus.start", group: "focus", description: "Start or resume focus timer", example: "start pomodoro for 45 minutes" },
@@ -308,16 +308,7 @@ const DEVICE_ACTION_CATALOG = [
   { type: "settings.set_ota_boot_check", group: "settings", description: "Toggle boot update checks", example: "check updates on boot" },
   { type: "settings.set_ota_min_battery", group: "settings", description: "Set OTA battery threshold", example: "only update above 50 percent battery" },
   { type: "ota.check", group: "firmware", description: "Fetch the latest firmware OTA manifest", example: "check for firmware update" },
-  { type: "ota.apply", group: "firmware", description: "Apply the latest available firmware OTA after explicit user consent", example: "install the firmware update" },
-  { type: "pet.feed", group: "pet", description: "Feed the OpenClaw pet", example: "feed the pet" },
-  { type: "pet.play", group: "pet", description: "Play with the OpenClaw pet", example: "play with the pet" },
-  { type: "pet.clean", group: "pet", description: "Clean the OpenClaw pet", example: "clean the pet" },
-  { type: "pet.sleep", group: "pet", description: "Put the pet to sleep", example: "put the pet to sleep" },
-  { type: "pet.medicine", group: "pet", description: "Heal the pet", example: "give the pet medicine" },
-  { type: "pet.discipline", group: "pet", description: "Discipline the pet", example: "discipline the pet" },
-  { type: "pet.hunt", group: "pet", description: "Send the pet hunting Wi-Fi", example: "send the pet hunting" },
-  { type: "pet.explore", group: "pet", description: "Let the pet explore", example: "let the pet explore" },
-  { type: "pet.reset", group: "pet", description: "Reset pet state", example: "reset the pet" }
+  { type: "ota.apply", group: "firmware", description: "Apply the latest available firmware OTA after explicit user consent", example: "install the firmware update" }
 ];
 
 const CARDPUTER_FIRMWARE_CONTEXT_VERSION = "2026-05-03.1";
@@ -355,7 +346,6 @@ const CARDPUTER_FIRMWARE_CAPABILITIES = {
     "Local UI screens: home, chat, voice, library, folders, notes, assets, focus, logs, settings, battery, firmware/OTA",
     "Calculator screen: basic arithmetic with +, -, *, /, decimal numbers, parentheses, clear, backspace, and Enter to evaluate",
     "Audio library and saved voice note playback by existing asset index/query/path",
-    "Pet/Tamagotchi actions: feed, play, clean, sleep, medicine, discipline, hunt, explore, reset",
     "Settings: audio language, OTA auto update, OTA boot check, OTA minimum battery",
     "Firmware OTA: fetch manifest, show candidate/current version, apply OTA, boot guard confirm/rollback, show firmware slot usage",
     "Standard voice turn: record, upload raw audio, transcribe, route to current topic, play synthesized reply audio",
@@ -403,10 +393,6 @@ const DEVICE_UI_MODES = new Set([
   "pulse",
   "chat",
   "chat_full",
-  "chat_eyes",
-  "face",
-  "eyes",
-  "hero",
   "voice",
   "library",
   "folders",
@@ -775,7 +761,7 @@ function buildFirmwareCapabilityPolicyText() {
   return (
     `Cardputer firmware context ${CARDPUTER_FIRMWARE_CONTEXT_VERSION}: ` +
     "The assistant must know the current Cardputer firmware capabilities in every topic. " +
-    "Implemented local functions include Pomodoro/focus, one configured conversation, calculator, UI screens, local audio/voice-note playback, pet actions, settings, firmware OTA, standard voice, and experimental realtime voice. " +
+    "Implemented local functions include Pomodoro/focus, one configured conversation, calculator, UI screens, local audio/voice-note playback, settings, firmware OTA, standard voice, and experimental realtime voice. " +
     "If the user asks to run an implemented function, use supported device_actions where possible. " +
     "If the user asks to run an absent function, say that it is not in the current firmware and ask whether to develop and publish it. " +
     CARDPUTER_EXECUTION_POLICY + " " +
@@ -4158,7 +4144,7 @@ class BridgeRuntime {
       "You are the Cardputer firmware release agent for this one job only.",
       CARDPUTER_EXECUTION_POLICY,
       "Use the language of request_language for user-facing replies. English by default; Russian only when request_language is Russian.",
-      "Implement the requested firmware change in the repo. Background-color requests are only smoke tests; the same route must handle real features such as calculator, alarm, stopwatch, Tamagotchi, or utility screens.",
+      "Implement the requested firmware change in the repo. Background-color requests are only smoke tests; the same route must handle real features such as calculator, alarm, stopwatch, or utility screens.",
       "Keep the implementation scoped and production-grade. Follow existing firmware UI/code patterns and avoid unrelated refactors.",
       "Before editing, inspect the relevant files. Use the server repo path from job_session_contract.repo.",
       "Fetch job_session_contract.push_remote and job_session_contract.branch, then fast-forward that exact clean checkout before editing. Stop if the checkout is on another branch; do not switch or reset it. Preserve dirty work and stop on conflicts. Never restore or merge legacy OmniBot firmware branches into the independent S1-ADV history.",

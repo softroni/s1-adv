@@ -18,99 +18,10 @@ void renderModeFooter(const String& left, const String& right = "") {
 void renderFaceOnlyUi() {
   if (gRealtimeScreenVisible) renderRealtimeUi();
   else renderUncannyEyesUi();
-  if (!gScreensaverActive && !gRealtimeScreenVisible) {
-    uint16_t bg=rgb565_local(3,7,13);
-    gCanvas.fillRect(0,125,240,10,bg);
-    gCanvas.setFont(&fonts::Font0);
-    gCanvas.setTextColor(gRealtimeActive?rgb565_local(100,255,170):rgb565_local(126,143,157),bg);
-    gCanvas.setCursor(8,128);
-    gCanvas.print(gRealtimeActive?"LIVE   Tab menu  Esc end":"Tab menu  Ctrl+K commands");
-  }
   if (!gRealtimeScreenVisible || !gRealtimeClassicView) {
     renderLauncherOverlay();
     renderDebugOverlay();
   }
-}
-
-void drawPetStatBar(int16_t x, int16_t y, int16_t w, const char* label, uint8_t value, uint16_t color, uint16_t bg) {
-  auto& d = gCanvas;
-  d.setFont(&fonts::Font0);
-  d.setTextColor(rgb565_local(150, 164, 176), bg);
-  d.setCursor(x, y);
-  d.print(label);
-  int16_t barX = x + 22;
-  int16_t barW = max<int16_t>(20, w - 24);
-  d.fillRoundRect(barX, y + 1, barW, 6, 3, rgb565_local(20, 32, 43));
-  int16_t fillW = max<int16_t>(2, (barW * value) / 100);
-  d.fillRoundRect(barX, y + 1, fillW, 6, 3, color);
-}
-
-void renderHeroUi() {
-  auto& d = gCanvas;
-  const uint16_t bg = rgb565_local(2, 6, 12);
-  const uint16_t panel = rgb565_local(7, 14, 24);
-  const uint16_t panel2 = rgb565_local(9, 20, 31);
-  const uint16_t grid = rgb565_local(13, 32, 45);
-  const uint16_t muted = rgb565_local(132, 148, 160);
-  const uint16_t accent = petMoodAccent();
-  d.fillScreen(bg);
-
-  d.fillRoundRect(6, 5, 228, 124, 14, panel);
-  d.drawRoundRect(6, 5, 228, 124, 14, accent);
-  d.drawRoundRect(10, 9, 220, 116, 11, rgb565_local(18, 34, 48));
-
-  d.setFont(&fonts::Font2);
-  d.setTextColor(accent, panel);
-  d.setCursor(16, 14);
-  d.print("AI PET");
-  String stage = petStageName(gPet.stage);
-  d.setTextColor(TFT_WHITE, panel);
-  d.setCursor(222 - d.textWidth(stage), 14);
-  d.print(stage);
-
-  int16_t arenaX = 15;
-  int16_t arenaY = 29;
-  int16_t arenaW = 116;
-  int16_t arenaH = 82;
-  d.fillRoundRect(arenaX, arenaY, arenaW, arenaH, 10, panel2);
-  d.drawRoundRect(arenaX, arenaY, arenaW, arenaH, 10, rgb565_local(30, 52, 68));
-  for (int16_t gx = arenaX + 10; gx < arenaX + arenaW - 8; gx += 22) {
-    d.drawFastVLine(gx, arenaY + 8, arenaH - 16, grid);
-  }
-  for (int16_t gy = arenaY + 12; gy < arenaY + arenaH - 8; gy += 16) {
-    d.drawFastHLine(arenaX + 8, gy, arenaW - 16, grid);
-  }
-
-  int16_t petX = arenaX + arenaW / 2 + static_cast<int16_t>(gEyeLookX / 5.5f);
-  int16_t petY = arenaY + 45 + static_cast<int16_t>(gEyeLookY / 7.0f);
-  drawProceduralOpenClawPet(petX, petY, gPet.stage == PetStage::Egg ? 38 : 42, false);
-
-  int16_t statX = 139;
-  int16_t statY = 32;
-  int16_t statW = 87;
-  d.fillRoundRect(statX - 4, statY - 4, 91, 79, 9, rgb565_local(4, 11, 19));
-  d.drawRoundRect(statX - 4, statY - 4, 91, 79, 9, rgb565_local(24, 42, 56));
-  drawPetStatBar(statX, statY, statW, "HUN", gPet.hunger, rgb565_local(255,136,64), rgb565_local(4, 11, 19));
-  drawPetStatBar(statX, statY + 11, statW, "FUN", gPet.happiness, rgb565_local(88, 240, 141), rgb565_local(4, 11, 19));
-  drawPetStatBar(statX, statY + 22, statW, "HP", gPet.health, rgb565_local(128, 230, 104), rgb565_local(4, 11, 19));
-  drawPetStatBar(statX, statY + 33, statW, "EN", gPet.energy, rgb565_local(47, 227, 255), rgb565_local(4, 11, 19));
-  drawPetStatBar(statX, statY + 44, statW, "CLN", gPet.cleanliness, rgb565_local(34, 209, 189), rgb565_local(4, 11, 19));
-  drawPetStatBar(statX, statY + 55, statW, "DSC", gPet.discipline, rgb565_local(170, 130, 255), rgb565_local(4, 11, 19));
-
-  d.setFont(&fonts::Font0);
-  d.setTextColor(muted, panel);
-  d.setCursor(18, 114);
-  String bottom = String(petMoodName(gPet.mood)) + " " + petActivityName(gPet.activity) +
-                  "  age " + petAgeText();
-  d.print(fitCurrentFontToWidth(bottom, 130));
-  d.setCursor(152, 114);
-  String meta = String("poop ") + String(gPet.poop) + " wifi " + String(gPet.env.netCount);
-  d.print(fitCurrentFontToWidth(meta, 72));
-
-  drawTinyFooter(panel, muted, "F food P play C clean S sleep H hunt", 14, 123, 212);
-
-  renderLauncherOverlay();
-  renderDebugOverlay();
 }
 
 void drawAssistantPulseArc(int16_t cx, int16_t cy, int16_t outerR, int16_t innerR,

@@ -55,7 +55,7 @@ Put S1-ADV on it and you get a menu of more than 40 apps: an AI assistant that r
 
 | Tab | Key | Apps |
 | --- | --- | --- |
-| AI Agent | A | Realtime, Pulse, AI Chat, Chat Eyes, Big Eyes, AI Pet |
+| AI Agent | A | Realtime, Pulse, AI Chat |
 | Media | M | Library, Folders, Voice Notes, Notes, Assets, Files, Internet Radio, VLC Remote |
 | Focus | F | Pomodoro, Alarm, Stopwatch, Calendar, Chess Mind, Chess, BrainFlow, KeyRush |
 | Tools | T | Calculator, NFC Notes, RFID Lab, IR Remote, smartLamp, Sonar, Mesh, Pocket Synth |

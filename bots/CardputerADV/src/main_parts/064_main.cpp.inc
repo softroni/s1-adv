@@ -42,9 +42,8 @@ bool handleHomeUpdateKey(char key, const Keyboard_Class::KeysState& keys) {
 }
 
 bool isAssistantUi() {
-  return gUiMode == UiMode::Home || gUiMode == UiMode::ChatFace ||
-         gUiMode == UiMode::ChatFull || gUiMode == UiMode::Face || gUiMode == UiMode::Hero ||
-         gUiMode == UiMode::Clock;
+  return gUiMode == UiMode::Home || gUiMode == UiMode::ChatFull ||
+         gUiMode == UiMode::Face || gUiMode == UiMode::Clock;
 }
 
 String makeRealtimeUpgradeRequest(const String& host,uint16_t port,const String& path,
@@ -178,10 +177,10 @@ bool handleEyeSkinKey(char key,const Keyboard_Class::KeysState& keys) {
   if (!isAssistantUi() || gLauncherVisible || gRecording) return false;
   // Brackets remain text in Full Chat. On an eye screen, or with Ctrl, they
   // always work, including while Realtime owns the microphone.
-  const bool eyes=gUiMode==UiMode::Face || gUiMode==UiMode::ChatFace;
+  const bool eyes=gUiMode==UiMode::Face;
   if (!keys.ctrl && !eyes) return false;
-  if (key=='[' || (keys.ctrl && key==',')) {runChatCommand(4);return true;}
-  if (key==']' || (keys.ctrl && key=='.')) {runChatCommand(5);return true;}
+  if (key=='[' || (keys.ctrl && key==',')) {runChatCommand(2);return true;}
+  if (key==']' || (keys.ctrl && key=='.')) {runChatCommand(3);return true;}
   return false;
 }
 
@@ -260,18 +259,18 @@ void servicePendingRealtimeStart() {
 void runChatCommand(uint8_t index) {
   gChatCommandsVisible = false;
   gLauncherVisible = false;
-  if (index==6) {toggleRealtimeView();return;}
-  if (index<=3 && gRecording) cancelRecordingDiscard();
+  if (index==4) {toggleRealtimeView();return;}
+  if (index<=1 && gRecording) cancelRecordingDiscard();
   if (index == 0) { toggleRealtimeVoice(); return; }
-  if (index <= 3) {
+  if (index == 1) {
     if (gRealtimeActive || gRealtimeExclusiveMode) closeRealtimeSession("chat view");
     gPendingRealtimeStart = false;
     gRealtimeScreenVisible=false;
-    setUiMode(index == 1 ? UiMode::ChatFull : (index == 2 ? UiMode::ChatFace : UiMode::Face));
+    setUiMode(UiMode::ChatFull);
     return;
   }
   gDeviceSettings.eyeSkin = static_cast<uint8_t>((gDeviceSettings.eyeSkin +
-      (index == 4 ? kEyeSkinCount - 1 : 1)) % kEyeSkinCount);
+      (index == 2 ? kEyeSkinCount - 1 : 1)) % kEyeSkinCount);
   saveDeviceSettings();
   logf("[EYES] skin=%u name=%s",gDeviceSettings.eyeSkin,eyeSkinName(gDeviceSettings.eyeSkin));
   setStatus(eyeSkinName(gDeviceSettings.eyeSkin), 900);
@@ -281,18 +280,17 @@ void renderChatCommandsOverlay() {
   if (!gChatCommandsVisible || !isAssistantUi()) return;
   auto& d = gCanvas;
   const uint16_t bg = rgb565_local(8,19,31), accent = rgb565_local(47,227,255);
-  d.fillRoundRect(16,12,208,113,6,bg);
-  d.drawRoundRect(16,12,208,113,6,accent);
+  d.fillRoundRect(16,24,208,87,6,bg);
+  d.drawRoundRect(16,24,208,87,6,accent);
   d.setFont(&fonts::Font0); d.setTextSize(1);
-  d.setTextColor(accent,bg); d.setCursor(24,18); d.print("COMMANDS        Esc close");
-  const char* labels[] = {"R  Realtime", "C  Full Chat", "E  Chat Eyes",
-                         "F  Big Eyes", "[  Previous animal", "]  Next animal",
+  d.setTextColor(accent,bg); d.setCursor(24,30); d.print("COMMANDS        Esc close");
+  const char* labels[] = {"R  Realtime", "C  Full Chat", "[  Previous animal", "]  Next animal",
                          gRealtimeClassicView?"B  RT view: Classic (Ctrl+B)":"B  RT view: Eyes (Ctrl+B)"};
   for (uint8_t i=0;i<kChatCommandCount;++i) {
     uint16_t row = i == gChatCommandSelection ? rgb565_local(18,53,59) : bg;
-    d.fillRoundRect(21,30+i*13,198,12,3,row);
+    d.fillRoundRect(21,42+i*13,198,12,3,row);
     d.setTextColor(i == gChatCommandSelection ? TFT_WHITE : rgb565_local(160,180,190),row);
-    d.setCursor(26,33+i*13); d.print(labels[i]);
+    d.setCursor(26,45+i*13); d.print(labels[i]);
   }
 }
 

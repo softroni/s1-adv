@@ -62,8 +62,8 @@ void startRealtimeSession(bool listen){{assert(listen);++starts;gRealtimeActive=
 {functions}
 {pcm}
 int main() {{
- assert(kLauncherGroups[0].count==6 && kLauncherGroups[0].items[0].startRealtime);
- assert(kLauncherGroups[0].items[5].mode==UiMode::Hero);
+ assert(kLauncherGroups[0].count==3 && kLauncherGroups[0].items[0].startRealtime);
+ assert(kLauncherGroups[0].items[2].mode==UiMode::ChatFull);
  gMeshBusOwned=true;applyLauncherSelection();assert(starts==0 && closes==0 && statuses==1 && current==UiMode::Home);
  gMeshBusOwned=false;
  applyLauncherSelection();assert(starts==1 && closes==0 && gLauncherSubSelection==0);

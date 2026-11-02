@@ -60,7 +60,7 @@ void processCompletedTextTurn() {
     gVoiceReplyPending = false;
     appendAssistantReply(done->reply);
     rememberStoredAssistantSeq(done->replySeq);
-    if (gUiMode != UiMode::ChatFull && gUiMode != UiMode::ChatFace)
+    if (gUiMode != UiMode::ChatFull)
       showVoiceNotice(done->reply, false);
     // Speech uses the existing cancellable worker. A synchronous HTTPS/TTS
     // request here can stop loopTask for the entire server round-trip.

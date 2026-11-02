@@ -31,6 +31,6 @@ for name, start, end in (('060', 'void renderChatUi() {', 'void renderSmartLampU
 
 chat = read('060')
 assert 'buildVisualLines(showFace ? 216 : 228)' not in chat + read('011')
-assert chat.count('buildVisualLines(chatWrapWidth(showFace))') == 1
+assert chat.count('buildVisualLines(chatWrapWidth())') == 1
 assert 'gChatVisibleRows = visibleRows;' in chat
 print('text size: ok')

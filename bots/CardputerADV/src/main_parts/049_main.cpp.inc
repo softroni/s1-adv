@@ -9,7 +9,7 @@
     else if (enterDown) runChatCommand(gChatCommandSelection);
     else if (charDown) handleTypingKey(curWordChar,keys);
   } else if (isAssistantUi() && !gLauncherVisible && keys.ctrl && (leftDown || rightDown)) {
-    runChatCommand(leftDown?4:5);
+    runChatCommand(leftDown?2:3);
 
   } else if (altVoiceTap && isAssistantUi() && !gLauncherVisible) {
     toggleVoiceByTap();
@@ -57,10 +57,10 @@
   } else if (!gLauncherVisible && gPlaybackActive && downDown) {
     adjustSpeakerVolume(-24);
     setKeyDiag("vol:down");
-  } else if ((gUiMode == UiMode::ChatFull || gUiMode == UiMode::ChatFace) && upDown) {
+  } else if (gUiMode == UiMode::ChatFull && upDown) {
     logf("[CHAT] scroll up arrow");
     scrollChatBy(1);
-  } else if ((gUiMode == UiMode::ChatFull || gUiMode == UiMode::ChatFace) && downDown) {
+  } else if (gUiMode == UiMode::ChatFull && downDown) {
     logf("[CHAT] scroll down arrow");
     scrollChatBy(-1);
   } else if (gUiMode == UiMode::Notes && (leftDown || upDown)) {
@@ -261,63 +261,5 @@ void updateBlink() {
   } else if (gBlinkEndMs != 0 && now >= gBlinkEndMs) {
     gBlinkEndMs = 0;
     scheduleBlink();
-  }
-}
-
-void drawEye(int16_t cx, int16_t cy, int16_t halfW, int16_t halfH, float openness,
-             uint16_t irisColor, int16_t pupilOffsetX, int16_t pupilOffsetY) {
-  auto& d = gCanvas;
-  int16_t eyeH = max<int16_t>(3, static_cast<int16_t>(halfH * openness));
-  if (eyeH <= 4) {
-    d.drawFastHLine(cx - halfW, cy, halfW * 2, irisColor);
-    return;
-  }
-
-  d.fillRoundRect(cx - halfW, cy - eyeH, halfW * 2, eyeH * 2, 8, TFT_BLACK);
-  d.drawRoundRect(cx - halfW, cy - eyeH, halfW * 2, eyeH * 2, 8, irisColor);
-  d.fillRoundRect(cx - halfW + 2, cy - eyeH + 2, halfW * 2 - 4, eyeH * 2 - 4, 7, TFT_DARKGREY);
-  d.fillCircle(cx + pupilOffsetX, cy + pupilOffsetY, max<int16_t>(3, eyeH / 3), irisColor);
-  d.fillCircle(cx + pupilOffsetX, cy + pupilOffsetY, max<int16_t>(2, eyeH / 5), TFT_BLACK);
-}
-
-void drawHeartGlyph(int16_t cx, int16_t cy, int16_t size, uint16_t color) {
-  auto& d = gCanvas;
-  int16_t r = max<int16_t>(1, size / 3);
-  d.fillCircle(cx - r, cy - r / 2, r, color);
-  d.fillCircle(cx + r, cy - r / 2, r, color);
-  d.fillTriangle(cx - size, cy, cx + size, cy, cx, cy + size, color);
-}
-
-void drawSparkGlyph(int16_t cx, int16_t cy, int16_t size, uint16_t color) {
-  auto& d = gCanvas;
-  d.drawLine(cx - size, cy, cx + size, cy, color);
-  d.drawLine(cx, cy - size, cx, cy + size, color);
-  d.drawLine(cx - size + 1, cy - size + 1, cx + size - 1, cy + size - 1, color);
-  d.drawLine(cx - size + 1, cy + size - 1, cx + size - 1, cy - size + 1, color);
-}
-
-void drawArcEye(int16_t cx, int16_t cy, int16_t halfW, int16_t arch, uint16_t color,
-                bool centerHigh, uint8_t thickness = 2) {
-  auto& d = gCanvas;
-  if (halfW <= 1) {
-    d.drawPixel(cx, cy, color);
-    return;
-  }
-  for (int16_t dx = -halfW; dx <= halfW; ++dx) {
-    float ratio = 1.0f - (static_cast<float>(dx * dx) / static_cast<float>(halfW * halfW));
-    if (ratio < 0.0f) {
-      ratio = 0.0f;
-    }
-    int16_t curve = static_cast<int16_t>(arch * ratio);
-    int16_t py = centerHigh ? (cy - curve) : (cy + curve);
-    d.fillRect(cx + dx, py - thickness / 2, 1, max<uint8_t>(1, thickness), color);
-  }
-}
-
-void drawBrowStroke(int16_t x1, int16_t y1, int16_t x2, int16_t y2, uint16_t color, uint8_t thickness = 2) {
-  auto& d = gCanvas;
-  int16_t half = max<int16_t>(0, thickness / 2);
-  for (int16_t t = -half; t <= half; ++t) {
-    d.drawLine(x1, y1 + t, x2, y2 + t, color);
   }
 }

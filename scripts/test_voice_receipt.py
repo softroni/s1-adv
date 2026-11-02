@@ -32,7 +32,7 @@ struct String:std::string {
  using std::string::string;String(const std::string& s):std::string(s){}
  String(int n):std::string(std::to_string(n)){}bool isEmpty()const{return empty();}
 };
-enum class UiMode{Home,Clock,ChatFull,ChatFace};UiMode gUiMode=UiMode::Home;
+enum class UiMode{Home,Clock,ChatFull};UiMode gUiMode=UiMode::Home;
 enum class VoiceRequestPhase{None,Recording,Sending,Processing,Accepted,Reply,Error};
 VoiceRequestPhase gVoiceRequestPhase;bool gVoiceUploadDone=false;
 bool gInboxUnread=false,gVoiceNoticeVisible=true,gVoiceNoticePending=false,gLauncherVisible=false,gChatCommandsVisible=false;
@@ -106,7 +106,7 @@ void reset(){gStoredAssistantSeqs.clear();history.clear();gInboxLastSeq=20;decod
  gVoiceNoticeVisible=true;gVoiceReplyPending=false;gAssistantPendingVisible=true;
  gVoiceNoticeText="";gVoiceRequestTranscript="";gLastHttpDiag="";gQueuedVoiceReplySpeech="";replyText="";userText="";}
 int main(){
- for(auto mode:{UiMode::Home,UiMode::Clock,UiMode::ChatFull,UiMode::ChatFace}){
+ for(auto mode:{UiMode::Home,UiMode::Clock,UiMode::ChatFull}){
   gUiMode=mode;reset();decoded["pending"]={"",0,true,false};
   decoded["transcript"]={"Change the battery",0,false,false};decoded["reply_seq"]={"",30,false,false};
   decoded["reply"]={"Request accepted. Firmware is building on the server.",0,false,false};
@@ -167,7 +167,7 @@ int main(){
   assert(gVoiceNoticeText.find("Recording kept")==std::string::npos);
   }
  // Text acceptance keeps the body and ends THINK. Generic receipts stay silent.
- for(auto mode:{UiMode::Home,UiMode::Clock,UiMode::ChatFull,UiMode::ChatFace}) {
+ for(auto mode:{UiMode::Home,UiMode::Clock,UiMode::ChatFull}) {
   reset();gUiMode=mode;tts=0;gActiveTextTurn="first";gSubmitting=gThinking=true;
   auto* accepted=new TextTurnTaskResult();accepted->ok=true;accepted->pending=true;
   accepted->reply="Accepted by the real firmware agent";accepted->replySeq=31;accepted->afterSeq=31;

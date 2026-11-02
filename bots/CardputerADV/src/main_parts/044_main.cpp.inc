@@ -420,7 +420,7 @@ void submitInput() {
   if (handleLocalCommand(text)) {
     return;
   }
-  if (gUiMode == UiMode::Home || gUiMode == UiMode::Face || gUiMode == UiMode::Hero) setUiMode(UiMode::ChatFull);
+  if (gUiMode == UiMode::Home || gUiMode == UiMode::Face) setUiMode(UiMode::ChatFull);
   pushUser(text);
   gPendingTextTurns.push_back(text);
   gAssistantPendingVisible = true;

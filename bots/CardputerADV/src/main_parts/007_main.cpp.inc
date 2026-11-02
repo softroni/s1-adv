@@ -14,10 +14,6 @@ const char* uiModeName(UiMode mode) {
       return "Pulse";
     case UiMode::Face:
       return "Face";
-    case UiMode::Hero:
-      return "Pet";
-    case UiMode::ChatFull:
-      return "Chat";
     case UiMode::Clock:
       return "Clock";
     case UiMode::Battery:
@@ -86,9 +82,9 @@ const char* uiModeName(UiMode mode) {
       return "C-Matrix";
     case UiMode::Logs:
       return "Logs";
-    case UiMode::ChatFace:
+    case UiMode::ChatFull:
     default:
-      return "Chat+Face";
+      return "Chat";
   }
 }
 

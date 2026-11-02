@@ -28,7 +28,7 @@ struct String:std::string {
 };
 bool handleMeshEscape(){return false;}
 bool cancelNfcNotes(){return false;}
-enum class UiMode {Home,Clock,Face,Hero,ChatFull,ChatFace,Nes,Files,NfcNotes,WifiSettings};
+enum class UiMode {Home,Clock,Face,ChatFull,Nes,Files,NfcNotes,WifiSettings};
 UiMode gUiMode=UiMode::Home;
 String gInputBuffer,gActiveTextTurn,gStatusText,lastUser;
 std::deque<String> gPendingTextTurns;
@@ -122,7 +122,7 @@ int main(){
  const int beforeStarts=started,beforeCloses=closed;
  assert(handleAssistantMenuKey('b',keys)&&gRealtimeClassicView);
  assert(gRealtimeActive&&gRealtimeRecording&&started==beforeStarts&&closed==beforeCloses);
- runChatCommand(6);assert(!gRealtimeClassicView&&gRealtimeActive&&gRealtimeRecording);
+ runChatCommand(4);assert(!gRealtimeClassicView&&gRealtimeActive&&gRealtimeRecording);
  gRealtimeActive=false;gRealtimeRecording=false;
  // Labels follow the actual transport/mic flags, including teardown errors.
  assert(std::string(realtimeStageLabel())=="OFF");
@@ -142,22 +142,22 @@ int main(){
  gInboxHttpBusy=true;gInputBuffer="  hello  ";submitInput();
  assert(gUiMode==UiMode::ChatFull && gAssistantPendingVisible && gInputBuffer.empty());
  assert(lastUser=="hello" && gPendingTextTurns.front()=="hello" && started==0);
- gUiMode=UiMode::ChatFace;gInputBuffer="second";submitInput();
- assert(gUiMode==UiMode::ChatFace && gPendingTextTurns.size()==2);
- gRecording=true;gRealtimeScreenVisible=true;runChatCommand(3);
- assert(gUiMode==UiMode::Face && started==0 && !gRealtimeScreenVisible && !gRecording);
- gRealtimeActive=true;gRealtimeExclusiveMode=true;runChatCommand(2);
- assert(closed==1 && gUiMode==UiMode::ChatFace);
- runChatCommand(4);assert(gDeviceSettings.eyeSkin==5);
- runChatCommand(5);assert(gDeviceSettings.eyeSkin==0 && saved==2);
- // The literal keys printed in the command menu work on both eye screens,
+ gUiMode=UiMode::ChatFull;gInputBuffer="second";submitInput();
+ assert(gUiMode==UiMode::ChatFull && gPendingTextTurns.size()==2);
+ gRecording=true;gRealtimeScreenVisible=true;runChatCommand(1);
+ assert(gUiMode==UiMode::ChatFull && started==0 && !gRealtimeScreenVisible && !gRecording);
+ gRealtimeActive=true;gRealtimeExclusiveMode=true;runChatCommand(1);
+ assert(closed==1 && gUiMode==UiMode::ChatFull);
+ runChatCommand(2);assert(gDeviceSettings.eyeSkin==5);
+ runChatCommand(3);assert(gDeviceSettings.eyeSkin==0 && saved==2);
+ // The literal keys printed in the command menu work on the Realtime screen,
  // including during a live microphone turn, without changing audio ownership.
  gUiMode=UiMode::Face;gLauncherVisible=false;gRealtimeActive=true;gRealtimeRecording=true;
  keys.ctrl=false;
  assert(handleEyeSkinKey(']',keys) && gDeviceSettings.eyeSkin==1);
  assert(handleEyeSkinKey('[',keys) && gDeviceSettings.eyeSkin==0);
  assert(gRealtimeActive && gRealtimeRecording);
- gUiMode=UiMode::ChatFace;assert(handleEyeSkinKey(']',keys));
+ gUiMode=UiMode::ChatFull;assert(!handleEyeSkinKey(']',keys));
  gUiMode=UiMode::ChatFull;assert(!handleEyeSkinKey('[',keys));
  keys.ctrl=true;assert(handleEyeSkinKey(',',keys));
  gLauncherVisible=true;assert(!handleEyeSkinKey(']',keys));gLauncherVisible=false;

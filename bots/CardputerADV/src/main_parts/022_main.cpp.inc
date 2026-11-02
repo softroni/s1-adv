@@ -216,15 +216,8 @@ bool mapActionUiMode(String mode, UiMode& out) {
   mode.replace(" ", "_");
   if (mode == "home" || mode == "pulse") {
     out = UiMode::Home;
-  } else if (mode == "chat" || mode == "chat_eyes") {
-    out = UiMode::ChatFace;
-  } else if (mode == "chat_full" || mode == "full_chat") {
+  } else if (mode == "chat" || mode == "chat_full" || mode == "full_chat") {
     out = UiMode::ChatFull;
-  } else if (mode == "face" || mode == "eyes") {
-    out = UiMode::Face;
-  } else if (mode == "hero" || mode == "pet" || mode == "tama" ||
-             mode == "tamagotchi" || mode == "companion") {
-    out = UiMode::Hero;
   } else if (mode == "voice") {
     out = UiMode::Voice;
   } else if (mode == "library") {

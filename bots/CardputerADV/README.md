@@ -17,7 +17,7 @@ The project began with OmniBot; see [Credits](../../CREDITS.md) for its origin.
 - First boot: Wi-Fi setup portal, or your private compile-time provisioning.
 - Later: Settings > Wi-Fi or `/wifi` changes network on the device.
 - Chat: keyboard text and ordinary push-to-talk with bridge-side STT/TTS.
-- Offline: focus timer, notes, calculator, clocks, pet and games.
+- Offline: focus timer, notes, calculator, clocks and games.
 
 ```bash
 # From the repository root, with PlatformIO installed in this Python environment:

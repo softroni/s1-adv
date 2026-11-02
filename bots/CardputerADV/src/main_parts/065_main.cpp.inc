@@ -26,7 +26,7 @@ void showVoiceNotice(const String& text, bool pending) {
   // Receipts and replies live in chat and the Home badge. They must not
   // reopen a sheet over the clock or a menu the user is navigating.
   gVoiceNoticeVisible = false;
-  if (!pending && gUiMode!=UiMode::ChatFull && gUiMode!=UiMode::ChatFace) gInboxUnread=true;
+  if (!pending && gUiMode!=UiMode::ChatFull) gInboxUnread=true;
   gVoiceNoticeShownMs = millis();
   render(); // Paint feedback before a notification tone or TLS borrows the canvas.
   gLastRenderMs=millis();
@@ -184,7 +184,7 @@ void showVoiceRequestError(const String& text) {
   showVoiceNotice(text,false);
   gVoiceRequestPhase=VoiceRequestPhase::Error;
   gVoiceNoticeVisible = !gLauncherVisible && !gChatCommandsVisible &&
-      gUiMode!=UiMode::ChatFull && gUiMode!=UiMode::ChatFace;
+      gUiMode!=UiMode::ChatFull;
   render();
 }
 
@@ -228,7 +228,7 @@ bool handleUnreadAssistantKey(char key, const Keyboard_Class::KeysState& keys) {
       keys.ctrl || keys.alt || keys.fn || !(keys.enter || key == '\r' || key == '\n') ||
       gRecording || gG0VoicePending || gVoiceCapturePreparing || gRealtimeActive || gRealtimeExclusiveMode)
     return false;
-  if ((gUiMode == UiMode::ChatFull || gUiMode == UiMode::ChatFace) && !gInputBuffer.isEmpty()) return false;
+  if (gUiMode == UiMode::ChatFull && !gInputBuffer.isEmpty()) return false;
   openAssistantConversation();
   return true;
 }

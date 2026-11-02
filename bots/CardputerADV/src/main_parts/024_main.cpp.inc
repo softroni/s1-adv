@@ -247,8 +247,7 @@ bool findLauncherEntryForMode(UiMode mode, int& groupIndex, int& subIndex) {
 // Coming back to an assistant screen isn't choosing something from the menu, so the menu stays
 // on what you last used. These are also menu items, but opening one from there keeps its row.
 bool launcherKeepsPlaceFor(UiMode mode) {
-  return mode == UiMode::Home || mode == UiMode::ChatFull || mode == UiMode::ChatFace ||
-         mode == UiMode::Face || mode == UiMode::Hero || mode == UiMode::Clock;
+  return mode == UiMode::Home || mode == UiMode::ChatFull || mode == UiMode::Clock;
 }
 
 void syncLauncherToMode(UiMode mode) {
@@ -265,9 +264,7 @@ void syncLauncherToMode(UiMode mode) {
 bool uiModeInterruptsRealtime(UiMode mode) {
   switch (mode) {
     case UiMode::Home:
-    case UiMode::ChatFace:
     case UiMode::Face:
-    case UiMode::Hero:
     case UiMode::ChatFull:
       return false;
     default:
@@ -336,7 +333,7 @@ void setUiMode(UiMode mode) {
     gPendingOtaCheckAction = true;
     gPendingOtaActionAfterMs = millis() + 250;
   }
-  if (mode == UiMode::ChatFull || mode == UiMode::ChatFace) gInboxUnread = false;
+  if (mode == UiMode::ChatFull) gInboxUnread = false;
   bool enteringScreensaverUi = gScreensaverActive &&
       (mode == UiMode::CMatrix || mode == UiMode::Face || mode == UiMode::ChessMind);
   if (!enteringScreensaverUi && mode != UiMode::CMatrix &&

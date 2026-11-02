@@ -43,7 +43,7 @@ struct Keyboard_Class{struct KeysState{bool ctrl=false,alt=false,opt=false,enter
 enum class UiMode{Home,Clock,Face,CMatrix,ChessMind,Ota,ChatFull};UiMode gUiMode=UiMode::Home,gScreensaverPreviousMode=UiMode::Home;
 uint32_t tick=1000,gLastRenderMs=0;uint32_t millis(){return tick;}uint32_t esp_random(){return 42;}
 struct{void invalidate(){}}gUiFramePolicy;
-bool gScreensaverActive=false,gScreensaverDimmed=false,gScreenOffActive=false;
+bool gScreensaverActive=false,gScreensaverDimmed=false,gScreenOffActive=false,gRealtimeScreenVisible=false;
 bool gRecording=false,gSubmitting=false,gThinking=false,gPlaybackActive=false,gVoiceNoticeVisible=false,gVoiceReplySpeechBusy=false,gTransferUiActive=false,gOtaApplyInProgress=false,gPendingRestart=false;
 bool gLauncherVisible=false,gCMatrixInitialized=true;uint32_t gScreensaverStartedMs=0,gLastUserActivityMs=1000,gLastUserInputMs=1000;
 struct{

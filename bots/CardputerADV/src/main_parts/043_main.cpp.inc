@@ -1278,24 +1278,8 @@ bool handleLocalCommand(const String& input) {
     return true;
   }
 
-  if (cmd == "/face") {
-    setUiMode(UiMode::Face);
-    return true;
-  }
-
   if (cmd == "/chat") {
     setUiMode(UiMode::ChatFull);
-    return true;
-  }
-
-  if (cmd == "/hero" || cmd == "/pet" || cmd == "/tama") {
-    setUiMode(UiMode::Hero);
-    return true;
-  }
-
-  if (cmd == "/petreset" || cmd == "/tamareset") {
-    resetPet(true);
-    setUiMode(UiMode::Hero);
     return true;
   }
 

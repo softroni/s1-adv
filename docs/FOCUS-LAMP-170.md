@@ -1,6 +1,6 @@
 # Focus, lamp and UI update 0.2.170
 
-Ctrl+T starts or resumes Focus from Home, Clock or an eye screen and opens its timer. Pressing it during a running phase opens the existing timer without resetting it. Ctrl+F keeps its existing Big Eyes action. Escape leaves Focus running; the common bottom status bar retains its phase and remaining time. The timer advances independently of the selected app, including Realtime; sounds wait for audio ownership and expire rather than interrupt a conversation.
+Ctrl+T starts or resumes Focus from Home, Clock or Realtime and opens its timer. Pressing it during a running phase opens the existing timer without resetting it. Escape leaves Focus running; the common bottom status bar retains its phase and remaining time. The timer advances independently of the selected app, including Realtime; sounds wait for audio ownership and expire rather than interrupt a conversation.
 
 The Settings launcher group contains Device settings, Display settings and Focus settings. Up/down select a row, left/right edit its value, Enter toggles or confirms, and Escape returns to the same Settings group. Plus/minus remain aliases. SmartLamp uses the same select/edit/Enter control pattern. All seven launcher groups and up to eight subitems fit without scroll arrows.
 
@@ -8,7 +8,7 @@ Focus settings add a SmartLamp link, work/break presets and Guided audio on/off.
 
 Guided audio uses the existing start, break and reflection WAVs. Playback can be disabled separately from the short phase notification tone. Turning it off stops a playing guided cue and preserves music/assistant playback. At boot, enabled audio missing from SD can be downloaded through the authenticated bridge asset manifest, with SHA checks. SD is required; the pack is too large for internal storage. The selected language's three cues determine readiness, with the existing Russian fallback. Replaced originals are preserved before download and restored if the replacement fails. The owner authorized including all six Russian/English recordings in the plugin distribution; the plugin maintainer owns that publication.
 
-Realtime keeps one session, microphone and audio pipeline. Ctrl+B or the B row in Ctrl+K switches Eyes/Classic presentation. Chat Eyes and Big Eyes remain separate chat view entries. View changes invalidate the complete frame, eye frames reset clipping/viewport, and only the selected visual renderer runs. The mic badge and stage follow actual transport/audio flags.
+Realtime keeps one session, microphone and audio pipeline. Ctrl+B or the B row in Ctrl+K switches Eyes/Classic presentation. View changes invalidate the complete frame, eye frames reset clipping, and only the selected visual renderer runs. The mic badge and stage follow actual transport/audio flags.
 
 Background firmware checks remain due every 20 seconds. Idle apps, settings and paused/finished games allow the worker; active games, NES, timing-sensitive hardware screens, recordings and Realtime defer it. A one-second quiet input gap and the existing single network owner still apply. Merely detecting a version does not start installation. Idle menus and Focus no longer prevent device firmware reports from reaching the bridge.
 

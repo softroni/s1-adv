@@ -12,7 +12,7 @@ void togglePulseChatDisplay() {
   if (gUiMode == UiMode::Home) {
     setUiMode(UiMode::ChatFull);
     setStatus("View: full chat", 900);
-  } else if (gUiMode == UiMode::ChatFull || gUiMode == UiMode::ChatFace) {
+  } else if (gUiMode == UiMode::ChatFull) {
     setUiMode(UiMode::Home);
     setStatus("View: pulse", 900);
   } else {

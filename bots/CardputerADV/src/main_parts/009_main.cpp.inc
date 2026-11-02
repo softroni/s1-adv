@@ -218,7 +218,8 @@ bool handleScreensaverWake() {
   UiMode target = gScreensaverActive
                       ? (gDeviceSettings.screensaverClockOnWake ? UiMode::Clock : gScreensaverPreviousMode)
                       : gScreensaverPreviousMode;
-  if (target == UiMode::CMatrix) {
+  // Face is only a screen of its own while Realtime is showing. Otherwise it's the saver.
+  if (target == UiMode::CMatrix || (target == UiMode::Face && !gRealtimeScreenVisible)) {
     target = UiMode::Home;
   }
   gScreensaverActive = false;
