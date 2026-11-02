@@ -759,6 +759,19 @@ test("full bridge: a tool asks Claude on its own and stays out of the chat", asy
   assert.ok(!chat.argv.includes("--resume"));
 });
 
+test("full bridge: what the device sends along reaches Claude, and a rule can come back changed", async t => {
+  const rule = { type: "lab.rule", name: "Wave red", any: true, hold_ms: 9000,
+    when: [{ sensor: "distance", test: "under", value: 30 }], do: [{ output: "strip_color", set: 0 }] };
+  const fake = await makeFake(t, { steps: [success(`Done. [[cardputer_actions:${JSON.stringify([rule])}]]`)] });
+  const { voice } = await startBridge(t, fake, await hearing(fake, "Make it stay on longer"));
+  const answer = await voice("voice-tool-6", 1, { "x-voice-tool": "lab.change",
+    "x-voice-context": "readings: distance=42%0Arule 1: {\"name\":\"Wave red\"}%0Achanging rule 1" });
+  assert.equal(answer.device_actions[0].hold_ms, 9000);
+  const [call] = await fake.calls();
+  assert.ok(call.stdin.includes("readings: distance=42\nrule 1: {\"name\":\"Wave red\"}\nchanging rule 1"));
+  assert.ok(call.stdin.endsWith("Spoken words:\nMake it stay on longer"));
+});
+
 test("full bridge: a tool's problems come back as errors the device can show", async t => {
   const fake = await makeFake(t, { steps: [failure("You've hit your usage limit")] });
   const { voice } = await startBridge(t, fake, await hearing(fake, "Wave"));

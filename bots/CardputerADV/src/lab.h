@@ -3,6 +3,7 @@
 // read a value for each sensor and say what each output should be, so all of it runs on the host.
 // No heap, storage or network, and nothing here touches hardware.
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include "pbhub.h"
 
@@ -406,6 +407,50 @@ class Draft {
   }
   bool usable() const { return ok && rule.conds > 0 && rule.actions > 0; }
 };
+
+// Fills a fixed buffer and stops at its end, so a long description can only come up short.
+class Text {
+ public:
+  Text(char* out, size_t size) : mOut(out), mSize(size) {
+    if (size) out[0] = '\0';
+  }
+  Text& add(const char* text) {
+    for (; text && *text && mAt + 1 < mSize; ++text) mOut[mAt++] = *text;
+    if (mSize) mOut[mAt] = '\0';
+    return *this;
+  }
+  Text& add(int value) {
+    char digits[12];
+    snprintf(digits, sizeof(digits), "%d", value);
+    return add(digits);
+  }
+  size_t length() const { return mAt; }
+
+ private:
+  char* mOut;
+  size_t mSize, mAt = 0;
+};
+
+// A rule in the shape Claude writes one, so it can be handed back to be changed.
+inline void ruleJson(const Rule& rule, Text& out) {
+  out.add("{\"name\":\"").add(rule.name).add("\",\"any\":").add(rule.any ? "true" : "false");
+  out.add(",\"hold_ms\":").add(static_cast<int>(rule.holdMs)).add(",\"when\":[");
+  for (uint8_t i = 0; i < rule.conds; ++i) {
+    const Cond& cond = rule.cond[i];
+    out.add(i ? ",{\"sensor\":\"" : "{\"sensor\":\"").add(info(cond.sig).key).add("\",\"test\":\"");
+    if (cond.op == Op::Changes) out.add("changes\"}");
+    else if (info(cond.sig).onOff) out.add(cond.op == Op::Above ? "on\"}" : "off\"}");
+    else out.add(cond.op == Op::Below ? "under" : "over").add("\",\"value\":").add(cond.value).add("}");
+  }
+  out.add("],\"do\":[");
+  for (uint8_t i = 0; i < rule.actions; ++i) {
+    const Action& action = rule.action[i];
+    out.add(i ? ",{\"output\":\"" : "{\"output\":\"").add(info(action.out).key).add("\",");
+    if (action.how == How::Set) out.add("\"set\":").add(action.value).add("}");
+    else out.add(action.how == How::Follow ? "\"follow\":\"" : "\"oppose\":\"").add(info(action.source).key).add("\"}");
+  }
+  out.add("]}");
+}
 
 // --- The I/O hub's six ports ------------------------------------------------------------------
 // Nothing on a hub port can say what it is, so the owner says, and the Lab remembers.

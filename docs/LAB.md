@@ -229,6 +229,8 @@ With [Claude connected](../README.md#3-connect-claude), you can just describe wh
 
 Nothing happens until you've looked at it. If Claude can't make a rule from what it heard, the screen says what it needs. A rule you ask for in chat arrives the same way.
 
+To change a rule, pick it in the list and tap Alt, then say what should be different, like "make it stay on longer" or "only when it's dark". You see what changed before anything is saved.
+
 ## If a part doesn't answer
 
 The Lab tells you where to look, and units reconnect by themselves.

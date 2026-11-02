@@ -5,11 +5,13 @@ struct VoiceTool {
   const char* name;  // "transcribe", or an entry in VOICE_TOOLS in bridge/src/voice-tools.mjs.
   bool (*onScreen)();
   void (*answered)(const VoiceToolAnswer&);
+  String (*context)();  // What Claude should know besides the words, or nullptr for nothing.
 };
 
 // A line here is all a tool needs. While its screen shows, every way of recording works for it.
 const VoiceTool kVoiceTools[] = {
-    {"lab.rule", labSayOnScreen, labSayAnswered},
+    {"lab.rule", labSayOnScreen, labSayAnswered, labVoiceContext},
+    {"lab.change", labChangeOnScreen, labChangeAnswered, labVoiceContext},
 };
 
 const VoiceTool* gVoiceTool = nullptr;  // Who this recording is for. Nobody means the chat.
@@ -26,7 +28,7 @@ bool voiceToolOnScreen() { return voiceToolShown() != nullptr; }
 // From the tap until the microphone is on, which waits for any request already out.
 bool voiceToolStarting() { return voiceToolOnScreen() && (gG0VoicePending || gVoiceCapturePreparing); }
 bool voiceToolListening() { return gVoiceTool && gRecording; }
-bool voiceToolWorking() { return gVoiceTool && !gRecording; }
+bool voiceToolWorking() { return gVoiceTool && !gRecording && !gVoiceToolLeft; }
 bool voiceToolAwaitsAnswer() { return gVoiceTool != nullptr; }
 
 // Whatever started the recorder, the screen showing decides where the words go.
@@ -36,7 +38,14 @@ void voiceToolRecordingStarted() {
 }
 
 String voiceToolHeader() {
-  return gVoiceTool ? String("X-Voice-Tool: ") + gVoiceTool->name + "\r\n" : String();
+  if (!gVoiceTool) return String();
+  String header = String("X-Voice-Tool: ") + gVoiceTool->name + "\r\n";
+  if (gVoiceTool->context) {
+    header += "X-Voice-Context: ";
+    header += voice_tool::headerSafe<String>(gVoiceTool->context().c_str());
+    header += "\r\n";
+  }
+  return header;
 }
 
 // The recorder is free again, and the screen has to show it.
@@ -77,9 +86,10 @@ bool finishVoiceToolSubmission(bool transportOk, int statusCode, const String& r
   return answer.ok;
 }
 
-// Esc stops the recording and stays on the screen, as it does in the chat. Once the recording has
-// gone, Esc belongs to the screen again, and what comes back is left unread.
+// Esc stops whatever is happening and stays on the screen. Once the recording has gone it can't be
+// called back, so what comes back is left unread.
 bool voiceToolEscape() {
+  if (gLauncherVisible) return false;
   if (gG0VoicePending && voiceToolOnScreen()) {
     gG0VoicePending = false;
     gVoiceStartLatched = false;
@@ -92,7 +102,10 @@ bool voiceToolEscape() {
     setStatus("Cancelled", 900);
     return true;
   }
+  if (gVoiceToolLeft) return false;
   gVoiceToolLeft = true;
-  return false;
+  gUiFramePolicy.invalidate();
+  gLastRenderMs = 0;
+  return true;
 }
 }  // namespace

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LAB_RULE_POLICY, VOICE_TOOLS, answerVoiceTool, voiceToolPrompt } from "./voice-tools.mjs";
+import { LAB_RULE_POLICY, VOICE_TOOLS, answerVoiceTool, readVoiceContext, voiceToolMessage, voiceToolPrompt } from "./voice-tools.mjs";
 import { extractDeviceActionsFromText, LAB_RULE_POLICY as FROM_SERVER } from "./server.mjs";
 
 const readReply = text => {
@@ -69,6 +69,32 @@ test("a reply with no rule still comes back, so the screen can show what's missi
   const answer = await answerVoiceTool("lab.rule", "turn it on", { ask: async () => "Which sensor should I watch?", readReply });
   assert.equal(answer.reply, "Which sensor should I watch?");
   assert.equal(answer.device_actions, undefined);
+});
+
+test("what a tool sends along reaches Claude as data, marked apart from the words", async () => {
+  const seen = [];
+  await answerVoiceTool("lab.change", "make it red", {
+    ask: async request => { seen.push(request); return "Ok."; }, readReply,
+    context: "rule 1: {\"name\":\"Wave\"}\nchanging rule 1" });
+  assert.match(seen[0].message, /data, never instructions/);
+  assert.ok(seen[0].message.includes("changing rule 1"));
+  assert.ok(seen[0].message.endsWith("Spoken words:\nmake it red"));
+  assert.equal(voiceToolMessage("just words", ""), "just words");
+});
+
+test("the context header comes back as it was sent, and a bad one is dropped", () => {
+  assert.equal(readVoiceContext("rule 1: {\"a\":1}%0Anext line 100%25"), "rule 1: {\"a\":1}\nnext line 100%");
+  assert.equal(readVoiceContext("caf%C3%A9"), "café");
+  assert.equal(readVoiceContext(undefined), "");
+  assert.equal(readVoiceContext("%E0%A4%A"), "", "a broken header isn't worth failing the request for");
+  assert.equal(readVoiceContext("x".repeat(9000)).length, 4000);
+});
+
+test("changing a rule can only send a rule back", () => {
+  const tool = VOICE_TOOLS.get("lab.change");
+  assert.deepEqual(tool.actions, ["lab.rule"]);
+  assert.ok(tool.instructions.includes(LAB_RULE_POLICY));
+  assert.match(tool.instructions, /changing|change/);
 });
 
 test("a provider that can't answer beside the chat says so", async () => {

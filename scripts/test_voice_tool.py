@@ -49,11 +49,15 @@ assert keys.index("if (voiceToolOnScreen() && (keys.enter || key == '\\r' || key
 
 # The Lab is the first tool, and nothing of the old way of watching the chat is left.
 tools = re.search(r'kVoiceTools\[\] = \{(.*?)\n\};', part(83), re.S)[1]
-assert '{"lab.rule", labSayOnScreen, labSayAnswered},' in tools
+assert '{"lab.rule", labSayOnScreen, labSayAnswered, labVoiceContext},' in tools
+assert '{"lab.change", labChangeOnScreen, labChangeAnswered, labVoiceContext},' in tools
 assert 'serviceLabSay' not in joined and 'sayAsked' not in joined
 
-module = part(83).replace('{"lab.rule", labSayOnScreen, labSayAnswered},',
-                          '{"lab.rule", onLabScreen, tookAnswer},\n    {"transcribe", onNotesScreen, tookAnswer},')
+module = part(83)
+module = module[:module.index('const VoiceTool kVoiceTools[] = {')] + """const VoiceTool kVoiceTools[] = {
+    {"lab.rule", onLabScreen, tookAnswer, labState},
+    {"transcribe", onNotesScreen, tookAnswer, nullptr},
+""" + module[module.index('};\n\nconst VoiceTool* gVoiceTool'):]
 code = r"""
 #include <cassert>
 #include <cstdarg>
@@ -80,6 +84,9 @@ bool labShown = false, notesShown = false; int answers = 0; VoiceToolAnswer last
 bool onLabScreen() { return labShown; }
 bool onNotesScreen() { return notesShown; }
 void tookAnswer(const VoiceToolAnswer& a) { ++answers; last = a; }
+String gLabState = "parts: Ultrasonic\nrule 1: 100%";
+String labState() { return gLabState; }
+bool gLauncherVisible = false;
 @MODULE@
 void cancelRecordingDiscard() { ++gCancelled; gRecording = false; voiceToolRecordingDropped(); }
 void listen() { gRecording = true; voiceToolRecordingStarted(); }
@@ -92,7 +99,7 @@ int main() {
 
   // On a tool's screen the recording is the tool's, however it was started.
   reset(); labShown = true; assert(voiceToolOnScreen()); listen();
-  assert(voiceToolListening() && !voiceToolWorking() && voiceToolAwaitsAnswer() && voiceToolHeader() == "X-Voice-Tool: lab.rule\r\n");
+  assert(voiceToolListening() && !voiceToolWorking() && voiceToolAwaitsAnswer() && voiceToolHeader() == "X-Voice-Tool: lab.rule\r\nX-Voice-Context: parts: Ultrasonic%0Arule 1: 100%25\r\n");
   gRecording = false; assert(voiceToolWorking() && !voiceToolListening());
   const int repaints = gRepaints; gLastRenderMs = 1; gFace = FaceMode::Error;
   assert(finishVoiceToolSubmission(true, 200, R"({"ok":true,"voice_tool":"lab.rule","transcript":"wave red","reply":"Done.","device_actions":[{"type":"lab.rule","name":"Wave"}]})"));
@@ -113,10 +120,13 @@ int main() {
   reset(); labShown = true; listen(); assert(voiceToolEscape()); assert(gCancelled == 1 && !gRecording && !answers && !voiceToolAwaitsAnswer());
   // A second Esc belongs to the screen.
   assert(!voiceToolEscape());
-  // Esc while it waits leaves the screen, and what comes back goes nowhere.
-  reset(); labShown = true; listen(); gRecording = false; assert(!voiceToolEscape());
-  assert(voiceToolWorking());  // The request is still out, so going back to the screen shows it.
+  // Esc while it waits stops showing that, stays put, and what comes back goes nowhere.
+  reset(); labShown = true; listen(); gRecording = false; assert(voiceToolWorking() && voiceToolEscape());
+  assert(!voiceToolWorking() && voiceToolAwaitsAnswer() && !voiceToolEscape());  // A second Esc is the screen's.
   finishVoiceToolSubmission(true, 200, R"({"voice_tool":"lab.rule","transcript":"x"})"); assert(!answers && !voiceToolAwaitsAnswer());
+  // The menu over the screen gets Esc first.
+  reset(); labShown = true; listen(); gRecording = false; gLauncherVisible = true; assert(!voiceToolEscape() && voiceToolWorking()); gLauncherVisible = false;
+  gVoiceTool = nullptr;
   // That doesn't outlive the one recording.
   listen(); gRecording = false; finishVoiceToolSubmission(true, 200, R"({"voice_tool":"lab.rule"})"); assert(answers == 1);
   // Wandering off isn't asking to drop it, so an answer still arrives from another screen.
@@ -135,6 +145,9 @@ int main() {
   assert(answers == 1 && !last.ok && last.problem == "Voice turn canceled" && !voiceToolAwaitsAnswer());
   voiceToolRecordingEnded(); assert(answers == 1);  // The recorder's scope ends after a delivery too.
 
+  // A value can't break the header it travels in.
+  assert(voice_tool::headerSafe<String>("a\r\nX-Evil: 1\t%\xC3\xA9") == "a%0D%0AX-Evil: 1%09%25%C3%A9");
+
   // Ten minutes of talk fits, which a fixed small buffer wouldn't.
   { std::string longWords(9000, 'w'); const auto a = read(true, 200, ("{\"voice_tool\":\"lab.rule\",\"transcript\":\"" + longWords + "\"}").c_str());
     assert(a.ok && a.heard == longWords); }
@@ -146,6 +159,7 @@ int main() {
   assert(problem(true, 422, R"({"error":"could not transcribe speech"})") == "Didn't catch that. Try again.");
   assert(problem(true, 503, R"({"error":"Your Claude plan limit has been reached."})") == "Your Claude plan limit has been reached.");
   assert(problem(true, 503, "<html>") == "The bridge couldn't do that.");
+  assert(problem(true, 400, R"({"error":"unknown_voice_tool"})") == "Restart the bridge to use this.");
   assert(problem(true, 200, "not json") == "Couldn't read the answer.");
   // An old bridge sends this to the chat, and that has to be said, not shown as an empty answer.
   assert(problem(true, 200, R"({"ok":true,"pending":true,"transcript":"x"})") == "Restart the bridge to use this.");

@@ -286,6 +286,11 @@ and Esc drops it. If it can't make a rule, the screen says what it needs and wha
 out of the chat, though a rule that's asked for in chat arrives the same way. It needs Wi-Fi and the
 bridge.
 
+**Change a rule** by talking to it. Pick a rule in the list, tap Alt and say what should be different,
+for example "make it stay on longer" or "only when it's dark". Claude sees the rule as it is now and
+sends it back. What changed stands out and the rest is grey. Enter replaces the old rule, E walks
+through it in the steps, and Esc keeps the rule you had.
+
 Rules are kept on the SD card in `/lab/rules.dat`, with the hub wiring, so they survive a firmware
 install. With no card they last until the next restart.
 

@@ -52,7 +52,7 @@ import { CARDPUTER_EXECUTION_POLICY, voiceThinking, unwrapCardputerEnvelope, aud
 import { DurableTurnOutbox } from "./turn-outbox.mjs";
 import { SemanticFront, frontPrompt, FRONT_RECEIPT, validateModelRouting } from './semantic-front.mjs';
 import { decodeVoiceUpload } from "./voice-upload-codec.mjs";
-import { LAB_RULE_POLICY, VOICE_TOOLS, answerVoiceTool } from "./voice-tools.mjs";
+import { LAB_RULE_POLICY, VOICE_TOOLS, answerVoiceTool, readVoiceContext } from "./voice-tools.mjs";
 import { RealtimePacingBudget, REALTIME_MAX_AUDIO_LEAD_MS } from "./realtime-pacing-budget.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -5190,8 +5190,9 @@ class BridgeRuntime {
   }
 
   // A tool's turn stays out of the chat, so it never touches the topic or its history.
-  answerVoiceTool(name, transcript) {
+  answerVoiceTool(name, transcript, context) {
     return answerVoiceTool(name, transcript, {
+      context,
       ask: this.upstream instanceof ClaudeCodeClient ? request => this.upstream.ask(request) : null,
       readReply: text => {
         const { visibleText, actions } = extractDeviceActionsFromText(text);
@@ -6702,7 +6703,7 @@ async function main() {
         console.info(`[voice-raw] transcript device=${device.device_id} turn=${turnId || "-"} chars=${transcript.length}`);
         if (voiceTool) {
           console.info(`[voice-tool] device=${device.device_id} turn=${turnId || "-"} tool=${voiceTool}`);
-          json(res, 200, await runtime.answerVoiceTool(voiceTool, transcript));
+          json(res, 200, await runtime.answerVoiceTool(voiceTool, transcript, readVoiceContext(req.headers["x-voice-context"])));
           return;
         }
         const commandResult = await runtime.handleOmnibotCommand(device, transcript);

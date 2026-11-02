@@ -500,6 +500,16 @@ void testJson(){
   assert(r.action[0].out==Out::StripColor&&r.action[0].how==How::Set&&r.action[1].how==How::Follow&&r.action[1].source==Sig::Knob);
   assert(parse(R"({"any":false,"when":[{"sensor":"motion","test":"on"}],"do":[{"output":"servo","oppose":"knob"}]})",r));
   assert(!r.any&&!std::strcmp(r.name,"Spoken rule")&&r.holdMs==2000&&r.action[0].how==How::FollowBack);
+  // A rule written out reads back the same, because Claude gets it back to change.
+  { char text[600]; Text out(text,sizeof(text)); Rule start=recipeRule(5); start.any=false; start.action[1]=oppose(Out::Servo,Sig::Light); ruleJson(start,out);
+    Rule back; assert(parse(text,back)); assert(!strcmp(back.name,start.name)&&back.any==start.any&&back.holdMs==start.holdMs&&back.conds==start.conds&&back.actions==start.actions);
+    assert(back.cond[0].sig==start.cond[0].sig&&back.cond[0].op==start.cond[0].op&&back.cond[0].value==start.cond[0].value);
+    assert(back.action[0].out==start.action[0].out&&back.action[0].value==start.action[0].value&&back.action[1].how==How::FollowBack&&back.action[1].source==Sig::Light);
+    for(int i=0;i<kRecipeCount;++i){char more[600];Text t(more,sizeof(more));ruleJson(recipeRule(i),t);Rule again;assert(parse(more,again));}
+    Rule live;live.conds=3;live.cond[0]=Cond{Sig::Knob,Op::Changes,0};setOnOff(live.cond[1],false);live.cond[1].sig=Sig::Motion;live.cond[2]=Cond{Sig::Humidity,Op::Above,60};live.actions=1;live.action[0]=setTo(Out::Relay2,1);
+    char third[600];Text t(third,sizeof(third));ruleJson(live,t);Rule again;assert(parse(third,again));assert(again.cond[0].op==Op::Changes&&again.cond[1].op==Op::Below&&again.cond[1].value==1&&again.cond[2].value==60&&again.action[0].value==1);
+    // Running out of room leaves a shorter text, never an overrun.
+    char tiny[8];Text cut(tiny,sizeof(tiny));ruleJson(start,cut);assert(strlen(tiny)==7&&cut.length()==7);}
   // The largest rule fits the device's buffer.
   assert(parse(R"({"type":"lab.rule","name":"Fifteen letters","any":false,"hold_ms":30000,"when":[{"sensor":"temperature","test":"over","value":45},{"sensor":"stick_button","test":"off"},{"sensor":"satellites","test":"changes"}],"do":[{"output":"strip_bright","oppose":"stick_x"},{"output":"lamp_power","set":1},{"output":"strip_length","follow":"temperature"}]})",r));
   assert(r.conds==3&&r.actions==3);

@@ -14,6 +14,24 @@ struct Answer {
   Text problem;      // Why ok is false, short enough for a small screen.
 };
 
+// A header can't hold a line break, so anything out of the ordinary travels percent-encoded.
+template <class Text>
+Text headerSafe(const char* raw) {
+  static constexpr char kHex[] = "0123456789ABCDEF";
+  Text out;
+  for (; *raw; ++raw) {
+    const unsigned char c = static_cast<unsigned char>(*raw);
+    if (c >= 0x20 && c <= 0x7E && c != '%') {
+      out += static_cast<char>(c);
+    } else {
+      out += '%';
+      out += kHex[c >> 4];
+      out += kHex[c & 15];
+    }
+  }
+  return out;
+}
+
 template <class Text>
 Answer<Text> readAnswer(bool delivered, int status, const char* body, const char* tool) {
   Answer<Text> answer;
@@ -29,7 +47,8 @@ Answer<Text> readAnswer(bool delivered, int status, const char* body, const char
   const bool readable = !deserializeJson(doc, body);
   if (status < 200 || status >= 300) {
     const char* said = readable ? (doc["error"] | "") : "";
-    if (*said) answer.problem = said;
+    if (strcmp(said, "unknown_voice_tool") == 0) answer.problem = "Restart the bridge to use this.";
+    else if (*said) answer.problem = said;
     else answer.problem = "The bridge couldn't do that.";
     return answer;
   }

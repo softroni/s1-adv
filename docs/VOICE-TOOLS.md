@@ -10,8 +10,8 @@ and not into the conversation, and it comes back as text, or as Claude's answer.
 While a tool's screen is showing, all of this works without any code in the tool:
 
 - Tap **Alt** to listen and tap it again to send. Holding **G0**, **Ctrl+V** and **Enter** work too.
-- **Esc** cancels a recording and stays on the screen. Once it's sent, Esc leaves the screen and
-  whatever comes back is ignored.
+- **Esc** cancels and stays on the screen. If the recording has already gone, whatever comes back
+  is ignored.
 - Nothing joins the chat. There's no chat message, no history and no spoken reply, and Claude's
   answer can arrive while a chat reply is still being worked on.
 - The recording is kept in Voice Notes, like one made in the chat.
@@ -23,7 +23,7 @@ This needs one line in `kVoiceTools`, at the top of
 into the bridge, so nothing changes there.
 
 ```cpp
-{"transcribe", notesOnScreen, notesHeard},
+{"transcribe", notesOnScreen, notesHeard, nullptr},
 ```
 
 The two functions go in your tool's own part:
@@ -51,6 +51,21 @@ Add the same line with a name of your own, then give that name an entry in `VOIC
 
 `instructions` tells Claude what the tool is for. `actions` lists the device actions it can send.
 Anything else it tries to send is dropped.
+
+## Tell Claude more than the words
+
+The last entry on a tool's line can be a function that returns what Claude should know, such as what
+a screen is showing. It runs when recording starts, and travels with the upload as the
+`X-Voice-Context` header. Claude gets it marked as data, not instructions, and up to 4,000 characters
+are used.
+
+```cpp
+{"notes.tidy", notesOnScreen, notesHeard, notesContext},
+
+String notesContext() { return "the note so far: " + gNoteText; }
+```
+
+The Lab sends what's plugged in, the readings and the saved rules, in `labVoiceContext()`.
 
 ## What comes back
 
