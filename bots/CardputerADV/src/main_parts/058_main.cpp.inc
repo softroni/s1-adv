@@ -217,6 +217,19 @@ void drawHomeBatteryStatus(int32_t rawLevel) {
   d.setFont(&fonts::Font2);
 }
 
+// What an update brings, in place of the idle bars, so it reads without opening anything.
+void drawHomeUpdateNote() {
+  auto& d = gCanvas;
+  const uint16_t ink = rgb565_local(255, 219, 0);
+  d.setFont(&fonts::Font2);
+  d.setTextColor(ink);
+  const auto lines = wrapText(gOtaManifest.notes, 104);
+  for (int i = 0; i < min<int>(2, lines.size()); ++i) {
+    d.setCursor(119, 71 + i * 15);
+    d.print(fitCurrentFontToWidth(lines[i], 104));
+  }
+}
+
 // Where the orb sits when nothing is happening.
 void drawHomeWeather() {
   auto& d = gCanvas;

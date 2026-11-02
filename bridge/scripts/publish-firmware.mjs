@@ -2,6 +2,7 @@ import { copyFile, mkdir, readFile, rename, writeFile, chown, chmod } from "node
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { releaseNote } from "../src/firmware-publish.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -77,6 +78,9 @@ await mkdir(destDir, { recursive: true });
 await copyFile(path.resolve(process.cwd(), args.bin), destPath);
 await protectPublishedFile(destPath);
 const firmwareBytes = await readFile(destPath);
+// This script runs fresh each time, so a running bridge gets the words without a restart.
+const projectDir = config.upstream?.claudeCode?.projectDir;
+const notes = args.notes || (projectDir ? await releaseNote(projectDir, args.version) : "");
 const manifest = {
   device: deviceClass,
   version: args.version,
@@ -88,7 +92,7 @@ const manifest = {
   confirm_required: String(args.confirmRequired ?? firmwareConfig.confirmRequired ?? "true") !== "false",
   built_at: args.builtAt || new Date().toISOString(),
   build_git_sha: args.git || "",
-  notes: args.notes || ""
+  notes
 };
 
 const manifestPath = path.join(destDir, firmwareConfig.manifestFilename || "manifest.json");

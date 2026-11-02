@@ -251,7 +251,9 @@ Ask for what you want, such as "add a snake game and send it to me". Then:
    saved Wi-Fi and bridge settings across updates.
 2. When Claude asks for it, the bridge checks the image itself: it must be a real ESP32-S3
    app image, fit the 3 MB slot, and be newer than the installed version.
-3. The Cardputer is told about the update. **You open `/ota`, review it and install it.**
+3. The Cardputer is told about the update, and Pulse and the Firmware screen show what's new in
+   up to five words, from the `In short:` line of the release notes. **You open `/ota`, review it
+   and install it.**
    Claude can't install anything, and the Cardputer needs at least 40% battery.
 
 The new firmware runs from the second app slot. Keep the USB cable available as a way back.

@@ -56,6 +56,26 @@ async function projectFile(projectDir, relative) {
   return resolved;
 }
 
+// What the device says about an update, from the "In short:" line of the release
+// notes. It's read as data: plain text only, cut to what fits the screen.
+const MAX_NOTE_WORDS = 5;
+const MAX_NOTE_CHARS = 48;
+
+export function shortNote(text) {
+  const words = String(text || "").replace(/[*_`#<>]/gu, "").replace(/[^\x20-\x7E]+/gu, " ").split(" ").filter(Boolean);
+  return words.slice(0, MAX_NOTE_WORDS).join(" ").slice(0, MAX_NOTE_CHARS).trim();
+}
+
+export async function releaseNote(projectDir, version) {
+  try {
+    const name = path.join("docs", `RELEASE-${String(version).split("-")[0]}.md`);
+    const text = await readFile(await projectFile(projectDir, name), "utf8");
+    return shortNote(/^in short:\s*(.+)$/imu.exec(text)?.[1]);
+  } catch {
+    return "";  // Words are a nicety, so a missing line must never stop an update.
+  }
+}
+
 export async function publishProjectFirmware({ projectDir, configPath, installedVersion = null, execute = run }) {
   const bytes = await readFile(await projectFile(projectDir, IMAGE_PATH));
   inspectFirmwareImage(bytes);

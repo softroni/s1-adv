@@ -119,6 +119,10 @@ int main(){
  for(int i=0;i<int(gNotes.size());++i){gSelectedNote=i;renderNotesUi();assert(anyRow(gNotes[i].name));}
  // Firmware offers one thing to press, and only with an update to install.
  candidate=true;renderOtaUi();assert(shows("Enter  Install update")&&shows("New"));
+ // It says what's new, in words that fit, in green so they stand out from the facts.
+ gOtaManifest.notes="Bigger screens, menu letters";renderOtaUi();assert(shows("Bigger screens, menu letters"));
+ for(const auto&t:gCanvas.printed)if(t.s=="Bigger screens, menu letters")assert(t.color==rgb565_local(88,240,141));
+ gOtaManifest.notes="";
  gOtaPendingVerify=true;renderOtaUi();assert(!shows("Enter  Install update")&&shows("Verifying installed update"));gOtaPendingVerify=false;
  candidate=false;renderOtaUi();assert(!shows("Enter  Install update")&&shows("Up to date; checks every 5s"));
  gOtaManifest.error="network unavailable";renderOtaUi();assert(shows("network unavailable")&&shows("Check failed; retrying"));gOtaManifest.error="";

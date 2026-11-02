@@ -211,8 +211,8 @@ void renderOtaUi() {
   } else if (updateReady) {
     note = gOtaManifest.notes;
     note.trim();
-    if (note.isEmpty())
-      note = externalPower ? String("Keep the charger connected") : "Image " + compactBytes(gOtaManifest.size) + ", " + compactFlashKb(fw.freeBytes) + " free";
+    if (!note.isEmpty()) noteInk = green;
+    else note = externalPower ? String("Keep the charger connected") : "Image " + compactBytes(gOtaManifest.size) + ", " + compactFlashKb(fw.freeBytes) + " free";
   } else if (hasCandidate) {
     note = gOtaRunningSlot + " " + gOtaBootState + ", " + compactFlashKb(fw.freeBytes) + " free";
   } else {

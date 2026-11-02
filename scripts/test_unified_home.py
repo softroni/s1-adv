@@ -106,6 +106,7 @@ String compactFlashKb(unsigned){return "900k";}String compactBytes(unsigned){ret
 void updateBatterySnapshot(){}bool batteryExternalPowerPresent(){return false;}
 template<class...T>void drawServiceOrb(T...){}
 template<class...T>void drawInfoRow(T...){}
+std::vector<String> wrapText(const String&s,int){size_t cut=s.find(' ',s.size()/2);if(cut==std::string::npos)return {s};return {s.substr(0,cut),s.substr(cut+1)};}
 constexpr int kBigVisibleRows=5;[[maybe_unused]] constexpr int16_t kBigListY=24,kBigRowH=22,kBigLeft=8,kBigRight=229;
 void useBigTextFont(const String&){gCanvas.setFont(&fonts::Font2);}
 int bigListFirstRow(int s,int c){return max<int>(0,min<int>(s-kBigVisibleRows/2,c-kBigVisibleRows));}
@@ -114,7 +115,7 @@ void drawBigRow(int row,const String&l,const String&v,bool,uint16_t,uint16_t=0,u
 void drawBigScrollbar(int,int,uint16_t){}
 void drawBigNotice(const String&t,uint16_t){gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,114);gCanvas.print(fitCurrentFontToWidth(t,220));}
 '''
-for signature in ['AssistantPulseState assistantPulseState()', 'void drawAssistantPulseButton(', 'void renderAssistantPulseChatHint()',
+for signature in ['void drawHomeUpdateNote()', 'AssistantPulseState assistantPulseState()', 'void drawAssistantPulseButton(', 'void renderAssistantPulseChatHint()',
                   'bool assistantPulseWorking(', 'void renderAssistantPulseUi()', 'void renderOtaUi()']:
     code += function(signature) + '\n'
 code += r'''
@@ -142,6 +143,14 @@ void checkMotion(){
 }
 int main(){
  checkMotion();
+ // An update says what it brings, while Pulse is idle, and only when there are words to show.
+ gOtaManifest.notes="Bigger screens, menu letters";candidateAvailable=true;reset();renderAssistantPulseUi();
+ assert(printed("Bigger screens,")&&printed("menu letters"));
+ const size_t shapesWithWords=gCanvas.shapes.size();
+ gThinking=true;reset();renderAssistantPulseUi();assert(!printed("menu letters"));gThinking=false;
+ candidateAvailable=false;reset();renderAssistantPulseUi();assert(!printed("menu letters"));
+ // With no words, the idle bars stay where they were.
+ candidateAvailable=true;gOtaManifest.notes="";reset();renderAssistantPulseUi();assert(gCanvas.shapes.size()>shapesWithWords);candidateAvailable=false;
  // Speech and a saved file are labeled differently.
  gPlaybackActive=true;reset();renderAssistantPulseUi();assert(printed("PLAY")&&!printed("SPEAK"));
  gPlaybackSpeech=true;reset();renderAssistantPulseUi();assert(printed("SPEAK")&&!printed("PLAY"));

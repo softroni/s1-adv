@@ -3,7 +3,10 @@ import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { firmwareVersion, inspectFirmwareImage, isNewerVersion, publishProjectFirmware } from "./firmware-publish.mjs";
+import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import { firmwareVersion, inspectFirmwareImage, isNewerVersion, publishProjectFirmware, releaseNote, shortNote } from "./firmware-publish.mjs";
 
 function image({ size = 128 * 1024, chip = 9, magic = 0xe9, desc = 0xabcd5432, version = "0.2.208-dev" } = {}) {
   const bytes = Buffer.alloc(size);
@@ -107,4 +110,54 @@ test("nothing from the project is executed, and no temporary image is left", asy
   assert.equal(calls[0][0], process.execPath);
   assert.ok(!calls[0].some(argument => argument.startsWith(fixture.projectDir)));
   assert.equal((await readdir(tmpdir())).filter(name => calls[0].join(" ").includes(name) && name.startsWith("s1-firmware-")).length, 0);
+});
+
+test("an update's note is five plain words at most", () => {
+  assert.equal(shortNote("Bigger screens, menu letters"), "Bigger screens, menu letters");
+  assert.equal(shortNote("one two three four five six seven"), "one two three four five");
+  assert.equal(shortNote("**Bold** `code` <b>tag</b>"), "Bold code btag/b");
+  assert.equal(shortNote("Caf\u00e9 \u043c\u0435\u043d\u044e\nnext"), "Caf next");
+  assert.equal(shortNote("  spaced   out  "), "spaced out");
+  assert.equal(shortNote("x".repeat(90)).length, 48);
+  for (const empty of ["", null, undefined, "\u0000\u0001"]) assert.equal(shortNote(empty), "");
+});
+
+test("the note comes from the release notes, and a bad file can't stop an update", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "s1-note-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, "docs"));
+  const notes = body => writeFile(path.join(root, "docs", "RELEASE-1.2.3.md"), body);
+  await notes("# S1-ADV 1.2.3\n\nIn short: Colour weather icons\n\nLonger text.\n");
+  assert.equal(await releaseNote(root, "1.2.3-dev"), "Colour weather icons");
+  await notes("# Title\n\nin SHORT:   Lower case works\n");
+  assert.equal(await releaseNote(root, "1.2.3"), "Lower case works");
+  await notes("# Title\n\nNothing marked here, in short: not a line start.\n");
+  assert.equal(await releaseNote(root, "1.2.3"), "");
+  assert.equal(await releaseNote(root, "9.9.9"), "", "no notes for this version");
+  // A link out of the project must not read a private file.
+  const secret = path.join(root, "secret.txt");
+  await writeFile(secret, "In short: private words\n");
+  await rm(path.join(root, "docs", "RELEASE-1.2.3.md"));
+  await symlink(secret, path.join(root, "docs", "RELEASE-1.2.3.md"));
+  assert.equal(await releaseNote(root, "1.2.3"), "");
+});
+
+test("publishing puts the note in the manifest the device reads", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "s1-note-publish-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const projectDir = path.join(root, "project");
+  await mkdir(path.join(projectDir, "docs"), { recursive: true });
+  await writeFile(path.join(projectDir, "docs", "RELEASE-1.2.3.md"), "# x\n\nIn short: Five words at most here, truly\n");
+  const bin = path.join(root, "firmware.bin");
+  await writeFile(bin, image());
+  const configPath = path.join(root, "config.json");
+  const config = { stateDir: path.join(root, "state"), upstream: { claudeCode: { projectDir } } };
+  await writeFile(configPath, JSON.stringify(config));
+  const script = fileURLToPath(new URL("../scripts/publish-firmware.mjs", import.meta.url));
+  const publish = async (...extra) => JSON.parse((await promisify(execFile)(process.execPath,
+    [script, "--config", configPath, "--bin", bin, "--version", "1.2.3-dev", ...extra])).stdout);
+  assert.equal((await publish()).notes, "Five words at most here,");
+  assert.equal((await publish("--notes", "Said by hand")).notes, "Said by hand");
+  await writeFile(configPath, JSON.stringify({ stateDir: config.stateDir }));
+  assert.equal((await publish()).notes, "", "without a project there's nothing to read");
 });
