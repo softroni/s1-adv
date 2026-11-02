@@ -87,8 +87,13 @@ your own should start the recorder, have it call `toggleVoiceByTap()`.
 ## How it works
 
 Whatever starts the recorder, the screen showing at that moment decides who it's for. The firmware
-adds an `X-Voice-Tool` header to the usual upload, and the bridge answers on that same request.
+sends an `X-Voice-Tool` header with the recording, and the bridge answers on that same request.
 Tools don't use the chat's inbox, so there's nothing to poll.
+
+The chat starts uploading while you talk, to get its reply sooner. A tool doesn't, because a TLS
+connection needs about 33 KB in one piece and on a Lab screen there's little more than that to spare.
+Its recording goes up once it has stopped and background checks have finished, and a connection that
+fails before anything was sent is tried once more.
 
 Claude is asked with `askModel` at `askEffort`, which default to Haiku at low effort so an answer
 takes a few seconds. See [the settings](CLAUDE-CODE.md#settings). Each question stands alone, with
