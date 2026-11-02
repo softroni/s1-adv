@@ -1,6 +1,6 @@
 // Network workers publish immutable results; only loopTask owns UI/history.
 struct InboxHttpPayload { String url, token, eventId, body; bool otaManifest = false, applyAfter = false, announce = false, logsUpload = false, weather = false; };
-struct InboxHttpResult { int code=0; String body, eventId; bool otaManifest = false, applyAfter = false, announce = false, logsUpload = false, weather = false; };
+struct InboxHttpResult { int code=0; String body, eventId; bool otaManifest = false, applyAfter = false, announce = false, logsUpload = false, weather = false, noMemory = false; };
 constexpr uint32_t kOtaAutoCheckIntervalMs = 20000U;
 constexpr uint32_t kOtaScreenCheckIntervalMs = 5000U;
 uint32_t gOtaLastAutoCheckMs = 0;
@@ -376,6 +376,7 @@ std::deque<String> gPendingTextTurns;
 String gActiveTextTurn;
 File gVoiceNotesScanDir;
 bool gVoiceNotesScanActive = false;
+bool gVoiceNotesBehindCard = false;  // The card has notes the list doesn't.
 uint16_t gVoiceNotesScanCount = 0;
 bool gBootBackgroundActive = false;
 uint8_t gBootBackgroundStep = 0;

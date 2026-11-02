@@ -75,15 +75,23 @@ int xTaskCreate(void(*)(void*),const char*,int,void*arg,int,void*){
 constexpr int WL_CONNECTED=3;
 struct{int status(){return WL_CONNECTED;}}WiFi;
 int responseCode=204,posts=0,getCount=0;String posted;
-struct WiFiClientSecure{void setHandshakeTimeout(int seconds){assert(seconds>=6);}};
+// As on the device: HTTPClient's destructor stops a client it still holds, so that client must outlive it.
+struct WiFiClientSecure{
+ bool alive=true;~WiFiClientSecure(){alive=false;}
+ void setHandshakeTimeout(int seconds){assert(seconds>=6);}
+ void stop(){assert(alive);}
+};
 void configureSecureClient(WiFiClientSecure&){}
+bool tlsShortOfMemory=false;
+bool tlsRanOutOfMemory(WiFiClientSecure&){return tlsShortOfMemory;}
 struct DynamicJsonDocument{DynamicJsonDocument(int){}String value;String& operator[](const char*){return value;}};
 void serializeJson(DynamicJsonDocument&d,String&out){out=d.value;}
 struct HTTPClient {
  void setConnectTimeout(int ms){assert(ms>=2500);}void setTimeout(int ms){assert(ms>=4000);}void setReuse(bool){}
- bool begin(WiFiClientSecure&,String){return true;}bool begin(String){return true;}
+ WiFiClientSecure* client=nullptr;~HTTPClient(){if(client)client->stop();}
+ bool begin(WiFiClientSecure&c,String){client=&c;return true;}bool begin(String){return true;}
  void addHeader(const char*,String){}int POST(String body){++posts;posted=body;return responseCode;}
- int GET(){++getCount;return responseCode;}String getString(){return "{}";}void end(){}
+ int GET(){++getCount;return responseCode;}String getString(){return "{}";}void end(){client=nullptr;}
 };
 '''
 for signature in ['InboxHttpResult* performInboxHttpRequest(',
@@ -140,6 +148,19 @@ int main(){
  auto wx=std::make_unique<InboxHttpPayload>();wx->url="https://bridge.invalid/api/cardputer/weather?place=Salem";wx->weather=true;
  assert(startInboxNetworkRequest(std::move(wx)));complete();
  assert(weatherCode==503&&!gBridgeHttpFailed&&gInboxRetryAfterMs==0&&!gInboxHttpBusy);
+ // TLS that can't get its memory says nothing about the link, so however often that happens the
+ // device stays on Wi-Fi: leaving would free nothing and fail whatever was about to run.
+ gInboxAckQueue.clear();gNetworkRecovery.success();responseCode=-1;tlsShortOfMemory=true;
+ auto pollOnce=[]{auto poll=std::make_unique<InboxHttpPayload>();poll->url="https://bridge.invalid/pending";
+  assert(startInboxNetworkRequest(std::move(poll)));complete();};
+ for(int i=0;i<6;++i){now+=2000;pollOnce();}
+ assert(gBridgeHttpFailed);
+ assert(!gNetworkRecovery.takeReconnect(now+5000,true,true));
+ // The same failure with memory to spare is the network, and still counts.
+ tlsShortOfMemory=false;
+ for(int i=0;i<6;++i){now+=2000;pollOnce();}
+ assert(gNetworkRecovery.takeReconnect(now+5000,true,true));
+ gNetworkRecovery.success();
  // Execute actual manifest completion: Ctrl+U installs a newly discovered
  // candidate; no candidate or a failed check returns Home without applying.
  gInboxAckQueue.clear();responseCode=200;

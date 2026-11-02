@@ -260,6 +260,9 @@ bool stopRecordingAndSend() {
     gSubmitting = false;
     gThinking = false;
     endVoiceWifiPerformance();
+    // A tool is done with its connection. Left open, the speaker's memory would land around TLS's
+    // buffers and wall in the room they leave, and the next connection couldn't fit.
+    if (voiceToolAwaitsAnswer()) gVoiceReplyConnection.clear();
     initSpeaker();
     resumeHubWebSocketAfterVoice();
   };

@@ -153,6 +153,12 @@ bool registerDownloadedVoiceNote(const String& wavPath, const String& titleHint,
   if (!saveVoiceNoteMetadata(note)) {
     return false;
   }
+  // It's on the card now, and the list reads the card when Voice Notes next opens. Holding it here
+  // as well takes about 660 bytes in five pieces, and a screen with a tool has none to spare.
+  if (voiceToolAwaitsAnswer()) {
+    gVoiceNotesBehindCard = true;
+    return true;
+  }
   bool existsInList = false;
   for (auto& existing : gVoiceNotes) {
     if (existing.audioPath == note.audioPath) {

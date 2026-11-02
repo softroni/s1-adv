@@ -285,6 +285,10 @@ void setUiMode(UiMode mode) {
     setStatus("Synth stopping; retry mode",1200);return;
   }
   if (mode == UiMode::Nes && gUiMode != UiMode::Nes && !enterNesApp()) return;
+  if (mode == UiMode::Voice && gVoiceNotesBehindCard) {
+    gVoiceNotesBehindCard = false;
+    loadVoiceNotes();
+  }
   if (gUiMode == UiMode::Nes && mode != UiMode::Nes) leaveNesApp();
   if (mode != gUiMode) gChatCommandsVisible = false;
   if (gUiMode==UiMode::BrainFlow && mode!=UiMode::BrainFlow) pauseBrainFlow();

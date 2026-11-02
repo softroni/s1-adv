@@ -57,7 +57,6 @@ bool compactMemoryForUi(const char* reason, bool force) {
     gDynamicPlaybackBuffer = nullptr;
   }
   clearEmojiCache();
-  gRuntimeLogs.clear();
   compactChatHistoryForMemory();
   yield();
   delay(1);

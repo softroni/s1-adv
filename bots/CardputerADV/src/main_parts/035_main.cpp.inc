@@ -253,8 +253,8 @@ bool requestAndPlayTts(const String& text) {
     pausedWsForTts = true;
   }
 
-  HTTPClient http;
   std::unique_ptr<WiFiClientSecure> secureClient;
+  HTTPClient http;  // Last in, first out: its destructor still uses the client.
   String url = hubBaseUrl() + kDeviceTtsPath;
   http.setTimeout(60000);
   http.setReuse(false);

@@ -17,15 +17,17 @@ String jsonEscapeLine(String value) {
   return value;
 }
 
+// Every task logs, and this runs while TLS needs the heap, so it takes nothing from it.
+void rememberRuntimeLog(const char* area, const char* message) {
+  char line[kRuntimeLogChars + 1];
+  snprintf(line, sizeof(line), "%lu %s %s", static_cast<unsigned long>(millis() / 1000), area, message);
+  portENTER_CRITICAL(&gRuntimeLogMux);
+  gRuntimeLogs.add(line);
+  portEXIT_CRITICAL(&gRuntimeLogMux);
+}
+
 void appendRuntimeLog(const String& area, const String& message, bool persist = false) {
-  String compact = String(millis() / 1000) + " " + area + " " + message;
-  while (compact.length() > 96) {
-    compact.remove(compact.length() - 1);
-  }
-  gRuntimeLogs.push_back(compact);
-  while (gRuntimeLogs.size() > kMaxRuntimeLogLines) {
-    gRuntimeLogs.pop_front();
-  }
+  rememberRuntimeLog(area.c_str(), message.c_str());
   if (!persist || !gStorageReady) {
     return;
   }
@@ -54,7 +56,7 @@ void logf(const char* fmt, ...) {
   vsnprintf(buf, sizeof(buf), fmt, args);
   va_end(args);
   Serial.println(buf);
-  appendRuntimeLog("SER", String(buf), false);
+  rememberRuntimeLog("SER", buf);
 }
 
 lgfx::LGFXBase& uiCanvas() {
@@ -260,6 +262,12 @@ bool hubUsesTls() {
 
 String hubBaseUrl() {
   return String(hubUsesTls() ? "https://" : "http://") + gHubHost + ":" + String(gHubPort);
+}
+
+// The request never reached the network, because TLS couldn't get its two buffers.
+bool tlsRanOutOfMemory(WiFiClientSecure& client) {
+  char detail[32] = {};
+  return client.lastError(detail, sizeof(detail)) == MBEDTLS_ERR_SSL_ALLOC_FAILED;
 }
 
 void configureSecureClient(WiFiClientSecure& client) {

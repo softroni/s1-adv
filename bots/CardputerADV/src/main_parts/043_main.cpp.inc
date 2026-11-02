@@ -845,7 +845,7 @@ bool handleHostSerialCommand(String line) {
   String cmd = line;
   cmd.toLowerCase();
   if (cmd == "logs.dump") {
-    for (const auto& entry : gRuntimeLogs) { Serial.print("[LOG] "); Serial.println(entry); }
+    for (size_t i = 0; i < gRuntimeLogs.size(); ++i) { Serial.print("[LOG] "); Serial.println(gRuntimeLogs[i]); }
     return true;
   }
   if (cmd=="ui.perf") {
@@ -1092,6 +1092,28 @@ bool handleHostSerialCommand(String line) {
     bool ok = fetchLatestInboxMessage(forcePlay, true);
     logf("[HOST] inbox.%s ok=%d seq=%u", forcePlay ? "play" : "poll", static_cast<int>(ok),
          static_cast<unsigned>(gInboxLastSeq));
+    return true;
+  }
+  // The pieces of free memory, largest first, taken and given straight back. TLS needs two of 17 KB.
+  if (cmd == "heap.map") {
+    if (gInboxHttpBusy || gVoiceDialBusy) {  // It holds every byte for a moment, and they need some.
+      logf("[HEAP_MAP] busy");
+      return true;
+    }
+    constexpr size_t kPieces = 12;
+    void* pieces[kPieces];
+    size_t sizes[kPieces];
+    size_t count = 0;
+    while (count < kPieces) {
+      const size_t size = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+      void* piece = size >= 256 ? heap_caps_malloc(size, MALLOC_CAP_8BIT) : nullptr;
+      if (!piece) break;
+      pieces[count] = piece;
+      sizes[count++] = size;
+    }
+    for (size_t i = 0; i < count; ++i) heap_caps_free(pieces[i]);
+    logf("[HEAP_MAP] free=%u pieces=%u", static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(count));
+    for (size_t i = 0; i < count; ++i) logf("[HEAP_MAP] %u at %p", static_cast<unsigned>(sizes[i]), pieces[i]);
     return true;
   }
   if (cmd == "mem.compact" || cmd == "/mem.compact") {

@@ -343,6 +343,8 @@ With [Claude connected](../README.md#3-connect-claude), you can do most of the L
 | Servo, LED strip, Cardputer LED or Speaker | [Set the part](#set-a-part-by-voice), or ask about it |
 | Devices, Dashboard, any other part, wiring or Sequences | [Ask the Lab](#ask-the-lab) |
 
+Other Lab screens don't listen, such as an offer waiting for **Enter** or the steps of a new rule. **G0** and **Ctrl+V** do nothing there either.
+
 All of this needs Wi-Fi and the bridge, and everything except calling a rule by name also needs Claude. If the screen says **Restart the bridge to use this**, your bridge is older than your firmware, so restart it.
 
 ### Say a rule

@@ -50,7 +50,7 @@ String voiceToolHeader() {
   return header;
 }
 
-// A TLS connection needs about 33 KB in one piece, and the Lab has little more than that, so it
+// A TLS connection needs two buffers of about 17 KB, and the Lab has little more than that, so it
 // can't share with a background check. Borrowing the screen's 32 KB isn't the answer: when it
 // comes back it lands somewhere else, and what's left is too broken up for the next connection.
 void voiceToolPrepareNetwork() {

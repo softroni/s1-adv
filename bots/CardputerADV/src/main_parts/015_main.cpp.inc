@@ -192,8 +192,8 @@ bool fetchRemoteOtaManifest() {
     return false;
   }
   String url = hubBaseUrl() + kFirmwareManifestFetchPath;
-  HTTPClient http;
   std::unique_ptr<WiFiClientSecure> secureClient;
+  HTTPClient http;  // Last in, first out: its destructor still uses the client.
   if (!configureHttpClient(http, secureClient, url, 4000)) {
     appendRuntimeLog("OTA", "fetch connect failed", true);
     return false;

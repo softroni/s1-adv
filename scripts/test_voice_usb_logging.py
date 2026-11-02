@@ -22,8 +22,8 @@ struct {
  void setTxTimeoutMs(int value){timeout=value;}
  void println(const char* line){if(full){waited+=timeout;return;}delivered=line;}
 } Serial;
-void appendRuntimeLog(const String& area,const String& line,bool persist){
- assert(area=="SER"&&!persist);saved=line;
+void rememberRuntimeLog(const char* area,const char* line){
+ assert(String(area)=="SER");saved=line;
 }
 '''
 code += function

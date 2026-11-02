@@ -29,6 +29,7 @@
 #include <freertos/task.h>
 #include <mbedtls/sha256.h>
 #include <mbedtls/gcm.h>
+#include <mbedtls/ssl.h>
 #include <esp_efuse.h>
 #include <esp_efuse_table.h>
 
@@ -70,6 +71,7 @@
 #include "lab_gps.h"
 #include "lab_json.h"
 #include "voice_tool.h"
+#include "runtime_log.h"
 #include "activity_cue.h"
 #include "assistant_activity.h"
 #include "battery_power.h"
@@ -112,7 +114,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.254-dev"
+#define APP_VERSION "0.2.255-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"
@@ -296,6 +298,7 @@ constexpr uint32_t kCriticalHeapFreeBytes = 16000;
 constexpr uint32_t kCriticalHeapLargestBlockBytes = 7000;
 constexpr size_t kMaxAudioAssets = 96;
 constexpr size_t kMaxRuntimeLogLines = 36;
+constexpr size_t kRuntimeLogChars = 96;
 constexpr size_t kMaxNotes = 128;
 constexpr size_t kMaxNoteInputChars = 512;
 constexpr size_t kVoicePreviewLineThreshold = 5;

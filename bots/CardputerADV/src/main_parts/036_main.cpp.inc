@@ -166,8 +166,8 @@ bool speechToWavFile(const String& text, const String& path) {
   size_t bytes = 0;
   bool ok = false;
   {
-    HTTPClient http;
     std::unique_ptr<WiFiClientSecure> secureClient;
+    HTTPClient http;  // Last in, first out: its destructor still uses the client.
     const String url = hubBaseUrl() + kDeviceTtsPath;
     http.setTimeout(60000);
     http.setReuse(false);

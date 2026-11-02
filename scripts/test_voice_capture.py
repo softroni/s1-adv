@@ -54,6 +54,7 @@ std::vector<uint8_t> gRecordInflightChunks;String gHubHost="example.test",gActiv
 constexpr size_t kRecordWriteBytes=512;constexpr uint32_t kMicSampleRate=16000;
 enum class FaceMode {Error,Listening};
 enum class UiMode {Home,Clock,Ota,ChatFull};UiMode gUiMode=UiMode::Home;void setUiMode(UiMode mode){gUiMode=mode;}
+bool labScreen=false,toolScreen=false;bool labMode(UiMode){return labScreen;}bool voiceToolOnScreen(){return toolScreen;}
 struct File {
  bool open=true;explicit operator bool()const{return open;}
  void setBufferSize(size_t){}size_t write(const uint8_t*,size_t n){return n;}
@@ -117,6 +118,14 @@ int main(){
   M5Cardputer.BtnA.pressed=false;updateG0VoiceTrigger();
   assert(!gRecording&&!gG0VoiceHeld&&stops==before+1);
  }
+ // On a Lab screen with no tool G0 records nothing: it would be a chat message, and the chat's
+ // upload takes more memory than the Lab has. With a tool on screen it works as usual.
+ labScreen=true;toolScreen=false;int labStarts=starts;
+ M5Cardputer.BtnA.pressed=true;updateG0VoiceTrigger();assert(!gRecording&&starts==labStarts);
+ M5Cardputer.BtnA.pressed=false;updateG0VoiceTrigger();startRecording();assert(!gRecording&&starts==labStarts);
+ toolScreen=true;M5Cardputer.BtnA.pressed=true;updateG0VoiceTrigger();assert(gRecording&&starts==labStarts+1);
+ M5Cardputer.BtnA.pressed=false;updateG0VoiceTrigger();assert(!gRecording);
+ labScreen=toolScreen=false;
  // A synth producer that has not acknowledged stop cannot lose its I2S owner.
  int blockedStarts=starts;synthOwned=true;synthStopOk=false;startRecording();
  assert(synthOwned&&starts==blockedStarts&&!gRecording);synthStopOk=true;

@@ -15,6 +15,9 @@ While a tool's screen is showing, all of this works without any code in the tool
 - Nothing joins the chat. There's no chat message, no history and no spoken reply, and Claude's
   answer can arrive while a chat reply is still being worked on.
 - The recording is kept in Voice Notes, like one made in the chat.
+- In the Lab, a screen with no tool doesn't record at all, however you start it. Anywhere else a
+  screen with no tool sends to the chat, which streams while you talk, and that takes more memory
+  than the Lab has.
 
 ## Add a tool that wants the words
 
@@ -91,7 +94,7 @@ sends an `X-Voice-Tool` header with the recording, and the bridge answers on tha
 Tools don't use the chat's inbox, so there's nothing to poll.
 
 The chat starts uploading while you talk, to get its reply sooner. A tool doesn't, because a TLS
-connection needs about 33 KB in one piece and on a Lab screen there's little more than that to spare.
+connection needs two buffers of about 17 KB and on a Lab screen there's little more than that to spare.
 Its recording goes up once it has stopped and background checks have finished, and a connection that
 fails before anything was sent is tried once more.
 

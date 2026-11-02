@@ -167,8 +167,8 @@ bool downloadUrlToFile(const String& url, const String& path, const String& expe
   if (showProgress) {
     beginTransferUi(progressTitle, "connecting", expectedSize, progressAccent);
   }
-  HTTPClient http;
   std::unique_ptr<WiFiClientSecure> secureClient;
+  HTTPClient http;  // Last in, first out: its destructor still uses the client.
   if (!configureHttpClient(http, secureClient, url, 180000)) {
     out.close();
     fsRemove(*fs, tempPath);

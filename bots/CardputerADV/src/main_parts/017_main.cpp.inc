@@ -282,8 +282,8 @@ bool applyOtaFromManifest() {
   }
 
   beginTransferUi("Firmware OTA", "connecting", expectedSize, rgb565_local(255, 93, 88));
-  HTTPClient http;
   std::unique_ptr<WiFiClientSecure> secureClient;
+  HTTPClient http;  // Last in, first out: its destructor still uses the client.
   if (!configureHttpClient(http, secureClient, gOtaManifest.url, 120000)) {
     finishTransferUi("connect failed", false);
     setHttpDiag("ota: begin failed");

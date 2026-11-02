@@ -218,8 +218,8 @@ TextTurnTaskResult* performTextTurnRequest(void* arg) {
     result->error = "Wi-Fi unavailable.";
   } else {
 
-    HTTPClient http;
     std::unique_ptr<WiFiClientSecure> secureClient;
+    HTTPClient http;  // Last in, first out: its destructor still uses the client.
     http.setTimeout(kTurnHttpTimeoutMs);
     http.setReuse(false);
     bool beginOk = false;

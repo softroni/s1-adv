@@ -12,6 +12,13 @@ void drainRecordingToFile() {
 }
 
 void startRecording() {
+  // Anywhere else in the Lab this would be a chat message, by accident. The chat also uploads while
+  // you talk, which takes more memory than the Lab has, and the device then lost its network.
+  if (labMode(gUiMode) && !voiceToolOnScreen()) {
+    logf("[VOICE] nothing to record for on this Lab screen");
+    setStatus("Voice doesn't work here", 1200);
+    return;
+  }
   if(!stopPocketSynth()){setStatus("Synth stopping; try voice again",1200);return;}
   if (vlcBusy()) { vlc_remote::cancel(); setStatus("VLC closing; press voice again",1600); return; }
   if (radioBusy()) { stopInternetRadio(); setStatus("Radio stopping; press voice again",1600); return; }

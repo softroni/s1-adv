@@ -209,8 +209,8 @@ bool fetchLatestInboxMessage(bool forcePlay, bool speak, bool quiet, bool assist
   if (assistantOnly) {
     url += "&sender_kind=assistant";
   }
-  HTTPClient http;
   std::unique_ptr<WiFiClientSecure> secureClient;
+  HTTPClient http;  // Last in, first out: its destructor still uses the client.
   uint32_t inboxTimeoutMs = quiet ? 4000 : 15000;
   if (!configureHttpClient(http, secureClient, url, inboxTimeoutMs)) {
     if (!quiet) {
@@ -254,8 +254,8 @@ InboxHttpResult* performInboxHttpRequest(void* arg) {
   result->announce = request->announce;
   result->logsUpload = request->logsUpload;
   result->weather = request->weather;
-  HTTPClient http;
   std::unique_ptr<WiFiClientSecure> secure;
+  HTTPClient http;  // Last in, first out: its destructor still uses the client.
   http.setConnectTimeout(2500);
   // The bridge may have to ask two services before it can answer.
   http.setTimeout(request->weather ? 8000 : 4000);
@@ -286,6 +286,7 @@ InboxHttpResult* performInboxHttpRequest(void* arg) {
     }
     http.end();
   }
+  if (secure && result->code <= 0) result->noMemory = tlsRanOutOfMemory(*secure);
   return result.release();
 }
 
@@ -330,7 +331,8 @@ void serviceInboxNetworkCompletion() {
     gBridgeHttpFailed = false;
   } else if (!cancelled) {
     gBridgeHttpFailed = true;
-    if (result->code <= 0) gNetworkRecovery.failure(millis());
+    // Running out of memory says nothing about the link, and leaving Wi-Fi wouldn't free any.
+    if (result->code <= 0 && !result->noMemory) gNetworkRecovery.failure(millis());
   }
   if (cancelled) {
     if(result->logsUpload) setStatus("Logs interrupted; U retry",1800);
@@ -525,8 +527,8 @@ bool injectInboxText(const String& text, bool speakAfter) {
   }
   String topicKey = currentConversationKey();
   String url = hubBaseUrl() + "/api/cardputer/v1/topics/" + urlEncodePathSegment(topicKey) + "/inbox/inject";
-  HTTPClient http;
   std::unique_ptr<WiFiClientSecure> secureClient;
+  HTTPClient http;  // Last in, first out: its destructor still uses the client.
   if (!configureHttpClient(http, secureClient, url, 15000)) {
     setStatus("Inject connect failed", 1200);
     logf("[INBOX] inject connect failed");

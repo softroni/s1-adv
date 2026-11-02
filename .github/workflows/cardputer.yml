@@ -132,6 +132,7 @@ jobs:
       - run: python scripts/test_realtime_audio_buffer.py --sanitize
       - run: python scripts/test_realtime_scheduler.py
       - run: python scripts/test_network_recovery.py
+      - run: python scripts/test_runtime_log.py
       - run: python scripts/test_voice_reply_connection.py
       - run: python scripts/test_wifi_memory_budget.py
       - run: python scripts/test_voice_delivery.py

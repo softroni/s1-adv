@@ -970,6 +970,12 @@ void beginLab() {
   gLabOnWires = false;
   gLabQuietProbes = 0;
   gLabOpen = true;
+  // The list only copies what's on the card, and every connection the Lab makes runs on this memory.
+  if (!gVoiceNotes.empty()) {
+    std::vector<VoiceNote>().swap(gVoiceNotes);
+    gSelectedVoiceNote = 0;
+    gVoiceNotesBehindCard = true;
+  }
   labEnterView(gUiMode);
   gLabGps = lab_gps::Parser{};
   Serial1.setRxBufferSize(512);

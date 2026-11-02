@@ -138,7 +138,7 @@ bool startRuntimeLogsUpload() {
   body += jsonEscapeLine(kBuildGitSha);
   body += "\",\"events\":[";
   bool first = true;
-  for (const auto& line : gRuntimeLogs) {
+  for (size_t i = 0; i < gRuntimeLogs.size(); ++i) {
     if (!first) {
       body += ",";
     }
@@ -146,7 +146,7 @@ bool startRuntimeLogsUpload() {
     body += "{\"ts\":";
     body += String(millis());
     body += ",\"level\":\"info\",\"message\":\"";
-    body += jsonEscapeLine(line);
+    body += jsonEscapeLine(gRuntimeLogs[i]);
     body += "\",\"free_heap\":";
     body += String(static_cast<unsigned>(ESP.getFreeHeap()));
     body += ",\"rssi\":";
@@ -182,8 +182,8 @@ bool probeOtaBridgeHealth(uint32_t timeoutMs) {
     return false;
   }
 
-  HTTPClient http;
   std::unique_ptr<WiFiClientSecure> secureClient;
+  HTTPClient http;  // Last in, first out: its destructor still uses the client.
   String url = hubBaseUrl() + "/healthz";
   if (!configureHttpClient(http, secureClient, url, timeoutMs)) {
     appendRuntimeLog("OTA", "health connect failed", false);

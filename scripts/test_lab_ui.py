@@ -284,6 +284,10 @@ enum class UiMode { Home, NfcNotes, Mesh, SmartLamp, IrRemote, LabDevices, LabRu
 UiMode gUiMode = UiMode::Home;
 bool gLauncherVisible = false, gRecording = false, gRealtimeActive = false, gPlaybackActive = false, gToneAllowed = true;
 bool gSubmitting = false, gThinking = false, gWifiReady = true;
+struct VoiceNote {};
+std::vector<VoiceNote> gVoiceNotes;
+int gSelectedVoiceNote = 0;
+bool gVoiceNotesBehindCard = false;
 String gHubHost = "bridge";
 int gVoiceTaps = 0;
 void toggleVoiceByTap() { ++gVoiceTaps; if (gRecording) { gRecording = false; gThinking = true; } else gRecording = true; }
