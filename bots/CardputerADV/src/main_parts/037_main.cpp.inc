@@ -261,6 +261,10 @@ TextTurnTaskResult* performTextTurnRequest(void* arg) {
       // Answer soon and let this connection go: only held polls can bring status while Claude works.
       http.addHeader("X-Activity-Status", "1");
       http.addHeader("X-Turn-Wait-Ms", "1000");
+      if (!payload->labState.isEmpty()) {
+        http.addHeader("X-Lab-State", payload->labState);
+        payload->labState = static_cast<const char*>(nullptr);  // Copied, and TLS needs the room.
+      }
       if (!payload->deviceToken.isEmpty()) {
         http.addHeader("Authorization", "Bearer " + payload->deviceToken);
       }
@@ -378,6 +382,7 @@ void maybeStartNextTextTurn() {
 
   payload->text = gPendingTextTurns.front();
   gPendingTextTurns.pop_front();
+  payload->labState = chatLabState();
   payload->url = hubBaseUrl() + kDeviceTextTurnPath;
   payload->deviceId = gDeviceId;
   payload->deviceToken = gDeviceToken;

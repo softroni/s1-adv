@@ -18,10 +18,15 @@ struct Answer {
 template <class Text>
 Text headerSafe(const char* raw) {
   static constexpr char kHex[] = "0123456789ABCDEF";
+  const auto plain = [](unsigned char c) { return c >= 0x20 && c <= 0x7E && c != '%'; };
   Text out;
+  if (!raw) return out;  // What a String's c_str() gives when it ran out of memory.
+  size_t length = 0;
+  for (const char* c = raw; *c; ++c) length += plain(static_cast<unsigned char>(*c)) ? 1 : 3;
+  out.reserve(length);  // In one piece, so this can't scatter the heap.
   for (; *raw; ++raw) {
     const unsigned char c = static_cast<unsigned char>(*raw);
-    if (c >= 0x20 && c <= 0x7E && c != '%') {
+    if (plain(c)) {
       out += static_cast<char>(c);
     } else {
       out += '%';
@@ -29,7 +34,8 @@ Text headerSafe(const char* raw) {
       out += kHex[c & 15];
     }
   }
-  return out;
+  // Nothing beats part of it, which Claude would read as the whole list.
+  return out.length() == length ? out : Text();
 }
 
 template <class Text>

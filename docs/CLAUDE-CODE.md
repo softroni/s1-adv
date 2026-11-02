@@ -152,7 +152,8 @@ response, and the answer arrives on the live feed.
 ## What this mode can do
 
 Chat, push-to-talk, conversation history, spoken replies, device actions such as
-starting a focus timer, and Wi-Fi updates all work.
+starting a focus timer, and Wi-Fi updates all work. The chat also knows the rules and
+sequences saved in the [Lab](LAB.md#from-the-chat), and can offer new or changed ones.
 
 By default the session has **no tools**. Claude can't read files, run commands or
 browse the web from the Cardputer, and it has no access to your projects. To change
@@ -324,6 +325,9 @@ session is locked down so that token reaches as little as possible:
   folder. Each has no tools, notes or project folder, even if the chat does, and no
   transcript is kept. In the Lab, a question also sends what's plugged in, the readings,
   your rules and, for Ask the Lab, about the last day of the sensor diary.
+- Each chat message also sends the rules and sequences saved in the Lab. The bridge puts
+  them beside your saved notes for that turn, so they stay out of the conversation, and
+  nothing about what's plugged in or its readings is sent.
 
 If a token leaks, someone could chat in that conversation, read it and use up your
 plan limits, and change your project folder if you've set one. Generate a new token and

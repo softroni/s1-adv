@@ -92,13 +92,19 @@ bool executeDeviceAction(JsonObjectConst action) {
   }
 
   if (type == "lab.set") return labVoiceSet(action["output"] | "", action["set"] | 0);
-  if (type == "lab.rule") {
+  if (type == "lab.rule" || type == "lab.sequence") {
+    // A reply can arrive before the Lab has been opened, and a rule can name what's on the card.
+    labReadBook();
+    const char* replaces = action["replaces"] | "";
     lab::Rule rule;
-    if (!lab::ruleFromJson(action, rule, labSequences(), labSequenceCount())) {
-      appendRuntimeLog("LAB", "rule from Claude refused", true);
-      return false;
+    lab::Sequence seq;
+    const bool offered = type == "lab.rule"
+        ? lab::ruleFromJson(action, rule, labSequences(), labSequenceCount()) && labOfferChange(rule, replaces)
+        : lab::sequenceFromJson(action, seq) && labOfferSequence(seq, replaces);
+    if (!offered) {
+      appendRuntimeLog("LAB", type == "lab.rule" ? "rule from Claude refused" : "sequence from Claude refused", true);
+      setStatus(type == "lab.rule" ? "Claude's rule wouldn't work" : "Claude's sequence wouldn't work", 2500);
     }
-    labOfferRule(rule);
-    return true;
+    return offered;
   }
 

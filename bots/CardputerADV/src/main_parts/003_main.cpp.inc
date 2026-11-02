@@ -32,10 +32,11 @@ struct DeviceActionCatalogEntry {
   const char* example;
 };
 
-constexpr const char* kDeviceActionCatalogVersion = "2026-11-02.1";
+constexpr const char* kDeviceActionCatalogVersion = "2026-11-02.2";
 constexpr DeviceActionCatalogEntry kDeviceActionCatalog[] = {
     {"focus.start", "start focus", "set pomodoro to 45 minutes"},
     {"lab.rule", "make a Lab rule", "when I wave, turn the strip red"},
+    {"lab.sequence", "write a Lab sequence", "flash the strip three times"},
     {"focus.pause", "pause focus", "pause focus"},
     {"focus.resume", "resume focus", "resume focus"},
     {"focus.reset", "reset focus", "reset pomodoro"},
@@ -187,6 +188,7 @@ struct BatteryHistorySample {
 
 struct TextTurnTaskPayload {
   String text;
+  String labState;  // What's saved in the Lab, ready for a header. Empty sends none.
   String url;
   String deviceId;
   String deviceToken;

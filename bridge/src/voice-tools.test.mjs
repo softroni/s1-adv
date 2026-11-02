@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LAB_HELP, LAB_RULE_POLICY, LAB_SET_POLICY, VOICE_TOOLS, answerVoiceTool, readVoiceContext, voiceToolMessage, voiceToolPrompt } from "./voice-tools.mjs";
+import { LAB_CHAT_POLICY, LAB_HELP, LAB_RULE_POLICY, LAB_SET_POLICY, VOICE_TOOLS, answerVoiceTool, readLabState, readVoiceContext, voiceToolMessage, voiceToolPrompt } from "./voice-tools.mjs";
 import { buildDeviceActionsPayload, extractDeviceActionsFromText, LAB_RULE_POLICY as FROM_SERVER, sanitizeDeviceAction } from "./server.mjs";
 
 const readReply = text => {
@@ -88,6 +88,29 @@ test("the context header comes back as it was sent, and a bad one is dropped", (
   assert.equal(readVoiceContext(undefined), "");
   assert.equal(readVoiceContext("%E0%A4%A"), "", "a broken header isn't worth failing the request for");
   assert.equal(readVoiceContext("x".repeat(9000)).length, 4000);
+});
+
+test("the chat's Lab state comes back as it was sent, with room for a full Lab", () => {
+  assert.equal(readLabState("saved rules:%0AWave: any motion on; do led set 0; hold 2000%0A"), "saved rules:\nWave: any motion on; do led set 0; hold 2000");
+  assert.equal(readLabState(undefined), "");
+  assert.equal(readLabState("%E0%A4%A"), "");
+  assert.equal(readLabState("x".repeat(9000)).length, 6000);
+});
+
+test("only the chat can write a sequence, so a voice tool's prompt never offers it", async () => {
+  for (const [name, tool] of VOICE_TOOLS) {
+    assert.ok(!(tool.actions || []).includes("lab.sequence"), name);
+    assert.ok(!(tool.instructions || "").includes("lab.sequence"), name);
+  }
+  const answer = await answerVoiceTool("lab.ask", "make a sequence", { readReply,
+    ask: async () => `Sure. ${marker([{ type: "lab.sequence", name: "Sneaky", steps: [{ wait_ms: 100 }] }])}` });
+  assert.equal(answer.device_actions, undefined);
+});
+
+test("Ask the Lab tells people where a sequence can be written", () => {
+  assert.match(LAB_HELP, /it can write and change them when asked in AI Chat/);
+  assert.match(LAB_CHAT_POLICY, /never guess what's saved/);
+  assert.match(LAB_CHAT_POLICY, /Send one rule or sequence in a reply/);
 });
 
 test("changing a rule can only send a rule back", () => {

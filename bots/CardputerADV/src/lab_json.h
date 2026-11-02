@@ -1,6 +1,6 @@
 #pragma once
-// Reads a rule that Claude sent back as a device action. The shape is set by the bridge's prompt,
-// and lab::Draft refuses anything it doesn't recognize.
+// Reads a rule or a sequence that Claude sent back as a device action. The shape is set by the
+// bridge's prompt, and anything it doesn't recognize is refused here.
 #include <ArduinoJson.h>
 #include "lab.h"
 
@@ -25,6 +25,43 @@ inline bool ruleFromJson(JsonObjectConst json, Rule& out, const Sequence* seqs, 
   if (!draft.usable()) return false;
   if (!draft.rule.name[0]) strcpy(draft.rule.name, "Spoken rule");
   out = draft.rule;
+  return true;
+}
+
+// One step the Lab can't run refuses the whole sequence, because with a step missing it isn't the
+// one that was asked for. Waits come in milliseconds and are kept in tenths of a second.
+inline bool stepFromJson(JsonObjectConst line, SeqStep& step) {
+  if (!line["wait_ms"].isNull()) {
+    step.kind = SeqKind::Wait;
+    const int tenths = (clampTo<int>(line["wait_ms"] | 0, 0, kMaxWaitTenths * 100) + 50) / 100;
+    step.value = static_cast<int16_t>(clampTo<int>(tenths, 1, kMaxWaitTenths));
+    return stepAllowed(step);
+  }
+  if (!outFromKey(line["output"] | "", step.out)) return false;
+  const OutInfo& o = info(step.out);
+  if (line["off"] | false) {
+    if (!canTurnOff(step.out)) return false;
+    step.kind = o.onOff ? SeqKind::Set : SeqKind::Off;  // The steps on the screen say it the same way.
+    step.value = 0;
+  } else if (!line["set"].isNull()) {
+    step.kind = SeqKind::Set;
+    step.value = clampTo<int16_t>(static_cast<int16_t>(clampTo<int>(line["set"] | 0, -32000, 32000)), o.lo, o.hi);
+  } else {
+    return false;
+  }
+  return stepAllowed(step);
+}
+inline bool sequenceFromJson(JsonObjectConst json, Sequence& out) {
+  Sequence seq;
+  cleanName(json["name"] | "", seq.name);
+  seq.loop = json["loop"] | false;
+  for (JsonObjectConst line : json["steps"].as<JsonArrayConst>()) {
+    if (seq.count >= kMaxSeqSteps || !stepFromJson(line, seq.steps[seq.count])) return false;
+    ++seq.count;
+  }
+  if (!seq.count) return false;
+  if (!seq.name[0]) strcpy(seq.name, "New sequence");
+  out = seq;
   return true;
 }
 }  // namespace lab

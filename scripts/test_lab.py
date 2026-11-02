@@ -635,6 +635,36 @@ void testSequences(){
    Draft e;e.addPlay("",&s,1);assert(!e.ok);}
 }
 
+// What the chat is told on every message. The room is worked out for each message, so the longest
+// possible Lab has to fit in it, and a rule or a step that grows has to fail here first.
+void testChatState(){
+  Rule rules[kMaxRules];Sequence seqs[kMaxSequences];
+  char small[200];
+  { Text out(small,sizeof(small));chatState(rules,0,seqs,0,out);assert(!strcmp(small,"saved rules: none\nsaved sequences: none\n"));}
+  assert(chatChars(0,seqs,0)>strlen(small));
+  for(int i=0;i<kMaxRules;++i){
+    Rule& r=rules[i];r=Rule{};r.on=false;strcpy(r.name,"Fifteen letters");r.holdMs=kMaxHoldMs;r.conds=3;
+    for(auto& c:r.cond)c=Cond{Sig::Temperature,Op::Below,-40};
+    r.actions=3;r.action[0]=follow(Out::StripBright,Sig::Temperature);r.action[1]=oppose(Out::StripLength,Sig::Temperature);
+    r.action[2]=Action{};r.action[2].out=i%2?Out::Say:Out::Sequence;r.action[2].how=How::Set;r.action[2].value=i%2?1:0;
+    std::memset(r.say,'x',kSayChars);r.say[kSayChars]=0;
+  }
+  for(auto& s:seqs){s=Sequence{};strcpy(s.name,"Fifteen letters");s.loop=true;s.count=kMaxSeqSteps;for(int i=0;i<kMaxSeqSteps;++i)s.steps[i]=SeqStep{i%2?SeqKind::Wait:SeqKind::Set,Out::StripBright,static_cast<int16_t>(i%2?kMaxWaitTenths:100)};}
+  const size_t room=chatChars(kMaxRules,seqs,kMaxSequences);
+  std::vector<char> text(room+1,'#');Text out(text.data(),room);chatState(rules,kMaxRules,seqs,kMaxSequences,out);
+  assert(text[room]=='#');
+  assert(out.length()+1<room);  // Stopped by what it had to say, not by the end of the room.
+  std::string said(text.data());assert(said.compare(said.size()-1,1,"\n")==0);
+  assert(said.find("saved sequences:\n")!=std::string::npos);
+  size_t lines=0;for(char c:said)lines+=c=='\n';assert(lines==size_t(2+kMaxRules+kMaxSequences));
+  assert(out.length()<6000);  // What the bridge keeps.
+  // A usual Lab costs far less than a full one, which is the point of working it out.
+  Sequence two[2];two[0].count=6;two[1].count=4;assert(chatChars(3,two,2)<1400);
+  // Nothing about a name's case or spacing changes which one it is, and a part of a name isn't it.
+  strcpy(seqs[0].name,"Door wave");strcpy(seqs[1].name,"Hello");
+  assert(findByName(seqs,2,"door WAVE")==0&&findByName(seqs,2,"hello")==1&&findByName(seqs,2,"Door")<0&&findByName(seqs,2,"")<0&&findByName(seqs,2,"Door wave again")<0&&findByName(seqs,0,"Hello")<0);
+  strcpy(rules[3].name,"Wave red");assert(findByName(rules,4,"wave red")==3&&findByName(rules,3,"wave red")<0);
+}
 void testTables(){
   for(const SigInfo& s:kSigs)assert(s.key&&std::strlen(s.name)<=12);
   for(const OutInfo& o:kOuts)assert(o.key&&std::strlen(o.name)<=12);  // Both fit a flow box.
@@ -652,7 +682,7 @@ void testTables(){
 }
 
 int main(){
-  testHub();testGps();testRanges();testInputs();testRules();testWiring();testCloseness();testStrip();testRelays();testDirect();testPractice();testRecipes();testRemotes();testDrafts();testSaving();testSequences();testTables();JSON_TEST
+  testHub();testGps();testRanges();testInputs();testRules();testWiring();testCloseness();testStrip();testRelays();testDirect();testPractice();testRecipes();testRemotes();testDrafts();testSaving();testSequences();testChatState();testTables();JSON_TEST
   std::puts("PASS Lab: hub commands, GPS lines, ranges, change detection, rules with hold and priority, sequences, wiring, the strip cap, the relay guard, and saved files that refuse every kind of damage");
 }
 '''
@@ -663,6 +693,58 @@ json_test = r'''
 #include "lab_json.h"
 Sequence gSeqs[2];uint8_t gSeqCount=0;
 bool parse(const char* text, Rule& out){StaticJsonDocument<2048> doc;assert(!deserializeJson(doc,text));return ruleFromJson(doc.as<JsonObjectConst>(),out,gSeqs,gSeqCount);}
+size_t slotsIn(JsonVariantConst value){size_t n=0;
+  if(value.is<JsonObjectConst>())for(JsonPairConst p:value.as<JsonObjectConst>())n+=1+slotsIn(p.value());
+  else if(value.is<JsonArrayConst>())for(JsonVariantConst v:value.as<JsonArrayConst>())n+=1+slotsIn(v);
+  return n;}
+bool parseSeq(const char* text, Sequence& out){DynamicJsonDocument doc(8192);assert(!deserializeJson(doc,text));return sequenceFromJson(doc.as<JsonObjectConst>(),out);}
+void testSequenceJson(){
+  // The example in the bridge's prompt, and it runs the way it reads.
+  Sequence s;assert(parseSeq(R"({"type":"lab.sequence","name":"Door wave","loop":false,"steps":[{"output":"strip_color","set":120},{"wait_ms":1000},{"output":"servo","set":90},{"wait_ms":2000},{"output":"servo","set":0},{"output":"strip_color","off":true}]})",s));
+  assert(!strcmp(s.name,"Door wave")&&!s.loop&&s.count==6);
+  assert(s.steps[0].kind==SeqKind::Set&&s.steps[0].out==Out::StripColor&&s.steps[0].value==120);
+  assert(s.steps[1].kind==SeqKind::Wait&&s.steps[1].value==10&&s.steps[3].value==20);
+  assert(s.steps[5].kind==SeqKind::Off&&s.steps[5].out==Out::StripColor);
+  for(uint8_t i=0;i<s.count;++i)assert(stepAllowed(s.steps[i]));
+  // On or off outputs read the way the screens write them, so "off" is a value and not a release.
+  assert(parseSeq(R"({"name":"Lamp","loop":true,"steps":[{"output":"relay_1","set":1},{"wait_ms":250},{"output":"relay_1","off":true},{"output":"ac_daikin","off":true}]})",s));
+  assert(s.loop&&s.steps[0].value==1&&s.steps[2].kind==SeqKind::Set&&s.steps[2].value==0&&s.steps[3].kind==SeqKind::Set&&s.steps[3].out==Out::AcDaikin);
+  assert(s.steps[1].value==3);  // Waits round to the tenth.
+  // Numbers are held to what the part can do, and a wait stays a wait.
+  assert(parseSeq(R"({"name":"Far","steps":[{"output":"servo","set":999},{"output":"speaker","set":10},{"wait_ms":1},{"wait_ms":0},{"wait_ms":99999999}]})",s));
+  assert(s.steps[0].value==180&&s.steps[1].value==200&&s.steps[2].value==1&&s.steps[3].value==1&&s.steps[4].value==kMaxWaitTenths);
+  // A name is cleaned like a rule's, and an empty one gets something to show.
+  assert(parseSeq(R"({"name":"<b>Wave!</b> and a very long name","steps":[{"wait_ms":100}]})",s));assert(strlen(s.name)<=kNameChars&&!strchr(s.name,'<'));
+  assert(parseSeq(R"({"steps":[{"wait_ms":100}]})",s));assert(!strcmp(s.name,"New sequence"));
+  // Anything it can't run refuses all of it, and leaves what was there alone.
+  strcpy(s.name,"Kept");
+  for(const char* bad:{R"({})",R"({"name":"x","steps":[]})",R"({"name":"x","steps":"wave"})",R"({"name":"x","steps":[{}]})",
+      R"({"name":"x","steps":[{"output":"ghost","set":1}]})",R"({"name":"x","steps":[{"output":"servo"}]})",
+      R"({"name":"x","steps":[{"output":"servo","off":true}]})",R"({"name":"x","steps":[{"output":"say","set":1}]})",
+      R"({"name":"x","steps":[{"output":"sequence","set":0}]})",R"({"name":"x","steps":[{"wait_ms":100},{"output":"say","text":"hi"}]})"}){assert(!parseSeq(bad,s));}
+  assert(!strcmp(s.name,"Kept"));
+  // Seventeen steps is one too many, and sixteen isn't.
+  std::string steps="{\"name\":\"Full\",\"steps\":[";for(int i=0;i<kMaxSeqSteps;++i)steps+=i?",{\"wait_ms\":100}":"{\"wait_ms\":100}";
+  assert(parseSeq((steps+"]}").c_str(),s)&&s.count==kMaxSeqSteps);
+  DynamicJsonDocument big(4096);assert(!deserializeJson(big,steps+",{\"wait_ms\":100}]}"));assert(!sequenceFromJson(big.as<JsonObjectConst>(),s));
+  // The device reads a reply's actions with 2048 bytes, so the longest sequence has to fit, with the
+  // longest rule beside it in case Claude sends both.
+  const char* worst=R"([{"type":"lab.sequence","name":"Fifteen letters","loop":true,"replaces":"Fifteen letter2","steps":[{"output":"strip_bright","set":100},{"wait_ms":600000},{"output":"strip_length","set":30},{"wait_ms":600000},{"output":"strip_color","set":359},{"wait_ms":600000},{"output":"lamp_bright","set":100},{"wait_ms":600000},{"output":"lamp_power","set":1},{"wait_ms":600000},{"output":"strip_color","off":true},{"wait_ms":600000},{"output":"ac_daikin","set":1},{"wait_ms":600000},{"output":"speaker","set":2000},{"output":"strip_bright","off":true}]},{"type":"lab.rule","name":"Fifteen letters","replaces":"Fifteen letter2","any":false,"hold_ms":30000,"when":[{"sensor":"temperature","test":"over","value":45},{"sensor":"stick_button","test":"off"},{"sensor":"satellites","test":"changes"}],"do":[{"output":"strip_bright","oppose":"stick_x"},{"output":"lamp_power","set":1},{"output":"strip_length","follow":"temperature"}]}])";
+  // Slots are 16 bytes on the device and larger here, so this works out what the device would use.
+  DynamicJsonDocument reply(8192);assert(!deserializeJson(reply,std::string(worst)));assert(sequenceFromJson(reply[0].as<JsonObjectConst>(),s)&&s.count==16);
+  const size_t onDevice=reply.memoryUsage()-slotsIn(reply.as<JsonVariantConst>())*(JSON_ARRAY_SIZE(1)-16);
+  assert(onDevice<2048);
+  Rule r;assert(ruleFromJson(reply[1].as<JsonObjectConst>(),r,gSeqs,gSeqCount)&&r.conds==3&&r.actions==3);
+  // What the chat sees reads back as what's saved: every line a rule or step can be.
+  { strcpy(gSeqs[0].name,"Hello");gSeqCount=1;Rule rule;
+    assert(parse(R"({"name":"Door","any":false,"hold_ms":1500,"when":[{"sensor":"distance","test":"under","value":30},{"sensor":"motion","test":"on"},{"sensor":"knob","test":"changes"}],"do":[{"output":"servo","follow":"knob"},{"output":"say","text":"hi there, friend"},{"output":"sequence","play":"Hello"}]})",rule));
+    rule.on=false;char text[400];Text out(text,sizeof(text));ruleLine(rule,out,gSeqs,gSeqCount);
+    assert(!strcmp(text,"Door (switched off): all distance under 30, motion on, knob changes; do servo follow knob, say text \"hi there, friend\", sequence play Hello; hold 1500\n"));
+    Rule other=recipeRule(5);other.action[1]=oppose(Out::Servo,Sig::Light);char more[400];Text line(more,sizeof(more));ruleLine(other,line,gSeqs,gSeqCount);assert(strstr(more,"oppose light")&&strstr(more,": any ")!=nullptr);
+    Sequence seq;assert(parseSeq(R"({"name":"Wave","loop":true,"steps":[{"output":"strip_color","set":120},{"wait_ms":1500},{"output":"strip_bright","off":true}]})",seq));
+    char third[200];Text t(third,sizeof(third));sequenceLine(seq,t);assert(!strcmp(third,"Wave (loops): strip_color set 120, wait_ms 1500, strip_bright off\n"));
+    gSeqCount=0;}
+}
 void testJson(){
   Rule r;
   assert(parse(R"({"type":"lab.rule","name":"Wave red","any":true,"hold_ms":2000,"when":[{"sensor":"distance","test":"under","value":30}],"do":[{"output":"strip_color","set":0},{"output":"servo","follow":"knob"}]})",r));
@@ -703,7 +785,7 @@ void testJson(){
 }
 '''
 if (library / 'ArduinoJson.h').exists():
-    code = code.replace('void testHub(){', json_test + 'void testHub(){', 1).replace('JSON_TEST', 'testJson();')
+    code = code.replace('void testHub(){', json_test + 'void testHub(){', 1).replace('JSON_TEST', 'testJson();testSequenceJson();')
 else:
     code = code.replace('JSON_TEST', '')
 with tempfile.TemporaryDirectory(prefix='s1-lab-') as directory:

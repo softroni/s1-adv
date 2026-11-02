@@ -52,7 +52,7 @@ import { CARDPUTER_EXECUTION_POLICY, voiceThinking, unwrapCardputerEnvelope, aud
 import { DurableTurnOutbox } from "./turn-outbox.mjs";
 import { SemanticFront, frontPrompt, FRONT_RECEIPT, validateModelRouting } from './semantic-front.mjs';
 import { decodeVoiceUpload } from "./voice-upload-codec.mjs";
-import { LAB_RULE_POLICY, VOICE_TOOLS, answerVoiceTool, readVoiceContext } from "./voice-tools.mjs";
+import { LAB_CHAT_POLICY, LAB_RULE_POLICY, VOICE_TOOLS, answerVoiceTool, readLabState, readVoiceContext } from "./voice-tools.mjs";
 import { RealtimePacingBudget, REALTIME_MAX_AUDIO_LEAD_MS } from "./realtime-pacing-budget.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -287,9 +287,10 @@ function authErrorPayload(message) {
   };
 }
 
-const DEVICE_ACTION_CATALOG_VERSION = "2026-11-02.1";
+const DEVICE_ACTION_CATALOG_VERSION = "2026-11-02.2";
 const DEVICE_ACTION_CATALOG = [
   { type: "lab.rule", group: "lab", description: "Offer the owner a rule joining sensors to outputs", example: "when I wave, turn the strip red" },
+  { type: "lab.sequence", group: "lab", description: "Offer the owner steps that run in order, with waits", example: "flash the strip three times" },
   { type: "focus.start", group: "focus", description: "Start or resume focus timer", example: "start pomodoro for 45 minutes" },
   { type: "focus.pause", group: "focus", description: "Pause a running focus timer", example: "pause focus" },
   { type: "focus.resume", group: "focus", description: "Resume paused focus timer", example: "resume focus" },
@@ -505,6 +506,9 @@ export function sanitizeDeviceAction(raw) {
       }
       return out;
     });
+    if (raw.replaces) {
+      action.replaces = boundedString(raw.replaces, 15);
+    }
     action.do = lines(raw.do).map((line) => {
       const out = { output: boundedString(line.output, 16) };
       if (typeof line.text === "string") {
@@ -523,6 +527,29 @@ export function sanitizeDeviceAction(raw) {
     if (!action.when.length || !action.do.length) {
       return null;
     }
+  } else if (type === "lab.sequence") {
+    // A sequence cut short isn't the one that was asked for, so it goes whole or not at all.
+    const steps = (Array.isArray(raw.steps) ? raw.steps : []).filter((step) => step && typeof step === "object");
+    if (!steps.length || steps.length > 16) {
+      return null;
+    }
+    action.name = boundedString(raw.name, 15);
+    action.loop = raw.loop === true;
+    if (raw.replaces) {
+      action.replaces = boundedString(raw.replaces, 15);
+    }
+    action.steps = steps.map((step) => {
+      if (Object.hasOwn(step, "wait_ms")) {
+        return { wait_ms: clampNumber(step.wait_ms, 100, 600000, 1000) };
+      }
+      const out = { output: boundedString(step.output, 16) };
+      if (step.off === true) {
+        out.off = true;
+      } else if (Object.hasOwn(step, "set")) {
+        out.set = clampNumber(step.set, -32000, 32000, 0);
+      }
+      return out;
+    });
   } else if (type === "topic.open") {
     if (Object.hasOwn(raw, "index")) {
       action.index = clampNumber(raw.index, 0, 999, 0);
@@ -721,7 +748,7 @@ function buildDeviceActionPolicyText() {
     "audio.play and voice.play only play existing local assets or voice notes and must include index, query, or path. " +
     "If the user asks you to say or test an arbitrary spoken phrase, do not use audio.play or voice.play; put the phrase in the visible reply because reply_audio will synthesize it. " +
     "Do not emit device_actions for normal conversation. Do not invent unsupported actions. Use settings actions when the user asks to change device preferences. " +
-    LAB_RULE_POLICY
+    `${LAB_RULE_POLICY} ${LAB_CHAT_POLICY}`
   );
 }
 
@@ -779,12 +806,17 @@ function wantsImmediateFirmwareInstall(text) {
   return /\b(install|apply|update it|install it|immediately|right away)\b|установ|обнови(?:ть)?(?:ся)?|сразу|немедленно|примен[еи]/iu.test(String(text || ""));
 }
 
-function trimDeviceEventMessage(message, maxTextChars) {
+// The device reads actions out of the reply's text, so a marker cut in half is an action lost
+// without a word. The words give way, and the marker goes through whole.
+export function trimDeviceEventMessage(message, maxTextChars) {
   const limit = Math.max(0, Math.min(8192, Number(maxTextChars) || 2048));
   const cloned = JSON.parse(JSON.stringify(message || {}));
   const text = cloned?.content?.text;
   if (typeof text === "string" && limit > 0 && text.length > limit) {
-    cloned.content.text = text.slice(0, limit);
+    let markers = "";
+    const words = stripInlineDeviceActionMarkers(text, (json) => { markers += `[[cardputer_actions:${json}]]`; });
+    // Some words have to stay, or the device has nothing to show and prints the marker instead.
+    cloned.content.text = `${words.slice(0, Math.max(40, limit - markers.length))}${markers}`;
     cloned.content.truncated = true;
     cloned.content.original_chars = text.length;
   }
@@ -3618,6 +3650,7 @@ class BridgeRuntime {
 	    this.upstream = claudeCode
 	      ? new ClaudeCodeClient(config, { appendSystemPrompt: buildClaudeCodeSystemPrompt(config),
           recentMessages: sessionKey => this.recentChatMessages(sessionKey),
+          labState: sessionKey => this.labStates.get(sessionKey) || "",
           publishFirmware: claudeCodeSettings(config).firmwareUpdates ? () => this.publishClaudeFirmware() : null })
 	      : new UpstreamGatewayClient(config.upstream);
 	    const kokoro = kokoroSettings(config);
@@ -3626,6 +3659,7 @@ class BridgeRuntime {
 	      ? { id: "claude-code:main", name: "Claude" }
 	      : { id: "openclaw:main", name: "OpenClaw" };
 	    this.clients = new Set();
+	    this.labStates = new Map();
 	    this.weather = new WeatherService(config.weather || {});
 	    this.turnActivity = new Map();
 	    this.activitySeq = 0;
@@ -3671,6 +3705,13 @@ class BridgeRuntime {
     });
     console.info(`[firmware] published version=${version}`);
     return `Update ${version} is ready. Open /ota to review and install it, with at least ${minBattery}% battery.\n${deviceActionMarker([{ type: "ota.check" }])}`;
+  }
+
+  // Sent with every chat message, and nowhere near the history. A message without one, because the
+  // device was short of memory for a moment, keeps the last one rather than saying nothing is saved.
+  rememberLabState(topic, header) {
+    const state = readLabState(header);
+    if (state) this.labStates.set(topic.session_key, state);
   }
 
   recentChatMessages(sessionKey) {
@@ -5795,7 +5836,8 @@ class BridgeRuntime {
       }),
       recent_topic_history: this.buildRecentHistoryForPrompt(topicKey, recentHistoryOverrides),
       firmware: this.buildFirmwarePromptContext(),
-      device_firmware: this.deviceFirmwareReports.get(device.device_id) || null
+      device_firmware: this.deviceFirmwareReports.get(device.device_id) || null,
+      lab_state: this.labStates.get(topic?.session_key) || null
     };
     const fastHistory=this.frontHistory(topicKey);
     if(fastHistory.length) context.fast_front_exchanges_since_last_smart_turn=fastHistory;
@@ -6479,6 +6521,7 @@ async function main() {
           requestError(res, 409, "no_topic_selected");
           return;
         }
+        runtime.rememberLabState(topic, req.headers["x-lab-state"]);
         const clientMsgId = String(req.headers["x-client-msg-id"] || payload.client_msg_id || makeId("cli")).trim().slice(0, 96);
         const fastLane = await runtime.tryFastLaneTurn({
           req,
@@ -6587,6 +6630,7 @@ async function main() {
           requestError(res, 409, "no_topic_selected");
           return;
         }
+        runtime.rememberLabState(topic, req.headers["x-lab-state"]);
         const clientMsgId = String(req.headers["x-client-msg-id"] || makeId("cli")).trim().slice(0, 96);
         const fastLane = await runtime.tryFastLaneTurn({
           req,
@@ -6735,6 +6779,7 @@ async function main() {
           requestError(res, 409, "no_topic_selected");
           return;
         }
+        runtime.rememberLabState(topic, req.headers["x-lab-state"]);
         const clientMsgId = String(req.headers["x-client-msg-id"] || makeId("cli")).trim().slice(0, 96);
         const fastLane = await runtime.tryFastLaneTurn({
           req,

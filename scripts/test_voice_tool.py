@@ -44,7 +44,12 @@ assert stop.index('voiceToolPrepareNetwork();') < stop.index('beginVoicePreconne
 post = function('bool postRawVoiceTurn(')
 assert post.index('voiceToolAwaitsAnswer() && !gVoiceDialBusy') < post.index('earlyGuard.active = false') < post.index('writeClientAll(*client, headers')
 # Both ways of sending the recording carry the tool's name.
+# Added in one go, so a Lab tool's context doesn't sit in memory for the whole upload.
 assert part(35).count('headers += voiceToolHeader();') == 1 and part(65).count('headers += voiceToolHeader();') == 1
+# Typed chat carries what's saved in the Lab the same way spoken chat does, and it's read off the
+# card once at boot so a recording never has to wait for it.
+assert 'payload->labState = chatLabState();' in part(37) and 'http.addHeader("X-Lab-State", payload->labState);' in part(37)
+assert part(61).index('initStorage();') < part(61).index('if (gSdReady) labReadBook();') < part(61).index('loadConfig();')
 assert '#include "main_parts/083_main.cpp.inc"' in (src / 'main.cpp').read_text()
 assert '#include "voice_tool.h"' in part(1)
 # Esc reaches it before the screens, on both key paths.
@@ -96,6 +101,8 @@ bool onNotesScreen() { return notesShown; }
 void tookAnswer(const VoiceToolAnswer& a) { ++answers; last = a; }
 String gLabState = "parts: Ultrasonic\nrule 1: 100%";
 String labState() { return gLabState; }
+String gLabChat;
+String labChatContext() { return gLabChat; }
 bool gLauncherVisible = false;
 int gConnectionsDropped = 0, gInboxWaits = 0;
 struct { void clear() { ++gConnectionsDropped; } } gVoiceReplyConnection;
@@ -112,11 +119,19 @@ VoiceToolAnswer read(bool sent, int code, const char* body) { return voice_tool:
 int main() {
   // The chat is what happens when no tool's screen shows.
   reset(); assert(!voiceToolOnScreen()); listen(); assert(!voiceToolAwaitsAnswer() && voiceToolHeader().empty() && !voiceToolListening());
+  // The chat isn't a tool, and it's told what's saved in the Lab, or nothing if that isn't known.
+  gLabChat = "saved rules:\nFull: 100%\n"; assert(voiceToolHeader() == "X-Lab-State: saved rules:%0AFull: 100%25%0A\r\n" && chatLabState() == "saved rules:%0AFull: 100%25%0A");
+  gLabChat = ""; assert(voiceToolHeader().empty() && chatLabState().empty());
+  // A String that ran out of memory has no text at all, and part of a list is worse than none.
+  assert(voice_tool::headerSafe<String>(nullptr).empty());
+  { struct Short : std::string { void operator+=(char c) { if (size() < 3) push_back(c); } }; assert(voice_tool::headerSafe<Short>("saved").empty()); assert(voice_tool::headerSafe<Short>("abc") == "abc"); assert(voice_tool::headerSafe<Short>("\n") == "%0A"); }
   voiceToolRecordingEnded(); voiceToolRecordingDropped(); assert(!answers && !voiceToolEscape());
 
   // On a tool's screen the recording is the tool's, however it was started.
   reset(); labShown = true; assert(voiceToolOnScreen()); listen();
+  gLabChat = "saved rules: none\n";
   assert(voiceToolListening() && !voiceToolWorking() && voiceToolAwaitsAnswer() && voiceToolHeader() == "X-Voice-Tool: lab.rule\r\nX-Voice-Context: parts: Ultrasonic%0Arule 1: 100%25\r\n");
+  gLabChat = "";
   gRecording = false; assert(voiceToolWorking() && !voiceToolListening());
   const int repaints = gRepaints; gLastRenderMs = 1; gFace = FaceMode::Error;
   assert(finishVoiceToolSubmission(true, 200, R"({"ok":true,"voice_tool":"lab.rule","transcript":"wave red","reply":"Done.","device_actions":[{"type":"lab.rule","name":"Wave"}]})"));

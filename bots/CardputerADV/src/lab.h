@@ -288,6 +288,17 @@ inline size_t nameInWords(const char* name, const char* heard) {
   }
   return 0;
 }
+// The same words, whatever their case or spacing.
+inline bool sameName(const char* a, const char* b) {
+  const size_t letters = nameInWords(a, b);
+  return letters && letters == nameInWords(b, a);
+}
+// By name, because that's all Claude knows a rule or a sequence by. -1 means nothing has that name.
+template <class Named>
+int findByName(const Named* items, uint8_t count, const char* name) {
+  for (uint8_t i = 0; i < count; ++i) if (sameName(items[i].name, name)) return i;
+  return -1;
+}
 // Which rule was named, for rules that listen for theirs. The longest name wins, so "movie time"
 // isn't taken for a rule called "time".
 inline int spokenRule(const char* heard, const Rule* rules, uint8_t count) {
@@ -639,19 +650,21 @@ inline bool outFromKey(const char* key, Out& out) {
   }
   return false;
 }
+// Keeps what the small screen and a header can both carry, up to kNameChars.
+inline void cleanName(const char* text, char* out) {
+  size_t length = 0;
+  for (const char* c = text; c && *c && length < kNameChars; ++c) {
+    const bool word = (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') || *c == ' ';
+    if (word) out[length++] = *c;
+  }
+  out[length] = '\0';
+}
 class Draft {
  public:
   Rule rule;
   bool ok = true;
 
-  void name(const char* text) {
-    size_t length = 0;
-    for (const char* c = text; c && *c && length < kNameChars; ++c) {
-      const bool word = (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') || *c == ' ';
-      if (word) rule.name[length++] = *c;
-    }
-    rule.name[length] = '\0';
-  }
+  void name(const char* text) { cleanName(text, rule.name); }
   void hold(int ms) { rule.holdMs = static_cast<uint16_t>(clampTo<int>(ms, 0, kMaxHoldMs)); }
   void addCond(const char* sensor, const char* test, int value) {
     Cond cond;
@@ -686,17 +699,13 @@ class Draft {
   }
   // By name, because Claude can't know the number, and a name that isn't saved is a refusal.
   void addPlay(const char* name, const Sequence* seqs, uint8_t count) {
-    for (uint8_t i = 0; rule.actions < kMaxActions && i < count; ++i) {
-      const size_t letters = nameInWords(seqs[i].name, name);
-      if (!letters || letters != nameInWords(name, seqs[i].name)) continue;
-      Action action;
-      action.out = Out::Sequence;
-      action.how = How::Set;
-      action.value = i;
-      rule.action[rule.actions++] = action;
-      return;
-    }
-    ok = false;
+    const int index = findByName(seqs, count, name);
+    if (index < 0 || rule.actions >= kMaxActions) { ok = false; return; }
+    Action action;
+    action.out = Out::Sequence;
+    action.how = How::Set;
+    action.value = static_cast<int16_t>(index);
+    rule.action[rule.actions++] = action;
   }
   void addSet(const char* output, int value) {
     Action action;
@@ -763,6 +772,53 @@ inline void ruleJson(const Rule& rule, Text& out, const Sequence* seqs = nullptr
     else out.add(action.how == How::Follow ? "\"follow\":\"" : "\"oppose\":\"").add(info(action.source).key).add("\"}");
   }
   out.add("]}");
+}
+
+// The same facts as ruleJson in far fewer letters, for the chat, which gets them with every message.
+inline void ruleLine(const Rule& rule, Text& out, const Sequence* seqs, uint8_t seqCount) {
+  out.add(rule.name).add(rule.on ? ": " : " (switched off): ").add(rule.any ? "any " : "all ");
+  for (uint8_t i = 0; i < rule.conds; ++i) {
+    const Cond& cond = rule.cond[i];
+    out.add(i ? ", " : "").add(info(cond.sig).key);
+    if (cond.op == Op::Changes) out.add(" changes");
+    else if (info(cond.sig).onOff) out.add(cond.op == Op::Above ? " on" : " off");
+    else out.add(cond.op == Op::Below ? " under " : " over ").add(cond.value);
+  }
+  out.add("; do ");
+  for (uint8_t i = 0; i < rule.actions; ++i) {
+    const Action& action = rule.action[i];
+    out.add(i ? ", " : "").add(info(action.out).key);
+    if (action.out == Out::Say) out.add(" text \"").add(rule.say).add("\"");
+    else if (action.out == Out::Sequence) out.add(" play ").add(action.value >= 0 && action.value < seqCount ? seqs[action.value].name : "");
+    else if (action.how == How::Set) out.add(" set ").add(action.value);
+    else out.add(action.how == How::Follow ? " follow " : " oppose ").add(info(action.source).key);
+  }
+  out.add("; hold ").add(static_cast<int>(rule.holdMs)).add("\n");
+}
+inline void sequenceLine(const Sequence& seq, Text& out) {
+  out.add(seq.name).add(seq.loop ? " (loops): " : ": ");
+  for (uint8_t i = 0; i < seq.count; ++i) {
+    const SeqStep& step = seq.steps[i];
+    out.add(i ? ", " : "");
+    if (step.kind == SeqKind::Wait) out.add("wait_ms ").add(static_cast<int>(step.value) * 100);
+    else if (step.kind == SeqKind::Off) out.add(info(step.out).key).add(" off");
+    else out.add(info(step.out).key).add(" set ").add(step.value);
+  }
+  out.add("\n");
+}
+// Everything saved, and the room it needs, which is worked out rather than fixed because this is
+// made on every chat message and a full Lab is about five times what a usual one needs.
+constexpr size_t kChatHeadChars = 64, kChatRuleChars = 240, kChatSeqChars = 32, kChatStepChars = 24;
+inline size_t chatChars(uint8_t ruleCount, const Sequence* seqs, uint8_t seqCount) {
+  size_t chars = kChatHeadChars + ruleCount * kChatRuleChars + seqCount * kChatSeqChars;
+  for (uint8_t i = 0; i < seqCount; ++i) chars += seqs[i].count * kChatStepChars;
+  return chars;
+}
+inline void chatState(const Rule* rules, uint8_t ruleCount, const Sequence* seqs, uint8_t seqCount, Text& out) {
+  out.add(ruleCount ? "saved rules:\n" : "saved rules: none\n");
+  for (uint8_t i = 0; i < ruleCount; ++i) ruleLine(rules[i], out, seqs, seqCount);
+  out.add(seqCount ? "saved sequences:\n" : "saved sequences: none\n");
+  for (uint8_t i = 0; i < seqCount; ++i) sequenceLine(seqs[i], out);
 }
 
 // --- The diary ---------------------------------------------------------------------------------

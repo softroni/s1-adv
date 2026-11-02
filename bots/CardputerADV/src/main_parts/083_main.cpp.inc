@@ -39,8 +39,16 @@ void voiceToolRecordingStarted() {
   gVoiceToolLeft = false;
 }
 
+// Every chat message says what's saved in the Lab, because the chat has no way to ask. It's a
+// header on both kinds of message, so typing and speaking can't drift apart.
+String chatLabState() { return voice_tool::headerSafe<String>(labChatContext().c_str()); }
+
 String voiceToolHeader() {
-  if (!gVoiceTool) return String();
+  if (!gVoiceTool) {
+    const String state = chatLabState();
+    if (state.isEmpty()) return state;
+    return String("X-Lab-State: ") + state + "\r\n";
+  }
   String header = String("X-Voice-Tool: ") + gVoiceTool->name + "\r\n";
   if (gVoiceTool->context) {
     header += "X-Voice-Context: ";

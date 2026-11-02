@@ -5,10 +5,12 @@ namespace {
 enum class LabSeqAsk : uint8_t { What, How, Value, Wait, Name };
 constexpr int16_t kLabSeqFirstWait = 10;  // A second.
 constexpr int kLabSeqPlayRows = 5, kLabSeqPlayRowH = 18;
+constexpr int kLabSeqOfferRows = 6, kLabSeqOfferRowH = 15;
 
 struct LabSeqEdit {
   lab::Sequence seq;
   int index = -1;               // Which saved sequence this is, or -1 until a new one is kept.
+  bool offered = false;         // From Claude, so only Enter on its review screen saves it.
   int row = 0, top = 0;
   bool deleteArmed = false;
   bool nameTouched = false;
@@ -74,7 +76,7 @@ void renderLabSeqs() {
 void renderLabSeqEdit() {
   auto& d = gCanvas;
   const LabSeqEdit& e = gLabSeqEdit;
-  labHead(e.seq.name, launcher_icons::kSteps, kLabLime, "SAVED ON ESC", kLabSoft);
+  labHead(e.seq.name, launcher_icons::kSteps, kLabLime, e.offered ? "NOT SAVED" : "SAVED ON ESC", e.offered ? kLabAmber : kLabSoft);
   const int rows = labSeqEditRows(), steps = e.seq.count;
   const int addRow = labSeqHasAddRow() ? steps : -1;
   for (int row = 0; row < min(kLabListRows, rows); ++row) {
@@ -102,8 +104,8 @@ void renderLabSeqEdit() {
   }
   labScrollBar(e.top, kLabListRows, rows, kLabListY, kLabListRows * kLabRowH - 1);
   if (e.deleteArmed) labKeys("X again deletes this step");
-  else if (e.row < steps) labKeys(String("ENTER edit ") + kLabArrowLeftRight + " move A add X del P play");
-  else labKeys("ENTER change  P play  ESC save");
+  else if (e.row < steps) labKeys(String("ENTER edit ") + kLabArrowLeftRight + (e.offered ? " move A add X del" : " move A add X del P play"));
+  else labKeys(e.offered ? "ENTER change  ESC back" : "ENTER change  P play  ESC save");
 }
 void labSeqOpen(int index) {
   LabSeqEdit& e = gLabSeqEdit;
@@ -131,6 +133,11 @@ void labSeqShowInList(int index) {
   labKeepRowShown(ui.seqRow, ui.seqTop, kLabListRows);
 }
 void labSeqLeaveEdit() {
+  if (gLabSeqEdit.offered) {  // Back to be looked at, not saved.
+    gLabSeqEdit.top = 0;
+    gLabUi.view = LabView::SeqOffer;
+    return;
+  }
   labSeqKeep();
   labSeqShowInList(gLabSeqEdit.index >= 0 ? gLabSeqEdit.index : gLabUi.seqRow);
   gLabUi.view = LabView::Seqs;
@@ -202,6 +209,8 @@ void labSeqEditKey(char lower, bool left, bool right, bool up, bool down, bool e
     }
   } else if (lower == 'a' && labSeqHasAddRow()) {
     labSeqAskAbout(lab::SeqStep{}, onStep ? e.row + 1 : steps, true);
+  } else if (lower == 'p' && e.offered) {
+    setStatus("Save it first: Esc, then Enter", 1500);
   } else if (lower == 'p') {
     labSeqKeep();
     if (e.index >= 0) labSeqPlay(e.index, LabView::SeqEdit);
@@ -374,6 +383,71 @@ void labSeqAskKey(char key, bool left, bool right, bool up, bool down, bool ente
       }
       break;
   }
+}
+
+// --- One from Claude ---------------------------------------------------------------------------
+// It waits here for Enter, like a rule, because a step can switch mains. It sits on the edit
+// screen's copy, so E is all it takes to change it, and it costs no memory of its own. Changing it
+// doesn't save it or let it play: Esc comes back here, and only Enter here is a yes.
+bool labSameStep(const lab::SeqStep& a, const lab::SeqStep& b) { return a.kind == b.kind && a.value == b.value && (a.kind == lab::SeqKind::Wait || a.out == b.out); }
+void renderLabSeqOffer() {
+  const LabSeqEdit& e = gLabSeqEdit;
+  // A change greys out what stayed the same, so what's different is what stands out.
+  const lab::Sequence* was = e.index >= 0 ? &gLabSeqs[e.index] : nullptr;
+  labHead(was ? "Claude changed this" : "Claude wrote this", launcher_icons::kSteps, kLabLime, "", kLabSoft);
+  gCanvas.setFont(&fonts::Font2);
+  for (int row = 0; row < min(kLabSeqOfferRows, static_cast<int>(e.seq.count)); ++row) {
+    const int i = e.top + row;
+    const int y = 20 + row * kLabSeqOfferRowH;
+    const lab::SeqStep& step = e.seq.steps[i];
+    const bool same = was && i < was->count && labSameStep(step, was->steps[i]);
+    labTextAt(&fonts::Font0, 6, y + 4, String(i + 1), kLabMuted);
+    const bool hue = step.kind == lab::SeqKind::Set && (step.out == Out::StripColor || step.out == Out::Led);
+    labTextAt(&fonts::Font2, 24, y, fitCurrentFontToWidth(labStepText(step), hue ? 184 : 206), same ? kLabMuted : step.kind == lab::SeqKind::Wait ? kLabCyan : kLabLime);
+    if (hue) gCanvas.fillRoundRect(212, y + 2, 16, 11, 3, labHueColor(step.value));
+  }
+  labScrollBar(e.top, kLabSeqOfferRows, e.seq.count, 20, kLabSeqOfferRows * kLabSeqOfferRowH);
+  // The rows can't show a name, a loop or steps that went, and grey has to mean the same.
+  const bool same = !was || (was->count == e.seq.count && was->loop == e.seq.loop && !strcmp(was->name, e.seq.name));
+  const String fewer = was && was->count != e.seq.count ? String(e.seq.name) + (e.seq.loop ? ", loops" : ", once") + ", was " + String(int(was->count)) + " steps" : String("");
+  labTextAt(&fonts::Font0, 6, 117, !fewer.isEmpty() ? fewer : String("Name: ") + e.seq.name + (e.seq.loop ? ", loops" : ", plays once"), same ? kLabMuted : kLabLime);
+  labKeys(e.seq.count > kLabSeqOfferRows ? String(kLabArrowUpDown) + " more  ENTER save  E edit  ESC drop" : String("ENTER save  E edit  ESC drop it"));
+}
+void labSeqOfferKey(char lower, bool up, bool down, bool enter) {
+  LabSeqEdit& e = gLabSeqEdit;
+  const int last = max(static_cast<int>(e.seq.count) - kLabSeqOfferRows, 0);
+  if (up || down) {
+    e.top = lab::clampTo(e.top + (up ? -1 : 1), 0, last);
+  } else if (enter && e.index < 0 && gLabSeqCount >= lab::kMaxSequences) {
+    setStatus("Sequences are full: delete one first", 1500);
+  } else if (enter) {
+    e.offered = false;
+    labSeqLeaveEdit();
+  } else if (lower == 'e') {
+    e.top = 0;
+    gLabUi.view = LabView::SeqEdit;
+  }
+}
+// Called with the same name as a saved one, it's a change to that one. Two with one name couldn't
+// be told apart when a rule asks for it.
+bool labOfferSequence(const lab::Sequence& seq, const char* replaces) {
+  LabUi& ui = gLabUi;
+  LabSeqEdit& e = gLabSeqEdit;
+  if (*replaces && lab::findByName(gLabSeqs, gLabSeqCount, replaces) < 0) return false;
+  // The owner's own edit is kept, but an offer that hasn't had its Enter is only replaced.
+  if (labMode(gUiMode) && !e.offered && (ui.view == LabView::SeqEdit || ui.view == LabView::SeqAsk)) labSeqKeep();
+  const int index = lab::findByName(gLabSeqs, gLabSeqCount, *replaces ? replaces : seq.name);
+  if (!labMode(gUiMode)) setUiMode(UiMode::LabSequences);
+  labStopPlaying();
+  e = LabSeqEdit{};
+  e.seq = seq;
+  e.index = index;
+  e.offered = true;
+  e.nameTouched = true;
+  ui.view = LabView::SeqOffer;
+  labOfferLanded();
+  labRedraw();
+  return true;
 }
 
 // --- Playing one -------------------------------------------------------------------------------

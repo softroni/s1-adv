@@ -18,7 +18,7 @@ To open it, press **Tab**, then **L**. You can also type `/lab`, `/rules` or `/s
 
 On the Cardputer, the arrow keys are `;` up, `.` down, `,` left and `/` right, and Esc is the top-left key.
 
-[Try it with no parts](#try-it-with-no-parts) · [Connect a part](#connect-a-part) · [Test a part](#test-a-part) · [Build a rule](#build-a-rule) · [Play it](#play-it) · [Sequences](#sequences) · [Talk to it](#talk-to-it) · [If a part doesn't answer](#if-a-part-doesnt-answer) · [Good to know](#good-to-know)
+[Try it with no parts](#try-it-with-no-parts) · [Connect a part](#connect-a-part) · [Test a part](#test-a-part) · [Build a rule](#build-a-rule) · [Play it](#play-it) · [Sequences](#sequences) · [Talk to it](#talk-to-it) · [From the chat](#from-the-chat) · [If a part doesn't answer](#if-a-part-doesnt-answer) · [Good to know](#good-to-know)
 
 > The Lab needs firmware built from source, as in step 1 of the [README](../README.md#set-it-up). The older one-command flash doesn't have it.
 
@@ -281,7 +281,7 @@ A rule decides **when**. A sequence decides **what happens, in what order**. Her
 
 ### Build a sequence
 
-Choose **+ New sequence** and it asks for the first step. A step either waits or does one thing, so two steps with no wait between them happen together.
+Choose **+ New sequence** and it asks for the first step. A step either waits or does one thing, so two steps with no wait between them happen together. You can also [describe one in the chat](#from-the-chat), and Claude writes the steps.
 
 <table>
 <tr>
@@ -359,9 +359,9 @@ Describe what you want, and Claude writes the rule.
 </tr>
 </table>
 
-Nothing happens until you've looked at it. If Claude can't make a rule from what it heard, the screen says what it needs and what it heard. A rule you ask for in chat arrives the same way.
+Nothing happens until you've looked at it. If Claude can't make a rule from what it heard, the screen says what it needs and what it heard. A rule you ask for [in the chat](#from-the-chat) arrives the same way.
 
-A rule you say can play a saved sequence: "when someone walks in, play Welcome". Claude can't write the sequence itself, so build that first.
+A rule you say can play a saved sequence: "when someone walks in, play Welcome". Say a rule can't write the sequence itself, so build that first, or ask for it [in the chat](#from-the-chat).
 
 ### Rules that talk
 
@@ -428,6 +428,38 @@ The Lab keeps a diary while rules play: one line an hour with how many times mot
 
 It's in `/lab/diary.txt` on the SD card. About the last day goes to Claude when you ask, and at no other time. Nothing is recorded while rules aren't playing, or if the clock hasn't been set. Delete the file to clear it.
 
+## From the chat
+
+You don't have to be in the Lab. On Pulse or in AI Chat, Claude knows every rule and sequence you've saved, so you can just ask, typing or talking.
+
+- "What rules do I have?"
+- "Make Wave red turn the strip blue instead."
+- "Write a sequence that flashes the strip three times, then moves the servo to 90."
+- "Make Door wave slower."
+
+Whatever it writes opens in the Lab for you to check. Nothing is saved until you press **Enter**.
+
+<table>
+<tr>
+<td width="50%"><img src="assets/lab/chat-seq.png" alt="Claude wrote this: six steps of a sequence called Door wave" width="100%"><br><sub><b>A new sequence.</b> Up and down scroll a long one. Enter saves it, E changes its steps first, and Esc drops it.</sub></td>
+<td width="50%"><img src="assets/lab/chat-seq-change.png" alt="Claude changed this: the two waits stand out, and the other steps are grey" width="100%"><br><sub><b>A change.</b> Grey is what stayed the same, and a changed name or fewer steps show on the line below. Enter replaces the old one, and Esc keeps it.</sub></td>
+</tr>
+</table>
+
+E doesn't save anything: after changing the steps, Esc comes back to this screen, and it can't play until it's saved. If you were typing when it arrived, it waits for the keys to rest for a second before it takes one, so your next message can't press Enter for you.
+
+A rule looks the same as one you [said](#say-a-rule) or [changed by voice](#change-a-rule). A changed rule stays switched on or off as it was, and a changed sequence keeps its place, so any rule that plays it still does. Claude sends one at a time, so if you ask for several, save the first and it does the next.
+
+| Claude can | You do it yourself |
+| --- | --- |
+| See your saved rules and sequences | Check what's plugged in and its readings, with [Ask the Lab](#ask-the-lab). The sensors stop when the Lab closes |
+| Write a rule or change one | Start and stop rules and sequences, because they can switch mains |
+| Write a sequence or change one | Delete a rule or a sequence |
+
+A rule can't play a sequence until that sequence is saved. Ask for the sequence, save it, then ask for the rule.
+
+This needs a bridge from 0.2.256 or later. On an older one, the chat can't see what's saved or write a sequence, so restart it.
+
 ## If a part doesn't answer
 
 The Lab tells you where to look, and units reconnect by themselves.
@@ -453,7 +485,7 @@ To see what the Lab finds as it happens, connect USB and run `python scripts/car
 ## Good to know
 
 - **Watch the power.** The strip and the servo run off the Cardputer's Grove power, and M5Stack doesn't publish a limit for it. At full white, 30 LEDs can draw 1 A, and a stalled servo 750 mA. The strip's limit starts at 25%, so keep it low. If the Cardputer restarts, give the strip its own 5 V supply and join the grounds.
-- **Rules live on the SD card**, in `/lab/rules.dat`, along with your hub wiring. Sequences are in `/lab/seqs.dat`, and rules' speech is in `/lab/say`. They survive a firmware install. With no card, rules and sequences last until the next restart.
+- **Rules live on the SD card**, in `/lab/rules.dat`, along with your hub wiring. Sequences are in `/lab/seqs.dat`, and rules' speech is in `/lab/say`. They survive a firmware install. With no card, rules and sequences last until the next restart, and the chat can't see them until the Lab has been opened.
 - **When two rules want the same output**, the lower one in the list wins.
 - **A relay can switch about three times a second at most**, however much a sensor flickers.
 - **The smartLamp and air conditioner are left alone until a rule asks.** When that rule ends or you stop, an "on" that it sent is undone. An air conditioner changes at most every 3 seconds. It sends by infrared, so point the Cardputer at it.

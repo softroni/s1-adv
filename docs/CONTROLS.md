@@ -304,6 +304,10 @@ and Esc drops it. If it can't make a rule, the screen says what it needs and wha
 out of the chat, though a rule that's asked for in chat arrives the same way. It needs Wi-Fi and the
 bridge.
 
+The chat knows every rule and sequence you've saved, so on Pulse or in AI Chat you can ask to change
+a rule, or to write or change a sequence. A sequence comes back to look at the same way: Enter saves
+it, E changes its steps first, and Esc drops it. See [From the chat](LAB.md#from-the-chat).
+
 A rule can **talk**. Say or ask for something like "when someone walks in, say welcome back". The
 phrase is spoken once each time the rule starts firing, and up to 40 letters fit, once in a rule.
 Its speech is made when you save the rule and kept in `/lab/say` on the SD card, so it plays with no

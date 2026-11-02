@@ -23,7 +23,7 @@ constexpr uint32_t kLabBeepMs = 400;
 constexpr int kLabLastPort = pbhub::kPorts - 1;
 constexpr int kLabLedMilliamps = 33;  // M5 rates this strip at 2 A a meter, with 60 LEDs a meter.
 
-enum class LabView : uint8_t { Devices, Device, PickPort, Wiring, Rules, Wizard, Play, Recipes, Say, Offer, Dash, Seqs, SeqEdit, SeqAsk, SeqPlay };
+enum class LabView : uint8_t { Devices, Device, PickPort, Wiring, Rules, Wizard, Play, Recipes, Say, Offer, Dash, Seqs, SeqEdit, SeqAsk, SeqPlay, SeqOffer };
 enum class LabStep : uint8_t { Sig, Op, Value, MoreConds, Join, Out, How, OutValue, Source, MoreActions, Hold, Name, PickSeq };
 
 // What a recording in the Lab is for, which sets the words on the screen around it.
@@ -79,6 +79,9 @@ lab::Rule gLabOffers[kLabOffers];
 int gLabOfferCount = 0, gLabOfferAt = 0;
 bool gLabOfferBatch = false;    // These arrived together, so they're choices, not replacements.
 int gLabOfferChanges = -1;      // The saved rule it would replace, or -1 for a new one.
+constexpr uint32_t kLabOfferQuietMs = 1000;
+bool gLabOfferSettled = true;   // The keyboard has rested since the offer landed.
+uint32_t gLabOfferKeyMs = 0;    // When it landed, or the last key since.
 int gLabOfferNext = -1;         // What the next offer replaces. Only a change sets this.
 bool gLabVoiceSetting = false;  // Only an answer to a question asked here can move a part.
 
@@ -99,6 +102,8 @@ void renderLabSeqs();
 void renderLabSeqEdit();
 void renderLabSeqAsk();
 void renderLabSeqPlay();
+void renderLabSeqOffer();
+void labSeqOfferKey(char lower, bool up, bool down, bool enter);
 void labSeqsKey(char lower, bool up, bool down, bool enter);
 void labSeqEditKey(char lower, bool left, bool right, bool up, bool down, bool enter);
 void labSeqAskKey(char key, bool left, bool right, bool up, bool down, bool enter, bool del);
@@ -1031,6 +1036,7 @@ void labWizardStart(int index, const lab::Rule* from) {
   w.index = index;
   if (from) w.rule = *from;
   else if (index >= 0) w.rule = gLabBook.rules[index];
+  if (from && index >= 0 && index < gLabBook.count) w.rule.on = gLabBook.rules[index].on;
   w.teaching = !w.rule.conds;
   w.nameTouched = w.rule.name[0] != '\0';
   w.step = LabStep::Sig;
@@ -1402,6 +1408,7 @@ void renderLabUi() {
     case LabView::SeqEdit: renderLabSeqEdit(); break;
     case LabView::SeqAsk: renderLabSeqAsk(); break;
     case LabView::SeqPlay: renderLabSeqPlay(); break;
+    case LabView::SeqOffer: renderLabSeqOffer(); break;
     default: renderLabFlow(gLabUi.playRule); break;
   }
   renderLauncherOverlay();
@@ -1850,6 +1857,31 @@ String labDescribe(bool withDiary) {
 }
 String labVoiceContext() { return labDescribe(false); }
 String labAskContext() { return labDescribe(true); }
+// What the chat is told, from any screen. It's only what's saved, because the sensors stop when the
+// Lab closes, and it's put together for each message so it can't go stale. No card at boot means
+// nothing has been read yet, so it says nothing rather than something wrong.
+String labChatContext() {
+  if (!gLabBookRead) return String();
+  const size_t chars = lab::chatChars(gLabBook.count, gLabSeqs, gLabSeqCount);
+  std::unique_ptr<char[]> buffer(new (std::nothrow) char[chars]);
+  if (!buffer) return String();
+  lab::Text text(buffer.get(), chars);
+  lab::chatState(gLabBook.rules, gLabBook.count, gLabSeqs, gLabSeqCount, text);
+  return String(buffer.get());
+}
+// An offer can land while someone's typing their next message, and Enter there isn't a yes. It takes
+// no keys until the keyboard has rested, however long they keep typing.
+void labOfferLanded() {
+  gLabOfferSettled = false;
+  gLabOfferKeyMs = millis();
+}
+bool labOfferSettling() {
+  if (gLabOfferSettled || (gLabUi.view != LabView::Offer && gLabUi.view != LabView::SeqOffer)) return false;
+  const uint32_t now = millis();
+  gLabOfferSettled = now - gLabOfferKeyMs >= kLabOfferQuietMs;
+  gLabOfferKeyMs = now;
+  return !gLabOfferSettled;
+}
 // A rule from Claude waits here until someone presses Enter, because rules can switch mains.
 void labOfferRule(const lab::Rule& rule) {
   if (!gLabOfferBatch) gLabOfferCount = 0;
@@ -1860,12 +1892,25 @@ void labOfferRule(const lab::Rule& rule) {
   if (!labMode(gUiMode)) setUiMode(UiMode::LabRules);
   labStopPlaying();
   gLabUi.view = LabView::Offer;
+  labOfferLanded();
   labRedraw();
+}
+// The chat says which rule by name, because the numbers can move. A name that's gone is a refusal,
+// and not a new rule, which would leave the old one running beside it.
+bool labOfferChange(const lab::Rule& rule, const char* replaces) {
+  const int changes = *replaces ? lab::findByName(gLabBook.rules, gLabBook.count, replaces) : gLabOfferNext;
+  if (*replaces && changes < 0) return false;
+  const int asked = gLabOfferNext;
+  gLabOfferNext = changes;
+  labOfferRule(rule);
+  gLabOfferNext = asked;
+  return true;
 }
 bool handleLabKey(char key, const Keyboard_Class::KeysState& keys) {
   if (keys.ctrl || keys.alt || keys.opt) return true;
   // The screen underneath is covered, so nothing should move it where it can't be seen.
   if (voiceToolStarting() || voiceToolWorking()) return true;
+  if (labOfferSettling()) return true;
   const char lower = static_cast<char>(tolower(static_cast<unsigned char>(key)));
   const bool up = key == ';', down = key == '.', left = key == ',', right = key == '/';
   const bool enter = keys.enter || key == '\r' || key == '\n';
@@ -1979,6 +2024,9 @@ bool handleLabKey(char key, const Keyboard_Class::KeysState& keys) {
     case LabView::SeqPlay:
       if (lower == 'p') labSeqPlayAgain();
       break;
+    case LabView::SeqOffer:
+      labSeqOfferKey(lower, up, down, enter);
+      break;
   }
   labRedraw();
   return true;
@@ -2003,6 +2051,7 @@ bool routeLabEscape() {
     case LabView::Dash: ui.view = LabView::Devices; break;
     case LabView::SeqEdit: labSeqLeaveEdit(); break;
     case LabView::SeqAsk: labSeqAskBack(); break;
+    case LabView::SeqOffer: ui.view = LabView::Seqs; break;
     case LabView::SeqPlay:
       gLabSeqRun.stop();
       labReleaseOutputs();

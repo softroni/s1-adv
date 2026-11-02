@@ -269,6 +269,7 @@ void setup() {
   }
   initStorage();
   if (!gOtaBootApplyMode) {
+    if (gSdReady) labReadBook();  // The chat is told what's saved, and it may never open the Lab.
     randomSeed(micros());
     scheduleBlink();
     gImuEnabled = M5.Imu.isEnabled();

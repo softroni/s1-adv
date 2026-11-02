@@ -341,7 +341,8 @@ void show(const char* scene) {
   for (const auto& op : gOps) std::fprintf(gDump, "%s\n", op.c_str());
 }
 void run(int ms) { for (int t = 0; t < ms; t += 10) { nowMs += 10; serviceLab(); } }
-void key(char k) { Keyboard_Class::KeysState keys; keys.enter = k == '\n'; keys.del = k == '\b'; assert(handleLabKey(k, keys)); }
+void pressNow(char k) { Keyboard_Class::KeysState keys; keys.enter = k == '\n'; keys.del = k == '\b'; assert(handleLabKey(k, keys)); }
+void key(char k) { gLabOfferSettled = true; pressNow(k); }
 void keys(const char* text) { for (const char* c = text; *c; ++c) { key(*c); run(60); } }
 void esc() { assert(routeLabEscape()); run(60); }
 const char UP = ';', DOWN = '.', LEFT = ',', RIGHT = '/', ENTER = '\n';
@@ -1404,12 +1405,125 @@ void testSequences() {
   gHubUnit.level[motion] = 0;
 }
 
+// --- What the chat can reach ------------------------------------------------------------------
+lab::Sequence chatSequence(const char* name, std::initializer_list<lab::SeqStep> steps, bool loop = false) {
+  lab::Sequence seq; std::strcpy(seq.name, name); seq.loop = loop;
+  for (const lab::SeqStep& step : steps) seq.steps[seq.count++] = step;
+  return seq;
+}
+void testChat() {
+  using lab::SeqKind; using lab::SeqStep;
+  const lab::Sequence wave = chatSequence("Door wave", {SeqStep{SeqKind::Set, Out::StripColor, 120}, SeqStep{SeqKind::Wait, Out::Servo, 10}, SeqStep{SeqKind::Set, Out::Servo, 90},
+                                                        SeqStep{SeqKind::Wait, Out::Servo, 20}, SeqStep{SeqKind::Set, Out::Servo, 0}, SeqStep{SeqKind::Off, Out::StripColor, 0}});
+  gDisk.files.clear(); gLabBook = lab::Book{}; freshBoot(); fingers();
+  // Before the card has been read it says nothing, rather than that nothing is saved.
+  gLabBookRead = false; gLabSeqCount = 0; assert(labChatContext().empty());
+  // Read at boot, it can tell the chat what's saved with the Lab shut and nothing on the bus.
+  labReadBook(); assert(!gLabOpen);
+  { const std::string said = labChatContext(); assert(said.find("saved rules:\n") == 0 && said.find("saved sequences:\nHello: led set 240") != std::string::npos && said.find("; hold ") != std::string::npos && !gLabOpen); }
+  { lab::Book kept = gLabBook; const uint8_t seqs = gLabSeqCount; gLabBook.count = 0; gLabSeqCount = 0; assert(labChatContext() == "saved rules: none\nsaved sequences: none\n"); gLabBook = kept; gLabSeqCount = seqs; }
+
+  // A change names its rule, from anywhere, and goes through the same screen as a spoken one.
+  setUiMode(UiMode::LabRules); run(1500);
+  lab::Draft first, second; first.name("Wave red"); first.addCond("distance", "under", 30); first.addSet("strip_color", 0); second.name("Too humid"); second.addCond("humidity", "over", 60); second.addSet("relay_1", 1);
+  gLabBook.rules[0] = first.rule; gLabBook.rules[1] = second.rule; gLabBook.rules[1].on = false; gLabBook.count = 2; labSaveBook();
+  setUiMode(UiMode::Home); assert(!gLabOpen);
+  { const std::string said = labChatContext(); assert(said.find("Wave red: any distance under 30; do strip_color set 0; hold 2000\n") != std::string::npos && said.find("Too humid (switched off): any humidity over 60") != std::string::npos); }
+  lab::Rule blue = first.rule; blue.action[0].value = 240; std::strcpy(blue.name, "Wave blue");
+  assert(labOfferChange(blue, "too HUMID") && gUiMode == UiMode::LabRules && gLabOpen && gLabUi.view == LabView::Offer && gLabOfferChanges == 1 && gLabOfferNext == -1);
+  show("chat-change-offer"); assert(gCanvas.shows("Claude changed this")); esc(); assert(gLabBook.count == 2 && !std::strcmp(gLabBook.rules[1].name, "Too humid"));
+  assert(labOfferChange(blue, "wave red") && gLabOfferChanges == 0); key(ENTER); assert(gLabUi.view == LabView::Rules && gLabBook.count == 2 && gLabBook.rules[0].action[0].value == 240 && !std::strcmp(gLabBook.rules[0].name, "Wave blue") && gLabBook.rules[0].on);
+  // A switched off rule stays off when it's changed, the same as a spoken change.
+  assert(labOfferChange(blue, "Too humid")); key(ENTER); assert(!gLabBook.rules[1].on && !std::strcmp(gLabBook.rules[1].name, "Wave blue")); std::strcpy(gLabBook.rules[1].name, "Too humid");
+  assert(labOfferChange(blue, "Too humid")); key('e'); assert(gLabUi.view == LabView::Wizard && gLabWizard.index == 1); for (int i = 0; i < 40 && gLabUi.view == LabView::Wizard; ++i) key(ENTER); assert(gLabUi.view != LabView::Wizard && !gLabBook.rules[1].on); std::strcpy(gLabBook.rules[1].name, "Too humid");
+  // A name that isn't there changes nothing, and doesn't add a second rule beside the first.
+  setUiMode(UiMode::Home); assert(!labOfferChange(blue, "Ghost") && gUiMode == UiMode::Home && !gLabOpen && gLabBook.count == 2);
+  // No name is a new rule, and a spoken change keeps naming its row the way it always did.
+  assert(labOfferChange(blue, "") && gLabOfferChanges < 0); esc();
+  gLabOfferNext = 1; assert(labOfferChange(blue, "") && gLabOfferChanges == 1 && gLabOfferNext == 1); gLabOfferNext = -1; esc();
+
+  // A new sequence comes in from anywhere, waits to be looked at, and nothing runs or saves until then.
+  setUiMode(UiMode::Home); const auto onCard = gDisk.files; const uint8_t saved = gLabSeqCount;
+  assert(labOfferSequence(wave, "") && gUiMode == UiMode::LabSequences && gLabOpen && gLabUi.view == LabView::SeqOffer && gLabSeqEdit.index < 0);
+  run(200); show("chat-seq-offer");
+  assert(gCanvas.shows("Claude wrote this") && gCanvas.shows("Strip color to 120") && gCanvas.shows("Wait 1 sec") && gCanvas.shows("Servo to 0") && gCanvas.shows("Strip off") && gCanvas.shows("Name: Door wave, plays once") && gCanvas.shows("ENTER save") && !gCanvas.shows("more"));
+  assert(gLabSeqCount == saved && !gLabSeqRun.running() && gDisk.files == onCard && !gLabDrive[int(Out::StripColor)].on);
+  // It doesn't listen, like a rule waiting for Enter.
+  assert(!labSayOnScreen() && !labChangeOnScreen() && !labAskOnScreen() && !labCommandOnScreen());
+  esc(); assert(gLabUi.view == LabView::Seqs && gLabSeqCount == saved && gDisk.files == onCard);
+  // Enter keeps it, on the card, and shows where it landed.
+  assert(labOfferSequence(wave, "")); key(ENTER); assert(gLabUi.view == LabView::Seqs && gLabSeqCount == saved + 1 && gLabUi.seqRow == saved && gDisk.files != onCard && !std::strcmp(gLabSeqs[saved].name, "Door wave") && gLabSeqs[saved].count == 6 && !gLabSeqRun.running());
+  { const std::string said = labChatContext(); assert(said.find("Door wave: strip_color set 120, wait_ms 1000, servo set 90, wait_ms 2000, servo set 0, strip_color off\n") != std::string::npos); }
+  // E opens it on the steps, and Esc saves from there as it does for any sequence.
+  { lab::Sequence other = wave; std::strcpy(other.name, "Other"); assert(labOfferSequence(other, "")); const auto before = gDisk.files; key('e'); assert(gLabUi.view == LabView::SeqEdit && gLabSeqEdit.seq.count == 6 && gLabSeqEdit.index < 0 && gLabSeqEdit.offered);
+    show("chat-seq-edit"); assert(gCanvas.shows("Strip color to 120") && gCanvas.shows("NOT SAVED") && !gCanvas.shows("P play"));
+    // P can't save it or run it from here, whatever is in the steps, and neither can Esc.
+    key('p'); assert(gLabUi.view == LabView::SeqEdit && !gLabSeqRun.running() && gLabSeqCount == saved + 1 && gDisk.files == before && gStatus.find("Save it first") != std::string::npos);
+    seqRowTo(labSeqEditRows() - 2); show("chat-seq-edit-end"); assert(gCanvas.shows("ESC back") && !gCanvas.shows("P play")); key(ENTER); assert(gLabSeqEdit.seq.loop);
+    esc(); assert(gLabUi.view == LabView::SeqOffer && gLabSeqCount == saved + 1 && gDisk.files == before); run(50); renderLabUi(); assert(gCanvas.shows("Claude wrote this") && gCanvas.shows("loops"));
+    // Enter is the only yes, and it saves what's on the screen.
+    key(ENTER); assert(gLabUi.view == LabView::Seqs && gLabSeqCount == saved + 2 && !std::strcmp(gLabSeqs[saved + 1].name, "Other") && gLabSeqs[saved + 1].loop && !gLabSeqRun.running());
+    // Its steps can be changed and it can still be dropped.
+    { const uint8_t kept = gLabSeqCount; lab::Sequence third = wave; std::strcpy(third.name, "Third"); assert(labOfferSequence(third, "")); key('e'); esc(); esc(); assert(gLabUi.view == LabView::Seqs && gLabSeqCount == kept); }
+    // A second reply replaces an offer being changed, and doesn't save it on the way.
+    { const uint8_t kept = gLabSeqCount; lab::Sequence third = wave; std::strcpy(third.name, "Third"); assert(labOfferSequence(third, "")); key('e'); assert(gLabUi.view == LabView::SeqEdit);
+      assert(!labOfferSequence(third, "Ghost") && gLabUi.view == LabView::SeqEdit && gLabSeqCount == kept); lab::Sequence fourth = third; std::strcpy(fourth.name, "Fourth"); assert(labOfferSequence(fourth, "") && gLabSeqCount == kept && !std::strcmp(gLabSeqEdit.seq.name, "Fourth") && gLabUi.view == LabView::SeqOffer); esc(); }
+    lab::removeSequence(gLabSeqs, gLabSeqCount, gLabBook.rules, gLabBook.count, saved + 1); labSaveSeqs(); }
+
+  // Keys typed for the chat don't reach an offer that lands under them, for as long as the typing goes on.
+  { const uint8_t kept = gLabSeqCount; const lab::Sequence s = chatSequence("Typed", {SeqStep{SeqKind::Set, Out::Relay1, 1}});
+    assert(labOfferSequence(s, "")); for (const char* c = "keep the step\n"; *c; ++c) { pressNow(*c); nowMs += 300; pressNow('\n'); nowMs += 300; } assert(gLabUi.view == LabView::SeqOffer && gLabSeqCount == kept && !gLabSeqRun.running());
+    nowMs += 1000; pressNow('\n'); assert(gLabUi.view == LabView::Seqs && gLabSeqCount == kept + 1); lab::removeSequence(gLabSeqs, gLabSeqCount, gLabBook.rules, gLabBook.count, kept); labSaveSeqs();
+    assert(labOfferChange(blue, "") && gLabUi.view == LabView::Offer); const uint8_t rules = gLabBook.count; pressNow('\n'); assert(gLabUi.view == LabView::Offer && gLabBook.count == rules); nowMs += 300; pressNow('\n'); assert(gLabUi.view == LabView::Offer); nowMs += 1000; pressNow('e'); assert(gLabUi.view == LabView::Wizard); gLabWizard = LabWizard{}; gLabUi.view = LabView::Rules;
+    // After the wait keys come as fast as they like, so a long list scrolls.
+    lab::Sequence longest = s; longest.count = lab::kMaxSeqSteps; assert(labOfferSequence(longest, "")); nowMs += 1000; pressNow(DOWN); pressNow(DOWN); pressNow(DOWN); assert(gLabSeqEdit.top == 3); esc(); }
+
+  // A change shows what's different, keeps its place, and a rule playing it keeps playing it.
+  lab::Sequence slower = wave; slower.steps[1].value = 30; slower.steps[2].value = 45; std::strcpy(slower.name, "Slow wave");
+  gLabBook.rules[0].actions = 1; gLabBook.rules[0].action[0] = lab::Action{Out::Sequence, lab::How::Set, int16_t(saved), Sig::Knob};
+  assert(!labOfferSequence(slower, "Ghost") && gLabUi.view == LabView::Seqs);
+  assert(labOfferSequence(slower, "door wave") && gLabSeqEdit.index == saved); show("chat-seq-change"); assert(gCanvas.shows("Claude changed this") && gCanvas.shows("Wait 3 sec") && gCanvas.shows("Servo to 45") && gCanvas.shows("Name: Slow wave"));
+  esc(); assert(!std::strcmp(gLabSeqs[saved].name, "Door wave") && gLabSeqs[saved].steps[1].value == 10);
+  assert(labOfferSequence(slower, "door wave")); key(ENTER); assert(gLabSeqCount == saved + 1 && !std::strcmp(gLabSeqs[saved].name, "Slow wave") && gLabSeqs[saved].steps[1].value == 30 && gLabBook.rules[0].action[0].value == saved);
+  // What the rows can't show still stands out, so a grey screen is one where nothing changed.
+  { lab::Sequence shorter = gLabSeqs[saved]; shorter.count = 4; assert(labOfferSequence(shorter, "")); show("chat-seq-fewer"); assert(gCanvas.shows("was 6 steps") && gCanvas.shows("Slow wave")); esc();
+    lab::Sequence looped = gLabSeqs[saved]; looped.loop = true; assert(labOfferSequence(looped, "")); renderLabUi(); assert(gCanvas.shows("loops")); esc(); }
+  // The same name with nothing said about it is that one too, because two couldn't be told apart.
+  { lab::Sequence again = slower; again.steps[1].value = 5; assert(labOfferSequence(again, "") && gLabSeqEdit.index == saved); renderLabUi(); assert(gCanvas.shows("Claude changed this")); esc(); }
+
+  // One that's still being changed on the screen is kept, not overwritten.
+  seqListTo(0); key(ENTER); assert(gLabUi.view == LabView::SeqEdit); gLabSeqEdit.seq.loop = !gLabSeqs[0].loop; { const bool loop = gLabSeqEdit.seq.loop; assert(labOfferSequence(wave, "") && gLabSeqs[0].loop == loop); esc(); gLabSeqs[0].loop = false; labSaveSeqs(); }
+
+  // Whatever was running stops first, so nothing is left going under the offer.
+  seqListTo(0); key('p'); run(100); assert(gLabSeqRun.running()); assert(labOfferSequence(wave, "") && !gLabSeqRun.running() && gLabUi.view == LabView::SeqOffer); esc();
+  setUiMode(UiMode::LabRules); run(300); keys("p"); run(300); assert(gLabPlaying); assert(labOfferSequence(wave, "") && !gLabPlaying && gLabUi.view == LabView::SeqOffer); esc();
+
+  // The most steps there can be scroll, and stop at both ends.
+  { lab::Sequence longest; std::strcpy(longest.name, "Fifteen letters"); longest.loop = true; longest.count = lab::kMaxSeqSteps;
+    for (int i = 0; i < lab::kMaxSeqSteps; ++i) longest.steps[i] = i % 2 ? SeqStep{SeqKind::Wait, Out::Servo, lab::kMaxWaitTenths} : SeqStep{SeqKind::Set, Out::StripBright, 100};
+    assert(labOfferSequence(longest, "")); show("chat-seq-long"); assert(gCanvas.shows("Name: Fifteen letters, loops") && gCanvas.shows("more"));
+    key(UP); assert(gLabSeqEdit.top == 0); for (int i = 0; i < 30; ++i) key(DOWN); assert(gLabSeqEdit.top == lab::kMaxSeqSteps - 6); show("chat-seq-long-end"); assert(gCanvas.shows("16"));
+    key('e'); assert(gLabSeqEdit.top == 0 && gLabUi.view == LabView::SeqEdit); esc(); esc();
+    // A full list can't take another, and says what to do. A change to a saved one still goes through.
+    const uint8_t was = gLabSeqCount; while (gLabSeqCount < lab::kMaxSequences) { gLabSeqs[gLabSeqCount] = lab::starterSequence(); std::strcpy(gLabSeqs[gLabSeqCount].name, "Spare"); ++gLabSeqCount; }
+    assert(labOfferSequence(longest, "")); key(ENTER); assert(gLabUi.view == LabView::SeqOffer && gLabSeqCount == lab::kMaxSequences && gStatus.find("full") != std::string::npos);
+    key('e'); assert(gLabUi.view == LabView::SeqEdit); esc(); key(ENTER); assert(gLabUi.view == LabView::SeqOffer && gLabSeqCount == lab::kMaxSequences); esc();
+    assert(labOfferSequence(wave, "Spare")); key(ENTER); assert(gLabSeqCount == lab::kMaxSequences && !std::strcmp(gLabSeqs[was].name, "Door wave"));
+    gLabSeqCount = was; }
+
+  // The pictures in docs/LAB.md.
+  setUiMode(UiMode::Home); gLabBook = lab::Book{}; gDisk.files.clear(); freshBoot(); setUiMode(UiMode::Home); labReadBook();
+  assert(labOfferSequence(wave, "")); run(200); show("doc-chat-seq"); key(ENTER); assert(gLabSeqCount == 2);
+  { lab::Sequence slow = wave; slow.steps[1].value = 30; slow.steps[3].value = 40; assert(labOfferSequence(slow, "Door wave")); run(200); show("doc-chat-seq-change"); assert(gCanvas.shows("Claude changed this") && gCanvas.shows("Wait 3 sec")); esc(); }
+  gLabSeqCount = 0; gLabBook = lab::Book{}; gDisk.files.clear(); setUiMode(UiMode::Home); freshBoot();
+}
+
 int main(int argc, char** argv) {
   if (argc > 1) gDump = std::fopen(argv[1], "w");
   for (bool& live : gLabHistoryLive) live = false;
-  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testGuidePictures(); testSequences(); setUiMode(UiMode::LabRules); run(1500); testGuards();
+  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testGuidePictures(); testSequences(); testChat(); setUiMode(UiMode::LabRules); run(1500); testGuards();
   if (gDump) std::fclose(gDump);
-  std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, sequences on their own and from a rule, the lamp and AC guards, units leaving and returning, saving and damage, and every screen stays on the display");
+  std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, sequences on their own and from a rule, what the chat can see and offer, the lamp and AC guards, units leaving and returning, saving and damage, and every screen stays on the display");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-lab-ui-') as directory:
