@@ -159,7 +159,7 @@ bool speechToWavFile(const String& text, const String& path) {
   if (speakText.isEmpty() || !gWifiReady || gHubHost.isEmpty() || !gSdReady) return false;
   waitForInboxToFinish(5000);
   prepareNetworkMemory("tts", true);
-  const bool releasedCanvas = releaseUiCanvasForNetwork("voice tool");
+  const bool releasedCanvas = releaseUiCanvasForNetwork("tts");
   const bool pausedWs = gWsReady;
   if (pausedWs) pauseHubWebSocketForVoice();
   const String partPath = path + ".part";

@@ -6,5 +6,5 @@ After you tapped Alt to send, the Lab could say it couldn't reach the bridge, ev
 running. The Cardputer was opening its connection while the microphone was recording, and on a Lab
 screen it could run out of memory or stall halfway through.
 
-A Lab recording now goes up once you've finished talking. The Cardputer lets background checks finish
-first, keeps the screen still while it sends, and tries once more if the connection fails.
+A Lab recording now goes up once you've finished talking, and the Cardputer tries once more if the
+connection fails.

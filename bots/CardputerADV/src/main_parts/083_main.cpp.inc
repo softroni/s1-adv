@@ -18,7 +18,6 @@ const VoiceTool kVoiceTools[] = {
 
 const VoiceTool* gVoiceTool = nullptr;  // Who this recording is for. Nobody means the chat.
 bool gVoiceToolLeft = false;            // Esc while it waited, so nobody wants the answer.
-bool gVoiceToolCanvasLent = false;      // The screen holds its last frame until the answer comes.
 
 const VoiceTool* voiceToolShown() {
   for (const VoiceTool& tool : kVoiceTools) {
@@ -51,23 +50,17 @@ String voiceToolHeader() {
   return header;
 }
 
-// A request in the middle of a recording's worth of other work can run out of room, because a
-// TLS connection needs two 16 KB blocks in one piece. The screen's 32 KB is the one large thing
-// that can wait, so a tool borrows it, after background checks have let go of theirs.
+// A TLS connection needs about 33 KB in one piece, and the Lab has little more than that, so it
+// can't share with a background check. Borrowing the screen's 32 KB isn't the answer: when it
+// comes back it lands somewhere else, and what's left is too broken up for the next connection.
 void voiceToolPrepareNetwork() {
-  if (!gVoiceTool) return;
-  waitForInboxToFinish(5000);
-  gVoiceToolCanvasLent = releaseUiCanvasForNetwork("voice tool");
+  if (gVoiceTool) waitForInboxToFinish(5000);
 }
 
 // The recorder is free again, and the screen has to show it.
 void voiceToolRelease() {
-  // The connection goes first: it holds the memory the screen is about to want back.
+  // Nothing here needs the connection again, and background checks can't start until it's gone.
   gVoiceReplyConnection.clear();
-  if (gVoiceToolCanvasLent) {
-    restoreUiCanvasAfterNetwork();
-    gVoiceToolCanvasLent = false;
-  }
   gVoiceTool = nullptr;
   gVoiceToolLeft = false;
   dismissVoiceNotice();
