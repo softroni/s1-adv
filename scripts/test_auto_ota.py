@@ -26,7 +26,7 @@ struct{brainflow::Phase phase=brainflow::Phase::Menu;}gBrainFlow;
 struct{bool running=false;}gKeyRush;
 bool gTetrisStarted=false,gTetrisPaused=false,gTetrisGameOver=false;
 bool labAllowsNetwork(){return false;}
-bool gWifiReady=true,gOtaApplyInProgress=false,gTransferUiActive=false,gLauncherVisible=false;
+bool gWifiReady=true,gOtaApplyInProgress=false,gOtaApplyCheckRunning=false,gTransferUiActive=false,gLauncherVisible=false;
 bool gG0VoicePending=false;
 bool gBootBackgroundActive=false,gRecording=false,gSubmitting=false,gThinking=false,gPlaybackActive=false;
 bool gVoiceReplySpeechBusy=false,gVoiceDialBusy=false,gRealtimeDialBusy=false,gPendingRealtimeStart=false;

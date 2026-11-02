@@ -193,6 +193,8 @@ bool handleAssetsKey(char key) {
 
 bool handleOtaKey(char key, const Keyboard_Class::KeysState& keys) {
   if ((!keys.enter && key != '\n' && key != '\r') || keys.ctrl || keys.alt || keys.fn) return false;
+  // Already on its way. Queuing again would run another check and put the restart off.
+  if (otaInstallStarting()) return true;
   if (gOtaPendingVerify) { setStatus("Verifying installed update", 1200); return true; }
   if (!homeFirmwareUpdateAvailable()) {
     setStatus(gOtaManifest.parsed ? "Firmware is current" : "Checking for updates", 1200);

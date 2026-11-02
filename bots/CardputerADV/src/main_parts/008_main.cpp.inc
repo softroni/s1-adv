@@ -197,8 +197,9 @@ void renderTransferUi() {
     d.fillRoundRect(barX + sweep, barY, 32, 8, 4, gTransferAccent);
   }
 
+  d.setFont(&fonts::Font0);
   d.setTextColor(muted, panel);
-  d.setCursor(18, 116);
+  d.setCursor(18, 114);
   d.print("do not power off");
   presentUiFrame();
 }

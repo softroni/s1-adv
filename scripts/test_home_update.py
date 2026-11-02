@@ -25,7 +25,10 @@ code = r'''
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <memory>
+#include <new>
 #include <string>
+#include <utility>
 #include <vector>
 using std::max;
 #include "release_delivery.h"
@@ -60,7 +63,23 @@ void appendRuntimeLog(String,String,bool){}
 int fetched=0,applied=0,painted=0;
 bool checkResult=true;
 bool applyAfter=false;
-bool startBackgroundManifestCheck(bool apply,bool){++fetched;gInboxHttpBusy=true;applyAfter=apply;return true;}
+// The real request starters run on these, down to the worker task that would do the fetching.
+struct InboxHttpPayload {String url,token;bool otaManifest=false,applyAfter=false,announce=false;};
+bool gOtaApplyCheckRunning=false,gInboxCancelRequested=false,gInboxCanvasReleased=false;
+uint32_t gOtaLastAutoCheckMs=0;
+constexpr uint32_t kOtaAutoCheckIntervalMs=20000,kOtaScreenCheckIntervalMs=5000;
+const char* kFirmwareManifestFetchPath="/firmware";
+String gDeviceToken;
+String hubBaseUrl(){return "https://bridge.test";}
+void prepareNetworkMemory(const char*,bool){}
+void clearEmojiCache(){}
+void restoreUiCanvasAfterNetwork(){}
+constexpr int pdPASS=1;
+void inboxHttpTask(void*){}
+int xTaskCreate(void(*)(void*),const char*,int,InboxHttpPayload* raw,int,void*){
+ if(raw->otaManifest){++fetched;applyAfter=raw->applyAfter;}
+ delete raw;return pdPASS;
+}
 bool freshCandidate=true;
 void completeCheck(){gInboxHttpBusy=false;if(checkResult&&freshCandidate&&applyAfter){gPendingOtaApplyAction=true;gPendingOtaActionAfterMs=now;}else if(applyAfter)gUiMode=UiMode::Home;}
 firmware_job_display::State gFirmwareJobState=firmware_job_display::State::Idle;
@@ -99,6 +118,9 @@ struct Canvas {
 } gCanvas;
 '''
 code += function('015_main.cpp.inc', 'bool homeFirmwareUpdateAvailable()')
+code += function('015_main.cpp.inc', 'bool otaInstallStarting()')
+code += function('020_main.cpp.inc', 'bool startInboxNetworkRequest(')
+code += function('020_main.cpp.inc', 'bool startBackgroundManifestCheck(')
 code += function('064_main.cpp.inc', 'bool handleHomeUpdateKey(')
 code += function('045_main.cpp.inc', 'bool handleOtaKey(')
 code += function('024_main.cpp.inc', 'void servicePendingOtaAction()')
@@ -258,6 +280,31 @@ int main(){
  assert(handleOtaKey('\n',keys));assert(!gPendingOtaCheckAction&&!gPendingOtaApplyAction);
  candidate();gOtaPendingVerify=true;
  assert(handleOtaKey('\n',keys));assert(!gPendingOtaApplyAction);gOtaPendingVerify=false;
+ // One press is enough. Pressing again changes nothing, at any point before the restart:
+ // each press used to queue another check, which put the restart off.
+ resetQueue();gInboxHttpBusy=false;gUiMode=UiMode::Ota;candidate();freshCandidate=true;checkResult=true;
+ const int checks=fetched,installs=applied;
+ assert(!otaInstallStarting()&&handleOtaKey('\n',keys)&&otaInstallStarting());
+ assert(handleOtaKey('\n',keys)&&otaInstallStarting());
+ now+=101;servicePendingOtaAction();
+ assert(fetched==checks+1&&gInboxHttpBusy&&!gPendingOtaApplyAction&&otaInstallStarting());
+ assert(handleOtaKey('\n',keys)&&handleOtaKey('\n',keys));
+ assert(!gPendingOtaCheckAction&&!gPendingOtaApplyAction&&otaInstallStarting());
+ completeCheck();assert(otaInstallStarting());now+=101;servicePendingOtaAction();
+ assert(applied==installs+1&&fetched==checks+1&&!otaInstallStarting());
+ // A press during an ordinary check counts at once, then waits its turn.
+ resetQueue();assert(startBackgroundManifestCheck(false,false)&&!otaInstallStarting());
+ assert(handleOtaKey('\n',keys)&&otaInstallStarting());
+ gInboxHttpBusy=false;now+=101;servicePendingOtaAction();assert(gInboxHttpBusy&&otaInstallStarting());
+ // A cancelled check won't install, so the screen stops saying so straight away and Enter works.
+ gInboxCancelRequested=true;assert(!otaInstallStarting());
+ gInboxHttpBusy=false;gInboxCancelRequested=false;assert(!otaInstallStarting());
+ assert(handleOtaKey('\n',keys)&&gPendingOtaApplyAction);
+ // Neither can a failed check, or any other request running afterwards pass for one.
+ now+=101;servicePendingOtaAction();assert(otaInstallStarting());
+ gInboxHttpBusy=false;assert(!otaInstallStarting());
+ assert(startInboxNetworkRequest(std::unique_ptr<InboxHttpPayload>(new InboxHttpPayload()))&&!otaInstallStarting());
+ gInboxHttpBusy=false;resetQueue();
  // The compact Home badge remains honest while the unified scene is sending.
  gThinking=true;assert(std::string(homeStatusLabel(false))=="THINKING");
  sendingNow=true;assert(std::string(homeStatusLabel(false))=="SENDING");sendingNow=false;
@@ -271,4 +318,4 @@ with tempfile.TemporaryDirectory(prefix='s1-home-update-') as directory:
                     '-Werror', '-I', str(root / 'bots/CardputerADV/src'),
                     str(p / 'test.cpp'), '-o', str(p / 'test')], check=True)
     subprocess.run([str(p / 'test')], check=True)
-print('PASS Home update: candidates, Ctrl+U, worker ownership, badge bounds, uncertain receipt versus stale link and F retry')
+print('PASS Home update: candidates, Ctrl+U, worker ownership, one install per press, badge bounds, uncertain receipt versus stale link and F retry')

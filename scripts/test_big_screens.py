@@ -89,7 +89,8 @@ bool homeFirmwareUpdateAvailable(){return candidate;}String gOtaRunningSlot="app
 struct FirmwareCapacityInfo{unsigned usableBytes=3145728,freeBytes=655000,reserveBytes=65536;};FirmwareCapacityInfo firmwareCapacityInfo(){return {};}
 struct{int level=82;}gBatterySnapshot;void updateBatterySnapshot(){}bool batteryExternalPowerPresent(){return false;}
 struct{uint8_t minBatteryForUpdate=40;bool clockTwelveHour=true;}gDeviceSettings;
-namespace release_delivery{bool otaPowerAllowed(int,bool,int){return true;}}
+bool powerOk=true,installStarting=false;bool otaInstallStarting(){return installStarting;}
+namespace release_delivery{bool otaPowerAllowed(int,bool,int){return powerOk;}}
 namespace clock_display{void format(char*p,size_t n,int,int,bool){snprintf(p,n,"6:45");}}
 namespace radio_catalog{const char* kGenres[]={"Jazz & Blues"};const char* languageName(int){return "EN";}struct St{const char* name="WBGO Jazz 88.3 Newark";int language=0;};}
 namespace internet_radio{enum class State{Idle,Playing};State state(){return State::Playing;}String status(){return "Playing 128 kbps";}}
@@ -126,6 +127,22 @@ int main(){
  gOtaPendingVerify=true;renderOtaUi();assert(!shows("Enter  Install update")&&shows("Verifying installed update"));gOtaPendingVerify=false;
  candidate=false;renderOtaUi();assert(!shows("Enter  Install update")&&shows("Up to date; checks every 5s"));
  gOtaManifest.error="network unavailable";renderOtaUi();assert(shows("network unavailable")&&shows("Check failed; retrying"));gOtaManifest.error="";
+ // Pressing Enter shows at once: the row that offered it answers, and says what comes next.
+ candidate=true;installStarting=true;gOtaManifest.notes="Bigger screens";gOtaManifest.error="old failure";renderOtaUi();
+ assert(shows("STARTING")&&!shows("UPDATE")&&shows("Starting update...")&&shows("Please wait, it restarts by itself"));
+ assert(!shows("Enter  Install update")&&!shows("Bigger screens")&&!shows("old failure"));
+ for(const auto&t:gCanvas.printed)if(t.s=="Please wait, it restarts by itself")assert(t.color==rgb565_local(88,240,141));
+ gOtaManifest.notes="";gOtaManifest.error="";
+ // Every boot queues a check and install too. With nothing to install it doesn't claim one.
+ candidate=false;renderOtaUi();assert(!shows("STARTING")&&!shows("Starting update...")&&!shows("Please wait, it restarts by itself"));
+ // Without the power to install, nothing offers Enter or says it has begun, even if one is queued.
+ candidate=true;powerOk=false;
+ for(bool queued:{true,false}){
+  installStarting=queued;renderOtaUi();
+  assert(shows("UPDATE")&&shows("Charge to 40% or connect USB")&&shows("Install needs more charge"));
+  assert(!shows("Enter  Install update")&&!shows("Starting update..."));
+ }
+ installStarting=false;powerOk=true;
  // The rest show their main facts in the bigger fonts.
  renderInternetRadioUi();assert(shows("Internet Radio")&&shows("Playing 128 kbps"));
  for(const auto&t:gCanvas.printed)if(t.s=="Jazz & Blues")assert(t.font==2);

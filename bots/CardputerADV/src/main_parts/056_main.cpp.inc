@@ -183,24 +183,30 @@ void renderOtaUi() {
   const uint16_t cyan = rgb565_local(47, 227, 255);
   const uint16_t muted = rgb565_local(182, 219, 255);
   const uint16_t white = TFT_WHITE;
-  const uint16_t accent = gOtaPendingVerify ? amber : (updateReady ? red : green);
+  updateBatterySnapshot();
+  const bool externalPower = batteryExternalPowerPresent();
+  const uint8_t minimum = max<uint8_t>(gDeviceSettings.minBatteryForUpdate, gOtaManifest.minBattery);
+  const bool powerOk = release_delivery::otaPowerAllowed(gBatterySnapshot.level, externalPower, minimum);
+  // Every boot queues a check and install too, so a queued install alone doesn't mean one is coming.
+  const bool starting = updateReady && powerOk && otaInstallStarting();
+  const uint16_t accent = starting ? green : gOtaPendingVerify ? amber : (updateReady ? red : green);
 
-  const String state = gOtaPendingVerify ? "VERIFY" : updateReady ? "UPDATE" :
+  const String state = starting ? "STARTING" : gOtaPendingVerify ? "VERIFY" : updateReady ? "UPDATE" :
       (gPendingOtaCheckAction || gInboxHttpBusy) ? "CHECKING" : hasCandidate ? "CURRENT" : "CHECKING";
   drawBigHeader("Firmware", accent, state);
 
   FirmwareCapacityInfo fw = firmwareCapacityInfo();
-  updateBatterySnapshot();
-  const bool externalPower = batteryExternalPowerPresent();
   const String powerValue = externalPower ? "charging" : (gBatterySnapshot.level >= 0 ? String(gBatterySnapshot.level) + "%" : "--");
   drawBigRow(0, "Installed", String(kAppVersion), false, accent, white, white);
   drawBigRow(1, "New", gOtaManifest.version.isEmpty() ? "-" : gOtaManifest.version, false, accent, white, updateReady ? red : green);
   drawBigRow(2, "Power", powerValue, false, accent, white, externalPower ? green : amber);
 
-  const uint8_t minimum = max<uint8_t>(gDeviceSettings.minBatteryForUpdate, gOtaManifest.minBattery);
   String note;
   uint16_t noteInk = gOtaConfirmedThisBoot ? green : (gOtaPendingVerify ? amber : muted);
-  if (updateReady && !release_delivery::otaPowerAllowed(gBatterySnapshot.level, externalPower, minimum)) {
+  if (starting) {
+    noteInk = green;
+    note = "Please wait, it restarts by itself";
+  } else if (updateReady && !powerOk) {
     noteInk = amber;
     note = "Charge to " + String(minimum) + "% or connect USB";
   } else if (!gOtaManifest.error.isEmpty()) {
@@ -223,10 +229,13 @@ void renderOtaUi() {
   d.setCursor(kBigLeft, kBigListY + 3 * kBigRowH + 2);
   d.print(fitCurrentFontToWidth(note, kBigRight - kBigLeft));
 
-  if (updateReady && !gOtaPendingVerify) {
+  if (starting) {
+    drawBigRow(4, "Starting update...", "", true, green);
+  } else if (updateReady && !gOtaPendingVerify && powerOk) {
     drawBigRow(4, "Enter  Install update", "", true, amber);
   } else {
     const char* status = gOtaPendingVerify ? "Verifying installed update" :
+        updateReady ? "Install needs more charge" :
         !gOtaManifest.error.isEmpty() ? "Check failed; retrying" :
         hasCandidate ? "Up to date; checks every 5s" : "Checking for updates...";
     d.setTextColor(gOtaPendingVerify ? amber : cyan);

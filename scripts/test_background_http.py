@@ -43,6 +43,7 @@ for name in ['InboxHttpPayload', 'InboxHttpResult']:
 code += r'''
 uint32_t now=100000,gLastInboxAutoPollMs=0,gInboxRetryAfterMs=0,gOtaLastAutoCheckMs=0,gPendingOtaActionAfterMs=0;
 uint32_t millis(){return now;}
+bool gOtaApplyCheckRunning=false;
 bool gInboxHttpBusy=false,gInboxCancelRequested=false,gInboxAllocationFailed=false;
 bool gCanvasSpriteActive=true,gInboxCanvasReleased=false,gPendingLogsUpload=false,gLogsUploadBusy=false;
 bool gRecording=false,gSubmitting=false,gPlaybackActive=false,gTransferUiActive=false;

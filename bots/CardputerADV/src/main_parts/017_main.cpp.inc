@@ -162,9 +162,9 @@ bool applyOtaFromManifest() {
     }
     otaLog("apply deferred to clean boot", true);
     requestOtaApplyBootMode(gOtaManifest.version.isEmpty() ? String("latest") : gOtaManifest.version);
-    beginTransferUi("Firmware OTA", "restarting clean updater", 100, rgb565_local(255, 93, 88));
-    updateTransferUi(100, 100, "restarting clean updater");
-    delay(500);
+    // Nothing is installed yet, so no 100%, and long enough to read before the screen goes dark.
+    beginTransferUi("Firmware OTA", "restarting to install", 0, rgb565_local(255, 93, 88));
+    delay(1500);
     ESP.restart();
     return true;
   }

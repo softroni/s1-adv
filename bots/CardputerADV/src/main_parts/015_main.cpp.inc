@@ -169,6 +169,13 @@ bool homeFirmwareUpdateAvailable() {
       release_delivery::isNewerVersion(gOtaManifest.version.c_str(), kAppVersion);
 }
 
+// From the press until the restart. Worked out from what's really queued, so a check that's
+// cancelled or fails can't leave the screen saying an install is on its way.
+bool otaInstallStarting() {
+  return gPendingOtaApplyAction ||
+         (gOtaApplyCheckRunning && gInboxHttpBusy && !gInboxCancelRequested);
+}
+
 bool fetchRemoteJsonToFile(const String& path, const String& localPath, const String& label) {
   String url = hubBaseUrl() + path;
   String title = label == "OTA" ? "OTA Manifest" : (label == "ASSET" ? "Asset Manifest" : "Download");

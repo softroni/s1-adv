@@ -387,6 +387,7 @@ bool waitForInboxToFinish(uint32_t timeoutMs) {
 bool startInboxNetworkRequest(std::unique_ptr<InboxHttpPayload> payload) {
   if (gInboxHttpBusy) return false;
   gInboxCancelRequested = false;
+  gOtaApplyCheckRunning = false;
   // Background HTTP never borrows the framebuffer. Repainting directly to
   // TFT during a TLS loan exposes partial gray frames on Home and menus.
   prepareNetworkMemory("inbox", false);
@@ -418,6 +419,7 @@ bool startBackgroundManifestCheck(bool applyAfter, bool announce) {
     return false;
   }
   gOtaLastAutoCheckMs = millis();
+  gOtaApplyCheckRunning = applyAfter;
   logf("[OTA_AUTO] GET at_ms=%u interval_ms=%u apply=%d", static_cast<unsigned>(millis()),
        gUiMode == UiMode::Ota ? kOtaScreenCheckIntervalMs : kOtaAutoCheckIntervalMs,
        static_cast<int>(applyAfter));

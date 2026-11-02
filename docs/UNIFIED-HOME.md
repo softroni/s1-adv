@@ -37,6 +37,13 @@ new-candidate result through the existing power/hash/boot gates. The normal
 Escape navigation remains. Manual fetch/reload/confirm/rollback letter actions
 are removed from that screen; explicit serial recovery remains available.
 
+From that press until the restart, the header reads `STARTING`, the action row
+turns green and reads `Starting update...`, and the line above it says to wait
+and that the device restarts by itself. More presses do nothing while it's starting.
+They can't queue a second check, so they can't put the restart off. Cancelling
+or a failed check ends the message. With too little power for the install, the
+row reads `Install needs more charge` and doesn't offer Enter.
+
 While the firmware screen is open, the shared HTTP worker checks every five
 seconds. Other screens retain twenty seconds. Recording, playback, transfers,
 Realtime and an active install defer checks; a due check remains due. A failed

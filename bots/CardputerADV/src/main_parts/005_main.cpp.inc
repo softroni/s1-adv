@@ -356,6 +356,7 @@ NotesMode gNotesMode = NotesMode::List;
 bool gOtaPendingVerify = false;
 bool gOtaConfirmedThisBoot = false;
 bool gOtaApplyInProgress = false;
+bool gOtaApplyCheckRunning = false; // The running manifest check ends in an install.
 bool gOtaBootApplyMode = false;
 uint32_t gOtaVerifyStartMs = 0;
 uint32_t gOtaLastHealthProbeMs = 0;

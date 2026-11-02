@@ -101,6 +101,7 @@ bool gPendingOtaCheckAction=false,gInboxHttpBusy=false;
 struct{bool parsed=true,present=true;String version="0.2.178-dev",notes,error;int minBattery=25;unsigned size=2000000;}gOtaManifest;
 String gOtaRunningSlot="app1",gOtaBootState="valid";
 bool homeFirmwareUpdateAvailable(){return candidateAvailable;}
+bool otaInstallStarting(){return false;}
 void renderSdRequiredBanner(const char*){}
 struct FirmwareCapacityInfo{unsigned usableBytes=3000000,freeBytes=900000,reserveBytes=65536;};
 FirmwareCapacityInfo firmwareCapacityInfo(){return {};}
