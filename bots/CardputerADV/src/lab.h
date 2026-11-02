@@ -745,6 +745,7 @@ class Text {
     return add(digits);
   }
   size_t length() const { return mAt; }
+  size_t room() const { return mSize > mAt + 1 ? mSize - mAt - 1 : 0; }
 
  private:
   char* mOut;
@@ -793,7 +794,7 @@ inline void ruleLine(const Rule& rule, Text& out, const Sequence* seqs, uint8_t 
     else if (action.how == How::Set) out.add(" set ").add(action.value);
     else out.add(action.how == How::Follow ? " follow " : " oppose ").add(info(action.source).key);
   }
-  out.add("; hold ").add(static_cast<int>(rule.holdMs)).add("\n");
+  out.add("; hold ").add(static_cast<int>(rule.holdMs));
 }
 inline void sequenceLine(const Sequence& seq, Text& out) {
   out.add(seq.name).add(seq.loop ? " (loops): " : ": ");
@@ -804,7 +805,6 @@ inline void sequenceLine(const Sequence& seq, Text& out) {
     else if (step.kind == SeqKind::Off) out.add(info(step.out).key).add(" off");
     else out.add(info(step.out).key).add(" set ").add(step.value);
   }
-  out.add("\n");
 }
 // Everything saved, and the room it needs, which is worked out rather than fixed because this is
 // made on every chat message and a full Lab is about five times what a usual one needs.
@@ -816,9 +816,15 @@ inline size_t chatChars(uint8_t ruleCount, const Sequence* seqs, uint8_t seqCoun
 }
 inline void chatState(const Rule* rules, uint8_t ruleCount, const Sequence* seqs, uint8_t seqCount, Text& out) {
   out.add(ruleCount ? "saved rules:\n" : "saved rules: none\n");
-  for (uint8_t i = 0; i < ruleCount; ++i) ruleLine(rules[i], out, seqs, seqCount);
+  for (uint8_t i = 0; i < ruleCount; ++i) {
+    ruleLine(rules[i], out, seqs, seqCount);
+    out.add("\n");
+  }
   out.add(seqCount ? "saved sequences:\n" : "saved sequences: none\n");
-  for (uint8_t i = 0; i < seqCount; ++i) sequenceLine(seqs[i], out);
+  for (uint8_t i = 0; i < seqCount; ++i) {
+    sequenceLine(seqs[i], out);
+    out.add("\n");
+  }
 }
 
 // --- The diary ---------------------------------------------------------------------------------

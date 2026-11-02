@@ -739,10 +739,10 @@ void testSequenceJson(){
   { strcpy(gSeqs[0].name,"Hello");gSeqCount=1;Rule rule;
     assert(parse(R"({"name":"Door","any":false,"hold_ms":1500,"when":[{"sensor":"distance","test":"under","value":30},{"sensor":"motion","test":"on"},{"sensor":"knob","test":"changes"}],"do":[{"output":"servo","follow":"knob"},{"output":"say","text":"hi there, friend"},{"output":"sequence","play":"Hello"}]})",rule));
     rule.on=false;char text[400];Text out(text,sizeof(text));ruleLine(rule,out,gSeqs,gSeqCount);
-    assert(!strcmp(text,"Door (switched off): all distance under 30, motion on, knob changes; do servo follow knob, say text \"hi there, friend\", sequence play Hello; hold 1500\n"));
+    assert(!strcmp(text,"Door (switched off): all distance under 30, motion on, knob changes; do servo follow knob, say text \"hi there, friend\", sequence play Hello; hold 1500"));
     Rule other=recipeRule(5);other.action[1]=oppose(Out::Servo,Sig::Light);char more[400];Text line(more,sizeof(more));ruleLine(other,line,gSeqs,gSeqCount);assert(strstr(more,"oppose light")&&strstr(more,": any ")!=nullptr);
     Sequence seq;assert(parseSeq(R"({"name":"Wave","loop":true,"steps":[{"output":"strip_color","set":120},{"wait_ms":1500},{"output":"strip_bright","off":true}]})",seq));
-    char third[200];Text t(third,sizeof(third));sequenceLine(seq,t);assert(!strcmp(third,"Wave (loops): strip_color set 120, wait_ms 1500, strip_bright off\n"));
+    char third[200];Text t(third,sizeof(third));sequenceLine(seq,t);assert(!strcmp(third,"Wave (loops): strip_color set 120, wait_ms 1500, strip_bright off"));
     gSeqCount=0;}
 }
 void testJson(){
@@ -774,8 +774,10 @@ void testJson(){
     for(int i=0;i<kRecipeCount;++i){char more[600];Text t(more,sizeof(more));ruleJson(recipeRule(i),t);Rule again;assert(parse(more,again));}
     Rule live;live.conds=3;live.cond[0]=Cond{Sig::Knob,Op::Changes,0};setOnOff(live.cond[1],false);live.cond[1].sig=Sig::Motion;live.cond[2]=Cond{Sig::Humidity,Op::Above,60};live.actions=1;live.action[0]=setTo(Out::Relay2,1);
     char third[600];Text t(third,sizeof(third));ruleJson(live,t);Rule again;assert(parse(third,again));assert(again.cond[0].op==Op::Changes&&again.cond[1].op==Op::Below&&again.cond[1].value==1&&again.cond[2].value==60&&again.action[0].value==1);
-    // Running out of room leaves a shorter text, never an overrun.
-    char tiny[8];Text cut(tiny,sizeof(tiny));ruleJson(start,cut);assert(strlen(tiny)==7&&cut.length()==7);}
+      // Running out of room leaves a shorter text, never an overrun.
+    char tiny[8];Text cut(tiny,sizeof(tiny));ruleJson(start,cut);assert(strlen(tiny)==7&&cut.length()==7);
+    // It says how much is left, so a long list can give way from the end that matters least.
+    char some[8];Text left(some,sizeof(some));assert(left.room()==7);left.add("abc");assert(left.room()==4);left.add("0123456789");assert(left.room()==0&&left.length()==7);Text one(some,1);assert(one.room()==0);Text none(some,0);assert(none.room()==0);}
   // The largest rule fits the device's buffer.
   assert(parse(R"({"type":"lab.rule","name":"Fifteen letters","any":false,"hold_ms":30000,"when":[{"sensor":"temperature","test":"over","value":45},{"sensor":"stick_button","test":"off"},{"sensor":"satellites","test":"changes"}],"do":[{"output":"strip_bright","oppose":"stick_x"},{"output":"lamp_power","set":1},{"output":"strip_length","follow":"temperature"}]})",r));
   assert(r.conds==3&&r.actions==3);

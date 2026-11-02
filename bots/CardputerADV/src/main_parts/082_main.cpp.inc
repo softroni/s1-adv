@@ -877,11 +877,11 @@ void renderLabSay() {
     labKeys("ESC cancel");
   } else if (listening) {
     labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Listening...", kLabGreen);
-    labTextAt(&fonts::Font0, 6, 52, command ? "Rules wait until you've finished." : ask ? "Ask about your parts and rules." : change ? "Say what should be different." : "Say what to watch and what to do.", kLabSoft);
+    labTextAt(&fonts::Font0, 6, 52, command ? "Rules wait until you've finished." : ask && gLabUi.view == LabView::Seqs ? "Describe the steps, or ask anything." : ask ? "Ask about your parts and rules." : change ? "Say what should be different." : "Say what to watch and what to do.", kLabSoft);
     labKeys("ALT send  ESC cancel");
   } else if (working) {
     labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, command ? "Checking what you said" : ask ? "Claude is looking" : change ? "Claude is changing it" : "Claude is writing it", TFT_WHITE);
-    labTextAt(&fonts::Font0, 6, 52, command ? "Rules carry on when this is done." : ask ? "It can see your parts and readings." : "You'll see it before it's saved.", kLabSoft);
+    labTextAt(&fonts::Font0, 6, 52, command ? "Rules carry on when this is done." : ask && gLabUi.view != LabView::Seqs ? "It can see your parts and readings." : "You'll see it before it's saved.", kLabSoft);
     labKeys("ESC back");
   } else if (!gWifiReady || gHubHost.isEmpty()) {
     labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Needs Wi-Fi", TFT_WHITE);
@@ -1843,8 +1843,8 @@ String labDescribe(bool withDiary) {
       text.add(" led=").add(ui.ledHue).add(" speaker=").add(ui.toneHz);
     }
   }
-  if (gLabSeqCount) text.add("\nsaved sequences:");
-  for (uint8_t i = 0; i < gLabSeqCount; ++i) text.add(i ? ", " : " ").add(gLabSeqs[i].name);
+  if (!withDiary && gLabSeqCount) text.add("\nsaved sequences:");
+  for (uint8_t i = 0; !withDiary && i < gLabSeqCount; ++i) text.add(i ? ", " : " ").add(gLabSeqs[i].name);
   for (uint8_t i = 0; i < gLabBook.count; ++i) {
     const lab::Rule& rule = gLabBook.rules[i];
     text.add("\nrule ").add(i + 1).add(rule.on ? "" : " (switched off)");
@@ -1852,7 +1852,15 @@ String labDescribe(bool withDiary) {
     lab::ruleJson(rule, text, gLabSeqs, gLabSeqCount);
   }
   if (labChangeOnScreen()) text.add("\nchanging rule ").add(gLabUi.ruleRow + 1);
-  if (withDiary) labDiaryTail(text);
+  if (withDiary) {
+    // Ask the Lab can change a sequence, so it gets the steps. They come after the rules, so a long
+    // list can only cost the diary's oldest hours.
+    if (gLabSeqCount) text.add("\nsaved sequences:");
+    for (uint8_t i = 0; i < gLabSeqCount; ++i) lab::sequenceLine(gLabSeqs[i], text.add("\n"));
+    // "Make it slower" means the one under the bar.
+    if (gLabUi.view == LabView::Seqs && gLabUi.seqRow < gLabSeqCount) text.add("\npicked in the list: ").add(gLabSeqs[gLabUi.seqRow].name);
+    labDiaryTail(text);
+  }
   return String(buffer.get());
 }
 String labVoiceContext() { return labDescribe(false); }

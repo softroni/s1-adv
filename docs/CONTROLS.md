@@ -306,7 +306,8 @@ bridge.
 
 The chat knows every rule and sequence you've saved, so on Pulse or in AI Chat you can ask to change
 a rule, or to write or change a sequence. A sequence comes back to look at the same way: Enter saves
-it, E changes its steps first, and Esc drops it. See [From the chat](LAB.md#from-the-chat).
+it, E changes its steps first, and Esc drops it. Tap Alt on the Sequences list to do the same there.
+See [From the chat](LAB.md#from-the-chat) and [Write a sequence](LAB.md#write-a-sequence).
 
 A rule can **talk**. Say or ask for something like "when someone walks in, say welcome back". The
 phrase is spoken once each time the rule starts firing, and up to 40 letters fit, once in a rule.

@@ -304,7 +304,9 @@ bool gActionsRun = false;
 const void* gActionRule = nullptr;  // Offered the way the real device action does.
 int gActionRepeats = 1;
 void offerFromAction(const void* rule);
-bool executeDeviceActionsJson(const String& json) { if (gActionRule) for (int i = 0; i < gActionRepeats; ++i) offerFromAction(static_cast<const char*>(gActionRule) + 0); return !std::string(json).empty() && gActionsRun; }
+const void* gActionSequence = nullptr;  // The same, for a sequence.
+bool offerSequenceFromAction(const void* sequence);
+bool executeDeviceActionsJson(const String& json) { if (gActionSequence) return offerSequenceFromAction(gActionSequence); if (gActionRule) for (int i = 0; i < gActionRepeats; ++i) offerFromAction(static_cast<const char*>(gActionRule) + 0); return !std::string(json).empty() && gActionsRun; }
 std::vector<String> wrapText(const String& raw, int) {
   std::vector<String> lines; std::string text = raw;
   for (size_t at = 0; at < text.size(); at += 38) lines.push_back(String(text.substr(at, 38).c_str()));
@@ -333,6 +335,7 @@ void setUiMode(UiMode mode) { if (labMode(gUiMode) && mode != gUiMode) stopLab()
 // --- Driving it ----------------------------------------------------------------------------------
 FILE* gDump = nullptr;
 lab::Rule gOfferSteps[4]; int gOfferStepAt = -1;
+bool offerSequenceFromAction(const void* sequence) { return labOfferSequence(*static_cast<const lab::Sequence*>(sequence), ""); }
 void offerFromAction(const void* rule) { labOfferRule(gOfferStepAt >= 0 ? gOfferSteps[gOfferStepAt++] : *static_cast<const lab::Rule*>(rule)); }
 void show(const char* scene) {
   renderLabUi();
@@ -1373,7 +1376,8 @@ void testSequences() {
   gLabSeqs[1].loop = true; keys("p"); gHubUnit.level[motion] = 1; run(4500); assert(gLabSeqRun.running()); key(' '); run(100); assert(!gLabSeqRun.running()); key(' '); run(100); assert(gLabSeqRun.running());
   gHubUnit.level[motion] = 0; run(300); assert(!gLabStates[door].active && !gLabSeqRun.running()); esc(); gLabSeqs[1].loop = false;
   // Claude is told what's saved, and gets a rule's sequence back by name, not by number.
-  { const String seen = labAskContext(); assert(std::string(seen).find("saved sequences: Hello, Door wave") != std::string::npos); assert(std::string(seen).find("\"output\":\"sequence\",\"play\":\"Door wave\"") != std::string::npos); }
+  { const String seen = labVoiceContext(); assert(std::string(seen).find("saved sequences: Hello, Door wave") != std::string::npos); }
+  { const String seen = labAskContext(); assert(std::string(seen).find("saved sequences:\nHello: led set 240") != std::string::npos && std::string(seen).find("\nDoor wave: ") != std::string::npos); assert(std::string(seen).find("\"output\":\"sequence\",\"play\":\"Door wave\"") != std::string::npos); }
 
   // Deleting one warns about the rules using it, and takes it out of them.
   setUiMode(UiMode::LabSequences); run(100); seqListTo(1); key('x'); show("seq-delete"); assert(gCanvas.shows("1 rule uses it") && gLabUi.seqDeleteArmed); key(UP); assert(!gLabUi.seqDeleteArmed && gLabSeqCount == 2);
@@ -1510,6 +1514,34 @@ void testChat() {
     key('e'); assert(gLabUi.view == LabView::SeqEdit); esc(); key(ENTER); assert(gLabUi.view == LabView::SeqOffer && gLabSeqCount == lab::kMaxSequences); esc();
     assert(labOfferSequence(wave, "Spare")); key(ENTER); assert(gLabSeqCount == lab::kMaxSequences && !std::strcmp(gLabSeqs[was].name, "Door wave"));
     gLabSeqCount = was; }
+
+  // Alt on the list of sequences can write one, and it lands on the same review, not the answer screen.
+  setUiMode(UiMode::LabSequences); run(300); gLabUi.seqRow = 0; gRecording = false; gThinking = false;
+  assert(labAskOnScreen());
+  { gRecording = true; renderLabUi(); assert(gCanvas.shows("Describe the steps")); gRecording = false; gThinking = true; renderLabUi(); assert(gCanvas.shows("before it's saved")); gThinking = false;
+    gLabUi.view = LabView::Devices; gRecording = true; renderLabUi(); assert(gCanvas.shows("Ask about your parts") && !gCanvas.shows("Describe the steps")); gRecording = false; gLabUi.view = LabView::Seqs; }
+  { const uint8_t kept = gLabSeqCount; const auto cardNow = gDisk.files; lab::Sequence spoken = chatSequence("Blink", {SeqStep{SeqKind::Set, Out::Led, 120}, SeqStep{SeqKind::Wait, Out::Servo, 10}});
+    gActionSequence = &spoken; { VoiceToolAnswer a; a.ok = true; a.heard = "blink the led"; a.reply = "Here it is."; a.actionsJson = "[{}]"; labAskAnswered(a); } gActionSequence = nullptr;
+    assert(gLabUi.view == LabView::SeqOffer && gLabSeqEdit.index < 0 && gLabSeqCount == kept && gDisk.files == cardNow && std::string(gQueuedVoiceReplySpeech).empty());
+    run(200); show("ask-seq-offer"); assert(gCanvas.shows("Claude wrote this") && gCanvas.shows("Name: Blink, plays once")); key(ENTER); assert(gLabUi.view == LabView::Seqs && gLabSeqCount == kept + 1 && !gLabSeqRun.running());
+    // One it can't use leaves the answer on the screen, so nothing just disappears.
+    { VoiceToolAnswer a; a.ok = true; a.heard = "blink the led"; a.reply = "Claude's words."; a.actionsJson = "[{}]"; labAskAnswered(a); assert(gLabUi.view == LabView::Say && gLabUi.sayNote == "Claude's words."); esc(); assert(gLabUi.view == LabView::Seqs); }
+    lab::removeSequence(gLabSeqs, gLabSeqCount, gLabBook.rules, gLabBook.count, kept); labSaveSeqs(); }
+  // "Make it slower" needs to know which one, and that's only true on the list, on a real row.
+  { const int row = gLabUi.seqRow; gLabUi.seqRow = 1; assert(gLabSeqCount > 1 && std::string(labAskContext()).find(std::string("\npicked in the list: ") + gLabSeqs[1].name) != std::string::npos);
+    gLabUi.seqRow = gLabSeqCount; assert(std::string(labAskContext()).find("picked in the list") == std::string::npos);
+    gLabUi.seqRow = 0; gLabUi.view = LabView::Devices; assert(std::string(labAskContext()).find("picked in the list") == std::string::npos); gLabUi.view = LabView::Seqs; assert(std::string(labVoiceContext()).find("picked in the list") == std::string::npos); gLabUi.seqRow = row; }
+  // Say a rule and changing a rule still only write rules, and only Ask the Lab sees the steps.
+  { gLabUi.view = LabView::Say; gLabUi.voice = LabVoice::NewRule; const String names = labVoiceContext(); assert(std::string(names).find("wait_ms") == std::string::npos && std::string(names).find("saved sequences: ") != std::string::npos); gLabUi.view = LabView::Seqs; }
+
+  // The steps can use up the room, and what gives way is the diary's oldest hours, not its newest.
+  { const uint8_t kept = gLabSeqCount; const lab::Sequence longest = [] { lab::Sequence seq; std::strcpy(seq.name, "Fifteen letters"); seq.count = lab::kMaxSeqSteps; for (int i = 0; i < lab::kMaxSeqSteps; ++i) seq.steps[i] = SeqStep{SeqKind::Set, Out::StripBright, 100}; return seq; }();
+    std::string diary; for (int hour = 0; hour < 24; ++hour) { char line[160]; std::snprintf(line, sizeof(line), "2026-11-%02d %02d: motion 1, rules fired 2, distance 3 to 4, temperature 20 to 21, humidity 40 to 41\n", 1 + hour / 24, hour); diary += line; }
+    gDisk.files[kLabDiaryPath] = std::vector<uint8_t>(diary.begin(), diary.end());
+    { const std::string roomy = labAskContext(); assert(roomy.find("2026-11-01 23:") != std::string::npos); }
+    while (gLabSeqCount < lab::kMaxSequences) gLabSeqs[gLabSeqCount++] = longest;
+    { const std::string full = labAskContext(); assert(full.find("2026-11-01 23: motion 1") != std::string::npos && full.find("humidity 40 to 41\n") != std::string::npos); assert(full.size() < 4000 && full.compare(full.size() - 1, 1, "\n") == 0); assert(full.find("\nrule 1") < full.find("saved sequences:\n")); }
+    gLabSeqCount = kept; gDisk.files.erase(kLabDiaryPath); }
 
   // The pictures in docs/LAB.md.
   setUiMode(UiMode::Home); gLabBook = lab::Book{}; gDisk.files.clear(); freshBoot(); setUiMode(UiMode::Home); labReadBook();

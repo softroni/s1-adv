@@ -46,36 +46,43 @@ export const LAB_HELP =
   "waits between them, kept under Sequences in the Lab. One plays from that list with P, or from a rule that plays " +
   "it. Only one runs at a time, and a new one replaces it. It wins any output it has set, and rules keep the rest. " +
   "Whatever it turned on goes off when it ends. A sequence set to play once finishes even if its rule stops, and " +
-  "one that plays over and over lasts as long as its rule. From here Claude can't write a sequence, only a rule " +
-  "that plays one, but it can write and change them when asked in AI Chat.";
+  "one that plays over and over lasts as long as its rule. Claude can write a sequence or change a saved one, and " +
+  "the owner checks it before it's saved. Claude can't start, stop or delete anything.";
 
-// What the chat can do in the Lab, on top of LAB_RULE_POLICY. The steps a sequence can drive must
-// match kSeqOutCount in bots/CardputerADV/src/lab.h, and the Lab state itself reaches Claude beside
-// the saved notes, so a stale copy never sits in the conversation.
-export const LAB_CHAT_POLICY =
-  "When the device sends one, a section called Lab state lists the rules and sequences saved in the Lab, and that " +
-  "is what the device state means for a chat message. A rule line reads: name, any or all, its when lines, then do " +
-  "and its do lines, then hold and its hold_ms. A sequence line reads: name, (loops) if it plays over and over, " +
-  "then its steps. There's no Lab state at all if the device didn't send one, so never guess what's saved. " +
-  "You can't see what's plugged in or any live readings, because the sensors stop when the Lab closes, so for " +
-  "those tell the owner to tap Alt on a Lab screen and ask there. " +
-  "To change a saved rule, append one lab.rule action with the whole rule, changed only as they ask, and replaces " +
-  "set to its current name, like {\"type\":\"lab.rule\",\"replaces\":\"Wave red\",\"name\":\"Wave blue\",...}. " +
+// How to write a sequence, for the chat and for Ask the Lab. The steps a sequence can drive must
+// match kSeqOutCount in bots/CardputerADV/src/lab.h.
+export const LAB_SEQUENCE_POLICY =
+  "A sequence line in the device state reads: name, (loops) if it plays over and over, then its steps. " +
   "When the user describes steps that run in order, like \"flash the strip, wait a second, then move the servo\", " +
   "reply briefly and append one lab.sequence action. Example: " +
   "[[cardputer_actions:[{\"type\":\"lab.sequence\",\"name\":\"Door wave\",\"loop\":false,\"steps\":[" +
   "{\"output\":\"strip_color\",\"set\":120},{\"wait_ms\":1000},{\"output\":\"servo\",\"set\":90},{\"wait_ms\":2000}," +
   "{\"output\":\"servo\",\"set\":0},{\"output\":\"strip_color\",\"off\":true}]}]]] " +
   "A step is an output with set, using the same outputs and values as a rule except say and sequence, or an output " +
-  "with off true, or wait_ms from 100 to 600000, in tenths of a second. A servo can't be turned off, only set. " +
+  "with off true, or wait_ms, which is milliseconds from 100 to 600000, so 2 seconds is 2000. A servo can't be " +
+  "turned off, only set. " +
   "Steps with no wait between them happen together, and whatever a sequence turned on goes off when it ends, so " +
   "end on a wait if the last thing should be seen. Use at most 16 steps and a name of 15 letters at most, and set " +
   "loop true for over and over. To change a saved sequence, send all of it back with replaces set to its current " +
-  "name. A rule can't play a sequence until it's saved, so send a new sequence on its own, and write the rule " +
-  "once they've saved it. Send one rule or sequence in a reply, because the device can only show one. If they ask " +
-  "for several, send the first and say you'll do the next once it's saved. The owner reviews every rule and " +
-  "sequence before it is saved, so never say it is saved or running. You can't start, stop or delete rules or " +
-  "sequences, so for those tell the owner what to press in the Lab.";
+  "name, changed only as they ask. Only do that if the device state shows its steps, and never guess them. If they " +
+  "say it or this one, they mean the sequence the device state says is picked in the list. A rule " +
+  "can't play a sequence until it's saved, so send a new sequence on its own, and write the rule once they've " +
+  "saved it. The owner reviews every sequence before it is saved, so never say it is saved or running.";
+
+// What the chat can do in the Lab, on top of LAB_RULE_POLICY. The Lab state itself reaches Claude
+// beside the saved notes, so a stale copy never sits in the conversation.
+export const LAB_CHAT_POLICY =
+  "When the device sends one, a section called Lab state lists the rules and sequences saved in the Lab, and that " +
+  "is what the device state means for a chat message. A rule line reads: name, any or all, its when lines, then do " +
+  "and its do lines, then hold and its hold_ms. There's no Lab state at all if the device didn't send one, so never " +
+  "guess what's saved. You can't see what's plugged in or any live readings, because the sensors stop when the Lab " +
+  "closes, so for those tell the owner to tap Alt on a Lab screen and ask there. " +
+  "To change a saved rule, append one lab.rule action with the whole rule, changed only as they ask, and replaces " +
+  "set to its current name, like {\"type\":\"lab.rule\",\"replaces\":\"Wave red\",\"name\":\"Wave blue\",...}. " +
+  `${LAB_SEQUENCE_POLICY} ` +
+  "Send one rule or sequence in a reply, because the device can only show one. If they ask for several, send the " +
+  "first and say you'll do the next once it's saved. You can't start, stop or delete rules or sequences, so for " +
+  "those tell the owner what to press in the Lab.";
 
 // The device checks all of this again, and acts only on the part whose screen is open.
 export const LAB_SET_POLICY =
@@ -121,8 +128,8 @@ export const VOICE_TOOLS = new Map([
   ["lab.ask", {
     instructions: `${LAB_HELP} Answer from the device state, using its real readings and rules, and say what to ` +
       "do next. If they ask what they could make, suggest up to 3 rules using parts that are answering, each as " +
-      `a lab.rule action, and say in one sentence what they do. ${LAB_RULE_POLICY} ${LAB_SET_POLICY}`,
-    actions: ["lab.rule", "lab.set"],
+      `a lab.rule action, and say in one sentence what they do. ${LAB_RULE_POLICY} ${LAB_SEQUENCE_POLICY} ${LAB_SET_POLICY}`,
+    actions: ["lab.rule", "lab.sequence", "lab.set"],
     words: 35
   }]
 ]);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LAB_CHAT_POLICY, LAB_HELP, LAB_RULE_POLICY, LAB_SET_POLICY, VOICE_TOOLS, answerVoiceTool, readLabState, readVoiceContext, voiceToolMessage, voiceToolPrompt } from "./voice-tools.mjs";
+import { LAB_CHAT_POLICY, LAB_HELP, LAB_RULE_POLICY, LAB_SEQUENCE_POLICY, LAB_SET_POLICY, VOICE_TOOLS, answerVoiceTool, readLabState, readVoiceContext, voiceToolMessage, voiceToolPrompt } from "./voice-tools.mjs";
 import { buildDeviceActionsPayload, extractDeviceActionsFromText, LAB_RULE_POLICY as FROM_SERVER, sanitizeDeviceAction } from "./server.mjs";
 
 const readReply = text => {
@@ -97,18 +97,26 @@ test("the chat's Lab state comes back as it was sent, with room for a full Lab",
   assert.equal(readLabState("x".repeat(9000)).length, 6000);
 });
 
-test("only the chat can write a sequence, so a voice tool's prompt never offers it", async () => {
-  for (const [name, tool] of VOICE_TOOLS) {
-    assert.ok(!(tool.actions || []).includes("lab.sequence"), name);
-    assert.ok(!(tool.instructions || "").includes("lab.sequence"), name);
+test("Ask the Lab can write a sequence, and Say a rule and changing a rule can't", async () => {
+  const sequence = { type: "lab.sequence", name: "Blink", loop: false, steps: [{ output: "led", set: 120 }, { wait_ms: 1000 }] };
+  const ask = VOICE_TOOLS.get("lab.ask");
+  assert.ok(ask.actions.includes("lab.sequence") && ask.instructions.includes(LAB_SEQUENCE_POLICY));
+  assert.deepEqual((await answerVoiceTool("lab.ask", "blink the led", { readReply, ask: async () => `Here. ${marker([sequence])}` })).device_actions, [sequence]);
+  for (const name of ["lab.rule", "lab.change"]) {
+    assert.ok(!VOICE_TOOLS.get(name).actions.includes("lab.sequence") && !VOICE_TOOLS.get(name).instructions.includes("lab.sequence"), name);
+    assert.equal((await answerVoiceTool(name, "blink the led", { readReply, ask: async () => `Here. ${marker([sequence])}` })).device_actions, undefined, name);
   }
-  const answer = await answerVoiceTool("lab.ask", "make a sequence", { readReply,
-    ask: async () => `Sure. ${marker([{ type: "lab.sequence", name: "Sneaky", steps: [{ wait_ms: 100 }] }])}` });
-  assert.equal(answer.device_actions, undefined);
 });
 
-test("Ask the Lab tells people where a sequence can be written", () => {
-  assert.match(LAB_HELP, /it can write and change them when asked in AI Chat/);
+test("the chat and Ask the Lab write sequences from the same words, and nothing is guessed", () => {
+  assert.ok(LAB_CHAT_POLICY.includes(LAB_SEQUENCE_POLICY));
+  assert.match(LAB_SEQUENCE_POLICY, /Only do that if the device state shows its steps, and never guess them/);
+  assert.match(LAB_SEQUENCE_POLICY, /milliseconds from 100 to 600000, so 2 seconds is 2000/, "a smaller model read tenths as the unit");
+  assert.ok(!LAB_SEQUENCE_POLICY.includes("tenths"), "waits are milliseconds, whatever the device keeps them as");
+  assert.match(LAB_SEQUENCE_POLICY, /picked in the list/);
+  assert.match(LAB_SEQUENCE_POLICY, /never say it is saved or running/);
+  assert.match(LAB_HELP, /Claude can write a sequence or change a saved one/);
+  assert.match(LAB_HELP, /can't start, stop or delete anything/);
   assert.match(LAB_CHAT_POLICY, /never guess what's saved/);
   assert.match(LAB_CHAT_POLICY, /Send one rule or sequence in a reply/);
 });
@@ -120,9 +128,9 @@ test("changing a rule can only send a rule back", () => {
   assert.match(tool.instructions, /changing|change/);
 });
 
-test("asking the Lab can bring rules back, and nothing else", async () => {
+test("asking the Lab can bring rules and sequences back, and nothing else", async () => {
   const tool = VOICE_TOOLS.get("lab.ask");
-  assert.deepEqual(tool.actions, ["lab.rule", "lab.set"]);
+  assert.deepEqual(tool.actions, ["lab.rule", "lab.sequence", "lab.set"]);
   assert.ok(tool.instructions.includes(LAB_HELP) && tool.instructions.includes(LAB_RULE_POLICY));
   assert.match(voiceToolPrompt(tool), /in under 35 words/, "the answer screen has room");
   assert.match(voiceToolPrompt(VOICE_TOOLS.get("lab.rule")), /in under 15 words/);

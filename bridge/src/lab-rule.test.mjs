@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { buildDeviceActionsPayload, LAB_RULE_POLICY, extractDeviceActionsFromText, sanitizeDeviceAction, trimDeviceEventMessage } from "./server.mjs";
-import { LAB_CHAT_POLICY } from "./voice-tools.mjs";
+import { LAB_CHAT_POLICY, VOICE_TOOLS } from "./voice-tools.mjs";
 
 const lab = new URL("../../bots/CardputerADV/src/lab.h", import.meta.url);
 const firmwareCatalog = new URL("../../bots/CardputerADV/src/main_parts/003_main.cpp.inc", import.meta.url);
@@ -128,6 +128,7 @@ test("the prompt allows only the outputs a sequence step can drive", async () =>
 test("the chat can't run anything, and is told so", () => {
   assert.match(LAB_CHAT_POLICY, /never say it is saved or running/u);
   assert.match(LAB_CHAT_POLICY, /can't start, stop or delete/u);
+  assert.equal(VOICE_TOOLS.has("lab.play"), false);
   assert.equal(sanitizeDeviceAction({ type: "lab.play", name: "Door wave" }), null);
   assert.equal(sanitizeDeviceAction({ type: "lab.stop" }), null);
 });

@@ -68,7 +68,8 @@ are used.
 String notesContext() { return "the note so far: " + gNoteText; }
 ```
 
-The Lab sends what's plugged in, the readings and the saved rules, in `labVoiceContext()`.
+The Lab sends what's plugged in, the readings and the saved rules, in `labVoiceContext()`. Ask the
+Lab adds each sequence's steps and the diary, in `labAskContext()`.
 
 ## What comes back
 

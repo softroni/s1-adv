@@ -281,7 +281,7 @@ A rule decides **when**. A sequence decides **what happens, in what order**. Her
 
 ### Build a sequence
 
-Choose **+ New sequence** and it asks for the first step. A step either waits or does one thing, so two steps with no wait between them happen together. You can also [describe one in the chat](#from-the-chat), and Claude writes the steps.
+Choose **+ New sequence** and it asks for the first step. A step either waits or does one thing, so two steps with no wait between them happen together. You can also [describe one](#write-a-sequence), and Claude writes the steps.
 
 <table>
 <tr>
@@ -341,7 +341,8 @@ With [Claude connected](../README.md#3-connect-claude), you can do most of the L
 | A saved rule, in the Rules list | [Change that rule](#change-a-rule) |
 | Playing | [Call a rule by name](#call-a-rule-by-name) |
 | Servo, LED strip, Cardputer LED or Speaker | [Set the part](#set-a-part-by-voice), or ask about it |
-| Devices, Dashboard, any other part, wiring or Sequences | [Ask the Lab](#ask-the-lab) |
+| Sequences | [Write or change a sequence](#write-a-sequence), or [ask the Lab](#ask-the-lab) |
+| Devices, Dashboard, any other part or wiring | [Ask the Lab](#ask-the-lab) |
 
 Other Lab screens don't listen, such as an offer waiting for **Enter** or the steps of a new rule. **G0** and **Ctrl+V** do nothing there either.
 
@@ -361,7 +362,7 @@ Describe what you want, and Claude writes the rule.
 
 Nothing happens until you've looked at it. If Claude can't make a rule from what it heard, the screen says what it needs and what it heard. A rule you ask for [in the chat](#from-the-chat) arrives the same way.
 
-A rule you say can play a saved sequence: "when someone walks in, play Welcome". Say a rule can't write the sequence itself, so build that first, or ask for it [in the chat](#from-the-chat).
+A rule you say can play a saved sequence: "when someone walks in, play Welcome". Say a rule can't write the sequence itself, so [write that first](#write-a-sequence).
 
 ### Rules that talk
 
@@ -399,7 +400,7 @@ Enter replaces the old rule, E walks through it in the steps, and Esc keeps the 
 
 ### Ask the Lab
 
-Stuck? Claude can see what's plugged in, the live readings and your rules, so it answers about your own setup. Tap Alt on Devices, the Dashboard, a part's screen, the wiring screen or Sequences, or open **Ask the Lab** at the bottom of the Rules list.
+Stuck? Claude can see what's plugged in, the live readings, your rules and your sequences, so it answers about your own setup. Tap Alt on Devices, the Dashboard, a part's screen, the wiring screen or Sequences, or open **Ask the Lab** at the bottom of the Rules list.
 
 - "Why didn't my rule fire?"
 - "Why won't the strip light up?"
@@ -413,6 +414,20 @@ Stuck? Claude can see what's plugged in, the live readings and your rules, so it
 <td width="33%"><img src="assets/lab/ask-offers.png" alt="Claude wrote this, the first of three suggested rules" width="100%"><br><sub><b>Or pick a rule.</b> It can suggest up to three. Left and right move between them, Enter saves the one showing, and Esc drops them all.</sub></td>
 </tr>
 </table>
+
+### Write a sequence
+
+Tap Alt on the Sequences list and describe the steps in order.
+
+- "Flash the strip green three times."
+- "Move the servo to 90, wait two seconds, then go back to zero."
+- "Blink the LED red every three seconds, forever."
+
+To change one, put the bar on it and say what's different, like "make it slower" or "make this one loop". You can also name one from any screen that asks the Lab: "make Door wave twice as slow".
+
+Whatever comes back opens on [the same screen as one from the chat](#from-the-chat), where you can check every step. Enter saves it, E changes the steps first, and Esc drops it. Check the waits and values, because Claude can get a number wrong.
+
+Claude can't start, stop or delete a sequence. For a rule that plays one, save the sequence first, then [say the rule](#say-a-rule).
 
 ### Set a part by voice
 

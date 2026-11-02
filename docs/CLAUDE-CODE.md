@@ -324,7 +324,8 @@ session is locked down so that token reaches as little as possible:
 - [Voice tools](VOICE-TOOLS.md) ask Claude one question at a time, in their own empty
   folder. Each has no tools, notes or project folder, even if the chat does, and no
   transcript is kept. In the Lab, a question also sends what's plugged in, the readings,
-  your rules and, for Ask the Lab, about the last day of the sensor diary.
+  your rules and, for Ask the Lab, your sequences and about the last day of the sensor
+  diary.
 - Each chat message also sends the rules and sequences saved in the Lab. The bridge puts
   them beside your saved notes for that turn, so they stay out of the conversation, and
   nothing about what's plugged in or its readings is sent.

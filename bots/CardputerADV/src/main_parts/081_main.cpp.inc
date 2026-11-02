@@ -895,19 +895,22 @@ void labDiaryNote(uint32_t now) {
   gLabDiary.note(gLabInputs);
 }
 // The newest lines, starting on a whole one.
+// As much as there's room for, counting back from the newest hour, which is what's asked about.
 void labDiaryTail(lab::Text& out) {
-  if (!gSdReady || !SD.exists(kLabDiaryPath)) return;
+  static constexpr char kHeading[] = "\ndiary, an hour a line, newest last:\n";
+  if (out.room() <= sizeof(kHeading) || !gSdReady || !SD.exists(kLabDiaryPath)) return;
   File file = SD.open(kLabDiaryPath, "r");
   if (!file) return;
   char tail[kLabDiaryTailBytes + 1];
-  const size_t size = file.size(), from = size > kLabDiaryTailBytes ? size - kLabDiaryTailBytes : 0;
+  const size_t room = min<size_t>(kLabDiaryTailBytes, out.room() - sizeof(kHeading));
+  const size_t size = file.size(), from = size > room ? size - room : 0;
   const bool moved = file.seek(from);
   const size_t got = moved ? file.read(reinterpret_cast<uint8_t*>(tail), size - from) : 0;
   file.close();
   tail[got] = '\0';
   const char* start = from ? strchr(tail, '\n') : tail;
   if (!start || !got) return;
-  out.add("\ndiary, an hour a line, newest last:\n").add(from ? start + 1 : start);
+  out.add(kHeading).add(from ? start + 1 : start);
 }
 
 // --- The loop --------------------------------------------------------------------------------
