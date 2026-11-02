@@ -87,6 +87,13 @@ bool postRawVoiceTurn(const uint8_t* ramPayload, const String& filePath, size_t 
   clearEmojiCache();
   if (!earlyDial) beginVoicePreconnect();
   std::unique_ptr<WiFiClient> prepared = takeVoicePreconnect();
+  // Nothing has been sent, and a tool's request changes nothing until it's answered, so a weak
+  // signal gets a second try. A chat message never does, because it might have arrived.
+  if (voiceToolAwaitsAnswer() && !gVoiceDialBusy && (!prepared || !prepared->connected())) {
+    logf("[VOICE_TOOL] connect failed; trying once more");
+    beginVoicePreconnect();
+    prepared = takeVoicePreconnect();
+  }
   if (gVoiceDialBusy) { setHttpDiag("voice_post: connection still preparing"); return false; }
   if (!prepared || !prepared->connected()) {
     // The worker already attempted the dial with a bounded TCP/TLS timeout.

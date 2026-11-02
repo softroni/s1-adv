@@ -213,6 +213,7 @@ bool stopRecordingAndSend() {
     finishVoiceCaptureUpload(dataSize);
     gVoicePreconnectEarly = true;
   } else if (gWifiReady) {
+    voiceToolPrepareNetwork();
     beginVoicePreconnect();
     gVoicePreconnectEarly = true;
   }

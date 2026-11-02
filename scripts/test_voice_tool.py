@@ -36,6 +36,13 @@ assert finish.index('voiceToolAwaitsAnswer()') < finish.index('pushError'), 'a t
 assert 'voiceToolRecordingEnded();' in function('void handleRecordingStorageFailure()')
 cancel = function('void cancelRecordingDiscard()')
 assert cancel.index('if (!gRecording)') < cancel.index('voiceToolRecordingDropped();')
+# A tool doesn't connect while the mic is on, and it's the only thing that borrows the screen this way.
+upload = function('void beginVoiceCaptureUpload()')
+assert upload.index('voiceToolAwaitsAnswer()') < upload.index('capture(new')
+assert stop.index('voiceToolPrepareNetwork();') < stop.index('beginVoicePreconnect();')
+# Only a request that sent nothing gets a second try, and never a chat message.
+post = function('bool postRawVoiceTurn(')
+assert post.index('voiceToolAwaitsAnswer() && !gVoiceDialBusy') < post.index('earlyGuard.active = false') < post.index('writeClientAll(*client, headers')
 # Both ways of sending the recording carry the tool's name.
 assert part(35).count('headers += voiceToolHeader();') == 1 and part(65).count('headers += voiceToolHeader();') == 1
 assert '#include "main_parts/083_main.cpp.inc"' in (src / 'main.cpp').read_text()
@@ -62,6 +69,7 @@ module = module[:module.index('const VoiceTool kVoiceTools[] = {')] + """const V
 """ + module[module.index('};\n\nconst VoiceTool* gVoiceTool'):]
 code = r"""
 #include <cassert>
+#include <cstring>
 #include <cstdarg>
 #include <cstdint>
 #include <iostream>
@@ -89,6 +97,15 @@ void tookAnswer(const VoiceToolAnswer& a) { ++answers; last = a; }
 String gLabState = "parts: Ultrasonic\nrule 1: 100%";
 String labState() { return gLabState; }
 bool gLauncherVisible = false;
+int gConnectionsDropped = 0, gCanvasLoans = 0, gCanvasReturns = 0, gInboxWaits = 0; bool gCanvasLendable = true;
+struct { void clear() { ++gConnectionsDropped; } } gVoiceReplyConnection;
+bool waitForInboxToFinish(uint32_t) { ++gInboxWaits; return true; }
+bool releaseUiCanvasForNetwork(const char* reason) { assert(!strcmp(reason, "voice tool")); if (!gCanvasLendable) return false; ++gCanvasLoans; return true; }
+void restoreUiCanvasAfterNetwork() { ++gCanvasReturns; }
+struct { int RSSI() { return -40; } } WiFi;
+struct { unsigned getFreeHeap() { return 1; } } ESP;
+unsigned heap_caps_get_largest_free_block(int) { return 1; }
+constexpr int MALLOC_CAP_8BIT = 4;
 @MODULE@
 void cancelRecordingDiscard() { ++gCancelled; gRecording = false; voiceToolRecordingDropped(); }
 void listen() { gRecording = true; voiceToolRecordingStarted(); }
@@ -108,6 +125,16 @@ int main() {
   assert(answers == 1 && last.ok && last.heard == "wave red" && last.reply == "Done." && last.actionsJson == R"([{"type":"lab.rule","name":"Wave"}])");
   assert(!voiceToolAwaitsAnswer() && !voiceToolWorking() && gFace == FaceMode::Idle && gRepaints > repaints && gLastRenderMs == 0);
   assert(voiceToolHeader().empty());  // The next recording starts clean.
+
+  // Only a tool borrows the screen for the request, after background checks have finished, and it
+  // goes back when the answer does, with the connection dropped first so there's room for it.
+  reset(); gInboxWaits = gCanvasLoans = gCanvasReturns = 0; voiceToolPrepareNetwork(); assert(!gInboxWaits && !gCanvasLoans);
+  labShown = true; listen(); gRecording = false; voiceToolPrepareNetwork(); assert(gInboxWaits == 1 && gCanvasLoans == 1 && !gCanvasReturns);
+  const int dropped = gConnectionsDropped; finishVoiceToolSubmission(true, 200, R"({"voice_tool":"lab.rule"})");
+  assert(gCanvasReturns == 1 && gConnectionsDropped == dropped + 1 && !gVoiceToolCanvasLent);
+  // A failure before any answer gives it back too, and a screen that couldn't be lent isn't restored.
+  reset(); gCanvasReturns = 0; labShown = true; listen(); gRecording = false; voiceToolPrepareNetwork(); setStatus("Wi-Fi lost", 1); voiceToolRecordingEnded(); assert(gCanvasReturns == 1);
+  reset(); gCanvasReturns = 0; gCanvasLendable = false; labShown = true; listen(); gRecording = false; voiceToolPrepareNetwork(); finishVoiceToolSubmission(false, -1, ""); assert(!gCanvasReturns); gCanvasLendable = true;
 
   // Each tool gets its own name on the request and hears only its own answer.
   reset(); notesShown = true; listen(); assert(voiceToolHeader() == "X-Voice-Tool: transcribe\r\n"); gRecording = false;

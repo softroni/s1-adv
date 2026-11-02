@@ -39,6 +39,8 @@ bool voiceToolListening();
 bool voiceToolWorking();
 bool voiceToolAwaitsAnswer();
 void voiceToolRecordingStarted();
+void voiceToolPrepareNetwork();
+bool waitForInboxToFinish(uint32_t timeoutMs);
 void voiceToolRecordingEnded();
 void voiceToolRecordingDropped();
 String voiceToolHeader();

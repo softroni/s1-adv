@@ -29,6 +29,8 @@ int main(){
    assert(gCanvasSpriteActive&&deletes==0&&waits==0);
   }
  assert(!releaseUiCanvasForNetwork(nullptr)&&gCanvasSpriteActive);
+ assert(releaseUiCanvasForNetwork("voice tool")&&!gCanvasSpriteActive&&deletes==1&&waits==1);
+ gCanvasSpriteActive=true;deletes=waits=0;
  assert(releaseUiCanvasForNetwork("NES")&&!gCanvasSpriteActive&&deletes==1&&waits==1);
  assert(!releaseUiCanvasForNetwork("NES")&&deletes==1);
 }

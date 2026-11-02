@@ -120,6 +120,7 @@ bool ensureWifiForHttp(const char*,unsigned){return fixture.wifi;}
 void setHttpDiag(const String& value){fixture.diag=value.value;}
 void setStatus(const String&){}
 String voiceToolHeader(){return "";}
+bool voiceToolAwaitsAnswer(){return false;}
 void render(){}
 void clearEmojiCache(){}
 bool hubUsesTls(){return fixture.tls;}

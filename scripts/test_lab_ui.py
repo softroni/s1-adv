@@ -275,6 +275,7 @@ struct SdClass {
 bool gSdReady = true, gImuEnabled = true;
 bool ensureDirRecursive(SdClass&, const char*) { return !gDisk.broken; }
 int gSpeechFetches = 0, gSpeechPlays = 0; bool gSpeechWorks = true; std::string gSpeechPath, gSpeechText;
+bool waitForInboxToFinish(uint32_t) { return true; }
 bool speechToWavFile(const String& text, const String& path) { ++gSpeechFetches; gSpeechText = text; if (!gSpeechWorks) return false; gDisk.files[std::string(path)] = {1, 2}; return true; }
 void render() {}
 struct Keyboard_Class { struct KeysState { bool ctrl = false, alt = false, opt = false, enter = false, del = false; }; };

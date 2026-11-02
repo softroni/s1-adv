@@ -370,6 +370,18 @@ void serviceInboxNetworkCompletion() {
   }
 }
 
+// For something about to need the memory a background check is using. Nothing starts another one
+// while this waits, because the caller has already gone busy or is about to.
+bool waitForInboxToFinish(uint32_t timeoutMs) {
+  const uint32_t started = millis();
+  if (gInboxHttpBusy) gInboxCancelRequested = true;
+  while (gInboxHttpBusy && millis() - started < timeoutMs) {
+    serviceInboxNetworkCompletion();
+    if (gInboxHttpBusy) delay(5);
+  }
+  return !gInboxHttpBusy;
+}
+
 bool startInboxNetworkRequest(std::unique_ptr<InboxHttpPayload> payload) {
   if (gInboxHttpBusy) return false;
   gInboxCancelRequested = false;

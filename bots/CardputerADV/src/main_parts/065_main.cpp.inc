@@ -685,6 +685,9 @@ void finishVoiceCaptureUpload(size_t bytes) {
 }
 
 void beginVoiceCaptureUpload() {
+  // A connection opened now competes with the mic for memory. The chat has a reply to speed up,
+  // but a tool just waits, so its recording goes up whole once it has stopped.
+  if (voiceToolAwaitsAnswer()) return;
   if (!gRecordingToFile || !gActiveRecordFile || !gRecording || gVoiceDialBusy ||
       gInboxHttpBusy || gRealtimeDialBusy || gVoiceReplySpeechBusy || !gWifiReady) return;
   std::shared_ptr<VoiceCaptureUpload> capture(new (std::nothrow) VoiceCaptureUpload());

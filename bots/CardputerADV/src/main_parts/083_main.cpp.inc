@@ -18,6 +18,7 @@ const VoiceTool kVoiceTools[] = {
 
 const VoiceTool* gVoiceTool = nullptr;  // Who this recording is for. Nobody means the chat.
 bool gVoiceToolLeft = false;            // Esc while it waited, so nobody wants the answer.
+bool gVoiceToolCanvasLent = false;      // The screen holds its last frame until the answer comes.
 
 const VoiceTool* voiceToolShown() {
   for (const VoiceTool& tool : kVoiceTools) {
@@ -50,8 +51,23 @@ String voiceToolHeader() {
   return header;
 }
 
+// A request in the middle of a recording's worth of other work can run out of room, because a
+// TLS connection needs two 16 KB blocks in one piece. The screen's 32 KB is the one large thing
+// that can wait, so a tool borrows it, after background checks have let go of theirs.
+void voiceToolPrepareNetwork() {
+  if (!gVoiceTool) return;
+  waitForInboxToFinish(5000);
+  gVoiceToolCanvasLent = releaseUiCanvasForNetwork("voice tool");
+}
+
 // The recorder is free again, and the screen has to show it.
 void voiceToolRelease() {
+  // The connection goes first: it holds the memory the screen is about to want back.
+  gVoiceReplyConnection.clear();
+  if (gVoiceToolCanvasLent) {
+    restoreUiCanvasAfterNetwork();
+    gVoiceToolCanvasLent = false;
+  }
   gVoiceTool = nullptr;
   gVoiceToolLeft = false;
   dismissVoiceNotice();
@@ -81,8 +97,9 @@ void voiceToolRecordingDropped() {
 
 bool finishVoiceToolSubmission(bool transportOk, int statusCode, const String& response) {
   const VoiceToolAnswer answer = voice_tool::readAnswer<String>(transportOk, statusCode, response.c_str(), gVoiceTool->name);
-  logf("[VOICE_TOOL] %s http=%d ok=%d chars=%u", gVoiceTool->name, statusCode, static_cast<int>(answer.ok),
-       static_cast<unsigned>(answer.heard.length()));
+  logf("[VOICE_TOOL] %s http=%d ok=%d chars=%u rssi=%d free=%u largest=%u", gVoiceTool->name, statusCode,
+       static_cast<int>(answer.ok), static_cast<unsigned>(answer.heard.length()), static_cast<int>(WiFi.RSSI()),
+       static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
   setStatus(answer.ok ? "Ready" : answer.problem, 1500);
   voiceToolDeliver(answer);
   return answer.ok;
