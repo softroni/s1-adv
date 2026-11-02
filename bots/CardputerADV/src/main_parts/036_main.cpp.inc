@@ -152,6 +152,84 @@
   return started;
 }
 
+// Keeps speech on the card for later, when there may be no network, as for a Lab rule that talks.
+// The file only gets its name once it's whole, so a dropped connection leaves nothing to play.
+bool speechToWavFile(const String& text, const String& path) {
+  const String speakText = cleanReplyForDevice(text);
+  if (speakText.isEmpty() || !gWifiReady || gHubHost.isEmpty() || !gSdReady) return false;
+  prepareNetworkMemory("tts", true);
+  const bool releasedCanvas = releaseUiCanvasForNetwork("tts");
+  const bool pausedWs = gWsReady;
+  if (pausedWs) pauseHubWebSocketForVoice();
+  const String partPath = path + ".part";
+  size_t bytes = 0;
+  bool ok = false;
+  {
+    HTTPClient http;
+    std::unique_ptr<WiFiClientSecure> secureClient;
+    const String url = hubBaseUrl() + kDeviceTtsPath;
+    http.setTimeout(60000);
+    http.setReuse(false);
+    const char* responseHeaders[] = {"X-Audio-Sample-Rate"};
+    http.collectHeaders(responseHeaders, 1);
+    bool opened = false;
+    if (hubUsesTls()) {
+      secureClient.reset(new WiFiClientSecure());
+      configureSecureClient(*secureClient);
+      opened = http.begin(*secureClient, url);
+    } else {
+      opened = http.begin(url);
+    }
+    if (opened) {
+      http.addHeader("Content-Type", "application/json");
+      http.addHeader("X-Device-Id", gDeviceId);
+      if (!gDeviceToken.isEmpty()) {
+        http.addHeader("Authorization", "Bearer " + gDeviceToken);
+        http.addHeader("X-Device-Token", gDeviceToken);
+      }
+      String body = "{\"device_id\":\"" + escapeJsonString(gDeviceId) + "\",\"text\":\"" + escapeJsonString(speakText) + "\"}";
+      const int status = http.POST(reinterpret_cast<uint8_t*>(const_cast<char*>(body.c_str())), body.length());
+      File file = status == 200 ? SD.open(partPath, "w+") : File();
+      if (file) {
+        const int headerRate = http.header("X-Audio-Sample-Rate").toInt();
+        const uint32_t sampleRate = headerRate >= 8000 && headerRate <= 48000 ? headerRate : kTtsDefaultSampleRate;
+        uint8_t header[44];
+        writeWavHeader(header, 0, sampleRate);
+        bool wrote = file.write(header, sizeof(header)) == sizeof(header);
+        const int expected = http.getSize();
+        WiFiClient* stream = http.getStreamPtr();
+        uint8_t buffer[1024];
+        const uint32_t deadline = millis() + 30000;
+        while (wrote && stream && http.connected() && static_cast<int32_t>(deadline - millis()) > 0 &&
+               (expected < 0 || bytes < static_cast<size_t>(expected))) {
+          const int available = stream->available();
+          if (available <= 0) { pumpBlockingNetworkUi(); continue; }
+          size_t chunk = min<size_t>(sizeof(buffer), available);
+          if (expected > 0) chunk = min<size_t>(chunk, expected - bytes);
+          const int got = stream->readBytes(buffer, chunk);
+          if (got <= 0) continue;
+          wrote = file.write(buffer, got) == static_cast<size_t>(got);
+          bytes += got;
+        }
+        writeWavHeader(header, bytes, sampleRate);
+        ok = wrote && bytes > 0 && !(bytes & 1) && (expected < 0 || bytes == static_cast<size_t>(expected)) &&
+             file.seek(0) && file.write(header, sizeof(header)) == sizeof(header);
+        file.close();
+      }
+      http.end();
+    }
+  }
+  if (ok) {
+    SD.remove(path.c_str());
+    ok = SD.rename(partPath.c_str(), path.c_str());
+  }
+  if (!ok) SD.remove(partPath.c_str());
+  logf("[LAB] speech saved=%d bytes=%u", static_cast<int>(ok), static_cast<unsigned>(bytes));
+  if (pausedWs) resumeHubWebSocketAfterVoice();
+  if (releasedCanvas) restoreUiCanvasAfterNetwork();
+  return ok;
+}
+
 bool sendTextTurn(const String& text) {
   if ((!gWifiReady && !ensureWifiForHttp("text-turn", 3000)) || gHubHost.isEmpty()) {
     pushError("Hub is not configured.");

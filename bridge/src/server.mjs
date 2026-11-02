@@ -506,7 +506,9 @@ export function sanitizeDeviceAction(raw) {
     });
     action.do = lines(raw.do).map((line) => {
       const out = { output: boundedString(line.output, 16) };
-      if (line.follow) {
+      if (typeof line.text === "string") {
+        out.text = boundedString(line.text, 40);
+      } else if (line.follow) {
         out.follow = boundedString(line.follow, 16);
       } else if (line.oppose) {
         out.oppose = boundedString(line.oppose, 16);

@@ -34,6 +34,7 @@ constexpr int kLabLedDivide = 4;           // The Cardputer's LED is bright at f
 constexpr const char* kLabDir = "/lab";
 constexpr const char* kLabPath = "/lab/rules.dat";
 constexpr const char* kLabNewPath = "/lab/rules.new";
+constexpr const char* kLabSayDir = "/lab/say";
 
 void serviceLabTests();
 void labEnterView(UiMode mode);
@@ -83,6 +84,8 @@ lab::Inputs gLabInputs;
 lab::Inputs gLabSeen;              // The readings with any practice values on top, for rules and the view.
 lab::Practice gLabPractice;
 lab::RuleState gLabStates[lab::kMaxRules];
+uint16_t gLabSaidFires[lab::kMaxRules] = {};  // How many of each rule's firings have been spoken.
+bool gLabFetchingSpeech = false;
 lab::Drive gLabDrive[lab::kOutCount];
 lab_gps::Parser gLabGps;
 bool gLabFound[lab::kUnitCount] = {};
@@ -771,6 +774,37 @@ void labReadBook() {
   }
 }
 
+// --- Rules that talk ---------------------------------------------------------------------------
+// Rules run with no network, so a phrase's speech is fetched while there's still time to wait: when
+// the rule is saved, and again before playing if that didn't work.
+String labSayPath(const char* text) {
+  char path[32];
+  snprintf(path, sizeof(path), "%s/%08lx.wav", kLabSayDir, static_cast<unsigned long>(lab::sayHash(text)));
+  return String(path);
+}
+void labFetchSpeech(const lab::Rule& rule) {
+  if (!lab::hasSay(rule) || !gSdReady || !ensureDirRecursive(SD, kLabSayDir)) return;
+  const String path = labSayPath(rule.say);
+  if (SD.exists(path.c_str())) return;
+  gLabFetchingSpeech = true;
+  labRedraw();
+  render();
+  const bool ok = speechToWavFile(rule.say, path);
+  gLabFetchingSpeech = false;
+  labRedraw();
+  if (!ok) setStatus("No voice yet for this rule", 2000);
+}
+// One at a time. A second rule's phrase waits, because its firing still counts as not said.
+void labSpeakNewFirings() {
+  for (uint8_t i = 0; i < gLabBook.count; ++i) {
+    if (gLabStates[i].fires == gLabSaidFires[i]) continue;
+    gLabSaidFires[i] = gLabStates[i].fires;
+    if (!lab::hasSay(gLabBook.rules[i])) continue;
+    startPlaybackStreamFromWavFile(labSayPath(gLabBook.rules[i].say), "lab say");
+    return;
+  }
+}
+
 // --- The loop --------------------------------------------------------------------------------
 void labHistoryReset(lab::Sig sig) {
   gLabHistorySig = sig;
@@ -798,6 +832,7 @@ void labStopPlaying() {
 }
 void labPlay() {
   for (lab::RuleState& state : gLabStates) state = lab::RuleState{};
+  for (uint16_t& said : gLabSaidFires) said = 0;
   gLabPractice.clear();
   labReleaseOutputs();
   gLabPlaying = true;
@@ -877,6 +912,7 @@ void serviceLab() {
   serviceLabTests();
   if (gLabPlaying && !gLabPaused) {
     lab::step(gLabBook.rules, gLabBook.count, gLabStates, gLabSeen, now, gLabDrive);
+    labSpeakNewFirings();
     labKeepAwake(now);
   } else if (gLabPlaying) {
     labDriveClear();

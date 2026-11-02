@@ -32,6 +32,7 @@ void saveLauncherSelection();
 bool handlePlaceEditKey(char key);
 void toggleVoiceByTap();
 using VoiceToolAnswer = voice_tool::Answer<String>;
+bool speechToWavFile(const String& text, const String& path);
 bool voiceToolOnScreen();
 bool voiceToolStarting();
 bool voiceToolListening();

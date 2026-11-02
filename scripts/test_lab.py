@@ -312,9 +312,27 @@ void testSaving(){
    encode(e,c);c[14]=uint8_t(kPartCount);seal(c,l);assert(!decode(c,l,o));}
   // A file from 0.2.232 to 0.2.235, with no such bytes, still loads.
   {Book b;b.count=1;b.rules[0]=starterRule();b.capPercent=50;uint8_t c[kFileBytes];const size_t n=encode(b,c);
-   uint8_t old[kFileBytes];std::memcpy(old,c,kOldHeaderBytes);std::memcpy(old+kOldHeaderBytes,c+kHeaderBytes,kRuleBytes);old[3]=1;
-   const size_t oldSize=n-2;const uint16_t k=checksum(old,oldSize-2);old[oldSize-2]=uint8_t(k&255);old[oldSize-1]=uint8_t(k>>8);
+   (void)n;uint8_t old[kFileBytes];std::memcpy(old,c,kOldHeaderBytes);std::memcpy(old+kOldHeaderBytes,c+kHeaderBytes,kOldRuleBytes);old[3]=1;
+   const size_t oldSize=kOldHeaderBytes+kOldRuleBytes+2;const uint16_t k=checksum(old,oldSize-2);old[oldSize-2]=uint8_t(k&255);old[oldSize-1]=uint8_t(k>>8);
    Book o;assert(decode(old,oldSize,o)&&o.count==1&&!std::strcmp(o.rules[0].name,"Wave lights")&&o.capPercent==50&&!o.direct.any());}
+  // A file from 0.2.236 to 0.2.244, with no phrases, still loads.
+  {Book b;b.count=2;b.rules[0]=starterRule();b.rules[1]=recipeRule(3);b.capPercent=50;b.direct.claim(Part::Knob);uint8_t c[kFileBytes];encode(b,c);
+   uint8_t old[kFileBytes];std::memcpy(old,c,kHeaderBytes);std::memcpy(old+kHeaderBytes,c+kHeaderBytes,kOldRuleBytes);std::memcpy(old+kHeaderBytes+kOldRuleBytes,c+kHeaderBytes+kRuleBytes,kOldRuleBytes);old[3]=2;
+   const size_t oldSize=kHeaderBytes+2*kOldRuleBytes+2;const uint16_t k=checksum(old,oldSize-2);old[oldSize-2]=uint8_t(k&255);old[oldSize-1]=uint8_t(k>>8);
+   Book o;assert(decode(old,oldSize,o)&&o.count==2&&!std::strcmp(o.rules[1].name,"Air theremin")&&o.direct.white==Part::Knob&&o.rules[0].say[0]==0&&o.rules[1].say[0]==0);}
+  // A phrase saves with its rule, and a file with anything strange in one is refused.
+  {Draft d;d.name("Welcome");d.addCond("motion","on",0);d.addSay("  Welcome back, friend! ");d.addSet("led",30);assert(d.usable()&&!std::strcmp(d.rule.say,"Welcome back, friend!")&&hasSay(d.rule));
+   Book b;b.count=1;b.rules[0]=d.rule;uint8_t c[kFileBytes];const size_t n=encode(b,c);assert(c[3]==3&&n==kHeaderBytes+kRuleBytes+2);
+   Book o;assert(decode(c,n,o)&&!std::strcmp(o.rules[0].say,d.rule.say)&&hasSay(o.rules[0])&&o.rules[0].action[0].out==Out::Say);
+   c[kHeaderBytes+kOldRuleBytes+2]=0x07;const uint16_t k=checksum(c,n-2);c[n-2]=uint8_t(k&255);c[n-1]=uint8_t(k>>8);Book x;assert(!decode(c,n,x));}
+  // What a rule can say is kept plain, and a rule can't say two things or nothing.
+  {Draft d;d.addSay("Say \"hello\"\\ \xD0\xBF{}");assert(!std::strcmp(d.rule.say,"Say hello")&&d.ok);d.addSay("again");assert(!d.ok);
+   Draft e;e.addSay("  \x01");assert(!e.ok&&e.rule.actions==0);
+   Draft f;f.addCond("motion","on",0);f.addSet("say",1);assert(!f.ok);
+   Draft g;g.addCond("motion","on",0);g.addFollow("say","knob",false);assert(!g.ok);
+   Draft h;h.addSay("This phrase goes on far longer than anyone would want to listen to");assert(std::strlen(h.rule.say)==kSayChars);
+   Rule silent;silent.conds=1;silent.actions=1;std::strcpy(silent.say,"Left over");assert(!hasSay(silent));
+   assert(sayHash("welcome")==sayHash("welcome")&&sayHash("welcome")!=sayHash("welcome!"));}
   // Every flipped byte and every short read is refused, and leaves the book alone.
   const size_t good=encode(book,bytes);
   for(size_t i=0;i<good;++i)for(int bit=0;bit<8;++bit){
@@ -500,6 +518,12 @@ void testJson(){
   assert(r.action[0].out==Out::StripColor&&r.action[0].how==How::Set&&r.action[1].how==How::Follow&&r.action[1].source==Sig::Knob);
   assert(parse(R"({"any":false,"when":[{"sensor":"motion","test":"on"}],"do":[{"output":"servo","oppose":"knob"}]})",r));
   assert(!r.any&&!std::strcmp(r.name,"Spoken rule")&&r.holdMs==2000&&r.action[0].how==How::FollowBack);
+  // A phrase comes back the same way, in place of a value.
+  { Rule r;assert(parse(R"({"name":"Hello","when":[{"sensor":"motion","test":"on"}],"do":[{"output":"led","set":30},{"output":"say","text":"welcome back"}]})",r));
+    assert(r.actions==2&&r.action[1].out==Out::Say&&!strcmp(r.say,"welcome back"));
+    char text[600];Text out(text,sizeof(text));ruleJson(r,out);Rule back;assert(parse(text,back)&&!strcmp(back.say,"welcome back")&&back.action[1].out==Out::Say);
+    assert(strstr(text,"\"text\":\"welcome back\""));
+    Rule none;assert(!parse(R"({"when":[{"sensor":"motion","test":"on"}],"do":[{"output":"say","text":"  "}]})",none));}
   // A rule written out reads back the same, because Claude gets it back to change.
   { char text[600]; Text out(text,sizeof(text)); Rule start=recipeRule(5); start.any=false; start.action[1]=oppose(Out::Servo,Sig::Light); ruleJson(start,out);
     Rule back; assert(parse(text,back)); assert(!strcmp(back.name,start.name)&&back.any==start.any&&back.holdMs==start.holdMs&&back.conds==start.conds&&back.actions==start.actions);

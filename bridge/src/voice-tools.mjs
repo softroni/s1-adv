@@ -14,6 +14,8 @@ export const LAB_RULE_POLICY =
   "strip_bright and lamp_bright (0 to 100), strip_length (0 to 30), speaker (200 to 2000 Hz), " +
   "and relay_1, relay_2, lamp_power, ac_tcl and ac_daikin (1 or 0). " +
   "Each do line has set, or follow or oppose with a sensor name, except the 1 or 0 outputs, which can only set. " +
+  "The output say speaks a phrase once each time the rule starts firing, and takes text instead of set, like " +
+  "{\"output\":\"say\",\"text\":\"welcome back\"}, in English, up to 40 letters, once in a rule. " +
   "Use at most 3 when lines and 3 do lines, any false when all must be true, and a name of 15 letters at most. " +
   "A wave or a hand means distance under 30. hold_ms is how long it keeps going afterwards, up to 30000. " +
   "The owner reviews every rule before it is saved, so never say it is running.";

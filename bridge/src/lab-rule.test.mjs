@@ -14,7 +14,7 @@ test("the prompt names exactly the sensors and outputs the firmware accepts", as
   const sensors = table("SigInfo kSigs");
   const outputs = table("OutInfo kOuts");
   assert.equal(sensors.length, 11);
-  assert.equal(outputs.length, 12);
+  assert.equal(outputs.length, 13);
   for (const key of [...sensors, ...outputs]) {
     assert.match(LAB_RULE_POLICY, new RegExp(`\\b${key}\\b`, "u"), key);
   }
@@ -57,6 +57,13 @@ test("a rule with nothing to watch or nothing to do goes no further", () => {
   assert.equal(sanitizeDeviceAction({ type: "lab.rule", when: [{ sensor: "knob", test: "changes" }] }), null);
   assert.equal(sanitizeDeviceAction({ type: "lab.rule", when: "knob", do: {} }), null);
   assert.equal(sanitizeDeviceAction({ type: "lab.delete_everything" }), null);
+});
+
+test("a phrase for a rule to speak gets through, and stays short", () => {
+  const rule = sanitizeDeviceAction({ type: "lab.rule", name: "Welcome", when: [{ sensor: "motion", test: "on" }],
+    do: [{ output: "say", text: "welcome back" }, { output: "say", text: "x".repeat(200) }] });
+  assert.deepEqual(rule.do[0], { output: "say", text: "welcome back" });
+  assert.equal(rule.do[1].text.length, 40);
 });
 
 test("the Lab's screens can be opened by name", () => {

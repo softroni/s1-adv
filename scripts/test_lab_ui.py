@@ -270,6 +270,9 @@ struct SdClass {
 } SD;
 bool gSdReady = true, gImuEnabled = true;
 bool ensureDirRecursive(SdClass&, const char*) { return !gDisk.broken; }
+int gSpeechFetches = 0, gSpeechPlays = 0; bool gSpeechWorks = true; std::string gSpeechPath, gSpeechText;
+bool speechToWavFile(const String& text, const String& path) { ++gSpeechFetches; gSpeechText = text; if (!gSpeechWorks) return false; gDisk.files[std::string(path)] = {1, 2}; return true; }
+void render() {}
 struct Keyboard_Class { struct KeysState { bool ctrl = false, alt = false, opt = false, enter = false, del = false; }; };
 enum class UiMode { Home, NfcNotes, Mesh, SmartLamp, IrRemote, LabDevices, LabRules };
 UiMode gUiMode = UiMode::Home;
@@ -278,6 +281,7 @@ bool gSubmitting = false, gThinking = false, gWifiReady = true;
 String gHubHost = "bridge";
 int gVoiceTaps = 0;
 void toggleVoiceByTap() { ++gVoiceTaps; if (gRecording) { gRecording = false; gThinking = true; } else gRecording = true; }
+bool startPlaybackStreamFromWavFile(const String& path, const String&) { ++gSpeechPlays; gSpeechPath = path; gPlaybackActive = true; return true; }
 // The module itself runs in test_voice_tool.py. This is what a tool's screen sees of it.
 struct VoiceToolAnswer { bool ok = false; String heard, reply, actionsJson, problem; };
 bool gVoiceStarting = false;
@@ -783,6 +787,38 @@ void testSay() {
     // A rule from the chat is a single offer again, whatever came before.
     labOfferRule(d.rule); assert(gLabOfferCount == 1); renderLabUi(); assert(!gCanvas.shows(" OF ")); esc();
     gLabUi.view = LabView::Rules; goToRow(gLabBook.count + 1);
+  }
+  // A rule that talks: the speech is made when it's saved, and plays once each time it starts firing.
+  {
+    M5.Imu.ay = 0;
+    lab::Draft d; d.name("Tip hello"); d.addCond("tilt", "over", 45); d.addSay("Hello there"); d.addSet("led", 30); d.hold(0); assert(d.usable());
+    const int count = gLabBook.count, fetches = gSpeechFetches;
+    labOfferRule(d.rule); show("say-offer-speech"); assert(gCanvas.shows("Say \"Hello there\""));
+    gLabFetchingSpeech = true; show("say-fetching"); assert(gCanvas.shows("Making its voice")); gLabFetchingSpeech = false;
+    key(ENTER); assert(gLabBook.count == count + 1 && gSpeechFetches == fetches + 1 && gSpeechText == "Hello there");
+    const std::string path = labSayPath("Hello there"); assert(gDisk.files.count(path) && path.rfind("/lab/say/", 0) == 0);
+    // Saving the same words again costs nothing.
+    labFetchSpeech(gLabBook.rules[count]); assert(gSpeechFetches == fetches + 1);
+    // Playing: nothing until it fires, then once, however long it stays true.
+    const int plays = gSpeechPlays; keys("p"); assert(gLabPlaying); gLabUi.playRule = count; run(300); assert(gSpeechPlays == plays);
+    show("say-flow"); assert(gCanvas.shows("Hello there"));
+    M5.Imu.ay = 1; run(300); assert(gSpeechPlays == plays + 1 && gSpeechPath == path && gPlaybackActive && gLabStates[count].active);
+    gPlaybackActive = false; run(500); assert(gSpeechPlays == plays + 1);
+    M5.Imu.ay = 0; run(300); assert(!gLabStates[count].active);
+    M5.Imu.ay = 1; run(300); assert(gSpeechPlays == plays + 2);  // Firing again speaks again.
+    gPlaybackActive = false; M5.Imu.ay = 0; run(200); labStopPlaying(); gLabUi.view = LabView::Rules;
+    // Lost speech comes back before playing, and if it can't, playing still starts.
+    gDisk.files.erase(path); gSpeechWorks = false; const int tries = gSpeechFetches; keys("p"); assert(gSpeechFetches == tries + 1 && gLabPlaying && !gDisk.files.count(path) && !gLabFetchingSpeech); labStopPlaying(); gLabUi.view = LabView::Rules; gSpeechWorks = true;
+    // The steps keep a phrase, and only offer Say to a rule with one, skipping what makes no sense.
+    labWizardStart(count, nullptr); gLabWizard.step = LabStep::Out; assert(labWizardRowCount() == lab::kOutCount); assert(std::string(labWizardRow(lab::kOutCount - 1)) == "Say");
+    gLabWizard = LabWizard{}; gLabUi.view = LabView::Rules;
+    labWizardStart(-1, nullptr); gLabWizard.step = LabStep::Out; assert(labWizardRowCount() == lab::kOutCount - 1); gLabWizard = LabWizard{}; gLabUi.view = LabView::Rules;
+    labWizardStart(count, nullptr); for (int i = 0; i < 40 && gLabUi.view == LabView::Wizard; ++i) key(ENTER);
+    assert(gLabUi.view == LabView::Rules && !std::strcmp(gLabBook.rules[count].say, "Hello there") && lab::hasSay(gLabBook.rules[count]) && gLabBook.rules[count].actions == 2);
+    // Taking Say off a rule drops its phrase.
+    lab::Rule plain = gLabBook.rules[count]; plain.action[0] = plain.action[1]; plain.actions = 1; labWizardStart(count, &plain); for (int i = 0; i < 40 && gLabUi.view == LabView::Wizard; ++i) key(ENTER); assert(gLabBook.rules[count].say[0] == 0);
+    gLabUi.ruleRow = count; key('x'); key('x'); assert(gLabBook.count == count);
+    goToRow(gLabBook.count + 1);
   }
   // Set a part by voice: only the one on the screen, only something small, only from the Lab.
   {

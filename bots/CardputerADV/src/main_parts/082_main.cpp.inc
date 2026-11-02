@@ -102,7 +102,8 @@ String labCondText(const lab::Cond& cond) {
   if (info.onOff) return text + (cond.op == lab::Op::Above ? " on" : " off");
   return text + (cond.op == lab::Op::Below ? " under " : " over ") + labValueText(cond.sig, cond.value);
 }
-String labActionText(const lab::Action& action) {
+String labActionText(const lab::Action& action, const char* say) {
+  if (action.out == Out::Say) return String("Say \"") + say + "\"";
   const lab::OutInfo& info = lab::info(action.out);
   String text = info.name;
   if (action.how != lab::How::Set) {
@@ -855,8 +856,9 @@ void renderLabOffer() {
     labTextAt(&fonts::Font2, 6, y, fitCurrentFontToWidth(String(!i ? "If " : rule.any ? "or " : "and ") + labCondText(rule.cond[i]), 228), same ? kLabMuted : kLabCyan);
   }
   for (uint8_t i = 0; i < rule.actions; ++i, y += 15) {
-    const bool same = was && i < was->actions && labSameAction(rule.action[i], was->action[i]);
-    labTextAt(&fonts::Font2, 6, y, fitCurrentFontToWidth(labActionText(rule.action[i]), 228), same ? kLabMuted : kLabLime);
+    const bool same = was && i < was->actions && labSameAction(rule.action[i], was->action[i]) &&
+                      (rule.action[i].out != Out::Say || !strcmp(rule.say, was->say));
+    labTextAt(&fonts::Font2, 6, y, fitCurrentFontToWidth(labActionText(rule.action[i], rule.say), 228), same ? kLabMuted : kLabLime);
   }
   labTextAt(&fonts::Font0, 6, 117, String("Name: ") + rule.name, kLabMuted);
   labKeys(gLabOfferCount > 1 ? String(kLabArrowLeftRight) + " next  ENTER save  E edit  ESC drop" : String("ENTER save  E edit  ESC drop it"));
@@ -870,7 +872,8 @@ int labWizardRowCount() {
   switch (w.step) {
     case LabStep::Sig: case LabStep::Source: return lab::kSigCount;
     case LabStep::Op: return lab::info(w.rule.cond[w.cond].sig).onOff ? 2 : 3;
-    case LabStep::Out: return lab::kOutCount;
+    // A phrase has to be spoken into being, so Say is only offered to a rule that has one.
+    case LabStep::Out: return lab::kOutCount - (w.rule.say[0] ? 0 : 1);
     case LabStep::How: return lab::info(w.rule.action[w.action].out).onOff ? 2 : 3;
     case LabStep::MoreConds: case LabStep::MoreActions: case LabStep::Join: return 2;
     default: return 0;
@@ -957,6 +960,7 @@ void labWizardFinish() {
   LabWizard& w = gLabWizard;
   w.rule.conds = w.keepConds;
   w.rule.actions = w.keepActions;
+  if (!lab::hasSay(w.rule)) w.rule.say[0] = '\0';
   if (!w.rule.name[0]) snprintf(w.rule.name, sizeof(w.rule.name), "Rule %d", gLabBook.count + 1);
   if (w.index >= 0) {
     gLabBook.rules[w.index] = w.rule;
@@ -967,6 +971,7 @@ void labWizardFinish() {
     ++gLabBook.count;
   }
   labSaveBook();
+  labFetchSpeech(w.rule);
   gLabUi.ruleTop = 0;
   labKeepRowShown(gLabUi.ruleRow, gLabUi.ruleTop, kLabListRows);
   gLabUi.view = LabView::Rules;
@@ -1035,7 +1040,13 @@ void labWizardPick() {
       action.out = static_cast<Out>(pick);
       const lab::OutInfo& info = lab::info(action.out);
       action.value = lab::clampTo<int16_t>(action.value, info.lo, info.hi);
-      labWizardGo(LabStep::How);
+      if (action.out == Out::Say) {
+        action.how = lab::How::Set;
+        action.value = 1;
+        labWizardActionLine();
+      } else {
+        labWizardGo(LabStep::How);
+      }
       break;
     }
     case LabStep::How:
@@ -1225,7 +1236,10 @@ void renderLabFlow(int index) {
     labTextAt(&fonts::Font0, kRight + 5, y + 3, fitCurrentFontToWidth(lab::info(action.out).name, kBoxW - 6), kLabMuted);
     int16_t value = 0;
     const bool known = firing && lab::actionValue(action, gLabSeen, value);
-    if (known && (action.out == Out::StripColor || action.out == Out::Led)) d.fillRoundRect(kRight + 5, y + (h > 30 ? 16 : 12), kBoxW - 10, h > 30 ? 16 : 12, 3, labHueColor(value));
+    if (action.out == Out::Say) {
+      gCanvas.setFont(&fonts::Font0);
+      labTextAt(&fonts::Font0, kRight + 5, y + (h > 30 ? 19 : 13), fitCurrentFontToWidth(rule.say, kBoxW - 8), known ? TFT_WHITE : kLabSoft);
+    } else if (known && (action.out == Out::StripColor || action.out == Out::Led)) d.fillRoundRect(kRight + 5, y + (h > 30 ? 16 : 12), kBoxW - 10, h > 30 ? 16 : 12, 3, labHueColor(value));
     else labTextAt(&fonts::Font2, kRight + 5, y + (h > 30 ? 17 : 11), known ? labOutText(action.out, value) : String("--"), TFT_WHITE);
   }
   d.fillCircle(cx, cy, kCircle, live);
@@ -1242,7 +1256,17 @@ void renderLabFlow(int index) {
   if (practicing) labKeys(String(kLabArrowUpDown) + " change  " + kLabArrowLeftRight + " sensor  ESC end practice");
   else labKeys(String(kLabArrowLeftRight) + " rule T practice SPACE pause ESC stop");
 }
+void renderLabFetching() {
+  labHead("Rules that talk", launcher_icons::kMic, kLabLime, "SAVING", kLabAmber);
+  labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Making its voice", TFT_WHITE);
+  labTextAt(&fonts::Font0, 6, 52, "It's kept on the card, so it can", kLabSoft);
+  labTextAt(&fonts::Font0, 6, 63, "play with no network.", kLabSoft);
+}
 void renderLabUi() {
+  if (gLabFetchingSpeech) {
+    renderLabFetching();
+    return;
+  }
   // A recording can start from a list, so what it's doing shows over whatever is underneath.
   const bool voiceBusy = voiceToolStarting() || voiceToolListening() || voiceToolWorking();
   switch (voiceBusy ? LabView::Say : gLabUi.view) {
@@ -1423,6 +1447,7 @@ void labRemoveRule(int index) {
   labKeepRowShown(gLabUi.ruleRow, gLabUi.ruleTop, kLabListRows);
 }
 void labStartPlaying() {
+  for (uint8_t i = 0; i < gLabBook.count; ++i) labFetchSpeech(gLabBook.rules[i]);
   gLabUi.playRule = 0;
   gLabUi.practicing = false;
   gLabUi.practiceCond = 0;
@@ -1759,6 +1784,7 @@ bool handleLabKey(char key, const Keyboard_Class::KeysState& keys) {
         gLabBook.rules[gLabOfferChanges] = gLabOffer;
         ui.ruleRow = gLabOfferChanges;
         labSaveBook();
+        labFetchSpeech(gLabOffer);
         ui.ruleTop = 0;
         labKeepRowShown(ui.ruleRow, ui.ruleTop, kLabListRows);
         ui.view = LabView::Rules;
@@ -1767,6 +1793,7 @@ bool handleLabKey(char key, const Keyboard_Class::KeysState& keys) {
         ui.ruleRow = gLabBook.count;
         ++gLabBook.count;
         labSaveBook();
+        labFetchSpeech(gLabOffer);
         ui.ruleTop = 0;
         labKeepRowShown(ui.ruleRow, ui.ruleTop, kLabListRows);
         ui.view = LabView::Rules;

@@ -286,6 +286,12 @@ and Esc drops it. If it can't make a rule, the screen says what it needs and wha
 out of the chat, though a rule that's asked for in chat arrives the same way. It needs Wi-Fi and the
 bridge.
 
+A rule can **talk**. Say or ask for something like "when someone walks in, say welcome back". The
+phrase is spoken once each time the rule starts firing, and up to 40 letters fit, once in a rule.
+Its speech is made when you save the rule and kept in `/lab/say` on the SD card, so it plays with no
+network. Sensors and rules wait while it speaks, and anything already on stays on. Without a card a
+rule can't speak. The steps can keep or remove a phrase, but only speech can add one.
+
 **Change a rule** by talking to it. Pick a rule in the list, tap Alt and say what should be different,
 for example "make it stay on longer" or "only when it's dark". Claude sees the rule as it is now and
 sends it back. What changed stands out and the rest is grey. Enter replaces the old rule, E walks

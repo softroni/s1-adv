@@ -15,7 +15,8 @@ inline bool ruleFromJson(JsonObjectConst json, Rule& out) {
   }
   for (JsonObjectConst line : json["do"].as<JsonArrayConst>()) {
     const char* output = line["output"] | "";
-    if (!line["follow"].isNull()) draft.addFollow(output, line["follow"] | "", false);
+    if (!line["text"].isNull()) draft.addSay(line["text"] | "");
+    else if (!line["follow"].isNull()) draft.addFollow(output, line["follow"] | "", false);
     else if (!line["oppose"].isNull()) draft.addFollow(output, line["oppose"] | "", true);
     else if (!line["set"].isNull()) draft.addSet(output, line["set"] | 0);
     else draft.ok = false;

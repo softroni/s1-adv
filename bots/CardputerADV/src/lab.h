@@ -35,7 +35,7 @@ constexpr const SigInfo& info(Sig sig) { return kSigs[static_cast<uint8_t>(sig)]
 // --- What can be driven ---------------------------------------------------------------------
 // New outputs go at the end, because saved rules store these numbers.
 enum class Out : uint8_t { Servo, StripColor, StripBright, StripLength, Relay1, Relay2, Led, Tone, LampPower,
-                           LampBright, AcTcl, AcDaikin, Count };
+                           LampBright, AcTcl, AcDaikin, Say, Count };
 constexpr uint8_t kOutCount = static_cast<uint8_t>(Out::Count);
 
 constexpr int kStripLeds = 30;
@@ -53,6 +53,7 @@ constexpr OutInfo kOuts[kOutCount] = {
     {"lamp_bright", "Lamp bright", "%", 0, 100, 5, false},
     {"ac_tcl", "TCL AC", "", 0, 1, 1, true},
     {"ac_daikin", "Daikin AC", "", 0, 1, 1, true},
+    {"say", "Say", "", 0, 1, 1, true},  // Speaks the rule's phrase once, each time it starts firing.
 };
 constexpr const OutInfo& info(Out out) { return kOuts[static_cast<uint8_t>(out)]; }
 
@@ -153,7 +154,7 @@ class Practice {
 };
 
 // --- Rules ----------------------------------------------------------------------------------
-constexpr uint8_t kMaxRules = 8, kMaxConds = 3, kMaxActions = 3, kNameChars = 15;
+constexpr uint8_t kMaxRules = 8, kMaxConds = 3, kMaxActions = 3, kNameChars = 15, kSayChars = 40;
 constexpr uint16_t kMaxHoldMs = 30000, kHoldStepMs = 500;
 
 enum class Op : uint8_t { Below, Above, Changes };
@@ -178,7 +179,25 @@ struct Rule {
   uint16_t holdMs = 2000;
   Cond cond[kMaxConds];
   Action action[kMaxActions];
+  char say[kSayChars + 1] = "";  // What Out::Say speaks. Travels with the rule, so it can't go astray.
 };
+
+inline bool hasSay(const Rule& rule) {
+  if (!rule.say[0]) return false;
+  for (uint8_t i = 0; i < rule.actions; ++i) if (rule.action[i].out == Out::Say) return true;
+  return false;
+}
+// Plain enough for a file, a header and JSON, and for speech to read out.
+constexpr bool sayAllowed(char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ' ' || c == '.' ||
+         c == ',' || c == '!' || c == '?' || c == '\'' || c == '-';
+}
+// Names the file a phrase's speech is kept in, so the same words share one.
+inline uint32_t sayHash(const char* text) {
+  uint32_t hash = 2166136261U;
+  for (; *text; ++text) hash = (hash ^ static_cast<uint8_t>(*text)) * 16777619U;
+  return hash;
+}
 
 // An on or off signal is "above 0" for on and "below 1" for off.
 inline void setOnOff(Cond& cond, bool on) {
@@ -387,9 +406,23 @@ class Draft {
     }
     rule.cond[rule.conds++] = cond;
   }
+  void addSay(const char* text) {
+    size_t length = 0;
+    for (const char* c = text; c && *c && length < kSayChars; ++c) {
+      if (sayAllowed(*c) && (length || *c != ' ')) rule.say[length++] = *c;
+    }
+    while (length && rule.say[length - 1] == ' ') --length;
+    rule.say[length] = '\0';
+    if (!length || rule.actions >= kMaxActions || hasSay(rule)) { ok = false; return; }
+    Action action;
+    action.out = Out::Say;
+    action.how = How::Set;
+    action.value = 1;
+    rule.action[rule.actions++] = action;
+  }
   void addSet(const char* output, int value) {
     Action action;
-    if (rule.actions >= kMaxActions || !outFromKey(output, action.out)) { ok = false; return; }
+    if (rule.actions >= kMaxActions || !outFromKey(output, action.out) || action.out == Out::Say) { ok = false; return; }
     const OutInfo& o = info(action.out);
     action.how = How::Set;
     action.value = clampTo<int16_t>(static_cast<int16_t>(clampTo<int>(value, -32000, 32000)), o.lo, o.hi);
@@ -398,7 +431,7 @@ class Draft {
   void addFollow(const char* output, const char* sensor, bool backwards) {
     Action action;
     if (rule.actions >= kMaxActions || !outFromKey(output, action.out) || !sigFromKey(sensor, action.source) ||
-        info(action.out).onOff) {
+        info(action.out).onOff) {  // Which includes Say.
       ok = false;
       return;
     }
@@ -446,7 +479,8 @@ inline void ruleJson(const Rule& rule, Text& out) {
   for (uint8_t i = 0; i < rule.actions; ++i) {
     const Action& action = rule.action[i];
     out.add(i ? ",{\"output\":\"" : "{\"output\":\"").add(info(action.out).key).add("\",");
-    if (action.how == How::Set) out.add("\"set\":").add(action.value).add("}");
+    if (action.out == Out::Say) out.add("\"text\":\"").add(rule.say).add("\"}");
+    else if (action.how == How::Set) out.add("\"set\":").add(action.value).add("}");
     else out.add(action.how == How::Follow ? "\"follow\":\"" : "\"oppose\":\"").add(info(action.source).key).add("\"}");
   }
   out.add("]}");
@@ -677,8 +711,9 @@ class RemoteSwitch {
 // The file holds only these numbers, and every one is checked on the way back in, so a damaged
 // card can't point a rule at something that doesn't exist.
 constexpr uint8_t kFileMagic[3] = {'S', 'L', 'B'};
-constexpr uint8_t kFileVersion = 2;     // Version 1 had no Direct, and still loads.
-constexpr size_t kRuleBytes = kNameChars + 1 + 6 + kMaxConds * 4 + kMaxActions * 5;
+constexpr uint8_t kFileVersion = 3;     // Version 1 had no Direct and 2 no phrases, and both still load.
+constexpr size_t kOldRuleBytes = kNameChars + 1 + 6 + kMaxConds * 4 + kMaxActions * 5;
+constexpr size_t kRuleBytes = kOldRuleBytes + kSayChars + 1;
 constexpr size_t kOldHeaderBytes = 4 + 1 + pbhub::kPorts + 3;
 constexpr size_t kHeaderBytes = kOldHeaderBytes + 2;
 constexpr size_t kFileBytes = kHeaderBytes + kMaxRules * kRuleBytes + 2;
@@ -737,6 +772,7 @@ inline size_t encode(const Book& book, uint8_t* out) {
       put16(action.value);
       put(static_cast<uint8_t>(action.source));
     }
+    for (uint8_t c = 0; c <= kSayChars; ++c) put(static_cast<uint8_t>(rule.say[c]));
   }
   const uint16_t sum = checksum(out, at);
   put(static_cast<uint8_t>(sum & 0xFF));
@@ -748,13 +784,14 @@ inline bool decode(const uint8_t* bytes, size_t length, Book& book) {
   if (length < 6 || length > kFileBytes) return false;
   if (memcmp(bytes, kFileMagic, sizeof(kFileMagic)) != 0) return false;
   const uint8_t version = bytes[3];
-  if (version != 1 && version != kFileVersion) return false;
+  if (version < 1 || version > kFileVersion) return false;
   const size_t headerBytes = version == 1 ? kOldHeaderBytes : kHeaderBytes;
+  const size_t ruleBytes = version >= 3 ? kRuleBytes : kOldRuleBytes;
   if (length < headerBytes + 2) return false;
   const uint16_t sum = static_cast<uint16_t>(bytes[length - 2] | (bytes[length - 1] << 8));
   if (checksum(bytes, length - 2) != sum) return false;
   const uint8_t count = bytes[4];
-  if (count > kMaxRules || length != headerBytes + count * kRuleBytes + 2) return false;
+  if (count > kMaxRules || length != headerBytes + count * ruleBytes + 2) return false;
   Book in;
   in.count = count;
   size_t at = 5;
@@ -811,6 +848,13 @@ inline bool decode(const uint8_t* bytes, size_t length, Book& book) {
       action.out = static_cast<Out>(out);
       action.how = static_cast<How>(how);
       action.source = static_cast<Sig>(source);
+    }
+    if (version >= 3) {
+      for (uint8_t c = 0; c <= kSayChars; ++c) {
+        rule.say[c] = static_cast<char>(get());
+        if (rule.say[c] && !sayAllowed(rule.say[c])) return false;
+      }
+      rule.say[kSayChars] = '\0';
     }
   }
   book = in;
