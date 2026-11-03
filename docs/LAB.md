@@ -36,7 +36,7 @@ More that needs nothing plugged in:
 
 - **A sequence.** Open **Sequences**, pick **Hello** and press **P**. It plays on the Cardputer's own LED and speaker.
 - **Tilt.** Open it in **Devices** and turn the page for a spirit level and a ball to roll into a hole.
-- **Speaker.** Open it in **Devices** and press **N** for a piano.
+- **Speaker.** Open it in **Devices** and turn the page for a piano.
 - **Cardputer LED.** Open it in **Devices** and change its color.
 
 ## Connect a part
@@ -122,7 +122,7 @@ The dot beside each device tells you what the Lab knows:
 </tr>
 <tr>
 <td><img src="assets/lab/led.png" alt="Cardputer LED screen, on and green" width="100%"><br><sub><b>Cardputer LED.</b> Built in. Left and right change the color, and Space turns it off or on.</sub></td>
-<td><img src="assets/lab/speaker.png" alt="Speaker screen at 930 Hz" width="100%"><br><sub><b>Speaker.</b> Built in. Left and right change the pitch, and Enter beeps.</sub></td>
+<td><img src="assets/lab/speaker.png" alt="Speaker screen at 930 Hz" width="100%"><br><sub><b>Speaker.</b> Built in. Up and down change the pitch, and Enter beeps.</sub></td>
 <td><img src="assets/lab/lamp.png" alt="smartLamp screen saying it's found" width="100%"><br><sub><b>smartLamp.</b> It looks for one on your Wi-Fi. Enter opens the smartLamp app.</sub></td>
 </tr>
 <tr>
@@ -136,7 +136,7 @@ The label at the top right tells you how much the Lab really knows. **ANSWERING*
 
 ### More pages
 
-Most parts have more than one page. The dots under the title show where you are. Left and right turn the page, or **N** on the Servo and Speaker, where the arrows already do something.
+Most parts have more than one page. The dots under the title show where you are. Left and right turn the page, or **N** on the Servo, where the arrows already do something. **N** works on the others too.
 
 <table>
 <tr>
@@ -156,11 +156,11 @@ Most parts have more than one page. The dots under the title show where you are.
 </tr>
 <tr>
 <td width="33%"><img src="assets/lab/level.png" alt="A spirit level with the bubble off center" width="100%"><br><sub><b>Tilt: level.</b> A spirit level for both directions.</sub></td>
-<td width="33%"><img src="assets/lab/roll.png" alt="A ball and a hole" width="100%"><br><sub><b>Tilt: roll.</b> Tip the Cardputer to roll the ball into the hole.</sub></td>
+<td width="33%"><img src="assets/lab/roll.png" alt="A ball and a hole" width="100%"><br><sub><b>Tilt: roll.</b> Tip the Cardputer and the ball rolls downhill. Get it into the hole.</sub></td>
 <td width="33%"><img src="assets/lab/moves.png" alt="A list of servo moves: Sweep, Wave and Tick" width="100%"><br><sub><b>Servo: moves.</b> Press <b>N</b>. Up and down pick a motion, left and right pick one of three speeds, and Enter starts it.</sub></td>
 </tr>
 <tr>
-<td width="33%"><img src="assets/lab/piano.png" alt="Eight piano keys with one pressed" width="100%"><br><sub><b>Speaker: piano.</b> Press <b>N</b>, then play keys 1 to 8.</sub></td>
+<td width="33%"><img src="assets/lab/piano.png" alt="Eight piano keys with one pressed" width="100%"><br><sub><b>Speaker: piano.</b> Turn the page, then play keys 1 to 8.</sub></td>
 </tr>
 </table>
 

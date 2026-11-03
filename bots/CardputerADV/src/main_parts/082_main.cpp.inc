@@ -710,8 +710,8 @@ void renderLabSpeaker() {
   labDrawHeadFor(Dev::Speaker, kLabLime, "BUILT IN", kLabSoft);
   labTextCenter(&fonts::Font6, 120, 34, String(gLabUi.toneHz), TFT_WHITE);
   labTextCenter(&fonts::Font2, 120, 88, "Hz", kLabMuted);
-  labTextCenter(&fonts::Font0, 120, 106, "N opens the piano", kLabAmber);
-  labKeys(String(kLabArrowLeftRight) + " pitch  ENTER beep  ESC back");
+  labTextCenter(&fonts::Font0, 120, 106, "Turn the page for a piano", kLabAmber);
+  labKeys(labPageKeys("") + kLabArrowUpDown + " pitch  ENTER beep  ESC back");
 }
 // Says what is wrong as far as the bus can tell: this unit, or the whole port.
 void renderLabMissing(Dev dev) {
@@ -1542,8 +1542,9 @@ void labDeviceKey(char key, char lower, bool left, bool right, bool up, bool dow
       else labDriveOff(Out::Led);
       return;
     case Dev::Speaker:
-      if (left || right) gLabUi.toneHz = lab::clampTo(gLabUi.toneHz + (right ? kLabToneStep : -kLabToneStep), 200, 2000);
-      if (enter || left || right) {
+      // Up and down, because left and right turn the page.
+      if (up || down) gLabUi.toneHz = lab::clampTo(gLabUi.toneHz + (up ? kLabToneStep : -kLabToneStep), 200, 2000);
+      if (enter || up || down) {
         gLabUi.beepUntilMs = millis() + kLabBeepMs;
         labDriveSet(Out::Tone, gLabUi.toneHz);
       }

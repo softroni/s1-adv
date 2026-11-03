@@ -55,7 +55,7 @@ void labBeep(int hz, uint32_t ms) {
   gLabUi.beepUntilMs = millis() + ms;
   labDriveSet(Out::Tone, hz);
 }
-bool labArrowsTurnPages(Dev dev) { return dev != Dev::Servo && dev != Dev::Speaker; }
+bool labArrowsTurnPages(Dev dev) { return dev != Dev::Servo; }
 
 // --- Getting between pages -------------------------------------------------------------------
 int labDevPages(Dev dev) {
@@ -386,8 +386,10 @@ void renderLabRoll() {
 }
 void labStepRoll() {
   LabPlay& p = gLabPlay;
-  p.speedX = (p.speedX + gLabTiltSide * 0.03f) * 0.97f;
-  p.speedY = (p.speedY - gLabInputs.get(Sig::Tilt).value * 0.03f) * 0.97f;
+  // Downhill, as found on the Cardputer: a positive side reading has its left edge down, and a
+  // positive front-back one its near edge, so the ball goes left and down for those.
+  p.speedX = (p.speedX - gLabTiltSide * 0.03f) * 0.97f;
+  p.speedY = (p.speedY + gLabInputs.get(Sig::Tilt).value * 0.03f) * 0.97f;
   p.ballX += p.speedX;
   p.ballY += p.speedY;
   if (p.ballX < 5.0f || p.ballX > kLabArenaW - 6.0f) {
@@ -454,7 +456,7 @@ void renderLabPiano() {
     labTextCenter(&fonts::Font0, x + 13, 90, String(i + 1), kLabDim);
   }
   labTextAt(&fonts::Font0, 6, 108, "Play the number keys", kLabAmber);
-  labKeys("1 to 8 play  N back  ESC out");
+  labKeys(labPageKeys("1 to 8 play  ESC out"));
 }
 
 // --- Stepping and keys ------------------------------------------------------------------------

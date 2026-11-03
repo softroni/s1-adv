@@ -469,7 +469,7 @@ void testDevices() {
   pickDevice(Dev::Hub); show("hub"); assert(gCanvas.shows("Mini Angle")); esc();
   pickDevice(Dev::Tilt); run(100); show("tilt"); esc();
   pickDevice(Dev::Led); keys(" "); assert(gLabUi.ledOn && gLed.g > 0); show("led"); keys("/"); esc(); assert(gLed.r == 0 && gLed.g == 0 && gLed.b == 0);
-  pickDevice(Dev::Speaker); keys("/"); assert(M5Cardputer.Speaker.tones > 0 && M5Cardputer.Speaker.hz == 930); show("speaker");
+  pickDevice(Dev::Speaker); keys(";"); assert(M5Cardputer.Speaker.tones > 0 && M5Cardputer.Speaker.hz == 930 && gLabUi.page == 0); show("speaker");
   run(600); assert(!gLabDrive[uint8_t(Out::Tone)].on); esc();
 
   // GPS: says when nothing's there, then shows the Cap's fix.
@@ -547,19 +547,24 @@ void testPages() {
   key('g'); assert(gLabPlay.guard == LabGuard::Off && !tone()); run(100); assert(!tone());
   // Leaving the page stops the alarm too.
   key('g'); gLabPlay.guardMs -= 6000; run(100); gHubUnit.level[motion] = 1; run(200); assert(tone()); key(RIGHT); assert(!tone()); gHubUnit.level[motion] = 0; run(300); assert(!tone()); show("page-motion-graph"); assert(gCanvas.shows("LAST 30 SEC")); esc();
-  // Tilt: flat is level, and rolling the ball into the hole scores.
+  // Tilt: flat is level, and rolling the ball into the hole scores. The ball rolls downhill, and on
+  // the Cardputer a positive side reading is its left edge down and a positive front-back one its near edge.
   M5.Imu.ax = 0; M5.Imu.ay = 0; pickDevice(Dev::Tilt); key(RIGHT); run(300); show("page-level"); assert(gCanvas.shows("Level"));
-  M5.Imu.ax = 0.34f; M5.Imu.ay = -0.26f; run(300); show("page-level-tilted"); assert(gCanvas.shows("Tilted") && gLabTiltSide == 19); key(RIGHT); run(100);
-  { const float startX = gLabPlay.ballX; run(600); assert(gLabPlay.ballX > startX); run(4000); assert(gLabPlay.ballX <= kLabArenaW - 6.0f && gLabPlay.ballX >= 5.0f && gLabPlay.ballY <= kLabArenaH - 6.0f && gLabPlay.ballY >= 5.0f); }
-  gLabPlay.targetX = int(gLabPlay.ballX); gLabPlay.targetY = int(gLabPlay.ballY); run(100); assert(gLabPlay.goals == 1); show("page-roll"); assert(gCanvas.shows("1 GOAL")); M5.Imu.ax = 0; M5.Imu.ay = 0.5f; run(200); esc();
+  M5.Imu.ax = 0.34f; M5.Imu.ay = -0.26f; run(300); show("page-level-tilted"); assert(gCanvas.shows("Tilted") && gLabTiltSide == 19); key(RIGHT);
+  gLabPlay.targetX = kLabArenaW - 12; gLabPlay.targetY = kLabArenaH - 12; run(100);  // Out of its way, so it can't score yet.
+  { const float startX = gLabPlay.ballX, startY = gLabPlay.ballY; run(600); assert(gLabPlay.ballX < startX && gLabPlay.ballY < startY); run(4000); assert(gLabPlay.ballX <= kLabArenaW - 6.0f && gLabPlay.ballX >= 5.0f && gLabPlay.ballY <= kLabArenaH - 6.0f && gLabPlay.ballY >= 5.0f); }
+  assert(gLabPlay.goals == 0); gLabPlay.targetX = int(gLabPlay.ballX); gLabPlay.targetY = int(gLabPlay.ballY); run(100); assert(gLabPlay.goals == 1); show("page-roll"); assert(gCanvas.shows("1 GOAL")); M5.Imu.ax = 0; M5.Imu.ay = 0.5f; run(200); esc();
   // Servo: N, because its arrows turn it. A move runs by itself, and stops with the page.
   const int servo = ports(lab::Part::Servo); pickDevice(Dev::Servo); keys("c"); key('n'); run(100); show("page-moves"); assert(gLabUi.page == 1 && gCanvas.shows("MOVES") && gCanvas.shows("Sweep") && gCanvas.shows("Tick"));
   key(ENTER); assert(gLabPlay.moving); { std::set<int> seen; for (int i = 0; i < 100; ++i) { run(40); seen.insert(gHubUnit.angle[servo][1]); } assert(seen.size() > 10); show("page-moves-running"); assert(gCanvas.shows("MOVING")); }
   key(ENTER); key(DOWN); key(ENTER); assert(gLabPlay.move == LabMove::Wave); { int lo = 180, hi = 0; run(2000); for (int i = 0; i < 100; ++i) { run(40); lo = std::min(lo, gHubUnit.angle[servo][1]); hi = std::max(hi, gHubUnit.angle[servo][1]); } assert(lo >= 50 && hi <= 130 && hi > lo); }
   key(RIGHT); assert(gLabPlay.moveSpeed == 3); for (int i = 0; i < 5; ++i) key(LEFT); assert(gLabPlay.moveSpeed == 1); key(ENTER); key(DOWN); key(ENTER); assert(gLabPlay.move == LabMove::Tick); { std::set<int> seen; run(100); for (int i = 0; i < 500; ++i) { run(10); seen.insert(gHubUnit.angle[servo][1]); } assert(seen.size() >= 3 && seen.size() <= 7); for (int a : seen) assert(a % 30 == 0); }
   key('n'); assert(gLabUi.page == 0); { const int a = gHubUnit.angle[servo][1]; run(1200); assert(gHubUnit.angle[servo][1] == a); } esc();
-  // Speaker: a piano on the number keys.
-  pickDevice(Dev::Speaker); show("speaker-paged"); assert(gCanvas.shows("N opens the piano")); key('n'); run(50); key('3'); assert(tone() && gLabDrive[int(Out::Tone)].value == 659); show("page-piano"); assert(gCanvas.shows("PIANO")); run(400); assert(!tone()); key('9'); assert(!tone()); key(ENTER); assert(!tone()); key('n'); assert(gLabUi.page == 0); esc();
+  // Speaker: up and down change the pitch, so the arrows can turn to a piano on the number keys.
+  pickDevice(Dev::Speaker); show("speaker-paged"); assert(gCanvas.shows("Turn the page for a piano"));
+  { const int hz = gLabUi.toneHz; key(DOWN); assert(gLabUi.toneHz == hz - 50 && tone() && gLabUi.page == 0); key(UP); assert(gLabUi.toneHz == hz && gLabUi.page == 0); }
+  key(RIGHT); assert(gLabUi.page == 1 && !tone()); run(50); key('3'); assert(tone() && gLabDrive[int(Out::Tone)].value == 659); show("page-piano"); assert(gCanvas.shows("PIANO")); run(400); assert(!tone()); key('9'); assert(!tone()); key(ENTER); assert(!tone()); { const int hz = gLabUi.toneHz; key(UP); assert(gLabUi.toneHz == hz && !tone()); }
+  key(LEFT); assert(gLabUi.page == 0); key('n'); assert(gLabUi.page == 1); key('n'); assert(gLabUi.page == 0); esc();
   // A page that's lost its part shows the same help as the first one.
   pickDevice(Dev::Ultrasonic); key(RIGHT); gUnits.present.erase(0x57); run(2000); show("page-missing"); assert(gCanvas.shows("Nothing at 0x57")); gUnits.present.insert(0x57); run(2000); renderLabUi(); assert(gCanvas.shows("PARKING")); esc();
   // Parts with one screen ignore N.
