@@ -343,7 +343,21 @@ bool waitForWifiConnection(uint32_t timeoutMs) {
   return WiFi.status() == WL_CONNECTED;
 }
 
+// Until connected, or until start-up should move on from this network.
+bool waitForBootWifi() {
+  const uint32_t start = millis();
+  while (WiFi.status() != WL_CONNECTED && !bootWifiGiveUp(millis() - start)) {
+    handleHostSerialInput();
+    delay(120);
+  }
+  return WiFi.status() == WL_CONNECTED;
+}
+
+// Start-up dials the network in use, then the other saved ones, most recently used first, then the
+// temporary network, and opens the setup portal only when none of them connects.
 bool ensureWifi() {
+  planBootWifi();
+  if (gWifiSsid.isEmpty()) bootWifiDialNext();
   if (gWifiSsid.isEmpty()) {
     activateTemporaryMidaWifi("wifi-missing");
   }
@@ -354,7 +368,12 @@ bool ensureWifi() {
   }
 
   beginWifiStationConnect("Connecting to Wi-Fi...");
-  bool connected = waitForWifiConnection(kWifiConnectTimeoutMs);
+  bool connected = waitForBootWifi();
+  while (!connected && bootWifiDialNext()) {
+    beginWifiStationConnect("Trying saved Wi-Fi");
+    connected = waitForBootWifi();
+  }
+  if (!connected) bootWifiRestoreFirst();
   if (!connected && activateTemporaryMidaWifi("wifi-connect-failed")) {
     beginWifiStationConnect("Trying MIDA Wi-Fi");
     connected = waitForWifiConnection(kWifiConnectTimeoutMs);
@@ -371,6 +390,7 @@ bool ensureWifi() {
   setStatus("Wi-Fi connected", 1000);
   pushSystem("Wi-Fi connected: " + WiFi.localIP().toString());
   logf("[WIFI] connected ssid=%s ip=%s", gWifiSsid.c_str(), WiFi.localIP().toString().c_str());
+  bootWifiKeep();
   if (!ensureCaptivePortalAccess(true, "wifi")) {
     pushError("Wi-Fi portal auth failed");
   }
@@ -584,6 +604,9 @@ void serviceDeferredBoot() {
       gBootStepStartedMs = millis();
       break;
     case 6:
+      planBootWifi();
+      // Nothing set up on the device, but the card may hold networks: start from the latest.
+      if (gWifiSsid.isEmpty()) bootWifiDialNext();
       beginDeferredWifi();
       gBootBackgroundStep = 7;
       gBootStepStartedMs = millis();
@@ -595,13 +618,22 @@ void serviceDeferredBoot() {
         setStatus("Wi-Fi connected", 1000);
         pushSystem("Wi-Fi connected: " + WiFi.localIP().toString());
         logf("[WIFI] connected ssid=%s ip=%s", gWifiSsid.c_str(), WiFi.localIP().toString().c_str());
+        bootWifiKeep();
         if (!ensureCaptivePortalAccess(true, "deferred-wifi")) {
           pushError("Wi-Fi portal auth failed");
         }
         syncClockFromNtp(true);
         gBootBackgroundStep = 8;
         gBootStepStartedMs = millis();
-      } else if (gBootWifiStarted && millis() - gBootWifiStartMs >= kWifiConnectTimeoutMs) {
+      } else if (gBootWifiStarted && bootWifiGiveUp(millis() - gBootWifiStartMs)) {
+        // The other saved networks, most recently used first, then the temporary one, then the portal.
+        if (bootWifiDialNext()) {
+          beginDeferredWifi();
+          gBootBackgroundStep = 7;
+          gBootStepStartedMs = millis();
+          break;
+        }
+        bootWifiRestoreFirst();
         if (activateTemporaryMidaWifi("deferred-connect-failed")) {
           beginDeferredWifi();
           gBootBackgroundStep = 7;

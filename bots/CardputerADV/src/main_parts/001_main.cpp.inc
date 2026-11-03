@@ -61,6 +61,7 @@
 #include "minesweeper.h"
 #include "snake.h"
 #include "nfc_notes.h"
+#include "wifi_fallback.h"
 #include "wifi_settings.h"
 #include "air_music.h"
 #include "flappy.h"
@@ -114,7 +115,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.266-dev"
+#define APP_VERSION "0.2.267-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"

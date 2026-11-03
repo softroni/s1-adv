@@ -6,7 +6,7 @@
 | Upload or boot fails | ESP32-S3 target, 8 MB flash and included dual OTA partitions |
 | Screen blank or unchanged after flashing | It's still in flashing mode. Unplug it and plug it back in, or press Reset without holding G0 |
 | `192.168.4.1` shows your router or `blocked.eero.com` | You aren't on the Cardputer's setup Wi-Fi. eero uses the same address. Join the setup Wi-Fi, and unplug Ethernet to that router for a moment |
-| Device opens setup | Press Enter on that screen to join Wi-Fi on the device. For the bridge URL and token, use the portal it shows, or configure private `.env` before building |
+| Device opens setup | None of the saved networks joined at start-up, each tried in turn. Press Enter on that screen to join Wi-Fi on the device. For the bridge URL and token, use the portal it shows, or configure private `.env` before building |
 | Wi-Fi fails | 2.4 GHz coverage and credentials; captive portals need site-specific support. To change network, see [Wi-Fi controls](CONTROLS.md#wi-fi) |
 | Wi-Fi scan says "Scan failed" | The device tries for about 10 seconds first. The message gives the radio's error code and the free memory. `3006` means the radio is busy connecting. "Scan lost" means the scan started and its results never arrived. A scan made while joined takes about 9 seconds. To see everything the radio hears, send `wifi.scan.raw` over USB |
 | Saved networks missing | Check the SD card. If Wi-Fi settings says it couldn't read them, the file was damaged or came from another Cardputer. It's set aside as `/wifi/networks.bad`, and networks are saved again as they connect |

@@ -60,8 +60,15 @@ up a password, and it can't be read on a computer or by another Cardputer. Witho
 device still connects to the last network it used, and it asks you to pick when that isn't
 available.
 
-If the setup screen appears because the old network is gone, press Enter on it to do all of
-this on the device. It restarts once it has joined.
+At start-up the device dials the network it used last. If that doesn't connect, it tries the
+other saved networks, most recently used first, each once, and joins the first that works. That
+one then comes first next time, and the chat says which network it joined. A network that isn't
+in range is passed over after about 6 seconds, and one that's there but refuses gets 20. The last
+one tried always gets the full 20, in case its router is still starting up. This checks that the
+Wi-Fi joins, not that it has internet.
+
+The setup screen appears only when none of them connects. Press Enter on it to do all of this on
+the device. It restarts once it has joined.
 
 ## Settings
 

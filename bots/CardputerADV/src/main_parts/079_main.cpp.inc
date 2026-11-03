@@ -348,6 +348,77 @@ void serviceWifiMemory() {
   else retryAt = millis() + 60000U;
 }
 
+// --- Start-up: the other saved networks, when the one in use can't be joined -----------------
+// wifi_fallback.h decides the order and when to move on. The first network's details are kept, so
+// that if nothing connects, the portal and later retries start from it as before.
+static_assert(wifi_fallback::kJoinTimeoutMs == kWifiConnectTimeoutMs, "one wait for every network");
+wifi_fallback::Dial gBootDial;
+String gBootFirstSsid, gBootFirstPassword;
+bool gBootDialSwitched = false;
+
+// Names only, read once before the first dial. Without a card there's nothing else to try.
+void planBootWifi() {
+  gBootFirstSsid = gWifiSsid;
+  gBootFirstPassword = gWifiPassword;
+  gBootDialSwitched = false;
+  std::vector<std::string> names;
+  if (gSdReady) {
+    wifi_store::List saved;
+    wifi_store::load(gWifiDisk, gWifiCipher, saved);
+    for (const auto& network : saved) names.push_back(network.ssid);
+    wifi_store::wipe(saved);
+  }
+  gBootDial.begin(gWifiSsid.c_str(), names);
+  logf("[WIFI] start-up has %u other saved network(s)", static_cast<unsigned>(gBootDial.queued()));
+}
+
+bool bootWifiGiveUp(uint32_t elapsedMs) {
+  return gBootDial.giveUp(elapsedMs, WiFi.status() == WL_NO_SSID_AVAIL);
+}
+
+// Puts the next saved network in place of the one in use, for this start only. False when none is
+// left. One forgotten since start-up began is passed over.
+bool bootWifiDialNext() {
+  if (!gSdReady || !gBootDial.another()) return false;
+  wifi_store::List saved;
+  wifi_store::load(gWifiDisk, gWifiCipher, saved);
+  const wifi_store::Saved* network = nullptr;
+  while (!network && gBootDial.another()) network = wifi_store::find(saved, gBootDial.next());
+  if (network) {
+    logf("[WIFI] start-up trying saved ssid=%s after ssid=%s", wifiLoggedName(network->ssid.c_str()).c_str(),
+         wifiLoggedName(gWifiSsid.c_str()).c_str());
+    gWifiSsid = network->ssid.c_str();
+    gWifiPassword = network->password.c_str();
+    gBootDialSwitched = true;
+    // A new network's attempt mustn't inherit the last one's "not found".
+    WiFi.disconnect(false, false);
+    delay(80);
+  }
+  wifi_store::wipe(saved);
+  return network != nullptr;
+}
+
+// A saved network that connected in place of the first becomes the one in use, as the most
+// recently used, so the next start dials it first. The temporary network never does.
+void bootWifiKeep() {
+  if (!gBootDialSwitched || usingTemporaryMidaWifi()) return;
+  gBootDialSwitched = false;
+  logf("[WIFI] start-up joined saved ssid=%s, first was ssid=%s", wifiLoggedName(gWifiSsid.c_str()).c_str(),
+       wifiLoggedName(gBootFirstSsid.c_str()).c_str());
+  pushSystem(gBootFirstSsid.isEmpty() ? String("Joined saved Wi-Fi ") + gWifiSsid :
+                                        String("Joined ") + gWifiSsid + ": " + gBootFirstSsid + " didn't connect");
+  saveWifiCreds(gWifiSsid, gWifiPassword);
+}
+
+// Nothing connected. The temporary network and the portal follow, from the network that was in use.
+void bootWifiRestoreFirst() {
+  if (!gBootDialSwitched) return;
+  gBootDialSwitched = false;
+  logf("[WIFI] start-up tried every saved network");
+  gWifiSsid = gBootFirstSsid;
+  gWifiPassword = gBootFirstPassword;
+}
+
 void stopWifiSettings() {
   gWifi.close(gWifiRadio);
 }
