@@ -22,6 +22,7 @@ class NfcRadio {
     if (!mAdded) mAdded = gNfcUnits.add(gNfcUnit, Wire);
     return mAdded && gNfcUnits.begin();
   }
+  bool busOpen() const { return mBusOpen; }  // It closes from its service, a pass after its screen does.
   void close() {
     if (!mBusOpen) return;
     if (mAdded) gNfcUnit.disableField();

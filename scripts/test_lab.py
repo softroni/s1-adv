@@ -14,6 +14,9 @@ for file, text in [
         ('001_main.cpp.inc', 'kLauncherGroupCount = 9'),
         ('001_main.cpp.inc', '#include "lab_json.h"'),
         ('023_main.cpp.inc', 'lab::ruleFromJson(action, rule, labSequences(), labSequenceCount())'),
+        ('023_main.cpp.inc', 'labOnceStart(lab::onceFromJson(action, once) ? &once : nullptr);'),
+        ('024_main.cpp.inc', 'if (modeChanged) labOnceLeaving(mode);'),
+        ('061_main.cpp.inc', 'serviceLabOnce();'),
         ('063_main.cpp.inc', 'return labAllowsNetwork();'),
         ('004_main.cpp.inc', '{"Devices", UiMode::LabDevices}'),
         ('004_main.cpp.inc', '{"Rules", UiMode::LabRules}'),
@@ -40,6 +43,10 @@ loop = (parts / '061_main.cpp.inc').read_text()
 assert loop.index('serviceNfcNotes();') < loop.index('serviceLab();')
 change = (parts / '024_main.cpp.inc').read_text()
 assert change.index('stopLab();') < change.index('gUiMode = mode;')
+# A check gives the port back before anything that could want it starts or stops.
+assert change.index('labOnceLeaving(mode);') < change.index('stopAirMusic();') < change.index('beginAirMusic();')
+# Ahead of every early return in the loop, so a check can always time out and give the port back.
+assert loop.index('serviceLabOnce();') < loop.index('if (gRealtimeExclusiveMode)') < loop.index('if (gUiMode == UiMode::Nes)')
 
 code = r'''
 #include "lab.h"
@@ -681,8 +688,63 @@ void testTables(){
          partFor(Dev::Ultrasonic)==Part::None&&partFor(Dev::Gps)==Part::None);
 }
 
+void testOnce() {
+  // Only what a wrong answer can't hurt. Everything that can switch mains or speak stays out.
+  for (uint8_t i = 0; i < kOutCount; ++i) {
+    const Out out = static_cast<Out>(i);
+    const bool safe = out == Out::Servo || out == Out::StripColor || out == Out::StripBright || out == Out::StripLength || out == Out::Led || out == Out::Tone;
+    assert(onceCanDrive(out) == safe);
+  }
+  // It only reaches for the port when it has to.
+  Once look; look.reads = 1; look.read[0] = Sig::Tilt; assert(look.usable() && !look.needsPort());
+  look.read[0] = Sig::Satellites; assert(!look.needsPort());
+  look.read[0] = Sig::Knob; assert(look.needsPort());
+  Once led; led.yes = 1; led.then[0] = {SeqKind::Set, Out::Led, 120}; assert(led.usable() && !led.needsPort());
+  Once strip; strip.no = 1; strip.otherwise[0] = {SeqKind::Set, Out::StripColor, 0}; strip.conds = 1; strip.cond[0] = {Sig::Tilt, Op::Above, 10}; assert(strip.needsPort());
+  assert(!Once{}.usable());
+  Once elseOnly; elseOnly.no = 1; assert(!elseOnly.usable());
+  // Any and all, the same as a rule.
+  Inputs in; in.set(Sig::Knob, 67, 0); in.set(Sig::Light, 10, 0);
+  Once both; both.conds = 2; both.cond[0] = {Sig::Knob, Op::Above, 50}; both.cond[1] = {Sig::Light, Op::Above, 50};
+  assert(onceHolds(both, in)); both.any = false; assert(!onceHolds(both, in)); both.cond[1].op = Op::Below; assert(onceHolds(both, in));
+  assert(onceHolds(look, in));  // With nothing to test, there's nothing stopping it.
+  // A sensor with no reading is never true.
+  Once gone; gone.conds = 1; gone.cond[0] = {Sig::Distance, Op::Below, 500}; assert(!onceHolds(gone, in)); gone.any = false; assert(!onceHolds(gone, in));
+  // Off clears the whole strip, because its three outputs are one strip.
+  Drive drive[kOutCount];
+  onceApply({SeqKind::Set, Out::StripColor, 240}, drive); onceApply({SeqKind::Set, Out::StripBright, 40}, drive);
+  assert(drive[int(Out::StripColor)].on && drive[int(Out::StripColor)].value == 240 && drive[int(Out::StripBright)].value == 40);
+  onceApply({SeqKind::Off, Out::StripBright, 0}, drive); assert(!stripFrame(drive, 100).on && !drive[int(Out::StripColor)].on);
+  // The colors the prompt names, and an honest number between them.
+  const struct { int hue; const char* word; } kHues[] = {{0, "red"}, {359, "red"}, {30, "orange"}, {60, "yellow"}, {120, "green"}, {180, "cyan"}, {240, "blue"}, {280, "purple"}, {330, "pink"}, {90, nullptr}, {210, nullptr}};
+  for (const auto& hue : kHues) { const char* word = hueWord(hue.hue); assert(hue.word ? word && !strcmp(word, hue.word) : !word); }
+  // What the owner reads.
+  const auto says = [](const Once& once, const Inputs& inputs) { static char line[kOnceTextChars]; Text text(line, sizeof(line)); onceReadings(once, inputs, text); return std::string(line); };
+  Once knob; knob.conds = 1; knob.cond[0] = {Sig::Knob, Op::Above, 50}; assert(says(knob, in) == "Knob 67%, over 50.");
+  knob.cond[0] = {Sig::Knob, Op::Below, 50}; assert(says(knob, in) == "Knob 67%, not under 50.");
+  in.set(Sig::Motion, 1, 0); in.set(Sig::Temperature, 24, 0); in.set(Sig::Tilt, -3, 0); in.set(Sig::Distance, 40, 0);
+  Once on; on.conds = 1; setOnOff(on.cond[0], true); on.cond[0].sig = Sig::Motion; assert(says(on, in) == "Motion on.");
+  Once some; some.reads = 3; some.read[0] = Sig::Temperature; some.read[1] = Sig::Tilt; some.read[2] = Sig::Distance; assert(says(some, in) == "Temperature 24 C; Tilt -3 deg; Distance 40 cm.");
+  // Something tested and also listed is said once.
+  Once twice; twice.conds = 1; twice.cond[0] = {Sig::Knob, Op::Above, 50}; twice.reads = 3; twice.read[0] = Sig::Knob; twice.read[1] = Sig::Tilt; twice.read[2] = Sig::Tilt; assert(says(twice, in) == "Knob 67%, over 50; Tilt -3 deg.");
+  const auto did = [](std::initializer_list<SeqStep> steps) { static char line[kOnceTextChars]; Text text(line, sizeof(line)); onceDone(steps.begin(), static_cast<uint8_t>(steps.size()), text); return std::string(line); };
+  assert(did({{SeqKind::Set, Out::StripColor, 0}}) == "Strip set to red."); assert(did({{SeqKind::Set, Out::Led, 90}}) == "LED set to hue 90.");
+  assert(did({{SeqKind::Off, Out::StripColor, 0}}) == "Strip off."); assert(did({{SeqKind::Off, Out::Led, 0}}) == "LED off."); assert(did({}) == "Nothing changed.");
+  assert(did({{SeqKind::Set, Out::Servo, 90}, {SeqKind::Set, Out::Tone, 880}, {SeqKind::Set, Out::StripBright, 40}}) == "Servo moved to 90 deg, beeped at 880 Hz, strip at 40% brightness.");
+  assert(did({{SeqKind::Set, Out::StripLength, 10}}) == "Strip lit to 10 LEDs.");
+  // The longest report still fits.
+  Inputs far; far.set(Sig::Temperature, -10, 0); far.set(Sig::StickPress, 0, 0); far.set(Sig::Satellites, 32, 0); far.set(Sig::Humidity, 100, 0); far.set(Sig::Distance, 450, 0); far.set(Sig::StickX, -100, 0);
+  Once full; full.conds = 3; for (auto& cond : full.cond) cond = {Sig::Temperature, Op::Below, -10}; full.cond[1].sig = Sig::Humidity; full.cond[1].value = 50; full.cond[2].sig = Sig::Distance; full.cond[2].value = 100;
+  full.reads = 3; full.read[0] = Sig::StickPress; full.read[1] = Sig::Satellites; full.read[2] = Sig::StickX;
+  static char line[kOnceTextChars]; Text text(line, sizeof(line)); onceReadings(full, far, text); text.add(" "); const SeqStep longest[3] = {{SeqKind::Set, Out::StripBright, 100}, {SeqKind::Set, Out::StripLength, 30}, {SeqKind::Set, Out::Servo, 180}}; onceDone(longest, 3, text); assert(text.room() > 0);
+  // The Lab's hub range: a number before it's been turned means nothing.
+  AnalogRange range; assert(!range.learned()); range.percent(2000); assert(!range.learned()); range.percent(1500); assert(!range.learned()); range.percent(300); assert(!range.learned()); range.percent(100); assert(range.learned());
+  assert(AnalogRange::fixedAt(2800).learned() && AnalogRange::fixedAt(2800).top == 2800 && !AnalogRange{}.fixed);
+  AnalogRange light; light.percent(3000); light.percent(1400); assert(!light.learned() && light.learned(kLightRangeShare));
+}
+
 int main(){
-  testHub();testGps();testRanges();testInputs();testRules();testWiring();testCloseness();testStrip();testRelays();testDirect();testPractice();testRecipes();testRemotes();testDrafts();testSaving();testSequences();testChatState();testTables();JSON_TEST
+  testHub();testGps();testRanges();testInputs();testRules();testWiring();testCloseness();testStrip();testRelays();testDirect();testPractice();testRecipes();testRemotes();testDrafts();testSaving();testSequences();testChatState();testOnce();testTables();JSON_TEST
   std::puts("PASS Lab: hub commands, GPS lines, ranges, change detection, rules with hold and priority, sequences, wiring, the strip cap, the relay guard, and saved files that refuse every kind of damage");
 }
 '''
@@ -698,6 +760,44 @@ size_t slotsIn(JsonVariantConst value){size_t n=0;
   else if(value.is<JsonArrayConst>())for(JsonVariantConst v:value.as<JsonArrayConst>())n+=1+slotsIn(v);
   return n;}
 bool parseSeq(const char* text, Sequence& out){DynamicJsonDocument doc(8192);assert(!deserializeJson(doc,text));return sequenceFromJson(doc.as<JsonObjectConst>(),out);}
+bool parseOnce(const char* text, Once& out){DynamicJsonDocument doc(2048);assert(!deserializeJson(doc,text));return onceFromJson(doc.as<JsonObjectConst>(),out);}
+void testOnceJson(){
+  // The examples in the bridge's prompt.
+  Once o;assert(parseOnce(R"({"type":"lab.once","any":true,"when":[{"sensor":"knob","test":"over","value":50}],"do":[{"output":"strip_color","set":0}],"else":[{"output":"strip_color","off":true}]})",o));
+  assert(o.any&&o.conds==1&&o.cond[0].sig==Sig::Knob&&o.cond[0].op==Op::Above&&o.cond[0].value==50&&o.yes==1&&o.then[0].out==Out::StripColor&&o.then[0].kind==SeqKind::Set&&o.then[0].value==0&&o.no==1&&o.otherwise[0].kind==SeqKind::Off);
+  assert(parseOnce(R"({"type":"lab.once","read":["temperature","humidity"]})",o));assert(o.reads==2&&o.read[1]==Sig::Humidity&&!o.conds&&!o.yes&&o.usable());
+  // Just an action, every part it may touch, and numbers held to what the part can do.
+  assert(parseOnce(R"({"do":[{"output":"servo","set":999},{"output":"speaker","set":10},{"output":"led","off":true}]})",o));assert(o.yes==3&&o.then[0].value==180&&o.then[1].value==200&&o.then[2].kind==SeqKind::Off);
+  assert(parseOnce(R"({"do":[{"output":"strip_bright","set":50},{"output":"strip_length","set":10}]})",o));
+  assert(parseOnce(R"({"any":false,"when":[{"sensor":"motion","test":"on"},{"sensor":"light","test":"under","value":20}]})",o));assert(!o.any&&o.conds==2);
+  // Numbers mean what they say, or the check is refused: nothing will look at it before it runs.
+  assert(parseOnce(R"({"when":[{"sensor":"temperature","test":"over","value":22.5}],"do":[{"output":"servo","set":90.5},{"output":"strip_color","set":120.0}]})",o));
+  assert(o.cond[0].value==22&&o.then[0].value==91&&o.then[1].value==120);  // Over 22.5 means 23 and up, the same as over 22.
+  assert(parseOnce(R"({"when":[{"sensor":"distance","test":"over","value":200}]})",o));assert(o.cond[0].value==200);  // A reading can pass a rule's range.
+  assert(parseOnce(R"({"when":[{"sensor":"tilt","test":"under","value":-20.5}]})",o));assert(o.cond[0].value==-20);  // Under -20.5 means -21 and down.
+  assert(parseOnce(R"({"when":[{"sensor":"humidity","test":"under","value":22.3},{"sensor":"knob","test":"over","value":22.7}]})",o));assert(o.cond[0].value==23&&o.cond[1].value==22);
+  Inputs whole;whole.set(Sig::Humidity,22,0);whole.set(Sig::Knob,23,0);o.any=false;assert(onceHolds(o,whole));
+  // What the bridge sends when a field has nothing in it.
+  assert(parseOnce(R"({"type":"lab.once","any":true,"read":["knob"],"when":[],"do":[],"else":[]})",o));assert(o.reads==1&&!o.conds&&!o.yes&&!o.no);
+  // Anything else is refused whole, and leaves what was there alone.
+  o=Once{};o.reads=2;o.read[1]=Sig::Tilt;
+  for(const char* refused:{
+      R"({})",R"({"any":true})",R"({"read":[]})",
+      R"({"do":[{"output":"relay_1","set":1}]})",R"({"do":[{"output":"relay_2","off":true}]})",R"({"do":[{"output":"lamp_power","set":1}]})",R"({"do":[{"output":"lamp_bright","set":50}]})",
+      R"({"do":[{"output":"ac_tcl","set":1}]})",R"({"do":[{"output":"ac_daikin","set":1}]})",R"({"do":[{"output":"say","text":"hi"}]})",R"({"do":[{"output":"sequence","play":"Hello"}]})",
+      R"({"when":[{"sensor":"knob","test":"over","value":50}],"do":[{"output":"strip_color","set":0}],"else":[{"output":"relay_1","set":1}]})",
+      R"({"do":[{"wait_ms":1000}]})",R"({"do":[{"output":"servo","off":true}]})",R"({"do":[{"output":"servo","follow":"knob"}]})",R"({"do":[{"output":"servo"}]})",R"({"do":[{"output":"nothing","set":1}]})",
+      R"({"when":[{"sensor":"knob","test":"changes"}]})",R"({"when":[{"sensor":"spoken","test":"on"}]})",R"({"when":[{"sensor":"nothing","test":"over","value":1}]})",R"({"when":[{"sensor":"knob","test":"on"}]})",
+      R"({"read":["spoken"]})",R"({"read":["nothing"]})",R"({"read":[1]})",R"({"read":["knob","light","tilt","motion"]})",R"({"read":"knob"})",
+      R"({"else":[{"output":"led","set":1}]})",R"({"read":["knob"],"else":[{"output":"led","set":1}]})",
+      R"({"do":{"output":"led","set":1}})",R"({"when":{"sensor":"knob","test":"over","value":1}})",R"({"read":["knob"],"do":"led"})",
+      R"({"do":[{"output":"led","set":1},{"output":"led","set":2},{"output":"led","set":3},{"output":"led","set":4}]})",
+      R"({"when":[{"sensor":"knob","test":"over","value":"50"}]})",R"({"when":[{"sensor":"knob","test":"over"}]})",R"({"when":[{"sensor":"knob","test":"over","value":99999}]})",
+      R"({"do":[{"output":"servo","set":"90"}]})",R"({"do":[{"output":"servo","set":true}]})",R"({"do":[{"output":"led","set":null}]})",R"({"do":[{"output":"led","off":"yes"}]})",
+      R"({"do":[{"output":"led","set":1,"wait_ms":100}]})",R"({"do":[7]})",R"({"when":[7]})",R"({"when":[{"sensor":"motion","test":"over","value":0}]})",
+      R"({"when":[{"sensor":"knob","test":"over","value":1},{"sensor":"knob","test":"over","value":2},{"sensor":"knob","test":"over","value":3},{"sensor":"knob","test":"over","value":4}]})"})
+    {assert(!parseOnce(refused,o));assert(o.reads==2&&o.read[1]==Sig::Tilt);}
+}
 void testSequenceJson(){
   // The example in the bridge's prompt, and it runs the way it reads.
   Sequence s;assert(parseSeq(R"({"type":"lab.sequence","name":"Door wave","loop":false,"steps":[{"output":"strip_color","set":120},{"wait_ms":1000},{"output":"servo","set":90},{"wait_ms":2000},{"output":"servo","set":0},{"output":"strip_color","off":true}]})",s));
@@ -787,7 +887,7 @@ void testJson(){
 }
 '''
 if (library / 'ArduinoJson.h').exists():
-    code = code.replace('void testHub(){', json_test + 'void testHub(){', 1).replace('JSON_TEST', 'testJson();testSequenceJson();')
+    code = code.replace('void testHub(){', json_test + 'void testHub(){', 1).replace('JSON_TEST', 'testJson();testSequenceJson();testOnceJson();')
 else:
     code = code.replace('JSON_TEST', '')
 with tempfile.TemporaryDirectory(prefix='s1-lab-') as directory:

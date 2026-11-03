@@ -380,6 +380,8 @@ void loop() {
   serviceNesTransfer();
   serviceRealtimeDialCompletion();
   updateFocusTimer();
+  // Ahead of every early return, so a check times out or gives the port back wherever the loop goes.
+  serviceLabOnce();
   if (gRealtimeExclusiveMode) {
     serviceRealtimeExclusiveLoop(loopStartMs);
     return;

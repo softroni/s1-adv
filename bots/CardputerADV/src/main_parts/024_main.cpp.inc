@@ -197,7 +197,9 @@ void serviceDeferredDeviceActions() {
   String json = gDeferredDeviceActionsJson;
   gDeferredDeviceActionsJson = "";
   logf("[ACT] run deferred bytes=%u", static_cast<unsigned>(json.length()));
+  gActionsFollowSpeech = true;
   executeDeviceActionsJson(json);
+  gActionsFollowSpeech = false;
 }
 
 void servicePendingOtaAction() {
@@ -309,6 +311,7 @@ void setUiMode(UiMode mode) {
     if (gUiMode == UiMode::Files) std::vector<SdFileEntry>().swap(gFileEntries);
   }
   // Right away, not from its service, because the next app may want the Grove port.
+  if (modeChanged) labOnceLeaving(mode);
   if (modeChanged && gUiMode == UiMode::AirMusic) stopAirMusic();
   if (modeChanged && gUiMode == UiMode::Flappy) stopFlappy();
   if (modeChanged && gUiMode == UiMode::Balloon) stopBalloon();

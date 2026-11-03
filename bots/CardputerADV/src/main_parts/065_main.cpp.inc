@@ -34,6 +34,15 @@ void showVoiceNotice(const String& text, bool pending) {
        static_cast<int>(gUiMode),static_cast<int>(gCanvasSpriteActive));
 }
 
+// Something the device found out for itself. It reads and sounds like the reply it follows.
+void postDeviceReply(const String& text, bool speak) {
+  appendAssistantReply(text);
+  if (gVoiceNoticeVisible || gUiMode != UiMode::ChatFull) showVoiceNotice(text, false);
+  if (speak) gQueuedVoiceReplySpeech = cleanReplyForDevice(text);
+  playActivityCue(gQueuedVoiceReplySpeech.isEmpty() ? activity_cue::Cue::ReplyReady : activity_cue::Cue::Loading);
+  setStatus("Lab check done", 3000);
+}
+
 void rememberStoredAssistantSeq(uint32_t seq) {
   if (!seq || std::find(gStoredAssistantSeqs.begin(), gStoredAssistantSeqs.end(), seq) != gStoredAssistantSeqs.end()) return;
   gStoredAssistantSeqs.push_back(seq);

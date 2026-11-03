@@ -43,6 +43,10 @@ constexpr const char* kLabDiaryOldPath = "/lab/diary.old";
 constexpr uint32_t kLabDiaryMs = 10000;
 constexpr size_t kLabDiaryMaxBytes = 32768;  // Well over a month.
 constexpr size_t kLabDiaryTailBytes = 1100;  // What goes with a question, about a day.
+constexpr uint32_t kLabOnceWaitMs = 30000;   // For a reply to finish speaking before giving up.
+constexpr uint32_t kLabOnceReadMs = 3500;    // A round of the bus, a wire check and a GPS line, with room.
+constexpr uint32_t kLabOnceSteadyMs = 250;   // Fresh readings after the first, which can be mid-settle.
+constexpr uint32_t kLabOnceWriteMs = 150, kLabOnceBeepMs = 300, kLabOnceServoMs = 800;
 
 void serviceLabTests();
 void labEnterView(UiMode mode);
@@ -50,6 +54,8 @@ bool labRescanAllowed();
 bool labBusWanted();
 void labSaveBook();
 bool labSeqOnScreen();
+void labOnceSay(const char* text, bool speak);
+void labOnceMirror(const lab::SeqStep& step);
 
 enum class LabStripTest : uint8_t { Solid, Rainbow, Chase, Count };
 
@@ -89,6 +95,7 @@ LabBus gLabBus;
 pbhub::Hub<LabBus> gLabHub(gLabBus);
 lab::Book gLabBook;
 bool gLabBookRead = false, gLabSaved = true;
+bool gLabBookKnown = false;  // The book is the owner's: read from the card, or a card that answers has none.
 lab::Inputs gLabInputs;
 lab::Inputs gLabSeen;              // The readings with any practice values on top, for rules and the view.
 lab::Practice gLabPractice;
@@ -356,6 +363,9 @@ void labReadHubParts(uint32_t now) {
   if (!labFound(lab::Unit::Hub)) return;
   const lab::Wiring& wiring = gLabBook.wiring;
   if (!gLabHubReady) labHubStart();
+  // A scale from the Grove wires means nothing on the hub, whose ADC has a different top.
+  if (gLabKnobRange.fixed) gLabKnobRange = lab::AnalogRange{};
+  if (gLabLightRange.fixed) gLabLightRange = lab::AnalogRange{};
   const int8_t knob = wiring.portOf(lab::Part::Knob);
   const int8_t light = wiring.portOf(lab::Part::Light);
   const int8_t motion = wiring.portOf(lab::Part::Motion);
@@ -455,8 +465,8 @@ void labTakeWires() {
   labForgetOutputs();
   gLabOnWires = true;
   gLabWhiteSilent = 0;
-  gLabKnobRange.top = lab::kDirectKnobTop;
-  gLabLightRange.top = lab::kDirectLightTop;
+  gLabKnobRange = lab::AnalogRange::fixedAt(lab::kDirectKnobTop);
+  gLabLightRange = lab::AnalogRange::fixedAt(lab::kDirectLightTop);
   labWiresOn();
 }
 // Back to the bus, which is how a unit plugged in later gets noticed.
@@ -722,6 +732,16 @@ void labWriteOutputs(uint32_t now) {
   labWriteStrip(now);
   labWriteRelays(now);
 }
+void labServoLetGo() {
+  if (labOnWires(lab::Part::Servo)) {
+    ledcWrite(kLabServoChannel, 0);
+  } else if (labFound(lab::Unit::Hub) && gLabHubReady) {
+    const int8_t servo = gLabBook.wiring.portOf(lab::Part::Servo);
+    if (servo >= 0 && gLabServoHeld) gLabHub.digitalWrite(servo, pbhub::kOutputPin, false);
+  }
+  gLabServoHeld = false;
+  gLabServoSent = -1;  // Let go, it has to be told again, even the same angle.
+}
 // Everything off, relays first. The servo is let go too, so it stops holding and drawing power.
 void labReleaseOutputs() {
   labDriveClear();
@@ -732,7 +752,6 @@ void labReleaseOutputs() {
       digitalWrite(kLabYellowPin, LOW);
     }
     if (gLabBook.direct.has(lab::Part::Strip)) labStripFill(0, lab::kStripLeds, 0, 0, 0);
-    if (gLabBook.direct.has(lab::Part::Servo)) ledcWrite(kLabServoChannel, 0);
   } else if (labFound(lab::Unit::Hub) && gLabHubReady) {
     const lab::Wiring& wiring = gLabBook.wiring;
     const int8_t relay = wiring.portOf(lab::Part::Relay);
@@ -742,10 +761,8 @@ void labReleaseOutputs() {
     }
     const int8_t strip = wiring.portOf(lab::Part::Strip);
     if (strip >= 0) gLabHub.fillLeds(strip, 0, lab::kStripLeds, 0, 0, 0);
-    const int8_t servo = wiring.portOf(lab::Part::Servo);
-    if (servo >= 0 && gLabServoHeld) gLabHub.digitalWrite(servo, pbhub::kOutputPin, false);
   }
-  gLabServoHeld = false;
+  labServoLetGo();
   labForgetOutputs();
   if (gLabLedSent >= 0) neopixelWrite(kLabLedPin, 0, 0, 0);
   gLabLedSent = -1;
@@ -803,7 +820,15 @@ void labReadBook() {
   if (gLabBookRead) return;
   gLabBookRead = true;
   uint8_t bytes[lab::kFileBytes > lab::kSeqFileBytes ? lab::kFileBytes : lab::kSeqFileBytes];
-  if (!labReadFile(kLabPath, kLabNewPath, bytes, lab::kFileBytes, [&](size_t size) { return lab::decode(bytes, size, gLabBook); })) {
+  gLabBookKnown = labReadFile(kLabPath, kLabNewPath, bytes, lab::kFileBytes, [&](size_t size) { return lab::decode(bytes, size, gLabBook); });
+  if (!gLabBookKnown) {
+    // A card with no Lab files has nothing set up on it. With no card, or a damaged file, this
+    // stand-in isn't what the owner set up, and a check from the chat has to know that.
+    // exists() also says no when the card has stopped answering, so the card has to answer first.
+    File root = gSdReady ? SD.open("/") : File();
+    const bool answers = root && root.isDirectory();
+    if (root) root.close();
+    gLabBookKnown = answers && !SD.exists(kLabPath) && !SD.exists(kLabNewPath);
     gLabBook = lab::Book{};
     gLabBook.rules[0] = lab::starterRule();
     gLabBook.count = 1;
@@ -958,20 +983,36 @@ void labPlay() {
   gLabPlaying = true;
   gLabPaused = false;
 }
+void labPartsFresh() {
+  labForgetOutputs();
+  gLabStripTest = LabStripTest::Solid;
+  gLabHubReady = false;
+  gLabServoHeld = false;
+  gLabOnWires = false;
+  gLabQuietProbes = 0;
+}
+void labGpsOn() {
+  gLabGps = lab_gps::Parser{};
+  Serial1.setRxBufferSize(512);
+  Serial1.begin(kLabGpsBaud, SERIAL_8N1, kLabGpsRxPin, kLabGpsTxPin);
+}
+void labPartsOff() {
+  if (gLabOnWires) labWiresOff();
+  gLabOnWires = false;
+  for (uint8_t i = 0; i < lab::kUnitCount; ++i) labUnitLost(static_cast<lab::Unit>(i));
+  gLabInputs = lab::Inputs{};
+  gAirSensor.close();
+}
 void beginLab() {
   labReadBook();
   gLabTrends.clear();
   for (bool& used : gLabPartUsed) used = false;
+  // A check from the chat can have left the strip and the LED on. This is what takes them back: with
+  // nothing asking, their first write here turns them off.
   labDriveClear();
-  labForgetOutputs();
-  gLabStripTest = LabStripTest::Solid;
+  labPartsFresh();
   gLabPlaying = false;
   gLabPaused = false;
-  gLabHubReady = false;
-  gLabServoHeld = false;
-  gLabLedSent = -1;
-  gLabOnWires = false;
-  gLabQuietProbes = 0;
   gLabOpen = true;
   // The list only copies what's on the card, and every connection the Lab makes runs on this memory.
   if (!gVoiceNotes.empty()) {
@@ -980,20 +1021,14 @@ void beginLab() {
     gVoiceNotesBehindCard = true;
   }
   labEnterView(gUiMode);
-  gLabGps = lab_gps::Parser{};
-  Serial1.setRxBufferSize(512);
-  Serial1.begin(kLabGpsBaud, SERIAL_8N1, kLabGpsRxPin, kLabGpsTxPin);
+  labGpsOn();
   labRedraw();
 }
 void stopLab() {
   if (!gLabOpen) return;
   labStopPlaying();
-  if (gLabOnWires) labWiresOff();
-  gLabOnWires = false;
+  labPartsOff();
   Serial1.end();
-  for (uint8_t i = 0; i < lab::kUnitCount; ++i) labUnitLost(static_cast<lab::Unit>(i));
-  gLabInputs = lab::Inputs{};
-  gAirSensor.close();
   gLabOpen = false;
 }
 void labKeepAwake(uint32_t now) {
@@ -1012,6 +1047,19 @@ void labRunSequence(uint32_t now) {
   gLabSeqRun.apply(gLabDrive);
   if (gLabSeqRun.running()) labKeepAwake(now);
 }
+void labReadPort(uint32_t now) {
+  if (gLabOnWires) {
+    labReadWires(now);
+    return;
+  }
+  gAirSensor.open();
+  labProbeNext(now);
+  labReadSonic(now);
+  labReadEnv(now);
+  labReadStick(now);
+  labReadDLight(now);
+  labReadHubParts(now);
+}
 void serviceLab() {
   if (!labMode(gUiMode) || !gLabOpen) return;
   // Nothing should move behind the menu, where it can't be seen or stopped.
@@ -1029,17 +1077,7 @@ void serviceLab() {
   if (gRecording || gRealtimeActive || gPlaybackActive) return;
   const uint32_t now = millis();
   serviceLabWires(now, labRescanAllowed(), labBusWanted());
-  if (gLabOnWires) {
-    labReadWires(now);
-  } else {
-    gAirSensor.open();
-    labProbeNext(now);
-    labReadSonic(now);
-    labReadEnv(now);
-    labReadStick(now);
-    labReadDLight(now);
-    labReadHubParts(now);
-  }
+  labReadPort(now);
   labReadTilt(now);
   labReadGps(now);
   gLabSeen = gLabInputs;
@@ -1065,6 +1103,329 @@ void serviceLab() {
   if (now - gLabRedrawMs >= kLabRedrawMs) {
     gLabRedrawMs = now;
     labRedraw();
+  }
+}
+
+// --- One check from the chat ---------------------------------------------------------------------
+// The chat can ask for a reading, or a reading and one action, from any screen. With the Lab closed,
+// this borrows its parts for a few seconds and gives them back before saying what it found. The strip
+// and the LED stay as they were left, because that's what "turn it red" means, and their state stays
+// in gLabDrive, so the next check can put them back after its bus traffic and the Lab takes them over.
+// Nothing here waits for Enter, so it only ever writes the outputs it was asked for or left on.
+enum class LabOncePhase : uint8_t { Idle, Waiting, Reading, Acting, Telling };
+lab::Once gLabOnce;
+LabOncePhase gLabOncePhase = LabOncePhase::Idle;
+bool gLabOnceBorrowed = false, gLabOncePort = false, gLabOnceGps = false, gLabOnceYes = false, gLabOnceSteady = false;
+bool gLabOnceSpeak = false, gLabOnceBeeped = false;
+uint32_t gLabOnceAskedMs = 0, gLabOnceMs = 0, gLabOnceSteadyMs = 0;
+size_t gLabOnceSaid = 0;  // How much of the report the readings take, ahead of what was done.
+char gLabOnceText[lab::kOnceTextChars] = "";  // What it last found, which also goes with the next message.
+
+bool labOnceInLab() { return labMode(gUiMode) && gLabOpen; }
+bool labHoldsGrove(UiMode mode) {
+  return mode == UiMode::AirMusic || mode == UiMode::Flappy || mode == UiMode::Balloon || mode == UiMode::BallCatch ||
+         mode == UiMode::NfcNotes;
+}
+// Whatever has the mic, the speaker or the whole loop for now, so a check waits rather than poll.
+bool labOnceHeld() {
+  return gRecording || gRealtimeActive || gRealtimeExclusiveMode || gPlaybackActive || gVoiceReplySpeechBusy ||
+         !gQueuedVoiceReplySpeech.isEmpty() || radioBusy() || vlcBusy() || synthAudioBusy() || synthForegroundAllowed() || gMeshBusOwned ||
+         gUiMode == UiMode::Nes || (labOnceInLab() && gLauncherVisible);
+}
+// Saying anything there would draw over a screen that owns the display.
+bool labOnceMayTell() { return !gRealtimeExclusiveMode && gUiMode != UiMode::Nes; }
+const lab::SeqStep* labOnceSteps(uint8_t& count) {
+  count = gLabOnceYes ? gLabOnce.yes : gLabOnce.no;
+  return gLabOnceYes ? gLabOnce.then : gLabOnce.otherwise;
+}
+bool labOnceDrives(lab::Part part) {
+  uint8_t count = 0;
+  const lab::SeqStep* steps = labOnceSteps(count);
+  for (uint8_t i = 0; i < count; ++i) if (lab::partOf(steps[i].out) == part) return true;
+  return false;
+}
+bool labStripKept() { return lab::stripFrame(gLabDrive, gLabBook.capPercent).on; }
+// Bus traffic can scramble a strip on the Grove wires, so whatever was left lit is sent again before
+// the port goes back, however the check ended. A full silent round means nothing else is on the bus.
+void labOnceRestore(uint32_t now) {
+  if (!labStripKept()) return;
+  if (!gLabOnWires && gLabBook.direct.has(lab::Part::Strip) && !labAnyUnit()) {
+    // A look cut short hasn't been all round the bus, so every unit is asked once before the wires are used.
+    bool found = false;
+    if (gLabQuietProbes < lab::kUnitCount) {
+      gAirSensor.open();
+      for (uint8_t i = 0; i < lab::kUnitCount && !found; ++i) found = labAsk(static_cast<lab::Unit>(i));
+    }
+    if (!found) labTakeWires();
+  }
+  if (!labPartReady(lab::Part::Strip)) return;
+  gLabStripKnown = false;
+  gLabStripTest = LabStripTest::Solid;
+  gLabStripMs = now - kLabStripGapMs;
+  labWriteStrip(now);
+}
+// From a screen change there's no restore: the next screen wants the port now, and a strip write
+// there would sit a 2.9 KB frame on top of whatever changed the screen.
+void labOnceGiveBack(bool restore = true) {
+  if (!gLabOnceBorrowed) return;
+  gLabOnceBorrowed = false;
+  // A check that never needed the port leaves it to whoever has it.
+  if (gLabOncePort) {
+    if (restore) labOnceRestore(millis());
+    // Nothing drives the strip's data line from here, and a floating one can show up as a flicker.
+    const bool lit = labOnWires(lab::Part::Strip) && labStripKept();
+    labPartsOff();
+    if (lit) pinMode(kLabYellowPin, INPUT_PULLDOWN);
+  }
+  if (gLabOnceGps) Serial1.end();
+  gLabOnceGps = false;
+  labForgetOutputs();
+}
+// Telling is its own phase because this can run in the middle of a screen change.
+void labOnceEnd() {
+  labOnceGiveBack();
+  gLabOnceMs = millis();
+  gLabOncePhase = LabOncePhase::Telling;
+}
+void labOnceEndWith(const char* first, const char* second = "", const char* third = "") {
+  lab::Text text(gLabOnceText, sizeof(gLabOnceText));
+  text.add(first).add(second).add(third);
+  labOnceEnd();
+}
+// The beep ends and the servo stops holding, so neither is left drawing power.
+void labOnceLetGo() {
+  uint8_t count = 0;
+  const lab::SeqStep* steps = labOnceSteps(count);
+  for (uint8_t i = 0; i < count; ++i) {
+    if (steps[i].out == lab::Out::Tone) labDriveOff(lab::Out::Tone);
+    if (steps[i].out == lab::Out::Servo) {
+      labDriveOff(lab::Out::Servo);
+      labServoLetGo();
+    }
+  }
+}
+// The report speaks when the reply it follows did. A reply that played before its action ran left
+// that fact in gActionsFollowSpeech.
+void labOnceStart(const lab::Once* once) {
+  const bool speak = gActionsFollowSpeech || !gQueuedVoiceReplySpeech.isEmpty() || gVoiceReplySpeechBusy || gPlaybackActive;
+  // Said at once, these are only shown: the reply that brought this one is about to speak.
+  if (gLabOncePhase == LabOncePhase::Telling && labOnceMayTell()) {
+    gLabOncePhase = LabOncePhase::Idle;
+    labOnceSay(gLabOnceText, false);
+  }
+  if (gLabOncePhase != LabOncePhase::Idle) {
+    if (labOnceMayTell()) labOnceSay("Still on the last check, so I didn't start that one.", false);
+    else setStatus("Still on the last check", 2000);
+    return;
+  }
+  gLabOnce = once ? *once : lab::Once{};
+  gLabOnceSpeak = speak;
+  gLabOnceYes = false;
+  gLabOnceSaid = 0;
+  gLabOnceAskedMs = millis();
+  gLabOncePhase = LabOncePhase::Waiting;
+  if (!once) labOnceEndWith("That check wouldn't work. Nothing changed.");
+  else if (gRealtimeActive || gRealtimeExclusiveMode) labOnceEndWith("A check can't run during a live voice session, so ask in the chat. Nothing changed.");
+}
+bool labOnceBusy() { return gLabOncePhase != LabOncePhase::Idle; }
+// Asked as it starts rather than when the reply came, because the screen can change in between.
+const char* labOnceRefusal() {
+  if (labOnceInLab()) {
+    const bool acts = gLabOnce.yes || gLabOnce.no;
+    // A sequence's screen takes the outputs every pass, even once it has finished.
+    const bool taken = gLabPlaying || gLabSeqRun.running() || labSeqOnScreen();
+    return acts && taken ? "A rule or a sequence has the parts in the Lab, so I left them alone. Nothing changed." : nullptr;
+  }
+  if (!gLabOnce.needsPort()) return nullptr;
+  // Relays read the bus as a switch, and these can carry mains. A setup that couldn't be read might
+  // have them, so it counts as having them.
+  if (!gLabBookKnown) return "The Lab's setup couldn't be read from the SD card, so I left the Grove port alone. Nothing changed.";
+  if (gLabBook.direct.has(lab::Part::Relay)) return "The relays are on the Grove port, so I left it alone. Nothing changed.";
+  if (labHoldsGrove(gUiMode)) return "Another app is using the Grove port. Nothing changed.";
+  return nullptr;
+}
+// Before anything else takes the Grove port, or the Lab takes back its parts.
+void labOnceLeaving(UiMode next) {
+  if (gLabOncePhase != LabOncePhase::Reading && gLabOncePhase != LabOncePhase::Acting) return;
+  if (!labOnceInLab() && !labMode(next) && !labHoldsGrove(next)) return;
+  if (gLabOncePhase == LabOncePhase::Acting) labOnceLetGo();
+  labOnceGiveBack(false);
+  labOnceEndWith("That screen needed the parts, so the check stopped.");
+}
+void labOnceOpen() {
+  gLabOnceBorrowed = true;
+  gLabOncePort = gLabOnce.needsPort();
+  if (gLabOncePort) labPartsFresh();
+  gLabOnceGps = gLabOnce.asksFor(lab::Sig::Satellites);
+  if (gLabOnceGps) labGpsOn();
+}
+// A wire with nothing on it still reads as something, so a part there needs a clean look first.
+bool labOnceBelieved(lab::Sig sig) {
+  if (!gLabInputs.get(sig).live) return false;
+  const bool onWire = sig == lab::Sig::Knob || sig == lab::Sig::Light || sig == lab::Sig::Motion;
+  return !gLabOnWires || !onWire || gLabWhiteSilent == 0;
+}
+// An analog part only knows its scale once it's been turned, and a number before then is wrong.
+bool labOnceRangeKnown(lab::Sig sig) {
+  if (sig == lab::Sig::Knob) return gLabKnobRange.learned();
+  return sig != lab::Sig::Light || labFound(lab::Unit::DLight) || gLabLightRange.learned(lab::kLightRangeShare);
+}
+void labOnceRead(uint32_t now) {
+  if (!labOnceInLab()) {
+    if (gLabOncePort) {
+      serviceLabWires(now, false, false);
+      labReadPort(now);
+    }
+    labReadTilt(now);
+    if (gLabOnceGps) labReadGps(now);
+  }
+  const bool late = now - gLabOnceMs >= kLabOnceReadMs;
+  for (uint8_t i = 0; i < lab::kSigCount; ++i) {
+    const lab::Sig sig = static_cast<lab::Sig>(i);
+    if (!gLabOnce.asksFor(sig) || labOnceBelieved(sig)) continue;
+    gLabOnceSteady = false;
+    if (late) labOnceEndWith("No reading from ", lab::info(sig).name, ". Nothing changed.");
+    return;
+  }
+  if (!gLabOnceSteady) {
+    gLabOnceSteady = true;
+    gLabOnceSteadyMs = now;
+  }
+  if (now - gLabOnceSteadyMs < kLabOnceSteadyMs) return;
+  for (uint8_t i = 0; i < lab::kSigCount; ++i) {
+    const lab::Sig sig = static_cast<lab::Sig>(i);
+    if (!gLabOnce.asksFor(sig) || labOnceRangeKnown(sig)) continue;
+    labOnceEndWith(lab::info(sig).name, " has no range yet, so turn it end to end in the Lab. Nothing changed.");
+    return;
+  }
+  gLabOnceYes = lab::onceHolds(gLabOnce, gLabInputs);
+  uint8_t count = 0;
+  const lab::SeqStep* steps = labOnceSteps(count);
+  lab::Text text(gLabOnceText, sizeof(gLabOnceText));
+  lab::onceReadings(gLabOnce, gLabInputs, text);
+  for (uint8_t i = 0; i < count; ++i) {
+    const lab::Part part = lab::partOf(steps[i].out);
+    if (part == lab::Part::None || labPartReady(part)) continue;
+    if (!late) return;
+    text.add(text.length() ? " " : "").add(lab::kPartNames[static_cast<uint8_t>(part)]).add(" isn't connected. Nothing changed.");
+    labOnceEnd();
+    return;
+  }
+  gLabOnceSaid = text.length();  // The readings as they were when it decided, whatever happens next.
+  uint32_t holdMs = kLabOnceWriteMs;
+  for (uint8_t i = 0; i < count; ++i) {
+    lab::onceApply(steps[i], gLabDrive);
+    if (labOnceInLab()) labOnceMirror(steps[i]);
+    if (steps[i].out == lab::Out::Servo && holdMs < kLabOnceServoMs) holdMs = kLabOnceServoMs;
+    if (steps[i].out == lab::Out::Tone && holdMs < kLabOnceBeepMs) holdMs = kLabOnceBeepMs;
+  }
+  gLabOnceBeeped = false;
+  gLabOnceMs = now + holdMs;
+  gLabOncePhase = LabOncePhase::Acting;
+}
+// Whether what was asked for really went out, rather than only being asked for. Something in the Lab,
+// like the menu or a sequence's screen, can take an output back before it's written.
+bool labOnceLanded(const lab::SeqStep& step) {
+  const lab::Drive& drive = gLabDrive[static_cast<uint8_t>(step.out)];
+  const bool wanted = step.kind == lab::SeqKind::Set;
+  if (drive.on != wanted || (wanted && drive.value != step.value)) return false;
+  switch (step.out) {
+    case lab::Out::Led: return gLabLedSent == (wanted ? step.value : -1);
+    case lab::Out::Servo: return gLabServoSent == step.value;
+    case lab::Out::Tone: return !wanted || gLabOnceBeeped;
+    default: return gLabStripKnown && gLabStripSent == lab::stripFrame(gLabDrive, gLabBook.capPercent);
+  }
+}
+const char* labOnceOutName(lab::Out out) {
+  return out == lab::Out::Led ? "Cardputer LED" : out == lab::Out::Servo ? "Servo" : out == lab::Out::Tone ? "Speaker" : "LED strip";
+}
+void labOnceAct(uint32_t now) {
+  const bool inLab = labOnceInLab();
+  // Something that takes the loop ends this now, and what didn't go out is said.
+  const bool cut = labOnceHeld();
+  // The Lab's own loop writes when it's open. Otherwise only what was asked for or left on is
+  // written, so a hub port the Lab only guesses at is never touched for nothing. Relays never are.
+  if (!inLab && !cut) {
+    labWriteLed(now);
+    labWriteTone();
+    if (gLabOncePort && labOnceDrives(lab::Part::Servo)) labWriteServo(now);
+    if (gLabOncePort && (labOnceDrives(lab::Part::Strip) || labStripKept())) labWriteStrip(now);
+  }
+  if (gLabToneOn) gLabOnceBeeped = true;
+  if (!cut && static_cast<int32_t>(now - gLabOnceMs) < 0) return;
+  uint8_t count = 0;
+  const lab::SeqStep* steps = labOnceSteps(count);
+  lab::SeqStep done[lab::kMaxActions];
+  uint8_t did = 0;
+  bool lost[lab::kPartCount] = {}, taken[lab::kOutCount] = {}, quiet = false;
+  for (uint8_t i = 0; i < count; ++i) {
+    const lab::Part part = lab::partOf(steps[i].out);
+    const lab::Out named = lab::isStrip(steps[i].out) ? lab::Out::StripColor : steps[i].out;  // One strip, one sentence.
+    if (labOnceLanded(steps[i])) done[did++] = steps[i];
+    else if (part != lab::Part::None && !labPartReady(part)) lost[static_cast<uint8_t>(part)] = true;
+    else if (steps[i].out == lab::Out::Tone && gLabDrive[static_cast<uint8_t>(lab::Out::Tone)].on) quiet = true;
+    else taken[static_cast<uint8_t>(named)] = true;
+  }
+  labOnceLetGo();
+  if (!inLab) labWriteTone();
+  // A strip that stopped answering isn't kept, or the next check would light it unasked.
+  if (lost[static_cast<uint8_t>(lab::Part::Strip)]) {
+    for (lab::Out out : {lab::Out::StripColor, lab::Out::StripBright, lab::Out::StripLength}) labDriveOff(out);
+  }
+  lab::Text text(gLabOnceText + gLabOnceSaid, sizeof(gLabOnceText) - gLabOnceSaid);
+  if (gLabOnce.yes || gLabOnce.no) {
+    const auto gap = [&]() -> const char* { return gLabOnceSaid || text.length() ? " " : ""; };
+    if (did || !count) lab::onceDone(done, did, text.add(gap()));
+    for (uint8_t part = 0; part < lab::kPartCount; ++part) {
+      if (lost[part]) text.add(gap()).add(lab::kPartNames[part]).add(" stopped answering.");
+    }
+    for (uint8_t out = 0; out < lab::kOutCount; ++out) {
+      if (taken[out]) text.add(gap()).add(labOnceOutName(static_cast<lab::Out>(out))).add(" didn't change, because something else had it.");
+    }
+    if (quiet) text.add(gap()).add("The speaker was busy, so it didn't beep.");
+  }
+  labOnceEnd();
+}
+void serviceLabOnce() {
+  if (gLabOncePhase == LabOncePhase::Idle) return;
+  const uint32_t now = millis();
+  const bool held = labOnceHeld();
+  switch (gLabOncePhase) {
+    case LabOncePhase::Waiting:
+      // From when it was asked, so however long the loop was elsewhere, a late check never acts.
+      if (now - gLabOnceAskedMs >= kLabOnceWaitMs) {
+        labOnceEndWith("The Cardputer stayed busy, so I didn't check. Nothing changed.");
+        return;
+      }
+      if (held || (gLabOnce.needsPort() && !labOnceInLab() && gNfcRadio.busOpen())) return;
+      if (const char* refusal = labOnceRefusal()) {
+        labOnceEndWith(refusal);
+        return;
+      }
+      if (!labOnceInLab()) labOnceOpen();
+      gLabOnceMs = now;
+      gLabOnceSteady = false;
+      gLabOncePhase = LabOncePhase::Reading;
+      return;
+    case LabOncePhase::Reading:
+      // The port goes back while it waits, and the look starts again from the top.
+      if (held) {
+        labOnceGiveBack();
+        gLabOncePhase = LabOncePhase::Waiting;
+        return;
+      }
+      labOnceRead(now);
+      return;
+    case LabOncePhase::Acting:
+      labOnceAct(now);
+      return;
+    case LabOncePhase::Telling:
+      if (!labOnceMayTell() || (held && now - gLabOnceMs < kLabOnceWaitMs)) return;
+      gLabOncePhase = LabOncePhase::Idle;
+      labOnceSay(gLabOnceText, gLabOnceSpeak);
+      return;
+    default:
+      return;
   }
 }
 }  // namespace

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { buildDeviceActionsPayload, LAB_RULE_POLICY, extractDeviceActionsFromText, sanitizeDeviceAction, trimDeviceEventMessage } from "./server.mjs";
-import { LAB_CHAT_POLICY, VOICE_TOOLS } from "./voice-tools.mjs";
+import { LAB_CHAT_POLICY, LAB_LIVE_CHAT_POLICY, LAB_LIVE_ONCE_POLICY, LAB_ONCE_POLICY, VOICE_TOOLS } from "./voice-tools.mjs";
 
 const lab = new URL("../../bots/CardputerADV/src/lab.h", import.meta.url);
 const firmwareCatalog = new URL("../../bots/CardputerADV/src/main_parts/003_main.cpp.inc", import.meta.url);
@@ -169,4 +169,84 @@ test("a reply with no action is cut where it always was, and a short one isn't t
   assert.equal(trimDeviceEventMessage({ content: { text: "short" } }, 1024).content.truncated, undefined);
   const broken = "z".repeat(1100) + "[[cardputer_actions:[{";
   assert.equal(trimDeviceEventMessage({ content: { text: broken } }, 1024).content.text.length, 1024, "half a marker is only words");
+});
+
+test("a one-time check keeps only its own fields", () => {
+  assert.deepEqual(sanitizeDeviceAction({
+    type: "lab.once", any: false, extra: 1, name: "dropped", hold_ms: 5,
+    read: ["knob", 7, "tilt"], when: [{ sensor: "knob", test: "over", value: 99999, extra: true }],
+    do: [{ output: "strip_color", set: 0, follow: "knob" }], else: [{ output: "led", off: true }]
+  }), {
+    type: "lab.once", any: false, read: ["knob", "tilt"], when: [{ sensor: "knob", test: "over", value: 32000 }],
+    do: [{ output: "strip_color", set: 0 }], else: [{ output: "led", off: true }]
+  });
+});
+
+test("a check can be a reading, an action or both, and has to be something", () => {
+  assert.deepEqual(sanitizeDeviceAction({ type: "lab.once", read: ["humidity"] }).read, ["humidity"]);
+  assert.equal(sanitizeDeviceAction({ type: "lab.once", do: [{ output: "led", set: 120 }] }).do.length, 1);
+  assert.equal(sanitizeDeviceAction({ type: "lab.once", when: [{ sensor: "motion", test: "on" }] }).any, true);
+  assert.equal(sanitizeDeviceAction({ type: "lab.once" }), null);
+  assert.equal(sanitizeDeviceAction({ type: "lab.once", read: [], when: [], do: [] }), null);
+  assert.equal(sanitizeDeviceAction({ type: "lab.once", read: "knob" }), null);
+});
+
+test("a check with a line too many is refused rather than cut", () => {
+  const led = { output: "led", set: 1 };
+  assert.equal(sanitizeDeviceAction({ type: "lab.once", do: [led, led, led] }).do.length, 3);
+  assert.equal(sanitizeDeviceAction({ type: "lab.once", do: [led, led, led, led] }), null);
+  assert.equal(sanitizeDeviceAction({ type: "lab.once", read: ["a", "b", "c", "d"] }), null);
+  assert.equal(sanitizeDeviceAction({ type: "lab.once", read: ["knob"], else: [led, led, led, led] }), null);
+  assert.equal(sanitizeDeviceAction({ type: "lab.once", read: ["knob"], when: Array(4).fill({ sensor: "knob", test: "on" }) }), null);
+});
+
+test("every example the prompt gives for a check is one the bridge passes", () => {
+  const markers = [...LAB_ONCE_POLICY.matchAll(/\[\[cardputer_actions:(.*?)\]\]\]/gu)];
+  assert.equal(markers.length, 3);
+  for (const marker of markers) {
+    const { actions } = extractDeviceActionsFromText(`Checking. ${marker[0]}`);
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0].type, "lab.once");
+  }
+});
+
+test("the chat and Ask the Lab both know about a check, and it never reports for the device", () => {
+  assert.ok(LAB_CHAT_POLICY.includes(LAB_ONCE_POLICY));
+  assert.ok(VOICE_TOOLS.get("lab.ask").actions.includes("lab.once"));
+  assert.ok(VOICE_TOOLS.get("lab.ask").instructions.includes(LAB_ONCE_POLICY));
+  assert.ok(!VOICE_TOOLS.get("lab.rule").actions.includes("lab.once"), "saying a rule is still only a rule");
+  assert.match(LAB_ONCE_POLICY, /never a number, a result or that anything changed/u);
+  assert.match(LAB_ONCE_POLICY, /An if means one time/u);
+  assert.doesNotMatch(LAB_CHAT_POLICY, /tell the owner to tap Alt on a Lab screen and ask there\. To change/u);
+});
+
+test("the outputs a check is told about are the ones the firmware lets it drive", async () => {
+  const header = await readFile(lab, "utf8");
+  assert.match(header, /onceCanDrive\(Out out\) \{ return out == Out::Servo \|\| isStrip\(out\) \|\| out == Out::Led \|\| out == Out::Tone; \}/u);
+  assert.match(LAB_ONCE_POLICY, /A do or else line is servo, strip_color, strip_bright, strip_length, led or speaker,/u);
+});
+
+test("a live voice session isn't offered a check, because the device can't run one then", async () => {
+  assert.ok(!LAB_LIVE_CHAT_POLICY.includes("lab.once action") && !LAB_LIVE_CHAT_POLICY.includes(LAB_ONCE_POLICY));
+  assert.ok(LAB_LIVE_CHAT_POLICY.includes(LAB_LIVE_ONCE_POLICY));
+  assert.equal(LAB_CHAT_POLICY.replace(LAB_ONCE_POLICY, "").length > 0, true);
+  const server = await readFile(new URL("./server.mjs", import.meta.url), "utf8");
+  const realtime = server.slice(server.indexOf("function realtimeInstructions("), server.indexOf("function realtimeInstructions(") + 2000);
+  assert.match(realtime, /buildDeviceActionPolicyText\(\{ live: true \}\)/u);
+  assert.match(server, /live \? DEVICE_ACTION_CATALOG\.filter\(\(action\) => action\.type !== "lab\.once"\)/u);
+});
+
+test("the check example only has the parts its words ask for", () => {
+  const markers = [...LAB_ONCE_POLICY.matchAll(/\[\[cardputer_actions:(.*?)\]\]\]/gu)].map((match) => JSON.parse(`${match[1]}]`));
+  assert.ok(markers.every(([action]) => !Object.hasOwn(action, "else")), "an else nobody asked for would act on its own");
+});
+
+test("a check's numbers stay numbers and keep their fractions, and anything else is dropped", () => {
+  const action = sanitizeDeviceAction({ type: "lab.once", when: [{ sensor: "temperature", test: "over", value: 22.5 }, { sensor: "knob", test: "over", value: "50" }],
+    do: [{ output: "servo", set: 90.5 }, { output: "led", set: "120" }, { output: "strip_color", set: true }] });
+  assert.equal(action.when[0].value, 22.5, "the device rounds it toward the side that keeps its meaning");
+  assert.equal(Object.hasOwn(action.when[1], "value"), false, "a string isn't a number, so the device refuses it");
+  assert.equal(action.do[0].set, 90.5);
+  assert.equal(Object.hasOwn(action.do[1], "set"), false);
+  assert.equal(Object.hasOwn(action.do[2], "set"), false);
 });

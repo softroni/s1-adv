@@ -99,11 +99,13 @@ String gActivityDetail;
 uint32_t gActivitySeq = 0;
 assistant_activity::CueGate gActivityCueGate;
 bool gReplyWaitLive = false;      // The bridge holds polls and reports activity for this wait.
+bool gActionsFollowSpeech = false;  // The actions running now came with a reply that has just been spoken.
 bool gReplyWaitFromText = false;  // A typed message only hears a reply that's long enough.
 assistant_activity::State currentAssistantActivity();
 void applyAssistantActivity(const char* state, const char* detail, uint32_t seq);
 volatile uint32_t gVoiceReplySpeechGeneration = 0;
 void showVoiceNotice(const String& text, bool pending);
+void postDeviceReply(const String& text, bool speak);
 firmware_job_display::State gFirmwareJobState = firmware_job_display::State::Idle;
 uint32_t gFirmwareJobLastSyncMs = 0;
 uint32_t gBridgeLastSuccessMs = 0;
@@ -563,6 +565,9 @@ void labReadBook();
 void labOfferRule(const lab::Rule& rule);
 bool labOfferChange(const lab::Rule& rule, const char* replaces);
 bool labOfferSequence(const lab::Sequence& seq, const char* replaces);
+void labOnceStart(const lab::Once* once);
+void labOnceLeaving(UiMode next);
+void serviceLabOnce();
 String labChatContext();
 const lab::Sequence* labSequences();
 uint8_t labSequenceCount();

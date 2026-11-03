@@ -69,20 +69,55 @@ export const LAB_SEQUENCE_POLICY =
   "can't play a sequence until it's saved, so send a new sequence on its own, and write the rule once they've " +
   "saved it. The owner reviews every sequence before it is saved, so never say it is saved or running.";
 
+// One look at a sensor, and perhaps one action, from the chat or from Ask the Lab. The outputs must
+// match onceCanDrive in bots/CardputerADV/src/lab.h, which checks them all again.
+export const LAB_ONCE_POLICY =
+  "The Cardputer can also check something for you right now, from any screen, with nothing saved. Use this for " +
+  "one-time requests: a reading like \"what's the knob at\" or \"how hot is it\", an action like \"turn the strip " +
+  "red\", or \"if the knob is over 50 turn the strip red\". An if means one time, so send lab.once and not a rule. " +
+  "Words like when, whenever or every time, or asking for a rule, mean something that keeps watching, so those are " +
+  "a lab.rule. Append one lab.once action, like " +
+  "[[cardputer_actions:[{\"type\":\"lab.once\",\"any\":true,\"when\":[{\"sensor\":\"knob\",\"test\":\"over\",\"value\":50}]," +
+  "\"do\":[{\"output\":\"strip_color\",\"set\":0}]}]]] " +
+  "or, for a plain action, [[cardputer_actions:[{\"type\":\"lab.once\",\"do\":[{\"output\":\"led\",\"set\":120}]}]]] " +
+  "or, for a reading alone, [[cardputer_actions:[{\"type\":\"lab.once\",\"read\":[\"temperature\",\"humidity\"]}]]]. " +
+  "read lists up to 3 sensors to report. when is up to 3 lines, the same as a rule's but only under, over, on or " +
+  "off, and any false when all must be true. Only write when for an if they actually said, so a plain action like " +
+  "turn the led green has no when at all. do is up to 3 lines to run if when is true, or always if there's no " +
+  "when. else is up to 3 lines to run if when is false, written the same way as do, and only when they say what " +
+  "should happen otherwise. A do or else line is servo, strip_color, strip_bright, strip_length, led or speaker, " +
+  "with set as a whole number or with off true, and a servo can't be turned off. No follow, oppose, waits, relays, lamp, air conditioners, say or " +
+  "sequence, because those need the owner: say so and offer a rule or a sequence instead. The Mini Angle reads as " +
+  "knob, so an angle means knob unless they say tilt. The device reads the sensor, acts and reports the real result " +
+  "by itself, a few seconds after your reply, so you never know the reading or the outcome yet. Say only what " +
+  "you're checking, in a few words, like \"Checking the knob.\", and never a number, a result or that anything " +
+  "changed. Outside the Lab, the strip and the led stay as set until the owner asks you to turn them off, with " +
+  "off true, or opens the Lab. In the Lab they last until the Lab takes them back, as it does when a part's " +
+  "screen closes. A servo moves and then lets go, and the speaker gives one short beep. Send one lab.once in a reply.";
+
+// A live voice session owns the speaker and the loop until it ends, so the device can't check then.
+export const LAB_LIVE_ONCE_POLICY =
+  "In this live voice session the Cardputer can't check a sensor or set a part one time, and there's no lab.once " +
+  "here. For a reading or a one-time action, say to ask in the chat once this call ends, and never guess a reading.";
+
 // What the chat can do in the Lab, on top of LAB_RULE_POLICY. The Lab state itself reaches Claude
 // beside the saved notes, so a stale copy never sits in the conversation.
-export const LAB_CHAT_POLICY =
+const labChatPolicy = (live) =>
   "When the device sends one, a section called Lab state lists the rules and sequences saved in the Lab, and that " +
   "is what the device state means for a chat message. A rule line reads: name, any or all, its when lines, then do " +
   "and its do lines, then hold and its hold_ms. There's no Lab state at all if the device didn't send one, so never " +
-  "guess what's saved. You can't see what's plugged in or any live readings, because the sensors stop when the Lab " +
-  "closes, so for those tell the owner to tap Alt on a Lab screen and ask there. " +
+  "guess what's saved. You can't see what's plugged in or any live readings yourself, because the sensors stop " +
+  `when the Lab closes, so ${live ? "never guess a reading" : "get a reading with lab.once and never guess one"}. ` +
+  "For what's plugged in, tell the owner to tap Alt on a Lab screen and ask there. A line starting last check is " +
+  "what the device reported after the most recent one-time check, so use it to answer questions about that result. " +
   "To change a saved rule, append one lab.rule action with the whole rule, changed only as they ask, and replaces " +
   "set to its current name, like {\"type\":\"lab.rule\",\"replaces\":\"Wave red\",\"name\":\"Wave blue\",...}. " +
-  `${LAB_SEQUENCE_POLICY} ` +
+  `${LAB_SEQUENCE_POLICY} ${live ? LAB_LIVE_ONCE_POLICY : LAB_ONCE_POLICY} ` +
   "Send one rule or sequence in a reply, because the device can only show one. If they ask for several, send the " +
   "first and say you'll do the next once it's saved. You can't start, stop or delete rules or sequences, so for " +
   "those tell the owner what to press in the Lab.";
+export const LAB_CHAT_POLICY = labChatPolicy(false);
+export const LAB_LIVE_CHAT_POLICY = labChatPolicy(true);
 
 // The device checks all of this again, and acts only on the part whose screen is open.
 export const LAB_SET_POLICY =
@@ -128,8 +163,9 @@ export const VOICE_TOOLS = new Map([
   ["lab.ask", {
     instructions: `${LAB_HELP} Answer from the device state, using its real readings and rules, and say what to ` +
       "do next. If they ask what they could make, suggest up to 3 rules using parts that are answering, each as " +
-      `a lab.rule action, and say in one sentence what they do. ${LAB_RULE_POLICY} ${LAB_SEQUENCE_POLICY} ${LAB_SET_POLICY}`,
-    actions: ["lab.rule", "lab.sequence", "lab.set"],
+      `a lab.rule action, and say in one sentence what they do. ${LAB_RULE_POLICY} ${LAB_SEQUENCE_POLICY} ${LAB_SET_POLICY} ` +
+      `Where one line of lab.set will do, use that. ${LAB_ONCE_POLICY}`,
+    actions: ["lab.rule", "lab.sequence", "lab.set", "lab.once"],
     words: 35
   }]
 ]);

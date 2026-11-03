@@ -4,7 +4,7 @@
 
 The Lab turns your Cardputer into a test bench. **Devices** shows everything it can reach, live, and most parts have extra pages with graphs, games and tools. **Rules** joins sensors to lights, motors and switches with "if this, then that", built one question at a time on the little screen. **Sequences** are steps that run in order, with waits between them.
 
-With Claude connected, you can also [talk to it](#talk-to-it): say a rule, change one, have it speak, or ask why it didn't fire.
+With Claude connected, you can also [talk to it](#talk-to-it): say a rule, change one, have it speak, or ask why it didn't fire. From the chat, it can [check something once](#check-something-once) without opening the Lab.
 
 <table>
 <tr>
@@ -18,7 +18,7 @@ To open it, press **Tab**, then **L**. You can also type `/lab`, `/rules` or `/s
 
 On the Cardputer, the arrow keys are `;` up, `.` down, `,` left and `/` right, and Esc is the top-left key.
 
-[Try it with no parts](#try-it-with-no-parts) · [Connect a part](#connect-a-part) · [Test a part](#test-a-part) · [Build a rule](#build-a-rule) · [Play it](#play-it) · [Sequences](#sequences) · [Talk to it](#talk-to-it) · [From the chat](#from-the-chat) · [If a part doesn't answer](#if-a-part-doesnt-answer) · [Good to know](#good-to-know)
+[Try it with no parts](#try-it-with-no-parts) · [Connect a part](#connect-a-part) · [Test a part](#test-a-part) · [Build a rule](#build-a-rule) · [Play it](#play-it) · [Sequences](#sequences) · [Talk to it](#talk-to-it) · [From the chat](#from-the-chat) · [Check something once](#check-something-once) · [If a part doesn't answer](#if-a-part-doesnt-answer) · [Good to know](#good-to-know)
 
 > The Lab needs firmware built from source, as in step 1 of the [README](../README.md#set-it-up). The older one-command flash doesn't have it.
 
@@ -342,7 +342,7 @@ With [Claude connected](../README.md#3-connect-claude), you can do most of the L
 | Playing | [Call a rule by name](#call-a-rule-by-name) |
 | Servo, LED strip, Cardputer LED or Speaker | [Set the part](#set-a-part-by-voice), or ask about it |
 | Sequences | [Write or change a sequence](#write-a-sequence), or [ask the Lab](#ask-the-lab) |
-| Devices, Dashboard, any other part or wiring | [Ask the Lab](#ask-the-lab) |
+| Devices, Dashboard, any other part or wiring | [Ask the Lab](#ask-the-lab), or [check something once](#check-something-once) |
 
 Other Lab screens don't listen, such as an offer waiting for **Enter** or the steps of a new rule. **G0** and **Ctrl+V** do nothing there either.
 
@@ -435,7 +435,7 @@ On the Servo, LED strip, Cardputer LED and Speaker screens you can say what to d
 
 <img src="assets/lab/servo-say.png" alt="The Servo screen, with ALT say it at the bottom" width="360">
 
-A spoken setting only moves the part whose screen is open. Relays, the lamp and the air conditioner stay on their keys, because speech can be misheard and they can switch mains.
+A spoken setting only moves the part whose screen is open. To set another part from here, or to make it depend on a reading, [check something once](#check-something-once). Relays, the lamp and the air conditioner stay on their keys, because speech can be misheard and they can switch mains.
 
 ### The diary
 
@@ -467,13 +467,58 @@ A rule looks the same as one you [said](#say-a-rule) or [changed by voice](#chan
 
 | Claude can | You do it yourself |
 | --- | --- |
-| See your saved rules and sequences | Check what's plugged in and its readings, with [Ask the Lab](#ask-the-lab). The sensors stop when the Lab closes |
+| See your saved rules and sequences | See what's plugged in, with [Ask the Lab](#ask-the-lab) |
 | Write a rule or change one | Start and stop rules and sequences, because they can switch mains |
 | Write a sequence or change one | Delete a rule or a sequence |
+| [Check something once](#check-something-once): read a sensor, or set the strip, LED, servo or speaker | Switch relays, the lamp or an air conditioner, which only a rule you've saved can do |
 
 A rule can't play a sequence until that sequence is saved. Ask for the sequence, save it, then ask for the rule.
 
 This needs a bridge from 0.2.256 or later. On an older one, the chat can't see what's saved or write a sequence, so restart it.
+
+## Check something once
+
+You don't need a rule to ask about right now. On Pulse or in AI Chat, Claude can read a sensor or set a part straight away, without opening the Lab. Nothing is saved, and nothing keeps watching.
+
+- "What's the knob at?"
+- "How hot is it, and how humid?"
+- "If the knob is over 50, turn the strip red."
+- "If the light is under 20, turn the LED blue, otherwise turn it off."
+- "Turn the strip off."
+
+Claude says what it's checking, and a few seconds later the result arrives as the next message, like **Knob 67%, over 50. Strip set to red.** If you asked out loud, it's read out too. The reading comes from the Cardputer itself, so it's the real number. Ask "what did it read?" afterwards and Claude has the result.
+
+An "if" means once. "When", "whenever" and "every time" keep watching, so those are a [rule](#say-a-rule), which waits for your Enter as usual. If it picks the wrong one, say which you meant.
+
+The same works on any screen that [asks the Lab](#ask-the-lab), and the result shows there. With the Lab open, it uses the readings already on screen.
+
+<img src="assets/lab/once-answer.png" alt="Ask the Lab showing a result: Knob 75%, over 50. Strip set to red." width="360">
+
+A check doesn't wait for Enter, so it can only reach parts where a mistake is easy to see and undo:
+
+| Part | What happens |
+| --- | --- |
+| **LED strip** | Stays as set until you say "turn the strip off" or open the Lab. Asked in the Lab, it lasts until the Lab takes it back, as when a part's screen closes |
+| **Cardputer LED** | The same |
+| **Servo** | Moves, then lets go so it isn't left drawing power |
+| **Speaker** | One short beep |
+
+Relays, the lamp and the air conditioners can switch mains, so they aren't on that list. Claude offers a rule instead, and you check that before it's saved.
+
+### What it needs
+
+- **The Lab has to know the part.** Anything with no I2C can't be found by asking, so [open it in Devices](#connect-a-part) once first. Its setup is saved. On the I/O hub it uses the ports you picked, and the hub can't tell an empty port from a part, so an empty one can still give a reading.
+- **It takes a second or two.** It waits for a spoken reply to finish first, and gives up after about 4 seconds if a part doesn't answer.
+- **If a sensor doesn't answer, nothing changes.** You get "No reading from Knob. Nothing changed.", and it won't guess. A sensor it can't read means no action at all, even with several in the question.
+- **A Mini Angle or Light on the I/O hub needs its range.** After a restart, open it in the Lab and turn it end to end once, or it says so and stops. Straight on Grove it doesn't need this.
+- **It's one at a time.** One check runs until it's finished, and there are no waits or repeats. For those, ask for a [sequence](#write-a-sequence) or a rule.
+- **The Grove port has to be free.** If Air Music, Flappy Bird, Hot Air Balloon, Ball Catch or NFC Notes has it, the check says so. Opening one of those, or the Lab, stops a check that's running.
+- **Relays on Grove keep it out.** They'd switch with the port's traffic, so with them set up on Grove a check leaves the port alone, and only tilt, GPS, the Cardputer's LED and its speaker still work. It does the same if the Lab's setup can't be read from the SD card, or there's no card. Relays plugged into Grove that you haven't set up in Devices can't be seen at all, so set them up or unplug them first. On the I/O hub they're no trouble.
+- **Not during rules or a live voice session.** With rules or a sequence playing in the Lab, or a sequence's screen open, they keep their parts and the check changes nothing. In a live voice session the Cardputer can't check anything, so ask in the chat afterwards.
+- **It says what didn't happen.** If a part stops answering, or something else takes it back before the change goes out, the result says so rather than claiming it worked.
+- **A strip or servo on Grove can flicker or twitch** as the port is checked, the same as when the Lab opens. The strip goes back to its color straight away.
+
+Needs firmware and a bridge from 0.2.259 or later.
 
 ## If a part doesn't answer
 

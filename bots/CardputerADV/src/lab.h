@@ -976,12 +976,24 @@ inline Part partFor(Dev dev) {
 
 // A knob's top depends on the unit and the hub, so the top seen so far is the top.
 struct AnalogRange {
-  uint16_t top = 512;
+  uint16_t top = 512, low = 0xFFFF;
+  bool fixed = false;  // A known top, as on the Grove wires, rather than one learned by turning.
+  static AnalogRange fixedAt(uint16_t known) {
+    AnalogRange range;
+    range.top = known;
+    range.fixed = true;
+    return range;
+  }
   uint8_t percent(uint16_t raw) {
     if (raw > top) top = raw;
+    if (raw < low) low = raw;
     return static_cast<uint8_t>((static_cast<uint32_t>(raw) * 100U + top / 2) / top);
   }
+  // Until it's been turned end to end, the highest reading so far is only where it happened to sit.
+  bool learned(uint8_t share = 8) const { return fixed || (top > 512 && low < top / share); }
 };
+// A light only reaches its bottom in bright light, which a room may never give, so it needs half.
+constexpr uint8_t kLightRangeShare = 2;
 
 // The Mini Angle's voltage falls as it turns clockwise, so the number has to be turned around for
 // clockwise to read as up, on the screen and in every rule that follows it. The owner found this
@@ -1302,5 +1314,120 @@ inline bool decodeSequences(const uint8_t* bytes, size_t length, Sequence* seqs,
   for (uint8_t i = 0; i < saved; ++i) seqs[i] = in[i];
   count = saved;
   return true;
+}
+
+// --- One check from the chat --------------------------------------------------------------------
+// Read something once, perhaps act on it once, and say what happened. Nothing is saved and nothing
+// keeps watching. It has no Enter to wait for, so it only reaches what speech can already set, where
+// a wrong answer costs a wrong color. Relays, the lamp and the air conditioners stay on their keys.
+constexpr uint8_t kOnceReads = 3;
+constexpr size_t kOnceTextChars = 240;  // The longest report: six readings and three things done.
+constexpr bool onceCanDrive(Out out) { return out == Out::Servo || isStrip(out) || out == Out::Led || out == Out::Tone; }
+constexpr bool onCardputer(Sig sig) { return sig == Sig::Tilt || sig == Sig::Satellites; }
+constexpr Part partOf(Out out) { return out == Out::Servo ? Part::Servo : isStrip(out) ? Part::Strip : Part::None; }
+
+struct Once {
+  bool any = true;
+  uint8_t reads = 0, conds = 0, yes = 0, no = 0;
+  Sig read[kOnceReads];
+  Cond cond[kMaxConds];
+  SeqStep then[kMaxActions], otherwise[kMaxActions];  // Set or Off, and never a wait.
+
+  bool usable() const { return (reads || conds || yes) && (conds || !no); }
+  bool asksFor(Sig sig) const {
+    for (uint8_t i = 0; i < conds; ++i) if (cond[i].sig == sig) return true;
+    for (uint8_t i = 0; i < reads; ++i) if (read[i] == sig) return true;
+    return false;
+  }
+  // Whether this has to touch the Grove port at all. Tilt doesn't, so it can't disturb what's there.
+  bool needsPort() const {
+    for (uint8_t i = 0; i < conds; ++i) if (!onCardputer(cond[i].sig)) return true;
+    for (uint8_t i = 0; i < reads; ++i) if (!onCardputer(read[i])) return true;
+    for (uint8_t i = 0; i < yes; ++i) if (partOf(then[i].out) != Part::None) return true;
+    for (uint8_t i = 0; i < no; ++i) if (partOf(otherwise[i].out) != Part::None) return true;
+    return false;
+  }
+};
+
+inline bool onceHolds(const Once& once, const Inputs& inputs) {
+  for (uint8_t i = 0; i < once.conds; ++i) {
+    const bool holds = condHolds(once.cond[i], inputs, 0);
+    if (holds == once.any) return holds;
+  }
+  return !once.any || !once.conds;
+}
+inline void onceApply(const SeqStep& step, Drive* drive) {
+  const Drive next{step.kind == SeqKind::Set, step.value};
+  if (step.kind == SeqKind::Off && isStrip(step.out)) {
+    drive[static_cast<uint8_t>(Out::StripColor)] = next;
+    drive[static_cast<uint8_t>(Out::StripBright)] = next;
+    drive[static_cast<uint8_t>(Out::StripLength)] = next;
+  } else {
+    drive[static_cast<uint8_t>(step.out)] = next;
+  }
+}
+// The colors the prompt names, or null for one in between.
+inline const char* hueWord(int hue) {
+  constexpr struct { int16_t hue; const char* word; } kWords[] = {{0, "red"}, {30, "orange"}, {60, "yellow"}, {120, "green"},
+                                                                  {180, "cyan"}, {240, "blue"}, {280, "purple"}, {330, "pink"}};
+  for (const auto& known : kWords) {
+    const int gap = hue > known.hue ? hue - known.hue : known.hue - hue;
+    if ((gap < 360 - gap ? gap : 360 - gap) < 15) return known.word;
+  }
+  return nullptr;
+}
+inline void onceValue(Sig sig, int value, Text& out) {
+  const SigInfo& s = info(sig);
+  out.add(s.name).add(" ");
+  if (s.onOff) out.add(value ? "on" : "off");
+  else out.add(value).add(s.unit[0] && s.unit[0] != '%' ? " " : "").add(s.unit);
+}
+// "Knob 67%, over 50. Humidity 40%." The numbers are the real ones, not Claude's account of them.
+inline void onceReadings(const Once& once, const Inputs& inputs, Text& out) {
+  bool first = true;
+  for (uint8_t i = 0; i < once.conds; ++i, first = false) {
+    const Cond& cond = once.cond[i];
+    const Reading& reading = inputs.get(cond.sig);
+    onceValue(cond.sig, reading.value, out.add(first ? "" : "; "));
+    if (info(cond.sig).onOff) continue;
+    out.add(condHolds(cond, inputs, 0) ? ", " : ", not ").add(cond.op == Op::Above ? "over " : "under ").add(cond.value);
+  }
+  for (uint8_t i = 0; i < once.reads; ++i) {
+    bool shown = false;
+    for (uint8_t c = 0; c < once.conds; ++c) shown = shown || once.cond[c].sig == once.read[i];
+    for (uint8_t r = 0; r < i; ++r) shown = shown || once.read[r] == once.read[i];
+    if (shown) continue;
+    onceValue(once.read[i], inputs.get(once.read[i]).value, out.add(first ? "" : "; "));
+    first = false;
+  }
+  if (!first) out.add(".");
+}
+inline void onceDid(const SeqStep& step, Text& out) {
+  const bool off = step.kind == SeqKind::Off;
+  const int value = step.value;
+  switch (step.out) {
+    case Out::Servo: out.add("servo moved to ").add(value).add(" deg"); return;
+    case Out::Tone: off ? out.add("speaker off") : out.add("beeped at ").add(value).add(" Hz"); return;
+    case Out::StripBright: off ? out.add("strip off") : out.add("strip at ").add(value).add("% brightness"); return;
+    case Out::StripLength: off ? out.add("strip off") : out.add("strip lit to ").add(value).add(" LEDs"); return;
+    default: break;
+  }
+  const char* name = step.out == Out::Led ? "LED" : "strip";
+  if (off) {
+    out.add(name).add(" off");
+    return;
+  }
+  const char* word = hueWord(value);
+  out.add(name).add(" set to ");
+  word ? out.add(word) : out.add("hue ").add(value);
+}
+// What was done, capitalized by hand because Text only ever adds.
+inline void onceDone(const SeqStep* steps, uint8_t count, Text& out) {
+  char line[kOnceTextChars];
+  Text said(line, sizeof(line));
+  for (uint8_t i = 0; i < count; ++i) onceDid(steps[i], i ? said.add(", ") : said);
+  if (!count) said.add("nothing changed");
+  if (line[0] >= 'a' && line[0] <= 'z') line[0] = static_cast<char>(line[0] - 'a' + 'A');
+  out.add(line).add(".");
 }
 }  // namespace lab

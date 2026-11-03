@@ -163,6 +163,7 @@ struct Grove {
   int mode[3] = {}, out[3] = {};
   uint32_t duty = 0; int channel = -1, attached = -1, bits = 0; uint32_t hz = 0;
   int ledsLit = 0, frames = 0; uint8_t lastGreen = 0, lastRed = 0, lastBlue = 0;
+  bool scrambled = false;     // Bus traffic reached a strip on yellow, and nothing has been sent since.
 } gGrove;
 void pinMode(uint8_t pin, int mode) { assert(pin == 1 || pin == 2); assert(!gBusOpen); gGrove.mode[pin] = mode; }
 // Anything on the I2C bus brings pull-ups, which hold the wire high whatever else is there.
@@ -181,7 +182,7 @@ rmt_obj_t* rmtInit(int pin, bool tx, int) { assert(pin == 2 && tx && !gBusOpen);
 float rmtSetTick(rmt_obj_t*, float tick) { assert(tick == 100); return tick; }
 bool rmtDeinit(rmt_obj_t*) { --gRmtLive; return true; }
 bool rmtWriteBlocking(rmt_obj_t*, rmt_data_t* data, size_t size) {
-  assert(size == 720 && gRmtLive == 1); ++gGrove.frames; gGrove.ledsLit = 0;
+  assert(size == 720 && gRmtLive == 1); ++gGrove.frames; gGrove.ledsLit = 0; gGrove.scrambled = false;
   for (int led = 0; led < 30; ++led) { uint8_t c[3] = {}; for (int bit = 0; bit < 24; ++bit) { assert(data[led * 24 + bit].duration0 + data[led * 24 + bit].duration1 == 12); if (data[led * 24 + bit].duration0 == 7) c[bit / 8] |= uint8_t(0x80 >> (bit % 8)); }
     if (c[0] || c[1] || c[2]) { ++gGrove.ledsLit; gGrove.lastGreen = c[0]; gGrove.lastRed = c[1]; gGrove.lastBlue = c[2]; } }
   return true;
@@ -220,7 +221,7 @@ struct WireClass {
 // --- What the Lab borrows from the games ---------------------------------------------------------
 struct AirSensor {
   int opens = 0, closes = 0; bool open_ = false;
-  void open() { if (!open_) ++opens; open_ = true; gBusOpen = true; }
+  void open() { if (!open_) ++opens; open_ = true; gBusOpen = true; gGrove.scrambled = true; }
   void close() { if (open_) ++closes; open_ = false; gBusOpen = false; }
   bool trigger() { Wire.beginTransmission(0x57); Wire.write(uint8_t(1)); return Wire.endTransmission() == 0; }
   bool read(uint32_t& um) { if (!gUnits.present.count(0x57)) return false; if (gUnits.sonicBusyWhileMeasuring && nowMs < gUnits.sonicBusyUntil) return false; um = gUnits.um; return true; }
@@ -257,7 +258,7 @@ constexpr const char* FILE_WRITE = "w";
 constexpr const char* FILE_APPEND = "a";
 bool gClockOk = true;
 bool hasValidSystemTime() { return gClockOk; }
-struct Disk { std::map<std::string, std::vector<uint8_t>> files; bool broken = false; } gDisk;
+struct Disk { std::map<std::string, std::vector<uint8_t>> files; bool broken = false, gone = false; } gDisk;  // gone: the card stopped answering.
 struct File {
   std::string path; size_t at = 0; bool ok = false, writing = false;
   operator bool() const { return ok; }
@@ -265,11 +266,12 @@ struct File {
   size_t read(uint8_t* out, size_t n) { auto& f = gDisk.files[path]; const size_t got = min(n, f.size() - at); std::memcpy(out, f.data() + at, got); at += got; return got; }
   size_t write(const uint8_t* b, size_t n) { auto& f = gDisk.files[path]; f.insert(f.end(), b, b + n); return n; }
   bool seek(size_t to) { at = to; return true; }
+  bool isDirectory() const { return path == "/"; }
   void close() {}
 };
 struct SdClass {
-  bool exists(const char* p) { return gDisk.files.count(p) > 0; }
-  File open(const char* p, const char* mode) { File f; f.path = p; f.ok = !gDisk.broken && (mode[0] != 'r' || exists(p)); return f; }
+  bool exists(const char* p) { return !gDisk.gone && gDisk.files.count(p) > 0; }
+  File open(const char* p, const char* mode = "r") { File f; f.path = p; f.ok = !gDisk.broken && !gDisk.gone && (mode[0] != 'r' || exists(p) || f.path == "/"); return f; }
   bool remove(const char* p) { return gDisk.files.erase(p) > 0; }
   bool rename(const char* a, const char* b) { auto it = gDisk.files.find(a); if (it == gDisk.files.end()) return false; gDisk.files[b] = it->second; gDisk.files.erase(it); return true; }
 } SD;
@@ -280,9 +282,15 @@ bool waitForInboxToFinish(uint32_t) { return true; }
 bool speechToWavFile(const String& text, const String& path) { ++gSpeechFetches; gSpeechText = text; if (!gSpeechWorks) return false; gDisk.files[std::string(path)] = {1, 2}; return true; }
 void render() {}
 struct Keyboard_Class { struct KeysState { bool ctrl = false, alt = false, opt = false, enter = false, del = false; }; };
-enum class UiMode { Home, NfcNotes, Mesh, SmartLamp, IrRemote, LabDevices, LabRules, LabSequences };
+enum class UiMode { Home, NfcNotes, Mesh, SmartLamp, IrRemote, LabDevices, LabRules, LabSequences, AirMusic, Flappy, Balloon, BallCatch, Nes };
 UiMode gUiMode = UiMode::Home;
 bool gLauncherVisible = false, gRecording = false, gRealtimeActive = false, gPlaybackActive = false, gToneAllowed = true;
+bool gRealtimeExclusiveMode = false, gMeshBusOwned = false, gActionsFollowSpeech = false, gRadioBusy = false;
+bool radioBusy() { return gRadioBusy; }
+bool vlcBusy() { return false; }
+bool synthAudioBusy() { return false; }
+bool synthForegroundAllowed() { return false; }
+struct { bool open = false; bool busOpen() const { return open; } } gNfcRadio;
 bool gSubmitting = false, gThinking = false, gWifiReady = true;
 struct VoiceNote {};
 std::vector<VoiceNote> gVoiceNotes;
@@ -299,6 +307,10 @@ bool voiceToolStarting() { return gVoiceStarting; }
 bool voiceToolListening() { return gRecording; }
 bool voiceToolWorking() { return gThinking; }
 String gQueuedVoiceReplySpeech;
+bool gVoiceReplySpeechBusy = false;
+std::vector<std::string> gReplies;  // What the chat was told.
+std::vector<bool> gRepliesSpoken;
+void postDeviceReply(const String& text, bool speak) { gReplies.push_back(text.c_str()); gRepliesSpoken.push_back(speak); }
 String cleanReplyForDevice(const String& text) { return text; }
 bool gActionsRun = false;
 const void* gActionRule = nullptr;  // Offered the way the real device action does.
@@ -306,7 +318,9 @@ int gActionRepeats = 1;
 void offerFromAction(const void* rule);
 const void* gActionSequence = nullptr;  // The same, for a sequence.
 bool offerSequenceFromAction(const void* sequence);
-bool executeDeviceActionsJson(const String& json) { if (gActionSequence) return offerSequenceFromAction(gActionSequence); if (gActionRule) for (int i = 0; i < gActionRepeats; ++i) offerFromAction(static_cast<const char*>(gActionRule) + 0); return !std::string(json).empty() && gActionsRun; }
+const void* gActionOnce = nullptr;  // The same, for a check.
+void startOnceFromAction(const void* once);
+bool executeDeviceActionsJson(const String& json) { if (gActionOnce) { startOnceFromAction(gActionOnce); return true; } if (gActionSequence) return offerSequenceFromAction(gActionSequence); if (gActionRule) for (int i = 0; i < gActionRepeats; ++i) offerFromAction(static_cast<const char*>(gActionRule) + 0); return !std::string(json).empty() && gActionsRun; }
 std::vector<String> wrapText(const String& raw, int) {
   std::vector<String> lines; std::string text = raw;
   for (size_t at = 0; at < text.size(); at += 38) lines.push_back(String(text.substr(at, 38).c_str()));
@@ -329,8 +343,8 @@ bool handleScreensaverWake() { ++gWakes; return false; }
 void renderLauncherOverlay() {}
 void renderDebugOverlay() {}
 bool labMode(UiMode mode) { return mode == UiMode::LabDevices || mode == UiMode::LabRules || mode == UiMode::LabSequences; }
-namespace { void beginLab(); void stopLab(); }
-void setUiMode(UiMode mode) { if (labMode(gUiMode) && mode != gUiMode) stopLab(); gUiMode = mode; if (labMode(mode)) beginLab(); }
+namespace { void beginLab(); void stopLab(); void labOnceLeaving(UiMode next); }
+void setUiMode(UiMode mode) { if (mode != gUiMode) labOnceLeaving(mode); if (labMode(gUiMode) && mode != gUiMode) stopLab(); gUiMode = mode; if (labMode(mode)) beginLab(); }
 ''' + (parts / '081_main.cpp.inc').read_text() + (parts / '082_main.cpp.inc').read_text() + (parts / '084_main.cpp.inc').read_text() + (parts / '085_main.cpp.inc').read_text() + r'''
 // --- Driving it ----------------------------------------------------------------------------------
 FILE* gDump = nullptr;
@@ -343,7 +357,7 @@ void show(const char* scene) {
   std::fprintf(gDump, "scene %s\n", scene);
   for (const auto& op : gOps) std::fprintf(gDump, "%s\n", op.c_str());
 }
-void run(int ms) { for (int t = 0; t < ms; t += 10) { nowMs += 10; serviceLab(); } }
+void run(int ms) { for (int t = 0; t < ms; t += 10) { nowMs += 10; serviceLabOnce(); serviceLab(); } }
 void pressNow(char k) { Keyboard_Class::KeysState keys; keys.enter = k == '\n'; keys.del = k == '\b'; assert(handleLabKey(k, keys)); }
 void key(char k) { gLabOfferSettled = true; pressNow(k); }
 void keys(const char* text) { for (const char* c = text; *c; ++c) { key(*c); run(60); } }
@@ -1550,12 +1564,177 @@ void testChat() {
   gLabSeqCount = 0; gLabBook = lab::Book{}; gDisk.files.clear(); setUiMode(UiMode::Home); freshBoot();
 }
 
+void startOnceFromAction(const void* once) { labOnceStart(static_cast<const lab::Once*>(once)); }
+lab::Once onceOver(int over, Out out, int set) {
+  lab::Once once; once.conds = 1; once.cond[0] = {Sig::Knob, lab::Op::Above, int16_t(over)};
+  once.yes = 1; once.then[0] = {lab::SeqKind::Set, out, int16_t(set)};
+  return once;
+}
+lab::Once onceDo(Out out, int set, lab::SeqKind kind = lab::SeqKind::Set) { lab::Once once; once.yes = 1; once.then[0] = {kind, out, int16_t(set)}; return once; }
+lab::Once onceRead(Sig sig) { lab::Once once; once.reads = 1; once.read[0] = sig; return once; }
+// A knob on the white wire and a strip on the yellow one, with every screen closed.
+void onceOnGrove(lab::Part yellow = lab::Part::Strip) {
+  setUiMode(UiMode::Home); run(100); gLabDrive[int(Out::Led)] = {}; gLabLedSent = -1; gLed = {};
+  for (Out out : {Out::StripColor, Out::StripBright, Out::StripLength}) gLabDrive[int(out)] = {};
+  gLabBook = lab::Book{}; gLabBook.direct.white = lab::Part::Knob; gLabBook.direct.yellow = yellow;
+  gLabBookRead = gLabBookKnown = true; gDisk.files.clear(); plugOnly(); gGrove = Grove{}; gGrove.adc = 700; gReplies.clear(); gRepliesSpoken.clear(); gLabOnceText[0] = 0;
+  gQueuedVoiceReplySpeech = ""; gPlaybackActive = gRecording = gRealtimeActive = gRealtimeExclusiveMode = gLauncherVisible = gRadioBusy = false; gToneAllowed = true;
+}
+std::string onceAsk(const lab::Once& once, int ms = 4500) {
+  gReplies.clear(); gRepliesSpoken.clear(); labOnceStart(&once); run(ms); assert(!labOnceBusy() && gReplies.size() == 1 && !gBusOpen && gRmtLive == 0);
+  return gReplies[0];
+}
+void testOnce() {
+  // What the owner asked for: from another screen, the knob over 50 turns the strip red.
+  onceOnGrove();
+  { const lab::Once once = onceOver(50, Out::StripColor, 0);
+    assert(onceAsk(once) == "Knob 75%, over 50. Strip set to red.");
+    assert(gUiMode == UiMode::Home && gGrove.ledsLit == 30 && gGrove.lastRed > 0 && gGrove.lastGreen == 0 && gGrove.lastBlue == 0 && !gGrove.scrambled);
+    assert(!gRepliesSpoken[0]);  // Typed, with a reply too short to speak, so the report is only shown.
+    assert(gLabBook.count == 0 && !gDisk.files.count("/lab/rules.dat"));  // No rule, and nothing watching.
+    assert(gGrove.mode[2] == INPUT_PULLDOWN);  // The strip stays lit, on a data line that can't float.
+    { const auto bus = gUnits.commands; const int frames = gGrove.frames; run(5000); assert(gUnits.commands == bus && gGrove.frames == frames && gAirSensor.open_ == false); }
+    // It answers from what's there now, and what was left lit stays lit through the next look.
+    gGrove.adc = 1960; assert(onceAsk(once) == "Knob 30%, not over 50. Nothing changed."); assert(gGrove.ledsLit == 30 && gGrove.lastRed > 0 && !gGrove.scrambled);
+    // And if the sensor's gone, the strip still comes back from the bus traffic before the port goes.
+    gGrove.held = false; assert(onceAsk(once, 5000) == "No reading from Knob. Nothing changed."); assert(gGrove.ledsLit == 30 && gGrove.lastRed > 0 && !gGrove.scrambled); gGrove.held = true; }
+  { lab::Once once = onceOver(50, Out::StripColor, 0); once.no = 1; once.otherwise[0] = {lab::SeqKind::Set, Out::StripColor, 120};
+    assert(onceAsk(once) == "Knob 30%, not over 50. Strip set to green."); assert(gGrove.lastGreen > 0 && gGrove.lastRed == 0); }
+  // Turning it off from the chat goes the same way, and nothing's left to look after.
+  assert(onceAsk(onceDo(Out::StripColor, 0, lab::SeqKind::Off)) == "Strip off."); assert(gGrove.ledsLit == 0 && gGrove.mode[2] == INPUT);
+  // The report goes along with the next message, so "what did it read?" has an answer.
+  assert(labChatContext().find("last check: Strip off.\n") != std::string::npos);
+  // A reading alone. Tilt is on the board, so the port isn't touched at all.
+  { onceOnGrove(); const int opens = gAirSensor.opens; const auto bus = gUnits.commands;
+    assert(onceAsk(onceRead(Sig::Tilt)) == "Tilt 30 deg."); assert(gAirSensor.opens == opens && gUnits.commands == bus && gGrove.frames == 0); }
+  { onceOnGrove(); const int opens = gAirSensor.opens; assert(onceAsk(onceDo(Out::Led, 120)) == "LED set to green."); assert(gLed.g > 0 && gAirSensor.opens == opens); }
+  // I2C units are found the way the Lab finds them, and two readings make one report.
+  { onceOnGrove(); gLabBook.direct = lab::Direct{}; plugOnly({0x44}); lab::Once once; once.reads = 2; once.read[0] = Sig::Temperature; once.read[1] = Sig::Humidity;
+    const std::string said = onceAsk(once); assert(said.find("Temperature ") == 0 && said.find(" C; Humidity ") != std::string::npos && said.back() == '.'); }
+  // Nothing plugged in means no answer, and no guess from a floating wire.
+  { onceOnGrove(); gGrove.held = false; const lab::Once once = onceOver(50, Out::StripColor, 0); const int frames = gGrove.frames;
+    assert(onceAsk(once, 5000) == "No reading from Knob. Nothing changed."); assert(gGrove.frames == frames && gGrove.ledsLit == 0); }
+  // A part that isn't where the Lab thinks says so, and still gives the reading it did get.
+  { onceOnGrove(lab::Part::None); const lab::Once once = onceOver(50, Out::StripColor, 0);
+    assert(onceAsk(once, 5000) == "Knob 75%, over 50. LED strip isn't connected. Nothing changed."); }
+  // On the I/O hub. A knob there has no scale until it's been turned, so its number isn't given.
+  { onceOnGrove(); gLabBook.direct = lab::Direct{}; gLabBook.wiring.port[0] = lab::Part::Knob; gLabBook.wiring.port[2] = lab::Part::Strip;
+    plugOnly({}, true); gLabKnobRange = lab::AnalogRange{}; gHubUnit.analog[0] = 2000;
+    const lab::Once once = onceOver(50, Out::StripColor, 240);
+    assert(onceAsk(once) == "Knob has no range yet, so turn it end to end in the Lab. Nothing changed.");
+    gLabKnobRange.top = 3000; gLabKnobRange.low = 10; gHubUnit.analog[0] = 900;
+    assert(onceAsk(once) == "Knob 70%, over 50. Strip set to blue.");
+    assert((gHubUnit.ledRgb[2][0] & 0xFF) > 0);  // The hub keeps driving it after the bus has gone.
+    // A scale learned somewhere else doesn't count: R, the Grove wires, or a part turned only partway.
+    gLabKnobRange = lab::AnalogRange::fixedAt(lab::kDirectKnobTop); assert(onceAsk(once).find("has no range yet") != std::string::npos);
+    gLabKnobRange = lab::AnalogRange{}; gLabKnobRange.percent(3000); gLabKnobRange.percent(1400); assert(onceAsk(once).find("has no range yet") != std::string::npos);
+    // The hub goes in the middle: the reading it decided on stays, and the strip isn't kept to come back unasked.
+    gLabKnobRange.top = 3000; gLabKnobRange.low = 10; gReplies.clear(); labOnceStart(&once);
+    for (int t = 0; t < 4000 && gLabOncePhase != LabOncePhase::Acting; t += 10) run(10); assert(gLabOncePhase == LabOncePhase::Acting);
+    gHubUnit.here = false; run(400); assert(gReplies.size() == 1 && gReplies[0] == "Knob 70%, over 50. LED strip stopped answering."); assert(!gLabDrive[int(Out::StripColor)].on);
+    gHubUnit.here = true; gLabKnobRange = lab::AnalogRange{}; }
+  // A servo moves and lets go, and a beep ends by itself.
+  { onceOnGrove(lab::Part::Servo); const lab::Once once = onceDo(Out::Servo, 90); gReplies.clear(); labOnceStart(&once); for (int t = 0; t < 3000 && gGrove.duty != lab::servoDuty(90); t += 10) run(10); assert(gGrove.duty == lab::servoDuty(90)); run(500); assert(gGrove.duty == lab::servoDuty(90) && labOnceBusy());
+    run(1500); assert(!labOnceBusy() && gGrove.duty == 0 && gGrove.attached == -1 && !gLabDrive[int(Out::Servo)].on && !gLabServoHeld); assert(gReplies.back() == "Servo moved to 90 deg.");
+    labOnceStart(&once); for (int t = 0; t < 3000 && gGrove.duty != lab::servoDuty(90); t += 10) run(10); assert(gGrove.duty == lab::servoDuty(90)); run(1500); assert(!labOnceBusy()); }
+  { onceOnGrove(); gToneAllowed = false; assert(onceAsk(onceDo(Out::Tone, 880)) == "The speaker was busy, so it didn't beep."); gToneAllowed = true; }
+  { onceOnGrove(); M5Cardputer.Speaker = SpeakerClass{}; assert(onceAsk(onceDo(Out::Tone, 880)) == "Beeped at 880 Hz."); assert(M5Cardputer.Speaker.tones > 0 && M5Cardputer.Speaker.hz == 880 && M5Cardputer.Speaker.stops > 0 && !gLabDrive[int(Out::Tone)].on && !gLabToneOn); }
+  // The relays read the bus as a switch, so with them on Grove the port stays shut.
+  { onceOnGrove(); gLabBook.direct = lab::Direct{}; gLabBook.direct.claim(lab::Part::Relay); const int opens = gAirSensor.opens; const lab::Once once = onceOver(50, Out::StripColor, 0);
+    assert(onceAsk(once) == "The relays are on the Grove port, so I left it alone. Nothing changed."); assert(gAirSensor.opens == opens);
+    assert(onceAsk(onceRead(Sig::Tilt)) == "Tilt 30 deg."); assert(gAirSensor.opens == opens); }
+  // Another app holds the port, or takes it while this is running, which also stops at once.
+  { onceOnGrove(); gUiMode = UiMode::AirMusic; const lab::Once once = onceOver(50, Out::StripColor, 0); const int opens = gAirSensor.opens;
+    assert(onceAsk(once) == "Another app is using the Grove port. Nothing changed."); assert(gAirSensor.opens == opens); gUiMode = UiMode::Home;
+    labOnceStart(&once); run(300); assert(gBusOpen); gReplies.clear(); setUiMode(UiMode::AirMusic); assert(!gBusOpen); run(50); assert(gReplies.size() == 1 && gReplies[0] == "That screen needed the parts, so the check stopped."); gUiMode = UiMode::Home; }
+  // The mic and the speaker come first, and the report never talks over the reply before it.
+  { onceOnGrove(); const lab::Once once = onceOver(50, Out::StripColor, 0); const int opens = gAirSensor.opens;
+    gQueuedVoiceReplySpeech = "Checking the knob."; gReplies.clear(); labOnceStart(&once); run(2000); assert(gAirSensor.opens == opens);
+    gQueuedVoiceReplySpeech = ""; gPlaybackActive = true; run(2000); assert(gAirSensor.opens == opens); gPlaybackActive = false;
+    run(4500); assert(gReplies.size() == 1 && gReplies[0] == "Knob 75%, over 50. Strip set to red.");
+    gQueuedVoiceReplySpeech = "Long"; gReplies.clear(); labOnceStart(&once); run(31000); assert(gReplies.empty() && labOnceBusy()); gQueuedVoiceReplySpeech = ""; run(50); assert(gReplies[0] == "The Cardputer stayed busy, so I didn't check. Nothing changed.");
+    // Speech that never drains can't hold a report back for good.
+    gQueuedVoiceReplySpeech = "Stuck"; gReplies.clear(); labOnceStart(nullptr); run(29000); assert(gReplies.empty()); run(1100); assert(gReplies.size() == 1 && !labOnceBusy()); gQueuedVoiceReplySpeech = ""; }
+  // One at a time, and one that can't be run says so.
+  { onceOnGrove(); const lab::Once first = onceOver(50, Out::StripColor, 0), second = onceOver(50, Out::StripColor, 240); gReplies.clear(); labOnceStart(&first); run(100); gQueuedVoiceReplySpeech = ""; labOnceStart(&second); assert(gReplies.size() == 1 && gReplies[0] == "Still on the last check, so I didn't start that one." && !gRepliesSpoken[0]); run(4500); assert(gReplies.size() == 2 && gReplies[1] == "Knob 75%, over 50. Strip set to red.");
+    gReplies.clear(); labOnceStart(nullptr); run(50); assert(gReplies.size() == 1 && gReplies[0] == "That check wouldn't work. Nothing changed."); }
+  // A setup it couldn't read might have relays on Grove, so the port stays shut, but the board still works.
+  { onceOnGrove(); gLabBookKnown = false; const int opens = gAirSensor.opens; const lab::Once once = onceOver(50, Out::StripColor, 0);
+    assert(onceAsk(once) == "The Lab's setup couldn't be read from the SD card, so I left the Grove port alone. Nothing changed."); assert(gAirSensor.opens == opens);
+    assert(onceAsk(onceRead(Sig::Tilt)) == "Tilt 30 deg."); }
+  // A card with no Lab files on it has nothing set up, so that's known. With no card it isn't.
+  { setUiMode(UiMode::Home); gLabBookRead = false; gDisk.files.clear(); gSdReady = true; labReadBook(); assert(gLabBookKnown);
+    gLabBookRead = false; gSdReady = false; labReadBook(); assert(!gLabBookKnown); labSaveBook(); assert(!gLabBookKnown); gSdReady = true;
+    // A card that stopped answering says no files too, and that isn't the same as none.
+    gLabBookRead = false; gDisk.gone = true; labReadBook(); assert(!gLabBookKnown); gDisk.gone = false; gLabBookRead = false; labReadBook(); assert(gLabBookKnown); }
+  // A live voice session owns the loop, so a check there says so, and only once the session is over.
+  { onceOnGrove(); gRealtimeExclusiveMode = true; const lab::Once once = onceOver(50, Out::StripColor, 0); const int opens = gAirSensor.opens;
+    labOnceStart(&once); run(60000); assert(gReplies.empty() && gAirSensor.opens == opens); gRealtimeExclusiveMode = false; run(50);
+    assert(gReplies.size() == 1 && gReplies[0] == "A check can't run during a live voice session, so ask in the chat. Nothing changed."); }
+  // Something that takes the loop after it was asked: it waits, and a late check never acts.
+  { onceOnGrove(); const lab::Once once = onceOver(50, Out::StripColor, 0); const int opens = gAirSensor.opens; gReplies.clear(); labOnceStart(&once);
+    gRadioBusy = true; run(45000); assert(gAirSensor.opens == opens); gRadioBusy = false; run(50); assert(gReplies.size() == 1 && gReplies[0] == "The Cardputer stayed busy, so I didn't check. Nothing changed."); assert(gGrove.ledsLit == 0); }
+  // In the middle of a look, playback gives the port straight back, and the look starts again after.
+  { onceOnGrove(); const lab::Once once = onceOver(50, Out::StripColor, 0); gReplies.clear(); labOnceStart(&once); run(300); assert(gBusOpen);
+    gPlaybackActive = true; run(20); assert(!gBusOpen && gLabOncePhase == LabOncePhase::Waiting); run(2000); assert(!gBusOpen);
+    gPlaybackActive = false; run(4500); assert(gReplies.size() == 1 && gReplies[0] == "Knob 75%, over 50. Strip set to red."); }
+  // A look cut short in its first second still puts a lit strip back before the port goes, even if it
+  // then never gets to run.
+  { onceOnGrove(); assert(onceAsk(onceOver(50, Out::StripColor, 0)) == "Knob 75%, over 50. Strip set to red.");
+    const lab::Once once = onceOver(50, Out::StripColor, 240); gReplies.clear(); labOnceStart(&once); run(100); assert(gBusOpen && gGrove.scrambled && gLabQuietProbes < lab::kUnitCount);
+    gPlaybackActive = true; run(20); assert(!gBusOpen && !gGrove.scrambled && gGrove.ledsLit == 30 && gGrove.lastRed > 0 && gGrove.mode[2] == INPUT_PULLDOWN);
+    run(31000); gPlaybackActive = false; run(50); assert(gReplies.size() == 1 && gReplies[0] == "The Cardputer stayed busy, so I didn't check. Nothing changed." && gGrove.lastRed > 0 && !gGrove.scrambled); }
+  // Readings are whole numbers, so thresholds keep their side.
+  { onceOnGrove(); lab::Once once = onceOver(74, Out::Led, 120); assert(onceAsk(once) == "Knob 75%, over 74. LED set to green."); }
+  // A reply that was spoken has a spoken report.
+  { onceOnGrove(); const lab::Once tilt = onceRead(Sig::Tilt); gActionsFollowSpeech = true; labOnceStart(&tilt); gActionsFollowSpeech = false; run(1000); assert(gReplies.size() == 1 && gRepliesSpoken[0]); }
+  // A check that needs no port leaves another app's bus alone.
+  { onceOnGrove(); gUiMode = UiMode::AirMusic; gAirSensor.open(); const int closes = gAirSensor.closes;
+    const lab::Once led = onceDo(Out::Led, 0); gReplies.clear(); labOnceStart(&led); run(1000);
+    assert(gReplies.size() == 1 && gReplies[0] == "LED set to red." && gAirSensor.open_ && gAirSensor.closes == closes); gAirSensor.close(); gUiMode = UiMode::Home; }
+  // Opening the Lab takes back what was left on.
+  { onceOnGrove(); assert(onceAsk(onceDo(Out::Led, 240)) == "LED set to blue."); assert(gLed.b > 0); const lab::Once red = onceOver(50, Out::StripColor, 0); onceAsk(red); assert(gGrove.ledsLit == 30);
+    setUiMode(UiMode::LabDevices); run(1500); assert(gLed.r == 0 && gLed.g == 0 && gLed.b == 0 && gGrove.ledsLit == 0 && !gLabDrive[int(Out::StripColor)].on); setUiMode(UiMode::Home); run(100); }
+  // Leaving it mid-check gives everything back before the Lab starts.
+  { onceOnGrove(); const lab::Once once = onceOver(50, Out::StripColor, 0); gReplies.clear(); labOnceStart(&once); run(300); setUiMode(UiMode::LabDevices); run(100); assert(gLabOpen && !labOnceBusy() && gReplies.empty() && gLabUi.view == LabView::Say && gLabUi.sayNote == "That screen needed the parts, so the check stopped."); gQueuedVoiceReplySpeech = ""; esc(); setUiMode(UiMode::Home); run(100); }
+  // With the Lab open it uses the Lab's own readings and parts, and answers there. Practice isn't real.
+  { onceOnGrove(); setUiMode(UiMode::LabDevices); run(2000); assert(gLabOnWires && gLabInputs.get(Sig::Knob).value == 75);
+    gLabPractice.nudge(Sig::Knob, -1, gLabInputs, nowMs); const int opens = gAirSensor.opens;
+    const lab::Once once = onceOver(50, Out::StripColor, 0); gActionOnce = &once; gReplies.clear();
+    VoiceToolAnswer answer; answer.ok = true; answer.reply = "Checking the knob."; answer.actionsJson = "[x]"; gLabUi.view = LabView::Devices;
+    labAskAnswered(answer); gActionOnce = nullptr; assert(gLabUi.view == LabView::Say && gLabUi.sayNote == "Checking the knob." && labOnceBusy() && gQueuedVoiceReplySpeech == "Checking the knob.");
+    gQueuedVoiceReplySpeech = ""; run(1000); assert(!labOnceBusy() && gLabUi.sayNote == "Knob 75%, over 50. Strip set to red." && gQueuedVoiceReplySpeech == "Knob 75%, over 50. Strip set to red." && gReplies.empty());
+    show("doc-once-answer"); assert(gCanvas.shows("Strip set to red"));
+    assert(gLabOnWires && gGrove.ledsLit == 30 && gAirSensor.opens == opens); gQueuedVoiceReplySpeech = ""; esc(); assert(gLabUi.view == LabView::Devices);
+    gLabPractice.clear(); setUiMode(UiMode::Home); run(100); assert(gGrove.ledsLit == 0); }  // Left on for as long as the Lab is open.
+  // In the Lab: rules that are playing keep their parts, the menu over it means wait, and a strip test
+  // pattern gives way to the color that was asked for.
+  { onceOnGrove(); gLabBook.count = 1; gLabBook.rules[0] = lab::recipeRule(5); setUiMode(UiMode::LabRules); run(2000); gLabUi.ruleRow = 0; keys("p"); run(300); assert(gLabPlaying);
+    { const lab::Once blue = onceOver(50, Out::StripColor, 240); gReplies.clear(); labOnceStart(&blue); run(200);
+      assert(!labOnceBusy() && gReplies.empty() && gLabUi.sayNote == "A rule or a sequence has the parts in the Lab, so I left them alone. Nothing changed." && gLabPlaying); }
+    gQueuedVoiceReplySpeech = ""; setUiMode(UiMode::LabDevices); run(2000); assert(!gLabPlaying);
+    gLauncherVisible = true; const lab::Once once = onceOver(50, Out::StripColor, 240); gReplies.clear(); labOnceStart(&once); run(2000); assert(labOnceBusy() && gLabOncePhase == LabOncePhase::Waiting);
+    gLauncherVisible = false; run(1000); assert(!labOnceBusy() && gLabUi.sayNote == "Knob 75%, over 50. Strip set to blue."); gQueuedVoiceReplySpeech = ""; esc();
+    gLabStripTest = LabStripTest::Rainbow; labOnceStart(&once); run(1000); assert(gLabStripTest == LabStripTest::Solid && gLabUi.stripHue == 240); gQueuedVoiceReplySpeech = ""; esc();
+    setUiMode(UiMode::Home); run(100); }
+  // A sequence's screen takes the outputs even once it's finished, so a check there doesn't act. And
+  // if something takes an output back before it goes out, the report says so.
+  { onceOnGrove(); setUiMode(UiMode::LabSequences); run(2000); gLabUi.view = LabView::SeqPlay; assert(labSeqOnScreen() && !gLabSeqRun.running());
+    const lab::Once red = onceOver(50, Out::StripColor, 0); labOnceStart(&red); run(300);
+    assert(!labOnceBusy() && gLabUi.sayNote == "A rule or a sequence has the parts in the Lab, so I left them alone. Nothing changed."); gQueuedVoiceReplySpeech = "";
+    setUiMode(UiMode::LabDevices); run(2000); labOnceStart(&red);
+    for (int t = 0; t < 3000 && gLabOncePhase != LabOncePhase::Acting; t += 10) { nowMs += 10; serviceLabOnce(); if (gLabOncePhase != LabOncePhase::Acting) serviceLab(); }
+    assert(gLabOncePhase == LabOncePhase::Acting); labDriveClear(); for (int t = 0; t < 400; t += 10) { nowMs += 10; serviceLabOnce(); labDriveClear(); serviceLab(); }
+    assert(!labOnceBusy() && gLabUi.sayNote == "Knob 75%, over 50. LED strip didn't change, because something else had it."); gQueuedVoiceReplySpeech = ""; esc(); setUiMode(UiMode::Home); run(100); }
+  onceOnGrove(); gLabBook = lab::Book{}; gDisk.files.clear(); plugOnly(); freshBoot();
+}
+
 int main(int argc, char** argv) {
   if (argc > 1) gDump = std::fopen(argv[1], "w");
   for (bool& live : gLabHistoryLive) live = false;
-  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testGuidePictures(); testSequences(); testChat(); setUiMode(UiMode::LabRules); run(1500); testGuards();
+  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testGuidePictures(); testSequences(); testChat(); testOnce(); setUiMode(UiMode::LabRules); run(1500); testGuards();
   if (gDump) std::fclose(gDump);
-  std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, sequences on their own and from a rule, what the chat can see and offer, the lamp and AC guards, units leaving and returning, saving and damage, and every screen stays on the display");
+  std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, sequences on their own and from a rule, what the chat can see and offer, one check from the chat, the lamp and AC guards, units leaving and returning, saving and damage, and every screen stays on the display");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-lab-ui-') as directory:

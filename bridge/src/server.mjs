@@ -52,7 +52,7 @@ import { CARDPUTER_EXECUTION_POLICY, voiceThinking, unwrapCardputerEnvelope, aud
 import { DurableTurnOutbox } from "./turn-outbox.mjs";
 import { SemanticFront, frontPrompt, FRONT_RECEIPT, validateModelRouting } from './semantic-front.mjs';
 import { decodeVoiceUpload } from "./voice-upload-codec.mjs";
-import { LAB_CHAT_POLICY, LAB_RULE_POLICY, VOICE_TOOLS, answerVoiceTool, readLabState, readVoiceContext } from "./voice-tools.mjs";
+import { LAB_CHAT_POLICY, LAB_LIVE_CHAT_POLICY, LAB_RULE_POLICY, VOICE_TOOLS, answerVoiceTool, readLabState, readVoiceContext } from "./voice-tools.mjs";
 import { RealtimePacingBudget, REALTIME_MAX_AUDIO_LEAD_MS } from "./realtime-pacing-budget.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -287,10 +287,11 @@ function authErrorPayload(message) {
   };
 }
 
-const DEVICE_ACTION_CATALOG_VERSION = "2026-11-02.2";
+const DEVICE_ACTION_CATALOG_VERSION = "2026-11-02.3";
 const DEVICE_ACTION_CATALOG = [
   { type: "lab.rule", group: "lab", description: "Offer the owner a rule joining sensors to outputs", example: "when I wave, turn the strip red" },
   { type: "lab.sequence", group: "lab", description: "Offer the owner steps that run in order, with waits", example: "flash the strip three times" },
+  { type: "lab.once", group: "lab", description: "Read a Lab sensor once, and perhaps act once, with nothing saved", example: "if the knob is over 50 turn the strip red" },
   { type: "focus.start", group: "focus", description: "Start or resume focus timer", example: "start pomodoro for 45 minutes" },
   { type: "focus.pause", group: "focus", description: "Pause a running focus timer", example: "pause focus" },
   { type: "focus.resume", group: "focus", description: "Resume paused focus timer", example: "resume focus" },
@@ -550,6 +551,41 @@ export function sanitizeDeviceAction(raw) {
       }
       return out;
     });
+  } else if (type === "lab.once") {
+    // A check with a line missing is a different question, so too many lines refuse it. The device
+    // is what decides which sensors and outputs are allowed, and it reads replies from the inbox itself.
+    const list = (value) => {
+      const lines = Array.isArray(value) ? value : [];
+      return lines.length > 3 ? null : lines;
+    };
+    const objects = (value) => list(value)?.filter((line) => line && typeof line === "object") ?? null;
+    // Only real numbers go on, unrounded: the device rounds a threshold toward the side that keeps
+    // its meaning, and anything else missing a number is refused there.
+    const number = (value) => (typeof value === "number" && Number.isFinite(value) ? Math.max(-32000, Math.min(32000, value)) : undefined);
+    const steps = (value) => objects(value)?.map((step) => {
+      const out = { output: boundedString(step.output, 16) };
+      if (step.off === true) {
+        out.off = true;
+      } else if (number(step.set) !== undefined) {
+        out.set = number(step.set);
+      }
+      return out;
+    }) ?? null;
+    const read = list(raw.read)?.filter((key) => typeof key === "string").map((key) => boundedString(key, 16));
+    const when = objects(raw.when)?.map((line) => {
+      const out = { sensor: boundedString(line.sensor, 16), test: boundedString(line.test, 8) };
+      if (number(line.value) !== undefined) {
+        out.value = number(line.value);
+      }
+      return out;
+    });
+    const then = steps(raw.do);
+    const otherwise = steps(raw.else);
+    if (!read || !when || !then || !otherwise || !(read.length || when.length || then.length)) {
+      return null;
+    }
+    action.any = raw.any !== false;
+    Object.assign(action, { read, when, do: then, else: otherwise });
   } else if (type === "topic.open") {
     if (Object.hasOwn(raw, "index")) {
       action.index = clampNumber(raw.index, 0, 999, 0);
@@ -733,9 +769,11 @@ function alignFocusActionMinutes(actions, ...texts) {
   });
 }
 
-function buildDeviceActionPolicyText() {
-  const actionTypes = DEVICE_ACTION_CATALOG.map((action) => action.type).join(", ");
-  const examples = DEVICE_ACTION_CATALOG
+// A live voice session can't run a check, so it isn't offered one.
+function buildDeviceActionPolicyText({ live = false } = {}) {
+  const catalog = live ? DEVICE_ACTION_CATALOG.filter((action) => action.type !== "lab.once") : DEVICE_ACTION_CATALOG;
+  const actionTypes = catalog.map((action) => action.type).join(", ");
+  const examples = catalog
     .filter((action) => action.example)
     .slice(0, 8)
     .map((action) => `"${action.example}" -> ${action.type}`)
@@ -748,7 +786,7 @@ function buildDeviceActionPolicyText() {
     "audio.play and voice.play only play existing local assets or voice notes and must include index, query, or path. " +
     "If the user asks you to say or test an arbitrary spoken phrase, do not use audio.play or voice.play; put the phrase in the visible reply because reply_audio will synthesize it. " +
     "Do not emit device_actions for normal conversation. Do not invent unsupported actions. Use settings actions when the user asks to change device preferences. " +
-    `${LAB_RULE_POLICY} ${LAB_CHAT_POLICY}`
+    `${LAB_RULE_POLICY} ${live ? LAB_LIVE_CHAT_POLICY : LAB_CHAT_POLICY}`
   );
 }
 
@@ -1521,7 +1559,7 @@ function realtimeInstructions(config, topic) {
         "For simple conversational replies, answer directly. Preserve any cardputer_actions marker returned by S1 exactly."
       ),
     "For local device actions, include the same machine marker protocol as the normal bridge after the spoken sentence.",
-    buildDeviceActionPolicyText(),
+    buildDeviceActionPolicyText({ live: true }),
     buildFirmwareCapabilityPolicyText(),
     base,
     REPLY_LANGUAGE_POLICY

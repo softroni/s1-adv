@@ -332,6 +332,11 @@ Try "why didn't my rule fire?", "why won't the strip light up?" or "what can I m
 The answer shows and is read aloud. If it suggests rules you get up to three: left and right move
 between them, Enter saves the one showing, and Esc drops them all.
 
+**Check something once** from the chat, on any screen, with nothing saved: "what's the knob at?" or
+"if the knob is over 50, turn the strip red". The Cardputer does the reading and adds the result to the
+chat. It can reach the strip, its LED, the servo and the speaker, but never relays, the lamp or an
+air conditioner. See [the Lab guide](LAB.md#check-something-once).
+
 The Lab keeps a **diary** while rules play: one line an hour with how many times motion was seen, how
 many times rules fired, and each sensor's lowest and highest reading. So you can leave rules playing
 overnight and ask "was there motion last night?" or "how hot did it get?". It's in

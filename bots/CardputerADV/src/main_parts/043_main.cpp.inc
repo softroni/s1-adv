@@ -1012,6 +1012,10 @@ bool handleHostSerialCommand(String line) {
     logf("%s", gLastVoiceCaptureCheck.c_str());
     return true;
   }
+  if (line.startsWith("lab.once ")) {  // Fields of a lab.once action, so heap can be watched without Claude.
+    executeDeviceActionsJson("{\"type\":\"lab.once\"," + line.substring(9) + "}");
+    return true;
+  }
   if (cmd == "voice.notice.test" || line.startsWith("voice.notice.test.clock ")) {
     if (gRecording || gSubmitting || gThinking || gRealtimeActive || gVoiceReplySpeechBusy) return true;
     const bool clock=line.startsWith("voice.notice.test.clock ");

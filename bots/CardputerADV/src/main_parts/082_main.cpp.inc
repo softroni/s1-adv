@@ -1469,8 +1469,8 @@ void labDeviceKey(char key, char lower, bool left, bool right, bool up, bool dow
     return;
   }
   if (lower == 'r') {
-    if (dev == Dev::Knob) gLabKnobRange.top = gLabOnWires ? lab::kDirectKnobTop : lab::AnalogRange{}.top;
-    else if (dev == Dev::Light) gLabLightRange.top = gLabOnWires ? lab::kDirectLightTop : lab::AnalogRange{}.top;
+    if (dev == Dev::Knob) gLabKnobRange = gLabOnWires ? lab::AnalogRange::fixedAt(lab::kDirectKnobTop) : lab::AnalogRange{};
+    else if (dev == Dev::Light) gLabLightRange = gLabOnWires ? lab::AnalogRange::fixedAt(lab::kDirectLightTop) : lab::AnalogRange{};
     else if (dev == Dev::Motion) gLabMotionCount = 0;
     labHistoryReset(gLabHistorySig);
     return;
@@ -1781,9 +1781,12 @@ void labChangeAnswered(const VoiceToolAnswer& answer) { labRuleAnswered(answer, 
 // build brings rules instead, which go straight to being looked at.
 void labAskAnswered(const VoiceToolAnswer& answer) {
   gLabVoiceSetting = true;
+  gActionsFollowSpeech = true;  // The answer is spoken below, so a check's report is too.
   const bool acted = answer.ok && labTakeOffers(answer.actionsJson);
+  gActionsFollowSpeech = false;
   gLabVoiceSetting = false;
-  if (acted) return;
+  // A check still has its report to come, and until then its words are all there is to show.
+  if (acted && (!labOnceBusy() || answer.reply.isEmpty())) return;
   LabUi& ui = gLabUi;
   if (ui.view != LabView::Say) ui.sayBack = ui.view;
   ui.voice = LabVoice::Ask;
@@ -1793,6 +1796,38 @@ void labAskAnswered(const VoiceToolAnswer& answer) {
   ui.sayHeard = answer.heard;
   if (answer.ok && !answer.reply.isEmpty()) gQueuedVoiceReplySpeech = cleanReplyForDevice(answer.reply);
   labRedraw();
+}
+// What a check found: in the Lab an answer, and anywhere else a reply.
+void labOnceSay(const char* text, bool speak) {
+  logf("[LAB] check: %s", text);
+  if (!labMode(gUiMode)) {
+    postDeviceReply(text, speak);
+    return;
+  }
+  LabUi& ui = gLabUi;
+  if (ui.view != LabView::Say) ui.sayBack = ui.view;
+  ui.voice = LabVoice::Ask;
+  ui.view = LabView::Say;
+  ui.sayFailed = true;
+  ui.sayNote = text;
+  if (speak) gQueuedVoiceReplySpeech = cleanReplyForDevice(ui.sayNote);
+  labRedraw();
+}
+// A check in the Lab leaves a part's test screen showing what it set, in the pattern that shows it.
+void labOnceMirror(const lab::SeqStep& step) {
+  LabUi& ui = gLabUi;
+  const bool set = step.kind == lab::SeqKind::Set;
+  if (lab::isStrip(step.out)) gLabStripTest = LabStripTest::Solid;
+  if (step.out == Out::StripColor && set) ui.stripHue = step.value;
+  if (step.out == Out::StripBright && set) ui.stripBright = step.value;
+  if (step.out == Out::Led) {
+    ui.ledOn = set;
+    if (set) ui.ledHue = step.value;
+  }
+  if (step.out == Out::Servo) {
+    ui.sweeping = false;
+    ui.servoAngle = step.value;
+  }
 }
 // Only the words matter here, and rules are waiting, so this skips Claude. Saying a name again
 // turns it back off.
@@ -1870,11 +1905,12 @@ String labAskContext() { return labDescribe(true); }
 // nothing has been read yet, so it says nothing rather than something wrong.
 String labChatContext() {
   if (!gLabBookRead) return String();
-  const size_t chars = lab::chatChars(gLabBook.count, gLabSeqs, gLabSeqCount);
+  const size_t chars = lab::chatChars(gLabBook.count, gLabSeqs, gLabSeqCount) + (gLabOnceText[0] ? lab::kOnceTextChars + 16 : 0);
   std::unique_ptr<char[]> buffer(new (std::nothrow) char[chars]);
   if (!buffer) return String();
   lab::Text text(buffer.get(), chars);
   lab::chatState(gLabBook.rules, gLabBook.count, gLabSeqs, gLabSeqCount, text);
+  if (gLabOnceText[0]) text.add("last check: ").add(gLabOnceText).add("\n");  // So a follow-up has the number.
   return String(buffer.get());
 }
 // An offer can land while someone's typing their next message, and Enter there isn't a yes. It takes

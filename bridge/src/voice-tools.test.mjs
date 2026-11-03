@@ -128,9 +128,9 @@ test("changing a rule can only send a rule back", () => {
   assert.match(tool.instructions, /changing|change/);
 });
 
-test("asking the Lab can bring rules and sequences back, and nothing else", async () => {
+test("asking the Lab can bring rules, sequences and a check back, and nothing else", async () => {
   const tool = VOICE_TOOLS.get("lab.ask");
-  assert.deepEqual(tool.actions, ["lab.rule", "lab.sequence", "lab.set"]);
+  assert.deepEqual(tool.actions, ["lab.rule", "lab.sequence", "lab.set", "lab.once"]);
   assert.ok(tool.instructions.includes(LAB_HELP) && tool.instructions.includes(LAB_RULE_POLICY));
   assert.match(voiceToolPrompt(tool), /in under 35 words/, "the answer screen has room");
   assert.match(voiceToolPrompt(VOICE_TOOLS.get("lab.rule")), /in under 15 words/);

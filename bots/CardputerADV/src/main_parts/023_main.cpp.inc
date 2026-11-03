@@ -92,6 +92,14 @@ bool executeDeviceAction(JsonObjectConst action) {
   }
 
   if (type == "lab.set") return labVoiceSet(action["output"] | "", action["set"] | 0);
+  if (type == "lab.once") {
+    // Its wiring is on the card, and a reply can arrive before the Lab has been opened. Mesh holds the
+    // card's bus, and a read that fails there would pass for an empty book.
+    if (!gMeshBusOwned) labReadBook();
+    lab::Once once;
+    labOnceStart(lab::onceFromJson(action, once) ? &once : nullptr);
+    return true;
+  }
   if (type == "lab.rule" || type == "lab.sequence") {
     // A reply can arrive before the Lab has been opened, and a rule can name what's on the card.
     labReadBook();
