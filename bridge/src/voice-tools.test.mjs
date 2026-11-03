@@ -116,7 +116,7 @@ test("the chat and Ask the Lab write sequences from the same words, and nothing 
   assert.match(LAB_SEQUENCE_POLICY, /picked in the list/);
   assert.match(LAB_SEQUENCE_POLICY, /never say it is saved or running/);
   assert.match(LAB_HELP, /Claude can write a sequence or change a saved one/);
-  assert.match(LAB_HELP, /can't start, stop or delete anything/);
+  assert.match(LAB_HELP, /can play a saved sequence, but can't stop one, start or stop rules, or delete anything/);
   assert.match(LAB_CHAT_POLICY, /never guess what's saved/);
   assert.match(LAB_CHAT_POLICY, /Send one rule or sequence in a reply/);
 });
@@ -130,7 +130,7 @@ test("changing a rule can only send a rule back", () => {
 
 test("asking the Lab can bring rules, sequences and a check back, and nothing else", async () => {
   const tool = VOICE_TOOLS.get("lab.ask");
-  assert.deepEqual(tool.actions, ["lab.rule", "lab.sequence", "lab.set", "lab.once"]);
+  assert.deepEqual(tool.actions, ["lab.rule", "lab.sequence", "lab.set", "lab.once", "lab.play"]);
   assert.ok(tool.instructions.includes(LAB_HELP) && tool.instructions.includes(LAB_RULE_POLICY));
   assert.match(voiceToolPrompt(tool), /in under 35 words/, "the answer screen has room");
   assert.match(voiceToolPrompt(VOICE_TOOLS.get("lab.rule")), /in under 15 words/);

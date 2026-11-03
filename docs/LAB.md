@@ -427,7 +427,7 @@ To change one, put the bar on it and say what's different, like "make it slower"
 
 Whatever comes back opens on [the same screen as one from the chat](#from-the-chat), where you can check every step. Enter saves it, E changes the steps first, and Esc drops it. Check the waits and values, because Claude can get a number wrong.
 
-Claude can't start, stop or delete a sequence. For a rule that plays one, save the sequence first, then [say the rule](#say-a-rule).
+Claude can [play a saved sequence](#play-a-sequence) when you ask, but can't stop or delete one. For a rule that plays one, save the sequence first, then [say the rule](#say-a-rule).
 
 ### Set a part by voice
 
@@ -451,6 +451,7 @@ You don't have to be in the Lab. On Pulse or in AI Chat, Claude knows every rule
 - "Make Wave red turn the strip blue instead."
 - "Write a sequence that flashes the strip three times, then moves the servo to 90."
 - "Make Door wave slower."
+- "Play Happy birthday."
 
 Whatever it writes opens in the Lab for you to check. Nothing is saved until you press **Enter**.
 
@@ -468,13 +469,22 @@ A rule looks the same as one you [said](#say-a-rule) or [changed by voice](#chan
 | Claude can | You do it yourself |
 | --- | --- |
 | See your saved rules and sequences | See what's plugged in, with [Ask the Lab](#ask-the-lab) |
-| Write a rule or change one | Start and stop rules and sequences, because they can switch mains |
+| Write a rule or change one | Start and stop rules, because they can switch mains |
 | Write a sequence or change one | Delete a rule or a sequence |
+| [Play a saved sequence](#play-a-sequence) | Stop it, with Esc, and press P for one that switches mains |
 | [Check something once](#check-something-once): read a sensor, or set the strip, LED, servo or speaker | Switch relays, the lamp or an air conditioner, which only a rule you've saved can do |
 
 A rule can't play a sequence until that sequence is saved. Ask for the sequence, save it, then ask for the rule.
 
 This needs a bridge from 0.2.256 or later. On an older one, the chat can't see what's saved or write a sequence, so restart it.
+
+### Play a sequence
+
+Ask for a saved one by name: "play Happy birthday". Once Claude's reply has finished speaking, the Cardputer opens it in the Lab and plays it, the same as pressing P on the Sequences list, and Esc stops it. Rules that were playing stop first, as they do for P.
+
+<img src="assets/lab/play-from-chat.png" alt="Happy birthday playing, with its steps and ESC stop" width="360">
+
+A sequence with a relay, lamp or air conditioner step opens ready on the list instead, and only plays when you press P, because those can switch mains. A live voice session can't play one, so ask in the chat afterwards. Needs firmware and a bridge from 0.2.260 or later.
 
 ## Check something once
 

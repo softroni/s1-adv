@@ -382,6 +382,7 @@ void loop() {
   updateFocusTimer();
   // Ahead of every early return, so a check times out or gives the port back wherever the loop goes.
   serviceLabOnce();
+  serviceLabPlayAsked();
   if (gRealtimeExclusiveMode) {
     serviceRealtimeExclusiveLoop(loopStartMs);
     return;

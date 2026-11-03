@@ -1430,4 +1430,16 @@ inline void onceDone(const SeqStep* steps, uint8_t count, Text& out) {
   if (line[0] >= 'a' && line[0] <= 'z') line[0] = static_cast<char>(line[0] - 'a' + 'A');
   out.add(line).add(".");
 }
+
+// --- Played from the chat ----------------------------------------------------------------------
+// A sequence the owner saved can be started by name, but one that switches something on the mains,
+// or the lamp or an air conditioner, still waits for the owner's own press.
+constexpr bool switchesMains(Out out) {
+  return out == Out::Relay1 || out == Out::Relay2 || out == Out::LampPower || out == Out::LampBright || out == Out::AcTcl ||
+         out == Out::AcDaikin;
+}
+inline bool switchesMains(const Sequence& seq) {
+  for (uint8_t i = 0; i < seq.count; ++i) if (seq.steps[i].kind != SeqKind::Wait && switchesMains(seq.steps[i].out)) return true;
+  return false;
+}
 }  // namespace lab

@@ -47,7 +47,16 @@ export const LAB_HELP =
   "it. Only one runs at a time, and a new one replaces it. It wins any output it has set, and rules keep the rest. " +
   "Whatever it turned on goes off when it ends. A sequence set to play once finishes even if its rule stops, and " +
   "one that plays over and over lasts as long as its rule. Claude can write a sequence or change a saved one, and " +
-  "the owner checks it before it's saved. Claude can't start, stop or delete anything.";
+  "the owner checks it before it's saved. Claude can play a saved sequence, but can't stop one, start or stop rules, " +
+  "or delete anything.";
+
+// Playing what the owner saved. The outputs must match switchesMains in bots/CardputerADV/src/lab.h.
+export const LAB_PLAY_POLICY =
+  "To play a saved sequence, append one lab.play action with its name exactly as listed under saved sequences, like " +
+  "[[cardputer_actions:[{\"type\":\"lab.play\",\"name\":\"Happy birthday\"}]]], and never a name that isn't listed. " +
+  "The Cardputer opens it in the Lab once your reply has finished speaking and plays it there, where Esc stops it, so " +
+  "say that in a few words. A sequence with a relay_1, relay_2, lamp_power, lamp_bright, ac_tcl or ac_daikin step " +
+  "opens ready instead, and only plays when the owner presses P, so say that. You can't stop a sequence once it plays.";
 
 // How to write a sequence, for the chat and for Ask the Lab. The steps a sequence can drive must
 // match kSeqOutCount in bots/CardputerADV/src/lab.h.
@@ -98,7 +107,8 @@ export const LAB_ONCE_POLICY =
 // A live voice session owns the speaker and the loop until it ends, so the device can't check then.
 export const LAB_LIVE_ONCE_POLICY =
   "In this live voice session the Cardputer can't check a sensor or set a part one time, and there's no lab.once " +
-  "here. For a reading or a one-time action, say to ask in the chat once this call ends, and never guess a reading.";
+  "here, and no lab.play either. For a reading, a one-time action or playing a sequence, say to ask in the chat once " +
+  "this call ends, and never guess a reading.";
 
 // What the chat can do in the Lab, on top of LAB_RULE_POLICY. The Lab state itself reaches Claude
 // beside the saved notes, so a stale copy never sits in the conversation.
@@ -112,10 +122,11 @@ const labChatPolicy = (live) =>
   "what the device reported after the most recent one-time check, so use it to answer questions about that result. " +
   "To change a saved rule, append one lab.rule action with the whole rule, changed only as they ask, and replaces " +
   "set to its current name, like {\"type\":\"lab.rule\",\"replaces\":\"Wave red\",\"name\":\"Wave blue\",...}. " +
-  `${LAB_SEQUENCE_POLICY} ${live ? LAB_LIVE_ONCE_POLICY : LAB_ONCE_POLICY} ` +
+  `${LAB_SEQUENCE_POLICY} ${live ? LAB_LIVE_ONCE_POLICY : `${LAB_ONCE_POLICY} ${LAB_PLAY_POLICY}`} ` +
   "Send one rule or sequence in a reply, because the device can only show one. If they ask for several, send the " +
-  "first and say you'll do the next once it's saved. You can't start, stop or delete rules or sequences, so for " +
-  "those tell the owner what to press in the Lab.";
+  "first and say you'll do the next once it's saved. " +
+  (live ? "You can't start, stop or delete rules or sequences" : "You can't stop a sequence, start or stop rules, or delete rules or sequences") +
+  ", so for those tell the owner what to press in the Lab.";
 export const LAB_CHAT_POLICY = labChatPolicy(false);
 export const LAB_LIVE_CHAT_POLICY = labChatPolicy(true);
 
@@ -164,8 +175,8 @@ export const VOICE_TOOLS = new Map([
     instructions: `${LAB_HELP} Answer from the device state, using its real readings and rules, and say what to ` +
       "do next. If they ask what they could make, suggest up to 3 rules using parts that are answering, each as " +
       `a lab.rule action, and say in one sentence what they do. ${LAB_RULE_POLICY} ${LAB_SEQUENCE_POLICY} ${LAB_SET_POLICY} ` +
-      `Where one line of lab.set will do, use that. ${LAB_ONCE_POLICY}`,
-    actions: ["lab.rule", "lab.sequence", "lab.set", "lab.once"],
+      `Where one line of lab.set will do, use that. ${LAB_ONCE_POLICY} ${LAB_PLAY_POLICY}`,
+    actions: ["lab.rule", "lab.sequence", "lab.set", "lab.once", "lab.play"],
     words: 35
   }]
 ]);

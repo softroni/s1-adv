@@ -566,6 +566,8 @@ void labOfferRule(const lab::Rule& rule);
 bool labOfferChange(const lab::Rule& rule, const char* replaces);
 bool labOfferSequence(const lab::Sequence& seq, const char* replaces);
 void labOnceStart(const lab::Once* once);
+bool labPlayAsked(const char* name);
+void serviceLabPlayAsked();
 void labOnceLeaving(UiMode next);
 void serviceLabOnce();
 String labChatContext();

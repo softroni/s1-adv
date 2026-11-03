@@ -99,6 +99,7 @@ void serviceRealtimeDialCompletion(){++f.dial;f.calls.push_back("dial");}
 void updateFocusTimer(){++f.focus;f.calls.push_back("focus");}
 // A Lab check only reads a flag here unless one is running, and then it waits or gives the port back.
 void serviceLabOnce(){f.calls.push_back("labonce");}
+void serviceLabPlayAsked(){f.calls.push_back("labplay");}
 void pollTyping(){++f.typing;f.calls.push_back("typing");}
 void serviceRealtimeVoice(){++f.rt;f.calls.push_back("rt");f.now+=f.rtCost;}
 void updateBlink(){++f.blink;f.calls.push_back("blink");}
@@ -121,7 +122,7 @@ void idleOpportunity(){
  reset();addDeletedWorker();loop();assertServices(1);
  assert(f.delayCalls==1 && f.idle1==1 && f.reaped==1 && f.pending.empty());
  assert(f.freeBytes==initialFreeBytes && f.now==1 && gWifiReady);
- const std::vector<std::string> expected={"health","m5","keys","usb","nes","dial","focus","labonce","wifi","typing","rt","blink","delay"};
+ const std::vector<std::string> expected={"health","m5","keys","usb","nes","dial","focus","labonce","labplay","wifi","typing","rt","blink","delay"};
  assert(f.calls==expected);
  for(unsigned i=0;i<64;++i){addDeletedWorker();loop();assert(f.freeBytes==initialFreeBytes);}
  assertServices(65);assert(f.reaped==65 && f.delayCalls==65);

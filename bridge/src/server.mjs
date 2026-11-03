@@ -287,10 +287,11 @@ function authErrorPayload(message) {
   };
 }
 
-const DEVICE_ACTION_CATALOG_VERSION = "2026-11-02.3";
+const DEVICE_ACTION_CATALOG_VERSION = "2026-11-02.4";
 const DEVICE_ACTION_CATALOG = [
   { type: "lab.rule", group: "lab", description: "Offer the owner a rule joining sensors to outputs", example: "when I wave, turn the strip red" },
   { type: "lab.sequence", group: "lab", description: "Offer the owner steps that run in order, with waits", example: "flash the strip three times" },
+  { type: "lab.play", group: "lab", description: "Play a saved Lab sequence by name, on its own screen", example: "play Happy birthday" },
   { type: "lab.once", group: "lab", description: "Read a Lab sensor once, and perhaps act once, with nothing saved", example: "if the knob is over 50 turn the strip red" },
   { type: "focus.start", group: "focus", description: "Start or resume focus timer", example: "start pomodoro for 45 minutes" },
   { type: "focus.pause", group: "focus", description: "Pause a running focus timer", example: "pause focus" },
@@ -551,6 +552,11 @@ export function sanitizeDeviceAction(raw) {
       }
       return out;
     });
+  } else if (type === "lab.play") {
+    action.name = boundedString(raw.name, 15);
+    if (!action.name) {
+      return null;
+    }
   } else if (type === "lab.once") {
     // A check with a line missing is a different question, so too many lines refuse it. The device
     // is what decides which sensors and outputs are allowed, and it reads replies from the inbox itself.
@@ -771,7 +777,7 @@ function alignFocusActionMinutes(actions, ...texts) {
 
 // A live voice session can't run a check, so it isn't offered one.
 function buildDeviceActionPolicyText({ live = false } = {}) {
-  const catalog = live ? DEVICE_ACTION_CATALOG.filter((action) => action.type !== "lab.once") : DEVICE_ACTION_CATALOG;
+  const catalog = live ? DEVICE_ACTION_CATALOG.filter((action) => action.type !== "lab.once" && action.type !== "lab.play") : DEVICE_ACTION_CATALOG;
   const actionTypes = catalog.map((action) => action.type).join(", ");
   const examples = catalog
     .filter((action) => action.example)

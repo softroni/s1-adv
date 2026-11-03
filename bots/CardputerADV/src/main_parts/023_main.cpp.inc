@@ -92,6 +92,10 @@ bool executeDeviceAction(JsonObjectConst action) {
   }
 
   if (type == "lab.set") return labVoiceSet(action["output"] | "", action["set"] | 0);
+  if (type == "lab.play") {
+    labReadBook();  // The names are on the card.
+    return labPlayAsked(action["name"] | "");
+  }
   if (type == "lab.once") {
     // Its wiring is on the card, and a reply can arrive before the Lab has been opened. Mesh holds the
     // card's bus, and a read that fails there would pass for an empty book.

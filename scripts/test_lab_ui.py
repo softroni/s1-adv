@@ -357,7 +357,7 @@ void show(const char* scene) {
   std::fprintf(gDump, "scene %s\n", scene);
   for (const auto& op : gOps) std::fprintf(gDump, "%s\n", op.c_str());
 }
-void run(int ms) { for (int t = 0; t < ms; t += 10) { nowMs += 10; serviceLabOnce(); serviceLab(); } }
+void run(int ms) { for (int t = 0; t < ms; t += 10) { nowMs += 10; serviceLabOnce(); serviceLabPlayAsked(); serviceLab(); } }
 void pressNow(char k) { Keyboard_Class::KeysState keys; keys.enter = k == '\n'; keys.del = k == '\b'; assert(handleLabKey(k, keys)); }
 void key(char k) { gLabOfferSettled = true; pressNow(k); }
 void keys(const char* text) { for (const char* c = text; *c; ++c) { key(*c); run(60); } }
@@ -1729,12 +1729,42 @@ void testOnce() {
   onceOnGrove(); gLabBook = lab::Book{}; gDisk.files.clear(); plugOnly(); freshBoot();
 }
 
+// What the owner asked for: "play Happy birthday" in the chat plays the saved one.
+void testPlayFromChat() {
+  setUiMode(UiMode::Home); run(100); gLabBook = lab::Book{}; gLabBookRead = gLabBookKnown = true; gDisk.files.clear(); plugOnly(); gReplies.clear();
+  gQueuedVoiceReplySpeech = ""; gPlaybackActive = gRecording = gRadioBusy = gRealtimeExclusiveMode = false;
+  lab::Sequence song = lab::starterSequence(); std::strcpy(song.name, "Happy birthday");
+  lab::Sequence fan; std::strcpy(fan.name, "Fan"); fan.count = 2; fan.steps[0] = {lab::SeqKind::Set, Out::Relay1, 1}; fan.steps[1] = {lab::SeqKind::Wait, Out::Servo, 50};
+  gLabSeqs[0] = song; gLabSeqs[1] = fan; gLabSeqCount = 2;
+  assert(!lab::switchesMains(song) && lab::switchesMains(fan));
+  // It waits for the reply to finish speaking, then plays on its own screen, where Esc stops it.
+  gQueuedVoiceReplySpeech = "Playing it."; assert(labPlayAsked("happy BIRTHDAY")); run(500); assert(gUiMode == UiMode::Home && !gLabSeqRun.running());
+  gQueuedVoiceReplySpeech = ""; run(20);
+  assert(gUiMode == UiMode::LabSequences && gLabUi.view == LabView::SeqPlay && gLabSeqRun.running() && gLabUi.seqShown == 0 && gLabUi.seqRow == 0);
+  run(100); assert(gLed.b > 0 || gLed.g > 0 || gLed.r > 0); show("doc-play-from-chat"); assert(gCanvas.shows("Happy birthday") && gCanvas.shows("ESC stop"));
+  esc(); assert(!gLabSeqRun.running() && gLabUi.view == LabView::Seqs);
+  // One that switches mains opens ready, and only the owner's P plays it.
+  setUiMode(UiMode::Home); run(100); assert(labPlayAsked("Fan")); run(20);
+  assert(gUiMode == UiMode::LabSequences && gLabUi.view == LabView::Seqs && gLabUi.seqRow == 1 && !gLabSeqRun.running() && gStatus == "P plays it: it switches mains");
+  keys("p"); assert(gLabSeqRun.running() && gLabUi.seqShown == 1); esc();
+  // A name that isn't saved does nothing, and one deleted before it plays does nothing either.
+  setUiMode(UiMode::Home); run(100); assert(!labPlayAsked("Nope") && gStatus == "No saved sequence by that name"); run(100); assert(gUiMode == UiMode::Home);
+  gQueuedVoiceReplySpeech = "Playing it."; assert(labPlayAsked("Fan")); gLabSeqCount = 1; gQueuedVoiceReplySpeech = ""; run(100); assert(gUiMode == UiMode::Home); gLabSeqCount = 2;
+  // Something that keeps the loop gives up after a while, and says so.
+  gRadioBusy = true; assert(labPlayAsked("Happy birthday")); run(29000); assert(gUiMode == UiMode::Home && gReplies.empty());
+  run(1100); assert(gUiMode == UiMode::Home && gReplies.size() == 1 && gReplies[0] == "The Cardputer stayed busy, so the sequence didn't play."); gRadioBusy = false; run(100); assert(gUiMode == UiMode::Home);
+  // Rules playing in the Lab give way, the same as pressing P on the list.
+  gLabBook.count = 1; gLabBook.rules[0] = lab::recipeRule(0); setUiMode(UiMode::LabRules); run(500); gLabUi.ruleRow = 0; keys("p"); run(200); assert(gLabPlaying);
+  assert(labPlayAsked("Happy birthday")); run(20); assert(!gLabPlaying && gUiMode == UiMode::LabSequences && gLabSeqRun.running()); esc();
+  setUiMode(UiMode::Home); gLabSeqCount = 0; gLabBook = lab::Book{}; gDisk.files.clear(); freshBoot();
+}
+
 int main(int argc, char** argv) {
   if (argc > 1) gDump = std::fopen(argv[1], "w");
   for (bool& live : gLabHistoryLive) live = false;
-  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testGuidePictures(); testSequences(); testChat(); testOnce(); setUiMode(UiMode::LabRules); run(1500); testGuards();
+  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testGuidePictures(); testSequences(); testChat(); testOnce(); testPlayFromChat(); setUiMode(UiMode::LabRules); run(1500); testGuards();
   if (gDump) std::fclose(gDump);
-  std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, sequences on their own and from a rule, what the chat can see and offer, one check from the chat, the lamp and AC guards, units leaving and returning, saving and damage, and every screen stays on the display");
+  std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, sequences on their own and from a rule, what the chat can see and offer, one check from the chat, a sequence played from the chat, the lamp and AC guards, units leaving and returning, saving and damage, and every screen stays on the display");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-lab-ui-') as directory:

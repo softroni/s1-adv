@@ -472,4 +472,48 @@ void renderLabSeqPlay() {
   }
   labKeys(running ? "ESC stop  P start again" : "ESC back  P play again");
 }
+
+// --- Played from the chat ----------------------------------------------------------------------
+// A saved sequence, by name. It plays on its own screen, the only place it can be seen and stopped,
+// once the reply that asked for it has finished speaking. One that switches mains opens there ready
+// and waits for P, because that's a press only the owner makes.
+constexpr uint32_t kLabPlayWaitMs = 30000;
+char gLabPlayAsked[lab::kNameChars + 1] = "";
+uint32_t gLabPlayAskedMs = 0;
+bool labPlayAsked(const char* name) {
+  const int index = lab::findByName(gLabSeqs, gLabSeqCount, name);
+  if (index < 0 || !gLabSeqs[index].count) {
+    logf("[LAB] no sequence to play called %s", name);
+    setStatus("No saved sequence by that name", 2500);
+    return false;
+  }
+  // By name, because the list can change before it plays.
+  snprintf(gLabPlayAsked, sizeof(gLabPlayAsked), "%s", gLabSeqs[index].name);
+  gLabPlayAskedMs = millis();
+  return true;
+}
+void serviceLabPlayAsked() {
+  if (!gLabPlayAsked[0]) return;
+  if (labOnceHeld()) {
+    if (millis() - gLabPlayAskedMs < kLabPlayWaitMs || !labOnceMayTell()) return;
+    gLabPlayAsked[0] = '\0';
+    labOnceSay("The Cardputer stayed busy, so the sequence didn't play.", false);
+    return;
+  }
+  const int index = lab::findByName(gLabSeqs, gLabSeqCount, gLabPlayAsked);
+  gLabPlayAsked[0] = '\0';
+  if (index < 0) return;
+  if (gUiMode != UiMode::LabSequences) setUiMode(UiMode::LabSequences);
+  labStopPlaying();
+  LabUi& ui = gLabUi;
+  ui.view = LabView::Seqs;
+  ui.seqRow = index;
+  labKeepRowShown(ui.seqRow, ui.seqTop, kLabListRows);
+  labRedraw();
+  if (lab::switchesMains(gLabSeqs[index])) {
+    setStatus("P plays it: it switches mains", 5000);
+    return;
+  }
+  labSeqPlay(index, LabView::Seqs);
+}
 }  // namespace

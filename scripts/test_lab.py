@@ -17,6 +17,8 @@ for file, text in [
         ('023_main.cpp.inc', 'labOnceStart(lab::onceFromJson(action, once) ? &once : nullptr);'),
         ('024_main.cpp.inc', 'if (modeChanged) labOnceLeaving(mode);'),
         ('061_main.cpp.inc', 'serviceLabOnce();'),
+        ('061_main.cpp.inc', 'serviceLabPlayAsked();'),
+        ('023_main.cpp.inc', 'return labPlayAsked(action["name"] | "");'),
         ('063_main.cpp.inc', 'return labAllowsNetwork();'),
         ('004_main.cpp.inc', '{"Devices", UiMode::LabDevices}'),
         ('004_main.cpp.inc', '{"Rules", UiMode::LabRules}'),
@@ -47,6 +49,7 @@ assert change.index('stopLab();') < change.index('gUiMode = mode;')
 assert change.index('labOnceLeaving(mode);') < change.index('stopAirMusic();') < change.index('beginAirMusic();')
 # Ahead of every early return in the loop, so a check can always time out and give the port back.
 assert loop.index('serviceLabOnce();') < loop.index('if (gRealtimeExclusiveMode)') < loop.index('if (gUiMode == UiMode::Nes)')
+assert loop.index('serviceLabPlayAsked();') < loop.index('if (gRealtimeExclusiveMode)')
 
 code = r'''
 #include "lab.h"

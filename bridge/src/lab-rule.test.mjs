@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { buildDeviceActionsPayload, LAB_RULE_POLICY, extractDeviceActionsFromText, sanitizeDeviceAction, trimDeviceEventMessage } from "./server.mjs";
-import { LAB_CHAT_POLICY, LAB_LIVE_CHAT_POLICY, LAB_LIVE_ONCE_POLICY, LAB_ONCE_POLICY, VOICE_TOOLS } from "./voice-tools.mjs";
+import { LAB_CHAT_POLICY, LAB_LIVE_CHAT_POLICY, LAB_LIVE_ONCE_POLICY, LAB_ONCE_POLICY, LAB_PLAY_POLICY, VOICE_TOOLS } from "./voice-tools.mjs";
 
 const lab = new URL("../../bots/CardputerADV/src/lab.h", import.meta.url);
 const firmwareCatalog = new URL("../../bots/CardputerADV/src/main_parts/003_main.cpp.inc", import.meta.url);
@@ -125,12 +125,12 @@ test("the prompt allows only the outputs a sequence step can drive", async () =>
   assert.match(LAB_CHAT_POLICY, /A servo can't be turned off/u);
 });
 
-test("the chat can't run anything, and is told so", () => {
+test("the chat can't stop, start rules or delete anything, and is told so", () => {
   assert.match(LAB_CHAT_POLICY, /never say it is saved or running/u);
-  assert.match(LAB_CHAT_POLICY, /can't start, stop or delete/u);
-  assert.equal(VOICE_TOOLS.has("lab.play"), false);
-  assert.equal(sanitizeDeviceAction({ type: "lab.play", name: "Door wave" }), null);
+  assert.match(LAB_CHAT_POLICY, /can't stop a sequence, start or stop rules, or delete rules or sequences/u);
+  assert.match(LAB_LIVE_CHAT_POLICY, /can't start, stop or delete rules or sequences/u);
   assert.equal(sanitizeDeviceAction({ type: "lab.stop" }), null);
+  assert.equal(sanitizeDeviceAction({ type: "lab.delete", name: "Door wave" }), null);
 });
 
 test("the bridge and the firmware list the same actions, at the same version", async () => {
@@ -233,7 +233,7 @@ test("a live voice session isn't offered a check, because the device can't run o
   const server = await readFile(new URL("./server.mjs", import.meta.url), "utf8");
   const realtime = server.slice(server.indexOf("function realtimeInstructions("), server.indexOf("function realtimeInstructions(") + 2000);
   assert.match(realtime, /buildDeviceActionPolicyText\(\{ live: true \}\)/u);
-  assert.match(server, /live \? DEVICE_ACTION_CATALOG\.filter\(\(action\) => action\.type !== "lab\.once"\)/u);
+  assert.match(server, /live \? DEVICE_ACTION_CATALOG\.filter\(\(action\) => action\.type !== "lab\.once" && action\.type !== "lab\.play"\)/u);
 });
 
 test("the check example only has the parts its words ask for", () => {
@@ -249,4 +249,28 @@ test("a check's numbers stay numbers and keep their fractions, and anything else
   assert.equal(action.do[0].set, 90.5);
   assert.equal(Object.hasOwn(action.do[1], "set"), false);
   assert.equal(Object.hasOwn(action.do[2], "set"), false);
+});
+
+test("playing a saved sequence takes only its name, and needs one", () => {
+  assert.deepEqual(sanitizeDeviceAction({ type: "lab.play", name: "Happy birthday", steps: [1], loop: true }), { type: "lab.play", name: "Happy birthday" });
+  assert.equal(sanitizeDeviceAction({ type: "lab.play", name: "x".repeat(40) }).name.length, 15);
+  assert.equal(sanitizeDeviceAction({ type: "lab.play" }), null);
+  assert.equal(sanitizeDeviceAction({ type: "lab.play", name: "" }), null);
+});
+
+test("the chat and Ask the Lab can play a sequence, and a live voice session can't", () => {
+  const markers = [...LAB_PLAY_POLICY.matchAll(/\[\[cardputer_actions:(.*?)\]\]\]/gu)];
+  assert.equal(markers.length, 1);
+  assert.deepEqual(extractDeviceActionsFromText(`Playing it. ${markers[0][0]}`).actions, [{ type: "lab.play", name: "Happy birthday" }]);
+  assert.ok(LAB_CHAT_POLICY.includes(LAB_PLAY_POLICY) && !LAB_LIVE_CHAT_POLICY.includes(LAB_PLAY_POLICY));
+  assert.ok(VOICE_TOOLS.get("lab.ask").actions.includes("lab.play") && VOICE_TOOLS.get("lab.ask").instructions.includes(LAB_PLAY_POLICY));
+  assert.match(LAB_PLAY_POLICY, /only plays when the owner presses P/u);
+});
+
+test("the outputs the prompt says wait for P are the ones the firmware holds back", async () => {
+  const header = await readFile(lab, "utf8");
+  const start = header.indexOf("constexpr bool switchesMains(Out out)");
+  const named = [...header.slice(start, header.indexOf("}", start)).matchAll(/Out::(\w+)/gu)].map((m) => m[1]);
+  assert.deepEqual(named, ["Relay1", "Relay2", "LampPower", "LampBright", "AcTcl", "AcDaikin"]);
+  assert.match(LAB_PLAY_POLICY, /relay_1, relay_2, lamp_power, lamp_bright, ac_tcl or ac_daikin/u);
 });
