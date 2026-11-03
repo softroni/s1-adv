@@ -70,6 +70,8 @@ String settingValue(uint8_t index) {
       return gDeviceSettings.clockTwelveHour ? "12h AM/PM" : "24h";
     case kWeatherPlaceSetting:
       return gDeviceSettings.weatherPlace;
+    case kMeshRegionSetting:
+      return s1_mesh::regionName(gDeviceSettings.meshRegion);
     default:
       return "-";
   }

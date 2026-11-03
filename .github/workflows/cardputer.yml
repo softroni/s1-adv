@@ -159,6 +159,7 @@ jobs:
       - run: python scripts/test_nes.py
       - run: python scripts/test_nes_ui.py
       - run: python scripts/cardputer.py build
+      - run: python scripts/test_mesh_region.py
       - run: python scripts/test_vlc_provision.py
       - run: python scripts/test_vlc_remote.py
       - run: python scripts/test_vlc_worker.py

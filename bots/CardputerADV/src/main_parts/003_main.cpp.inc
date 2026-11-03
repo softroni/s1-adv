@@ -267,6 +267,7 @@ struct DeviceSettings {
   uint8_t notificationVolumePct = kDefaultNotificationVolumePct;
   String updateChannel = "dev";
   String audioLanguage = "en";
+  uint8_t meshRegion = s1_mesh::kDefaultRegion;
 };
 
 const char* textSizeName(uint8_t size) {

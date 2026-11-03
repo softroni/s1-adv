@@ -24,9 +24,41 @@ Network-heavy polling and voice services pause during Mesh. Pomodoro time,
 alarms, battery and SmartLamp servicing continue. This first version does not
 run Mesh in the background alongside those applications.
 
+## Region
+
+Mesh uses Meshtastic's US region unless you pick another: LongFast public
+channel, 906.875 MHz, 250 kHz, SF11, CR4/5. Pick yours in Settings → Device →
+**Mesh region** with Left and Right (Enter steps forward too). The Mesh screen
+shows the region and its channel before you start the radio, and a running
+radio keeps the region it started with until you leave Mesh.
+
+The list holds the Meshtastic regions inside the band M5Stack rates the Cap for,
+868 to 923 MHz (the AS923 channels), all on their LongFast channel:
+
+| Region | Channel |
+| --- | --- |
+| US (default) | 906.875 MHz |
+| ANZ | 919.875 MHz |
+| BR_902 | 903.875 MHz |
+| EU_868 | 869.525 MHz |
+| JP | 923.375 MHz |
+| KR | 922.875 MHz |
+| MY_919 | 922.875 MHz |
+| PH_868 | 869.375 MHz |
+| PH_915 | 917.875 MHz |
+| RU | 869.075 MHz |
+| SG_923 | 917.875 MHz |
+| TH | 923.875 MHz |
+| TW | 923.875 MHz |
+| UA_868 | 868.375 MHz |
+
+Regions below 868 MHz (IN, NZ_865, KZ_863, NP_865, EU_866), the 433 MHz and
+2.4 GHz regions, and the licensed amateur bands are left out. Picking a region
+in software doesn't make transmitting legal where you are, so check your local
+rules. Until 0.2.269 Mesh was fixed to TH.
+
 ## Channel and controls
 
-- Thailand region, LongFast public channel: 923.875 MHz, 250 kHz, SF11, CR4/5.
 - Transmit power is fixed at 10 dBm; the library applies regional airtime
   accounting and carrier sensing. These software settings do not certify an
   antenna or regulatory approval.
@@ -42,14 +74,15 @@ The client receives channel text and node announcements and sends channel text
 and its own NodeInfo. It does not relay packets, provide the Meshtastic phone
 API, use the Cap GNSS, scan other frequencies, or provide private-message UI.
 An empty list means no compatible announcements were received during this
-session; it does not establish that Phuket has no nodes. Received radio text
+session; it does not establish that there are no nodes nearby. Received radio text
 is display data and is never executed as a device or agent instruction.
 
 ## Checks
 
 `scripts/test_mesh_leaf_state.py`, `test_mesh_lifecycle.py`, `test_mesh_radio.py`
 and `test_mesh_ui.py` exercise the production state, lifecycle, radio setup and
-240×135 renderer. Lifecycle tests use controlled hardware mocks and include
+240×135 renderer. `test_mesh_region.py` checks the region list and channels
+against the library's own table, so it runs after a firmware build. Lifecycle tests use controlled hardware mocks and include
 worker cancellation, partial initialization, SD restoration and app guards.
 State and UI tests include malformed UTF-8, fixed bounds and sanitizers.
 These checks do not substitute for RF communication with a second node.

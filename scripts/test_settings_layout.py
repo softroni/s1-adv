@@ -49,7 +49,7 @@ const uint16_t TFT_BLACK=0,TFT_WHITE=0xffff;
 constexpr uint16_t rgb565_local(int r,int g,int b){return ((r&0xf8)<<8)|((g&0xfc)<<3)|(b>>3);}
 template<class T>T clampValue(T x,T lo,T hi){return std::min(hi,std::max(lo,x));}
 enum class UiMode{Settings,FocusSettings,ScreenSettings};UiMode gUiMode=UiMode::Settings;
-constexpr uint8_t kDeviceSettingsItemCount=9,kFocusSettingsItemCount=11,kScreenSettingsItemCount=11,kWeatherPlaceSetting=8;
+constexpr uint8_t kDeviceSettingsItemCount=10,kFocusSettingsItemCount=11,kScreenSettingsItemCount=11,kWeatherPlaceSetting=8,kMeshRegionSetting=9;
 int gSelectedSetting=0;bool gPlaceEditing=false;int editors=0,overlays=0,adjusted=0,toggles=0;
 uint8_t currentSettingsItemCount(){return gUiMode==UiMode::Settings?kDeviceSettingsItemCount:gUiMode==UiMode::FocusSettings?kFocusSettingsItemCount:kScreenSettingsItemCount;}
 const char* currentSettingsTitle(){return "Device";}
@@ -125,7 +125,7 @@ int main(){
  gPlaceEditing=true;renderSettingsUi();assert(editors==1);gPlaceEditing=false;
  // Keys: up and down pick and wrap, left and right change.
  gSelectedSetting=0;assert(handleSettingsKey('.')&&gSelectedSetting==1&&adjusted==0);
- assert(handleSettingsKey(';')&&gSelectedSetting==0);assert(handleSettingsKey(';')&&gSelectedSetting==8);
+ assert(handleSettingsKey(';')&&gSelectedSetting==0);assert(handleSettingsKey(';')&&gSelectedSetting==kDeviceSettingsItemCount-1);
  assert(handleSettingsKey('.')&&gSelectedSetting==0);
  assert(handleSettingsKey('/')&&adjusted==1&&gSelectedSetting==0);
  assert(handleSettingsKey(',')&&adjusted==0&&gSelectedSetting==0);

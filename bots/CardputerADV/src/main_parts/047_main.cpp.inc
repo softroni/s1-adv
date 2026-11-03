@@ -164,6 +164,9 @@ void adjustCurrentSetting(int delta) {
     case 7:
       gDeviceSettings.clockTwelveHour = !gDeviceSettings.clockTwelveHour;
       break;
+    case kMeshRegionSetting:
+      gDeviceSettings.meshRegion = s1_mesh::stepRegion(gDeviceSettings.meshRegion, delta);
+      break;
     default:
       break;
   }
@@ -248,6 +251,9 @@ void toggleCurrentSetting() {
       gPlaceEditing = true;
       gPlaceDraft = "";
       return;
+    case kMeshRegionSetting:
+      gDeviceSettings.meshRegion = s1_mesh::stepRegion(gDeviceSettings.meshRegion, 1);
+      break;
     default:
       break;
   }

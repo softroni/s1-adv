@@ -24,7 +24,7 @@ def function(signature):
 
 pulse = function('void renderAssistantPulseUi()')
 assert 'if (state == AssistantPulseState::Ready && !working) {\n    drawHomeWeather();' in pulse, 'the orb still shows while anything is happening'
-assert 'kDeviceSettingsItemCount = 9;' in joined and 'kWeatherPlaceSetting = 8;' in joined
+assert 'kDeviceSettingsItemCount = 10;' in joined and 'kWeatherPlaceSetting = 8;' in joined
 assert 'gPrefs.getString("wx_place", weather_view::kDefaultPlace)' in joined and 'gPrefs.putString("wx_place", gDeviceSettings.weatherPlace)' in joined
 assert 'if (!weather_view::validPlace(gDeviceSettings.weatherPlace.c_str())) gDeviceSettings.weatherPlace = weather_view::kDefaultPlace;' in joined
 # A comma and a space have to survive the trip to the bridge.

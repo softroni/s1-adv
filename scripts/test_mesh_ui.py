@@ -16,6 +16,7 @@ code=r'''
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <set>
 #include <type_traits>
 using std::min;
 struct String:std::string {
@@ -38,7 +39,8 @@ struct Canvas {
   int w=0;for(size_t i=0;i<s.size();++i)if((uint8_t(s[i])&0xc0)!=0x80)w+=font==0?6:font==2?8:uint8_t(s[i])<128?6:12;
   return w;
  }
- template<class T>void print(T value){String s(value);int w=textWidth(s),h=font==0?8:font==2?16:12;
+ std::set<std::string> printed;
+ template<class T>void print(T value){String s(value);printed.insert(s);int w=textWidth(s),h=font==0?8:font==2?16:12;
   if(w){assert(x>=0&&x+w<=240&&y>=0&&y+h<=135);if(clipped)assert(x>=8&&x+w<=232&&y>=54&&y+h<=126);}
   x+=w;++calls;
  }
@@ -50,16 +52,23 @@ struct Canvas {
 }gCanvas;
 namespace s1_mesh {
 constexpr int kInitPending=-32768;
-struct RadioSession {State state;std::atomic<int>initResult{0};};
+struct RadioSession {State state;std::atomic<int>initResult{0};uint8_t region=1;};
+// UA_868 is as long as a region's name gets.
+inline const char* regionName(uint8_t c){return c==1?"US":"UA_868";}
+inline float regionFrequency(uint8_t c){return c==1?906.875f:868.375f;}
 }
+struct {uint8_t meshRegion=1;}gDeviceSettings;
+
 std::unique_ptr<s1_mesh::RadioSession>gMeshSession;
 bool gMeshBusOwned=false,gSdReady=true;String gMeshNotice;
 uint32_t millis(){return 1234567890;}
 '''+render+r'''
 int main() {
- for(bool sd:{false,true}){gSdReady=sd;renderMeshUi();assert(!gCanvas.clipped);}
- gMeshSession=std::make_unique<s1_mesh::RadioSession>();gMeshBusOwned=true;gSdReady=false;
+ for(uint8_t region:{1,15})for(bool sd:{false,true}){gDeviceSettings.meshRegion=region;gSdReady=sd;renderMeshUi();assert(!gCanvas.clipped);}
+ // A running radio shows the region it started with, not one picked since.
+ gMeshSession=std::make_unique<s1_mesh::RadioSession>();gMeshSession->region=15;gDeviceSettings.meshRegion=1;gMeshBusOwned=true;gSdReady=false;gCanvas.printed.clear();
  for(int init:{0,s1_mesh::kInitPending,-19}) {gMeshSession->initResult=init;renderMeshUi();assert(!gCanvas.clipped);}
+ assert(gCanvas.printed.count("UA_868 / LongFast")&&!gCanvas.printed.count("US / LongFast"));
  gMeshSession->initResult=0;auto& s=gMeshSession->state;
  for(uint32_t n=1;n<=16;++n){auto* p=s.hear(n,UINT32_MAX-n,int16_t(n%2?-32768:32767));memset(p->name,'W',40);p->name[40]=0;}
  for(unsigned type=0;type<3;++type) {
@@ -82,4 +91,4 @@ with tempfile.TemporaryDirectory(prefix='s1-mesh-ui-') as directory:
                     '-fsanitize=address,undefined','-fno-omit-frame-pointer',
                     '-I'+str(ROOT/'bots/CardputerADV/src'),str(p/'ui.cpp'),'-o',str(p/'ui')],check=True)
     subprocess.run([str(p/'ui')],check=True)
-print('PASS actual Mesh renderer: 240x135 bounds, startup/failure/empty, 16 nodes, every history/page, long ASCII/Cyrillic/emoji and clip-state restoration (ASan/UBSan)')
+print('PASS actual Mesh renderer: 240x135 bounds, both region names at their longest, the running radio region shown, startup/failure/empty, 16 nodes, every history/page, long ASCII/Cyrillic/emoji and clip-state restoration (ASan/UBSan)')

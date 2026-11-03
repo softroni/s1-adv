@@ -1,5 +1,6 @@
 #pragma once
 #include "mesh_leaf_state.h"
+#include "mesh_region.h"
 #include <RadioLib.h>
 #include <libmeshtastic_leaf.h>
 #include <atomic>
@@ -14,17 +15,21 @@ struct RadioSession {
   std::atomic<int> initResult{kInitPending};
   bool readyReported=false;
   uint32_t lowHeap=UINT32_MAX, lowLargest=UINT32_MAX;
-  explicit RadioSession(SPIClass& spi):module(5,4,3,6,spi),radio(&module) {
+  const RegionCode region;
+  RadioSession(SPIClass& spi,uint8_t savedRegion):module(5,4,3,6,spi),radio(&module),region(regionOrDefault(savedRegion)) {
     module.spiConfig.timeout=250; // A missing/busy chip cannot stall the UI task.
   }
   int initialize() {
-    int e=radio.begin(923.875f,250.0f,11,5,RADIOLIB_SX126X_SYNC_WORD_PRIVATE,10,16,1.8f);
+    // mesh.begin() sets the modem again, but start on the region's own channel: RadioLib only
+    // recalibrates the chip for a move of 20 MHz or more, so 923.875 then 906.875 would keep
+    // the calibration for the wrong band.
+    int e=radio.begin(regionFrequency(region),250.0f,11,5,RADIOLIB_SX126X_SYNC_WORD_PRIVATE,10,16,1.8f);
     if(e) return e;
     if((e=radio.setDio2AsRfSwitch(true)))return e;
     if((e=radio.setCurrentLimit(140.0f)))return e;
     if((e=radio.setCRC(2)))return e;
     libmeshtastic_leaf::MeshConfig cfg;
-    cfg.radio.region=libmeshtastic_leaf::REGION_TH;
+    cfg.radio.region=region;
     cfg.radio.preset=libmeshtastic_leaf::PRESET_LONG_FAST;
     cfg.radio.txPower=10;
     cfg.hopLimit=3;

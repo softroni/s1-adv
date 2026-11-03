@@ -317,6 +317,8 @@ String settingLabel(uint8_t index) {
       return "Clock format";
     case kWeatherPlaceSetting:
       return "Weather city";
+    case kMeshRegionSetting:
+      return "Mesh region";
     default:
       return "-";
   }

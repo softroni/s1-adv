@@ -98,12 +98,16 @@ struct FakeMesh {
  void onReceive(void(*)(const libmeshtastic_leaf::MeshPacket&)){}
  void update(){assert(gMeshBusOwned&&!gSdReady);++updates;}
 };
+struct {uint8_t meshRegion=1;}gDeviceSettings;
 namespace s1_mesh {
 constexpr int kInitPending=-32768;
+inline const char* regionName(uint8_t){return "US";}
+inline float regionFrequency(uint8_t){return 906.875f;}
 struct RadioSession {
  FakeMesh mesh;State state;std::atomic<int>initResult{kInitPending};
- bool readyReported=false;uint32_t lowHeap=UINT32_MAX,lowLargest=UINT32_MAX;
- explicit RadioSession(Spi&){++live;}
+ bool readyReported=false;uint32_t lowHeap=UINT32_MAX,lowLargest=UINT32_MAX;uint8_t region;
+ // The radio starts on whatever region Settings holds at that moment.
+ RadioSession(Spi&,uint8_t saved):region(saved){assert(saved==gDeviceSettings.meshRegion);++live;}
  ~RadioSession(){assert(!workerPending);--live;}
  int initialize(){assert(gMeshBusOwned&&!gSdReady);return initError;}
 };

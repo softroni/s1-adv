@@ -117,7 +117,7 @@ void startMeshMode() {
     gMeshNotice="Not enough free RAM";return;
   }
   // Busy/heap failures leave SD and radio untouched.
-  gMeshSession.reset(new(std::nothrow) s1_mesh::RadioSession(gSdSpi));
+  gMeshSession.reset(new(std::nothrow) s1_mesh::RadioSession(gSdSpi,gDeviceSettings.meshRegion));
   if(!gMeshSession) {gMeshNotice="Not enough free RAM";return;}
   gMeshNotice="Preparing radio...";render();
   if(!loadMeshIdentity(*gMeshSession)) {
@@ -173,8 +173,9 @@ void serviceMeshMode() {
   session.lowLargest=std::min(session.lowLargest,uint32_t(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
   if(!session.readyReported) {
     session.readyReported=true;
-    logf("[MESH] ready TH LongFast 923.875MHz node=!%08lx heap=%u largest=%u",
-      static_cast<unsigned long>(session.mesh.getNodeNum()),unsigned(session.lowHeap),unsigned(session.lowLargest));
+    logf("[MESH] ready %s LongFast %.3fMHz node=!%08lx heap=%u largest=%u",s1_mesh::regionName(session.region),
+      double(s1_mesh::regionFrequency(session.region)),static_cast<unsigned long>(session.mesh.getNodeNum()),
+      unsigned(session.lowHeap),unsigned(session.lowLargest));
   }
   session.mesh.onReceive(meshHandlePacket);
   session.mesh.update();
@@ -228,7 +229,8 @@ bool handleMeshHostCommand(const String& line) {
   else if(line=="mesh.stop") {if(stopMeshMode(true))setUiMode(UiMode::Home);}
   else if(line=="mesh.nodes") {if(gMeshSession)gMeshSession->state.nodeView=true;}
   else if(line=="mesh.status") {
-    logf("[MESH] owned=%d init=%d sd=%d heap=%u largest=%u nodes=%u messages=%u",gMeshBusOwned,
+    logf("[MESH] region=%s owned=%d init=%d sd=%d heap=%u largest=%u nodes=%u messages=%u",
+      s1_mesh::regionName(gMeshSession?uint8_t(gMeshSession->region):gDeviceSettings.meshRegion),gMeshBusOwned,
       gMeshSession?gMeshSession->initResult.load():s1_mesh::kInitPending,gSdReady,unsigned(ESP.getFreeHeap()),
       unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)),
       unsigned(gMeshSession?gMeshSession->state.nodeCount:0),unsigned(gMeshSession?gMeshSession->state.messageCount:0));
@@ -252,13 +254,21 @@ void renderMeshUi() {
   auto& d=gCanvas;
   const uint16_t bg=rgb565_local(3,8,14),muted=rgb565_local(130,145,155),cyan=rgb565_local(47,227,255);
   d.fillScreen(bg);d.setTextSize(1);d.setFont(&fonts::Font2);d.setTextColor(TFT_WHITE,bg);d.setCursor(8,5);d.print("Mesh");
-  d.setFont(&fonts::Font0);d.setTextColor(muted,bg);d.setCursor(144,12);d.print("TH / LongFast");
+  // A running radio keeps the region it started with, so show that one.
+  const uint8_t region=gMeshSession?uint8_t(gMeshSession->region):gDeviceSettings.meshRegion;
+  const String band=String(s1_mesh::regionName(region))+" / LongFast";
+  d.setFont(&fonts::Font0);d.setTextColor(muted,bg);d.setCursor(232-d.textWidth(band),12);d.print(band);
   d.drawFastHLine(6,23,228,rgb565_local(48,54,61));
   d.setTextColor(gMeshBusOwned?rgb565_local(255,136,64):muted,bg);d.setCursor(8,29);
   d.print(meshClip(gMeshNotice.isEmpty()?(gSdReady?"Radio off / SD ready":"Radio off / SD unavailable"):gMeshNotice,224));
   if(!gMeshSession || gMeshSession->initResult.load(std::memory_order_acquire)!=0) {
     d.setFont(&fonts::Font2);d.setTextColor(TFT_WHITE,bg);d.setCursor(36,58);d.print("Meshtastic leaf");
-    d.setFont(&fonts::Font0);d.setTextColor(muted,bg);d.setCursor(78,81);d.print("Public channel");
+    char channel[40];snprintf(channel,sizeof(channel),"Public channel, %.3f MHz",double(s1_mesh::regionFrequency(region)));
+    d.setFont(&fonts::Font0);d.setTextColor(muted,bg);d.setCursor(120-d.textWidth(channel)/2,81);d.print(channel);
+    if(!gMeshBusOwned) {
+      const String where="Region: Settings > Device";
+      d.setCursor(120-d.textWidth(where)/2,95);d.print(where);
+    }
     d.setTextColor(cyan,bg);d.setCursor(8,127);d.print(gMeshBusOwned?"Starting...  Esc cancel":"Enter start   Esc back");return;
   }
   const auto& state=gMeshSession->state;

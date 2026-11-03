@@ -431,6 +431,8 @@ visible until retry or exit. The firmware uses one configured conversation;
 there is no topic browser or topic creation/switching.
 
 Device Settings → Clock format switches between 12h AM/PM (default) and 24h.
+Device Settings → Mesh region picks the Meshtastic region Mesh uses, US (906.875 MHz) unless
+changed. Left and Right step through the list in [Mesh](MESH.md#region).
 Display Settings → Text size switches chat and voice replies between Small, Medium
 and Large.
 Ordinary voice keeps the original REC graphics during capture and THINK until the
