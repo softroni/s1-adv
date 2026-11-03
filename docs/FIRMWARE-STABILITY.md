@@ -70,7 +70,8 @@ right indicates the inbox/manifest worker while the rest of the UI still renders
 ## Measurement and regression gates
 
 USB commands `ui.perf`, `voice.capture.status`, `home.update.status`, and `diag` expose
-state and profiling. Serial records `[UI_LATENCY]`, `[VOICE_LATENCY]`,
+state and profiling. `wifi.scan.raw` lists every network the radio hears, with its channel and
+the name's exact bytes, and `wifi.open` and `wifi.rescan` drive the Wi-Fi screen's own scan. Serial records `[UI_LATENCY]`, `[VOICE_LATENCY]`,
 `[UI_SERVICE]`, `[OTA_AUTO]`, `[FIRMWARE_JOB]`, and `[REQUEST]` correlate input to
 first rendered frame, G0 to microphone/REC, slow service cost, loop service gaps,
 heap/largest-block/stack minima, network dispatch and acceptance.

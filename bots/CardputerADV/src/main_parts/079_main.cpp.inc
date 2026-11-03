@@ -4,9 +4,38 @@
 
 // The Arduino scan call only says that it failed. This keeps the driver's reason for the screen.
 esp_err_t gWifiScanError = ESP_OK;
+
+// The driver answers every scan it starts with one done event: when the scan ends, when it's
+// stopped, and when a newer scan replaces it. Arduino stops waiting after 6 s and calls the scan
+// failed, but a scan made while joined takes over 8 s here, because the radio keeps going back to
+// its own channel. The screen then started again, which replaced the scan in flight, and that
+// scan's empty answer read as the new one's: "No networks found". So a scan is over when the
+// driver has answered every start, counted from the first time the events are watched.
+// Each count has one writer: starts on the loop, done events on Arduino's event task.
+volatile uint32_t gWifiScansStarted = 0, gWifiScanDoneCount = 0, gWifiLeftCount = 0;
+volatile uint8_t gWifiScanDoneStatus = 0xFF, gWifiScanDoneHeard = 0, gWifiLeftReason = 0;
+volatile bool gWifiWatching = false;
+uint32_t gWifiScanStartedMs = 0;
+// Longer than the screen's own scan limit, which stops the scan and so brings its answer.
+constexpr uint32_t kWifiScanAnswerMs = 20000;
+
+bool wifiScanInFlight() {
+  if (gWifiScansStarted == gWifiScanDoneCount) return false;
+  // Turning Wi-Fi off mid-scan can lose the answer. Waiting for it would block every later scan.
+  if (millis() - gWifiScanStartedMs > kWifiScanAnswerMs) {
+    gWifiScansStarted = gWifiScanDoneCount;
+    return false;
+  }
+  return true;
+}
+
 extern "C" esp_err_t __real_esp_wifi_scan_start(const wifi_scan_config_t* config, bool block);
 extern "C" esp_err_t __wrap_esp_wifi_scan_start(const wifi_scan_config_t* config, bool block) {
   gWifiScanError = __real_esp_wifi_scan_start(config, block);
+  if (gWifiScanError == ESP_OK && gWifiWatching) {
+    gWifiScansStarted = gWifiScansStarted + 1;
+    gWifiScanStartedMs = millis();
+  }
   return gWifiScanError;
 }
 
@@ -103,9 +132,55 @@ WifiSdDisk gWifiDisk;
 WifiCipher gWifiCipher;
 String gWifiRememberedSsid;
 
+// Arduino may already have given up on a scan the driver is still running, so ask the driver too.
 void stopWifiScan() {
-  if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) esp_wifi_scan_stop();
+  if (wifiScanInFlight() || WiFi.scanComplete() == WIFI_SCAN_RUNNING) esp_wifi_scan_stop();
   WiFi.scanDelete();
+}
+
+// Arduino stores a scan's results before it calls this. The event task only stores numbers here:
+// it runs on a small stack, so the logging happens on the loop.
+void noteWifiEvent(arduino_event_id_t event, arduino_event_info_t info) {
+  if (event == ARDUINO_EVENT_WIFI_SCAN_DONE) {
+    gWifiScanDoneStatus = static_cast<uint8_t>(info.wifi_scan_done.status);
+    gWifiScanDoneHeard = info.wifi_scan_done.number;
+    gWifiScanDoneCount = gWifiScanDoneCount + 1;
+  } else if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+    gWifiLeftReason = info.wifi_sta_disconnected.reason;
+    gWifiLeftCount = gWifiLeftCount + 1;
+  }
+}
+
+// Called from the loop before a scan starts, so no scan is already in flight uncounted.
+void watchWifiEvents() {
+  if (gWifiWatching) return;
+  WiFi.onEvent(noteWifiEvent, ARDUINO_EVENT_WIFI_SCAN_DONE);
+  WiFi.onEvent(noteWifiEvent, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+  gWifiWatching = true;
+}
+
+// A name as the radio has it. Bytes outside plain ASCII, like an iPhone's curly apostrophe, show
+// as \xNN, so a typed name can be compared with a heard one.
+String wifiLoggedName(const char* name) {
+  String out;
+  for (const unsigned char* c = reinterpret_cast<const unsigned char*>(name); *c; ++c) {
+    if (*c >= 32 && *c < 127 && *c != '\\') {
+      out += static_cast<char>(*c);
+    } else {
+      char hex[5];
+      snprintf(hex, sizeof(hex), "\\x%02X", *c);
+      out += hex;
+    }
+  }
+  return out;
+}
+
+void logWifiScanDriver(const char* what, int count) {
+  logf("[WIFI] %s at=%u count=%d err=%x status=%d scans=%u/%u heard=%u scan_status=%u left=%u reason=%u heap=%u",
+       what, static_cast<unsigned>(millis()), count, static_cast<unsigned>(gWifiScanError),
+       static_cast<int>(WiFi.status()), static_cast<unsigned>(gWifiScanDoneCount),
+       static_cast<unsigned>(gWifiScansStarted), gWifiScanDoneHeard, gWifiScanDoneStatus,
+       static_cast<unsigned>(gWifiLeftCount), gWifiLeftReason, static_cast<unsigned>(ESP.getFreeHeap()));
 }
 
 // Leaves the setup AP alone: a failed join on that screen must still leave the portal working.
@@ -120,9 +195,18 @@ struct WifiRadio {
     gWifiReady = false;
   }
   bool startScan() {
+    watchWifiEvents();
+    // An unanswered scan's answer would read as this one's. Stopping it brings the answer.
+    if (wifiScanInFlight()) {
+      esp_wifi_scan_stop();
+      logWifiScanDriver("scan start waits for the last scan", WIFI_SCAN_RUNNING);
+      return false;
+    }
     gWifiScanError = ESP_OK;
     WiFi.scanDelete();
-    return WiFi.scanNetworks(true, true) != WIFI_SCAN_FAILED;
+    const int16_t started = WiFi.scanNetworks(true, true);
+    logWifiScanDriver("scan start", started);
+    return started != WIFI_SCAN_FAILED;
   }
   std::string scanTrouble() {
     char text[40];
@@ -136,17 +220,26 @@ struct WifiRadio {
     return text;
   }
   int scanResults(std::vector<wifi_settings::Network>& out) {
+    // Not Arduino's 6 s guess: the screen's own limit covers a driver that never answers.
+    if (wifiScanInFlight()) return wifi_settings::kScanRunning;
     const int count = WiFi.scanComplete();
-    if (count < 0) return count;
+    if (count < 0) {
+      logWifiScanDriver("scan results", count);
+      return count;
+    }
+    int hidden = 0;
     for (int i = 0; i < count; ++i) {
       out.push_back({WiFi.SSID(i).c_str(), WiFi.RSSI(i), WiFi.encryptionType(i) != WIFI_AUTH_OPEN});
+      if (out.back().ssid.empty()) ++hidden;
     }
+    logWifiScanDriver("scan results", count);
+    logf("[WIFI] scan hidden=%d", hidden);
     WiFi.scanDelete();
     return count;
   }
   void stopScan() { stopWifiScan(); }
   void join(const std::string& ssid, const std::string& password) {
-    logf("[WIFI] switch start ssid=%s", ssid.c_str());
+    logf("[WIFI] switch start ssid=%s", wifiLoggedName(ssid.c_str()).c_str());
     gWifiReady = false;
     WiFi.setAutoReconnect(true);
     WiFi.disconnect(false, false);
@@ -154,9 +247,18 @@ struct WifiRadio {
     WiFi.begin(ssid.c_str(), password.c_str());
   }
   bool joined(const std::string& ssid) { return online() && WiFi.SSID() == ssid.c_str(); }
-  bool notFound() { return WiFi.status() == WL_NO_SSID_AVAIL; }
+  // Polled while joining, so each change of the station's state reaches the log once.
+  bool notFound() {
+    static int logged = -1;
+    const wl_status_t status = WiFi.status();
+    if (static_cast<int>(status) != logged) {
+      logged = static_cast<int>(status);
+      logWifiScanDriver("join state", 0);
+    }
+    return status == WL_NO_SSID_AVAIL;
+  }
   void rejoinCurrent() {
-    logf("[WIFI] back to configured network");
+    logWifiScanDriver("back to configured network", 0);
     WiFi.setAutoReconnect(true);
     WiFi.disconnect(false, false);
     delay(80);
@@ -348,6 +450,7 @@ bool wifiSettingsTyping() { return gUiMode == UiMode::WifiSettings && gWifi.typi
 bool wifiSettingsTakesAllKeys() { return gUiMode == UiMode::WifiSettings && gWifi.takesAllKeys(); }
 
 void beginWifiSettings() {
+  watchWifiEvents();
   gWifi = wifi_settings::App{};
   gWifi.rescan(millis());
   wifi_store::List saved;
@@ -385,6 +488,42 @@ void serviceWifiSettings() {
   if (gUiMode != UiMode::WifiSettings) return;
   gWifi.poll(gWifiRadio, millis());
   wifiSettle();
+}
+
+// Serial wifi.rescan: R on the Wi-Fi screen.
+void rescanWifiSettings() {
+  if (gUiMode != UiMode::WifiSettings) {
+    logf("[WIFI] rescan needs the Wi-Fi screen. Send wifi.open first");
+    return;
+  }
+  gWifi.rescan(millis());
+  wifiSettle();
+}
+
+// Serial wifi.scan.raw: one plain blocking scan with every network heard, the screen's filtering
+// left out, and the radio's channel rules.
+void runWifiRawScan() {
+  watchWifiEvents();
+  if (gUiMode == UiMode::WifiSettings && (gWifi.scanning() || gWifi.ownsRadio())) {
+    logf("[WIFI] raw scan skipped: the Wi-Fi screen is using the radio");
+    return;
+  }
+  wifi_country_t country = {};
+  esp_wifi_get_country(&country);
+  logf("[WIFI] raw scan country=%.2s first=%u channels=%u policy=%d mode=%d home=%d", country.cc,
+       country.schan, country.nchan, static_cast<int>(country.policy), static_cast<int>(WiFi.getMode()),
+       static_cast<int>(WiFi.channel()));
+  gWifiScanError = ESP_OK;
+  const uint32_t started = millis();
+  const int16_t count = WiFi.scanNetworks(false, true);
+  logWifiScanDriver("raw scan", count);
+  logf("[WIFI] raw scan ms=%u", static_cast<unsigned>(millis() - started));
+  for (int i = 0; i < count; ++i) {
+    Serial.printf("[WIFI] raw %2d ch=%2d rssi=%4d auth=%d name=%s\n", i, static_cast<int>(WiFi.channel(i)),
+                  static_cast<int>(WiFi.RSSI(i)), static_cast<int>(WiFi.encryptionType(i)),
+                  wifiLoggedName(WiFi.SSID(i).c_str()).c_str());
+  }
+  WiFi.scanDelete();
 }
 
 bool wifiSettingsEscape() {

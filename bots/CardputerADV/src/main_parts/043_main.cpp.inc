@@ -899,6 +899,19 @@ bool handleHostSerialCommand(String line) {
     gRealtimeSmokePrompt = "Count slowly from one to twenty, saying every number.";
     return true;
   }
+  if (cmd == "wifi.scan.raw") {
+    runWifiRawScan();
+    return true;
+  }
+  if (cmd == "wifi.open") {
+    setUiMode(UiMode::WifiSettings);
+    logf("[HOST] wifi.open mode=%d", static_cast<int>(gUiMode));
+    return true;
+  }
+  if (cmd == "wifi.rescan") {
+    rescanWifiSettings();
+    return true;
+  }
   if (cmd == "diag" || cmd == "/diag" || cmd == "dbg" || cmd == "/dbg") {
     printHostDiag();
     return true;

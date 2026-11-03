@@ -585,6 +585,8 @@ bool handleNfcNotesKey(char key, const Keyboard_Class::KeysState& keys);
 void renderNfcNotesUi();
 void beginWifiSettings();
 void stopWifiSettings();
+void rescanWifiSettings();
+void runWifiRawScan();
 void serviceWifiSettings();
 void serviceWifiMemory();
 bool wifiSettingsOwnsRadio();
