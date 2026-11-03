@@ -272,6 +272,74 @@ void labStepTarget(uint32_t now) {
   labNewTarget();
 }
 
+// --- Joystick: which way it's held -----------------------------------------------------------
+// The unit can be held any way round, so the Lab asks for a push right and then up, and keeps that.
+constexpr uint32_t kLabStickHoldMs = 500;
+void renderLabStickLearn() {
+  auto& d = gCanvas;
+  const LabUi& ui = gLabUi;
+  const bool up = ui.stickLearn == 2;
+  labDrawHeadFor(Dev::Joystick, kLabLime, "DIRECTIONS", kLabAmber);
+  constexpr int x = 10, y = 23, size = 98, cx = x + size / 2, cy = y + size / 2, kReach = 36;
+  d.fillRoundRect(x, y, size, size, 8, kLabPanel2);
+  d.drawCircle(cx, cy, 10, kLabDim);
+  // A thick arrow, the way to push.
+  const int tipX = up ? cx : cx + kReach, tipY = up ? cy - kReach : cy;
+  for (int w = -2; w <= 2; ++w) {
+    if (up) d.drawLine(cx + w, cy + 12, tipX + w, tipY, kLabLime);
+    else d.drawLine(cx - 12, cy + w, tipX, tipY + w, kLabLime);
+  }
+  for (int w = -1; w <= 1; ++w) {
+    if (up) {
+      d.drawLine(tipX + w, tipY, tipX - 13 + w, tipY + 13, kLabLime);
+      d.drawLine(tipX + w, tipY, tipX + 13 + w, tipY + 13, kLabLime);
+    } else {
+      d.drawLine(tipX, tipY + w, tipX - 13, tipY - 13 + w, kLabLime);
+      d.drawLine(tipX, tipY + w, tipX - 13, tipY + 13 + w, kLabLime);
+    }
+  }
+  labTextAt(&fonts::Font0, 124, 25, up ? "STEP 2 OF 2" : "STEP 1 OF 2", kLabMuted);
+  labTextAt(&fonts::FreeSansBold9pt7b, 124, 38, "Push it", TFT_WHITE);
+  labTextAt(&fonts::FreeSansBold9pt7b, 124, 58, up ? "up" : "right", kLabLime);
+  labTextAt(&fonts::Font0, 124, 84, up ? "away from you" : "and hold it there", kLabSoft);
+  const uint32_t held = ui.stickPush >= 0 ? millis() - ui.stickHeldMs : 0;
+  labBar(124, 98, 110, 8, static_cast<int>(min<uint32_t>(held, kLabStickHoldMs) * 100 / kLabStickHoldMs), kLabLime);
+  labKeys("ESC stop, and nothing changes");
+}
+void labStepStickLearn(uint32_t now) {
+  LabUi& ui = gLabUi;
+  if (!ui.stickLearn) return;
+  if (static_cast<Dev>(ui.devRow) != Dev::Joystick || !labDevHere(Dev::Joystick)) {
+    ui.stickLearn = 0;
+    return;
+  }
+  const int x = gLabStickRaw[0], y = gLabStickRaw[1], axis = lab::stickPushAxis(x, y);
+  // Which of four ways it's pushed. The second push has to be across the first.
+  const bool counts = axis >= 0 && (ui.stickLearn == 1 || axis != lab::stickPushAxis(ui.stickRight[0], ui.stickRight[1]));
+  const int push = counts ? axis * 2 + ((axis == 0 ? x : y) > 0 ? 1 : 0) : -1;
+  if (push != ui.stickPush) {
+    ui.stickPush = push;
+    ui.stickHeldMs = now;
+    return;
+  }
+  if (push < 0 || now - ui.stickHeldMs < kLabStickHoldMs) return;
+  if (ui.stickLearn == 1) {
+    ui.stickRight[0] = x;
+    ui.stickRight[1] = y;
+    ui.stickLearn = 2;
+    ui.stickPush = -1;
+    labBeep(1200, 60);
+    return;
+  }
+  lab::StickTurn turn;
+  if (lab::learnStick(ui.stickRight[0], ui.stickRight[1], x, y, turn)) {
+    gLabBook.stick = turn;
+    labSaveBook();
+  }
+  ui.stickLearn = 0;
+  labBeep(1600, 120);
+}
+
 // --- Mini Angle: keep it in the moving zone ---------------------------------------------------
 void renderLabSteady() {
   auto& d = gCanvas;

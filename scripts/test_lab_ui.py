@@ -1789,12 +1789,46 @@ void testLedPower() {
   setUiMode(UiMode::Home); assert(gLed.b == 0 && gBacklightPct == 70 && !gLedWantsLight);
 }
 
+// The joystick can be held any way round, so the Lab learns which way is right and which is up.
+void testStickLearn() {
+  const auto plugged = gUnits.present; const bool hub = gHubUnit.here;
+  gUnits.present = {0x57, 0x44, 0x63, 0x50}; gHubUnit.here = true; gUnits.stickX = 0; gUnits.stickY = 0;
+  setUiMode(UiMode::LabDevices); run(1500); gLabUi.devRow = 0;
+  pickDevice(Dev::Joystick); renderLabUi(); assert(gCanvas.shows("D set directions") && gLabBook.stick.bits() == 0);
+  key('d'); run(100); show("stick-learn-right"); assert(gLabUi.stickLearn == 1 && gCanvas.shows("STEP 1 OF 2") && gCanvas.shows("right"));
+  // Arrows and N don't turn the page while it listens, and a small push doesn't count.
+  key(RIGHT); key('n'); assert(gLabUi.page == 0 && gLabUi.stickLearn == 1);
+  gUnits.stickX = 30; run(1000); assert(gLabUi.stickLearn == 1);
+  // This one is held a quarter turn round and upside down: right reads as Y going down, up as X going up.
+  gUnits.stickX = 4; gUnits.stickY = -110; run(250); show("stick-learn-holding"); assert(gLabUi.stickLearn == 1 && gCanvas.shows("Push it"));
+  run(400); assert(gLabUi.stickLearn == 2);
+  run(800); assert(gLabUi.stickLearn == 2);  // Still pushed right, which can't be up too.
+  gUnits.stickX = 0; gUnits.stickY = 0; run(200); show("stick-learn-up"); assert(gCanvas.shows("STEP 2 OF 2") && gCanvas.shows("up"));
+  gUnits.stickX = 105; gUnits.stickY = 8; run(700); assert(gLabUi.stickLearn == 0 && gLabBook.stick.swap && gLabBook.stick.flipX && !gLabBook.stick.flipY);
+  // Now right is right and up is up, everywhere the stick is read.
+  gUnits.stickX = 0; gUnits.stickY = -127; run(100); assert(gLabInputs.get(Sig::StickX).value == 100 && gLabInputs.get(Sig::StickY).value == 0);
+  gUnits.stickX = 127; gUnits.stickY = 0; run(100); assert(gLabInputs.get(Sig::StickY).value == 100 && gLabInputs.get(Sig::StickX).value == 0);
+  renderLabUi(); assert(gCanvas.shows("Move it"));
+  // Esc while it listens stops it, keeps what was there, and stays on the page.
+  key('d'); run(100); gUnits.stickX = -110; gUnits.stickY = 0; run(700); assert(gLabUi.stickLearn == 2);
+  esc(); assert(gLabUi.stickLearn == 0 && gLabUi.view == LabView::Device && gLabBook.stick.swap && gLabBook.stick.flipX);
+  // It's saved with the rest of the Lab.
+  esc(); freshBoot(); gLabBook = lab::Book{}; setUiMode(UiMode::LabDevices); run(1500); assert(gLabBook.stick.swap && gLabBook.stick.flipX && !gLabBook.stick.flipY);
+  // Leaving the screen mid-way stops it too.
+  gLabUi.devRow = 0; pickDevice(Dev::Joystick); key('d'); run(100); assert(gLabUi.stickLearn == 1); esc(); esc(); assert(gLabUi.view == LabView::Devices && !gLabUi.stickLearn);
+  pickDevice(Dev::Joystick); key('d'); run(100); assert(gLabUi.stickLearn == 1); setUiMode(UiMode::Home); setUiMode(UiMode::LabDevices); run(100); assert(!gLabUi.stickLearn);
+  // If the joystick goes, so does the question.
+  pickDevice(Dev::Joystick); key('d'); run(100); gUnits.present.erase(0x63); run(2000); assert(!gLabUi.stickLearn); gUnits.present.insert(0x63); run(2000); esc();
+  gLabBook.stick = lab::StickTurn{}; labSaveBook(); gUnits.stickX = 47; gUnits.stickY = -15; setUiMode(UiMode::Home);
+  gUnits.present = plugged; gHubUnit.here = hub;
+}
+
 int main(int argc, char** argv) {
   if (argc > 1) gDump = std::fopen(argv[1], "w");
   for (bool& live : gLabHistoryLive) live = false;
-  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testGuidePictures(); testSequences(); testChat(); testOnce(); testPlayFromChat(); setUiMode(UiMode::LabRules); run(1500); testGuards(); testLedPower();
+  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testGuidePictures(); testSequences(); testChat(); testOnce(); testPlayFromChat(); setUiMode(UiMode::LabRules); run(1500); testGuards(); testLedPower(); testStickLearn();
   if (gDump) std::fclose(gDump);
-  std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, sequences on their own and from a rule, what the chat can see and offer, one check from the chat, a sequence played from the chat, the lamp and AC guards, units leaving and returning, saving and damage, the LED waiting for full screen light, and every screen stays on the display");
+  std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, sequences on their own and from a rule, what the chat can see and offer, one check from the chat, a sequence played from the chat, the lamp and AC guards, units leaving and returning, saving and damage, the LED waiting for full screen light, learning which way the joystick is held, and every screen stays on the display");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-lab-ui-') as directory:

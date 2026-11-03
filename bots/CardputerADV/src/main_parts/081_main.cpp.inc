@@ -150,6 +150,7 @@ lab::StripFrame gLabStripSent;
 bool gLabStripKnown = false;
 lab::RelayGuard gLabRelays[2];
 int gLabLedSent = -1;
+int gLabStickRaw[2] = {0, 0};   // The joystick as it reads, before the Lab turns it the way it's held.
 uint32_t gLabLedPowerSeen = 0;  // The LED's power-on time when it was last written.
 bool gLabToneOn = false;
 lab::RemoteSwitch gLabLamp, gLabAcs[2];
@@ -340,8 +341,12 @@ void labReadStick(uint32_t now) {
     labUnitLost(lab::Unit::Joystick);
     return;
   }
-  gLabInputs.set(lab::Sig::StickX, lab::clampTo<int16_t>(static_cast<int8_t>(axes[0]) * 100 / 127, -100, 100), now);
-  gLabInputs.set(lab::Sig::StickY, lab::clampTo<int16_t>(static_cast<int8_t>(axes[1]) * 100 / 127, -100, 100), now);
+  gLabStickRaw[0] = static_cast<int8_t>(axes[0]);
+  gLabStickRaw[1] = static_cast<int8_t>(axes[1]);
+  int x = gLabStickRaw[0], y = gLabStickRaw[1];
+  gLabBook.stick.apply(x, y);
+  gLabInputs.set(lab::Sig::StickX, lab::clampTo<int16_t>(static_cast<int16_t>(x * 100 / 127), -100, 100), now);
+  gLabInputs.set(lab::Sig::StickY, lab::clampTo<int16_t>(static_cast<int16_t>(y * 100 / 127), -100, 100), now);
   gLabInputs.set(lab::Sig::StickPress, button == 0 ? 1 : 0, now);
 }
 void labReadDLight(uint32_t now) {

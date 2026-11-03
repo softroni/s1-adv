@@ -103,7 +103,7 @@ The dot beside each device tells you what the Lab knows:
 <tr>
 <td width="33%"><img src="assets/lab/ultrasonic.png" alt="Ultrasonic screen showing 41 cm and a chart of the last 30 seconds" width="100%"><br><sub><b>Ultrasonic.</b> Live distance and the last 30 seconds. R resets the lowest and highest.</sub></td>
 <td width="33%"><img src="assets/lab/env.png" alt="ENV III screen showing temperature and humidity" width="100%"><br><sub><b>ENV III.</b> Breathe on it and watch the humidity jump.</sub></td>
-<td width="33%"><img src="assets/lab/joystick.png" alt="Joystick 2 screen showing the stick position and a pressed button" width="100%"><br><sub><b>Joystick 2.</b> The stick's position and its button.</sub></td>
+<td width="33%"><img src="assets/lab/joystick.png" alt="Joystick 2 screen showing the stick position and its button" width="100%"><br><sub><b>Joystick 2.</b> The stick's position and its button. If the dot goes the wrong way, <b>D</b> sets its directions.</sub></td>
 </tr>
 <tr>
 <td><img src="assets/lab/knob.png" alt="Mini Angle screen with a dial at 67%" width="100%"><br><sub><b>Mini Angle.</b> Turn it end to end once so it learns its range.</sub></td>
@@ -133,6 +133,13 @@ The dot beside each device tells you what the Lab knows:
 </table>
 
 The Cardputer LED takes its power from the screen light, and it only gets steady power with the screen at full brightness. So while a test, a rule, a sequence or the chat has it lit, the screen goes to full brightness, and it goes back to your own setting once the LED is off. When the screen turns itself off, the LED goes dark with it, and it comes back on when the screen wakes.
+
+<table>
+<tr>
+<td width="33%"><img src="assets/lab/joystick-directions.png" alt="Joystick 2 asking for a push right, with an arrow and a bar half full" width="100%"><br><sub><b>Joystick 2: directions.</b> Push right and hold until the bar fills, then up.</sub></td>
+<td>The Joystick 2 reads differently depending on which way round you hold it, so the Lab can learn it. If the dot goes the wrong way, press <b>D</b> on its screen. Push the stick right and hold it until the bar fills, then push it up, away from you, and hold it again. It beeps after each push. The Lab saves this with the rest of its setup, and every page, rule and reading uses it from then on. Esc stops it part way and changes nothing.</td>
+</tr>
+</table>
 
 The label at the top right tells you how much the Lab really knows. **ANSWERING** means the part replied just now. **ON CH0** or **ON GROVE** says where it is. **SIGNAL SENT** means a command went out, but an output can't reply, so watch the part itself.
 

@@ -330,9 +330,31 @@ void testSaving(){
    Book o;assert(decode(old,oldSize,o)&&o.count==1&&!std::strcmp(o.rules[0].name,"Wave lights")&&o.capPercent==50&&!o.direct.any());}
   // A file from 0.2.236 to 0.2.244, with no phrases, still loads.
   {Book b;b.count=2;b.rules[0]=starterRule();b.rules[1]=recipeRule(3);b.capPercent=50;b.direct.claim(Part::Knob);uint8_t c[kFileBytes];encode(b,c);
-   uint8_t old[kFileBytes];std::memcpy(old,c,kHeaderBytes);std::memcpy(old+kHeaderBytes,c+kHeaderBytes,kOldRuleBytes);std::memcpy(old+kHeaderBytes+kOldRuleBytes,c+kHeaderBytes+kRuleBytes,kOldRuleBytes);old[3]=2;
-   const size_t oldSize=kHeaderBytes+2*kOldRuleBytes+2;const uint16_t k=checksum(old,oldSize-2);old[oldSize-2]=uint8_t(k&255);old[oldSize-1]=uint8_t(k>>8);
+   uint8_t old[kFileBytes];std::memcpy(old,c,kDirectHeaderBytes);std::memcpy(old+kDirectHeaderBytes,c+kHeaderBytes,kOldRuleBytes);std::memcpy(old+kDirectHeaderBytes+kOldRuleBytes,c+kHeaderBytes+kRuleBytes,kOldRuleBytes);old[3]=2;
+   const size_t oldSize=kDirectHeaderBytes+2*kOldRuleBytes+2;const uint16_t k=checksum(old,oldSize-2);old[oldSize-2]=uint8_t(k&255);old[oldSize-1]=uint8_t(k>>8);
    Book o;assert(decode(old,oldSize,o)&&o.count==2&&!std::strcmp(o.rules[1].name,"Air theremin")&&o.direct.white==Part::Knob&&o.rules[0].say[0]==0&&o.rules[1].say[0]==0);}
+  // A file from 0.2.245 to 0.2.262, with no stick byte, still loads, the stick as it reads.
+  {Book b;b.count=2;b.rules[0]=starterRule();b.rules[1]=recipeRule(3);b.capPercent=50;b.direct.claim(Part::Knob);b.stick.swap=true;uint8_t c[kFileBytes];const size_t n=encode(b,c);
+   uint8_t old[kFileBytes];std::memcpy(old,c,kDirectHeaderBytes);std::memcpy(old+kDirectHeaderBytes,c+kHeaderBytes,n-kHeaderBytes-2);old[3]=3;
+   const size_t oldSize=n-1;const uint16_t k=checksum(old,oldSize-2);old[oldSize-2]=uint8_t(k&255);old[oldSize-1]=uint8_t(k>>8);
+   Book o;assert(decode(old,oldSize,o)&&o.count==2&&!std::strcmp(o.rules[1].name,"Air theremin")&&o.direct.white==Part::Knob&&o.stick.bits()==0);}
+  // Which way the joystick is held saves, and a byte that can't be one is refused.
+  {Book b;b.stick.flipX=true;b.stick.flipY=true;uint8_t c[kFileBytes];const size_t n=encode(b,c);assert(c[kDirectHeaderBytes]==6);Book o;assert(decode(c,n,o)&&!o.stick.swap&&o.stick.flipX&&o.stick.flipY);
+   c[kDirectHeaderBytes]=8;const uint16_t k=checksum(c,n-2);c[n-2]=uint8_t(k&255);c[n-1]=uint8_t(k>>8);assert(!decode(c,n,o));}
+  // Learning it: a push right and then up, whichever way the unit is turned, or flipped over.
+  {StickTurn t;
+   // Once learnt, the same two pushes read as right and up.
+   const auto learnt=[&](int rx,int ry,int ux,int uy){StickTurn l;if(!learnStick(rx,ry,ux,uy,l))return false;
+     int x=rx,y=ry;l.apply(x,y);const bool rightOk=x>=100&&std::abs(y)<20;x=ux;y=uy;l.apply(x,y);const bool upOk=y>=100&&std::abs(x)<20;t=l;return rightOk&&upOk;};
+   for(int sx:{1,-1})for(int sy:{1,-1})for(bool swap:{false,true}){
+     // Where a push right and a push up land in raw readings, for each of the eight ways it can read.
+     const int rx=swap?0:110*sx,ry=swap?110*sx:0,ux=swap?110*sy:0,uy=swap?0:110*sy;assert(learnt(rx+5,ry-4,ux-3,uy+6));}
+   assert(learnt(110,0,0,110)&&t.bits()==0);assert(learnt(-110,0,0,-110)&&t.flipX&&t.flipY&&!t.swap);assert(learnt(0,110,-110,0)&&t.swap&&!t.flipX&&t.flipY);
+   assert(!learnStick(110,0,90,10,t));         // Both on the same axis.
+   assert(!learnStick(40,0,0,110,t));          // Too small to be on purpose.
+   assert(!learnStick(100,70,0,110,t));        // Too diagonal to tell.
+   assert(stickPushAxis(-80,10)==0&&stickPushAxis(5,-127)==1&&stickPushAxis(0,0)==-1);
+   int x=-128,y=127;StickTurn f;f.flipX=true;f.apply(x,y);assert(x==128&&y==127);}
   // The numbers behind the device pages.
   {assert(parkingGapMs(100)==1000&&parkingGapMs(300)==1000&&parkingGapMs(9)==90&&parkingGapMs(8)==0&&parkingGapMs(1)==0);
    assert(!strcmp(parkingWord(14),"Stop!")&&!strcmp(parkingWord(15),"Getting close")&&!strcmp(parkingWord(40),"All clear"));
@@ -376,7 +398,7 @@ void testSaving(){
    Book b;b.count=1;b.rules[0]=movie;uint8_t c[kFileBytes];const size_t n=encode(b,c);Book o;assert(decode(c,n,o)&&o.rules[0].cond[0].sig==Sig::Spoken);}
   // A phrase saves with its rule, and a file with anything strange in one is refused.
   {Draft d;d.name("Welcome");d.addCond("motion","on",0);d.addSay("  Welcome back, friend! ");d.addSet("led",30);assert(d.usable()&&!std::strcmp(d.rule.say,"Welcome back, friend!")&&hasSay(d.rule));
-   Book b;b.count=1;b.rules[0]=d.rule;uint8_t c[kFileBytes];const size_t n=encode(b,c);assert(c[3]==3&&n==kHeaderBytes+kRuleBytes+2);
+   Book b;b.count=1;b.rules[0]=d.rule;uint8_t c[kFileBytes];const size_t n=encode(b,c);assert(c[3]==4&&n==kHeaderBytes+kRuleBytes+2);
    Book o;assert(decode(c,n,o)&&!std::strcmp(o.rules[0].say,d.rule.say)&&hasSay(o.rules[0])&&o.rules[0].action[0].out==Out::Say);
    c[kHeaderBytes+kOldRuleBytes+2]=0x07;const uint16_t k=checksum(c,n-2);c[n-2]=uint8_t(k&255);c[n-1]=uint8_t(k>>8);Book x;assert(!decode(c,n,x));}
   // What a rule can say is kept plain, and a rule can't say two things or nothing.

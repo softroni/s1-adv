@@ -54,6 +54,10 @@ struct LabUi {
   int servoAngle = 90, stripHue = 200, stripBright = 40, stripLed = 0, ledHue = 120, toneHz = 880;
   bool sweeping = false, sweepUp = true, ledOn = false, relays[2] = {false, false};
   uint32_t sweepMs = 0, beepUntilMs = 0;
+  // Learning which way the joystick is held: 1 waits for a push right, then 2 for a push up.
+  uint8_t stickLearn = 0;
+  int stickPush = -1, stickRight[2] = {0, 0};
+  uint32_t stickHeldMs = 0;
 } gLabUi;
 
 struct LabTrail {
@@ -94,6 +98,8 @@ String labPageKeys(const char* more);
 void renderLabPage(Dev dev, int page);
 void serviceLabPage(uint32_t now);
 bool labPageKey(Dev dev, char key, char lower, bool left, bool right, bool up, bool down, bool enter);
+void renderLabStickLearn();
+void labStepStickLearn(uint32_t now);
 void renderLabDash();
 int labDashPages();
 
@@ -515,6 +521,10 @@ void renderLabKnob() {
   labKeys(labPageKeys(labOnHub(Dev::Knob) ? "Turn it  P port  R reset" : "Turn it end to end"));
 }
 void renderLabStick() {
+  if (gLabUi.stickLearn) {
+    renderLabStickLearn();
+    return;
+  }
   auto& d = gCanvas;
   labDrawAnswering(Dev::Joystick);
   constexpr int x = 10, y = 23, size = 98, center = size / 2;
@@ -530,7 +540,7 @@ void renderLabStick() {
   labStat(124, 25, "LEFT-RIGHT", String(stickX));
   labStat(124, 53, "UP-DOWN", String(stickY));
   labStat(124, 81, "BUTTON", pressed ? "Pressed" : "Up", pressed ? kLabGreen : TFT_WHITE);
-  labKeys(labPageKeys("Move it and press it"));
+  labKeys(labPageKeys("Move it  D set directions"));
 }
 void renderLabServo() {
   auto& d = gCanvas;
@@ -1421,6 +1431,7 @@ void labOpenDevice(Dev dev) {
   gLabUi.page = 0;
   gLabPartUsed[static_cast<uint8_t>(lab::partFor(dev))] = true;
   gLabUi.sweeping = false;
+  gLabUi.stickLearn = 0;
   gLabUi.ledOn = false;
   gLabUi.relays[0] = gLabUi.relays[1] = false;
   Sig sig = Sig::Distance;
@@ -1439,6 +1450,7 @@ void labOpenDevice(Dev dev) {
 void labCloseDevice() {
   labReleaseOutputs();
   gLabUi.sweeping = false;
+  gLabUi.stickLearn = 0;
   gLabUi.view = LabView::Devices;
   labRescanBus();
 }
@@ -1458,6 +1470,7 @@ void labServoGoTo(int angle) {
 }
 void labDeviceKey(char key, char lower, bool left, bool right, bool up, bool down, bool enter) {
   const Dev dev = static_cast<Dev>(gLabUi.devRow);
+  if (gLabUi.stickLearn) return;  // Only the stick answers, and Esc stops it.
   if (labDevPages(dev) > 1 && (lower == 'n' || ((left || right) && labArrowsTurnPages(dev)))) {
     labTurnPage(left ? -1 : 1);
     return;
@@ -1505,6 +1518,12 @@ void labDeviceKey(char key, char lower, bool left, bool right, bool up, bool dow
       } else if (left || right) {
         gLabUi.stripHue = (gLabUi.stripHue + (right ? kLabHueStep : 360 - kLabHueStep)) % 360;
         labStripPick(gLabStripTest);
+      }
+      return;
+    case Dev::Joystick:
+      if (lower == 'd' && !gLabUi.page) {
+        gLabUi.stickLearn = 1;
+        gLabUi.stickPush = -1;
       }
       return;
     case Dev::Relay:
@@ -1571,6 +1590,7 @@ void serviceLabTests() {
     labDriveOff(Out::Tone);
   }
   serviceLabPage(now);
+  labStepStickLearn(now);
   if (!gLabUi.sweeping || now - gLabUi.sweepMs < kLabSweepStepMs) return;
   gLabUi.sweepMs = now;
   if (gLabUi.servoAngle >= pbhub::kMaxAngle) gLabUi.sweepUp = false;
@@ -2082,7 +2102,10 @@ bool routeLabEscape() {
   LabUi& ui = gLabUi;
   switch (ui.view) {
     case LabView::Devices: case LabView::Rules: case LabView::Seqs: return false;
-    case LabView::Device: labCloseDevice(); break;
+    case LabView::Device:
+      if (ui.stickLearn) ui.stickLearn = 0;  // Stops learning, and the directions stay as they were.
+      else labCloseDevice();
+      break;
     case LabView::PickPort: ui.view = LabView::Device; break;
     case LabView::Wiring:
       // Nothing is driven on this screen. The parts may have moved, so the hub starts over.
@@ -2118,6 +2141,7 @@ bool routeLabEscape() {
 // Each menu entry opens on its own first screen.
 void labEnterView(UiMode mode) {
   gLabUi.view = mode == UiMode::LabSequences ? LabView::Seqs : mode == UiMode::LabRules ? LabView::Rules : LabView::Devices;
+  gLabUi.stickLearn = 0;
 }
 bool labSeqOnScreen() { return gLabUi.view == LabView::SeqPlay; }
 }  // namespace

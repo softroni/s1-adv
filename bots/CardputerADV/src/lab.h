@@ -1099,12 +1099,53 @@ class RemoteSwitch {
 // The file holds only these numbers, and every one is checked on the way back in, so a damaged
 // card can't point a rule at something that doesn't exist.
 constexpr uint8_t kFileMagic[3] = {'S', 'L', 'B'};
-constexpr uint8_t kFileVersion = 3;     // Version 1 had no Direct and 2 no phrases, and both still load.
+constexpr uint8_t kFileVersion = 4;     // 1 had no Direct, 2 no phrases and 3 no stick turn, and all still load.
 constexpr size_t kOldRuleBytes = kNameChars + 1 + 6 + kMaxConds * 4 + kMaxActions * 5;
 constexpr size_t kRuleBytes = kOldRuleBytes + kSayChars + 1;
 constexpr size_t kOldHeaderBytes = 4 + 1 + pbhub::kPorts + 3;
-constexpr size_t kHeaderBytes = kOldHeaderBytes + 2;
+constexpr size_t kDirectHeaderBytes = kOldHeaderBytes + 2;  // Versions 2 and 3.
+constexpr size_t kHeaderBytes = kDirectHeaderBytes + 1;
 constexpr size_t kFileBytes = kHeaderBytes + kMaxRules * kRuleBytes + 2;
+
+// Which way the joystick reads depends on how its unit is held, so the Lab learns it: push the stick
+// right, then up. It keeps whether the raw axes are swapped, and whether each one runs backwards.
+struct StickTurn {
+  bool swap = false, flipX = false, flipY = false;
+  uint8_t bits() const { return static_cast<uint8_t>((swap ? 1 : 0) | (flipX ? 2 : 0) | (flipY ? 4 : 0)); }
+  static bool from(uint8_t bits, StickTurn& out) {
+    if (bits > 7) return false;
+    out.swap = (bits & 1) != 0;
+    out.flipX = (bits & 2) != 0;
+    out.flipY = (bits & 4) != 0;
+    return true;
+  }
+  void apply(int& x, int& y) const {
+    if (swap) {
+      const int was = x;
+      x = y;
+      y = was;
+    }
+    if (flipX) x = -x;
+    if (flipY) y = -y;
+  }
+};
+constexpr int kStickLearnReach = 60;  // Of 127, so a push has to be on purpose.
+// The raw axis a push is along, 0 for X and 1 for Y, or -1 if it's too small or too diagonal to say.
+inline int stickPushAxis(int x, int y) {
+  const int alongX = x < 0 ? -x : x, alongY = y < 0 ? -y : y;
+  const int most = alongX > alongY ? alongX : alongY, least = alongX > alongY ? alongY : alongX;
+  if (most < kStickLearnReach || least * 2 > most) return -1;
+  return alongX > alongY ? 0 : 1;
+}
+// From the raw readings while it was pushed right and then up. They have to be on different axes.
+inline bool learnStick(int rightX, int rightY, int upX, int upY, StickTurn& out) {
+  const int right = stickPushAxis(rightX, rightY), up = stickPushAxis(upX, upY);
+  if (right < 0 || up < 0 || right == up) return false;
+  out.swap = right == 1;
+  out.flipX = (right == 0 ? rightX : rightY) < 0;
+  out.flipY = (up == 0 ? upX : upY) < 0;
+  return true;
+}
 
 struct Book {
   Rule rules[kMaxRules];
@@ -1114,6 +1155,7 @@ struct Book {
   bool lightFlipped = true;   // Most units read lower as it gets brighter.
   uint8_t showMode = 0;
   Direct direct;
+  StickTurn stick;
 };
 
 inline uint16_t checksum(const uint8_t* bytes, size_t length) {
@@ -1141,6 +1183,7 @@ inline size_t encode(const Book& book, uint8_t* out) {
   put(book.showMode);
   put(static_cast<uint8_t>(book.direct.white));
   put(static_cast<uint8_t>(book.direct.yellow));
+  put(book.stick.bits());
   for (uint8_t i = 0; i < book.count; ++i) {
     const Rule& rule = book.rules[i];
     for (uint8_t c = 0; c <= kNameChars; ++c) put(static_cast<uint8_t>(rule.name[c]));
@@ -1173,7 +1216,7 @@ inline bool decode(const uint8_t* bytes, size_t length, Book& book) {
   if (memcmp(bytes, kFileMagic, sizeof(kFileMagic)) != 0) return false;
   const uint8_t version = bytes[3];
   if (version < 1 || version > kFileVersion) return false;
-  const size_t headerBytes = version == 1 ? kOldHeaderBytes : kHeaderBytes;
+  const size_t headerBytes = version == 1 ? kOldHeaderBytes : version < 4 ? kDirectHeaderBytes : kHeaderBytes;
   const size_t ruleBytes = version >= 3 ? kRuleBytes : kOldRuleBytes;
   if (length < headerBytes + 2) return false;
   const uint16_t sum = static_cast<uint16_t>(bytes[length - 2] | (bytes[length - 1] << 8));
@@ -1211,6 +1254,7 @@ inline bool decode(const uint8_t* bytes, size_t length, Book& book) {
     in.direct.white = onWhite;
     in.direct.yellow = onYellow;
   }
+  if (version >= 4 && !StickTurn::from(get(), in.stick)) return false;
   for (uint8_t i = 0; i < count; ++i) {
     Rule& rule = in.rules[i];
     for (uint8_t c = 0; c <= kNameChars; ++c) rule.name[c] = static_cast<char>(get());
