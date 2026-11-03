@@ -52,12 +52,15 @@ struct Canvas {
 }gCanvas;
 namespace s1_mesh {
 constexpr int kInitPending=-32768;
-struct RadioSession {State state;std::atomic<int>initResult{0};uint8_t region=1;};
+enum class Use:uint8_t{Chat,Scan};
+struct RadioSession {State state;std::atomic<int>initResult{0};uint8_t region=1;Use use=Use::Chat;};
 // UA_868 is as long as a region's name gets.
 inline const char* regionName(uint8_t c){return c==1?"US":"UA_868";}
 inline float regionFrequency(uint8_t c){return c==1?906.875f:868.375f;}
 }
 struct {uint8_t meshRegion=1;}gDeviceSettings;
+int scanRenders=0;
+void renderRadioScanUi(s1_mesh::RadioSession&){++scanRenders;}
 
 std::unique_ptr<s1_mesh::RadioSession>gMeshSession;
 bool gMeshBusOwned=false,gSdReady=true;String gMeshNotice;
@@ -69,6 +72,12 @@ int main() {
  gMeshSession=std::make_unique<s1_mesh::RadioSession>();gMeshSession->region=15;gDeviceSettings.meshRegion=1;gMeshBusOwned=true;gSdReady=false;gCanvas.printed.clear();
  for(int init:{0,s1_mesh::kInitPending,-19}) {gMeshSession->initResult=init;renderMeshUi();assert(!gCanvas.clipped);}
  assert(gCanvas.printed.count("UA_868 / LongFast")&&!gCanvas.printed.count("US / LongFast"));
+ // A scan session: its start screen while the radio starts, then the scanner's own screen.
+ gMeshSession->use=s1_mesh::Use::Scan;gCanvas.printed.clear();
+ for(int init:{s1_mesh::kInitPending,-19}){gMeshSession->initResult=init;renderMeshUi();assert(!gCanvas.clipped&&!scanRenders);}
+ assert(gCanvas.printed.count("Radio Scan")&&gCanvas.printed.count("Listening only, nothing sent")&&!gCanvas.printed.count("Meshtastic leaf"));
+ gMeshSession->initResult=0;renderMeshUi();assert(scanRenders==1);
+ gMeshSession->use=s1_mesh::Use::Chat;gMeshSession->initResult=0;
  gMeshSession->initResult=0;auto& s=gMeshSession->state;
  for(uint32_t n=1;n<=16;++n){auto* p=s.hear(n,UINT32_MAX-n,int16_t(n%2?-32768:32767));memset(p->name,'W',40);p->name[40]=0;}
  for(unsigned type=0;type<3;++type) {
@@ -91,4 +100,4 @@ with tempfile.TemporaryDirectory(prefix='s1-mesh-ui-') as directory:
                     '-fsanitize=address,undefined','-fno-omit-frame-pointer',
                     '-I'+str(ROOT/'bots/CardputerADV/src'),str(p/'ui.cpp'),'-o',str(p/'ui')],check=True)
     subprocess.run([str(p/'ui')],check=True)
-print('PASS actual Mesh renderer: 240x135 bounds, both region names at their longest, the running radio region shown, startup/failure/empty, 16 nodes, every history/page, long ASCII/Cyrillic/emoji and clip-state restoration (ASan/UBSan)')
+print('PASS actual Mesh renderer: 240x135 bounds, both region names at their longest, the running radio region shown, a scan session handed to the scanner screen, startup/failure/empty, 16 nodes, every history/page, long ASCII/Cyrillic/emoji and clip-state restoration (ASan/UBSan)')

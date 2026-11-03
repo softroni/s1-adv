@@ -103,11 +103,12 @@ namespace s1_mesh {
 constexpr int kInitPending=-32768;
 inline const char* regionName(uint8_t){return "US";}
 inline float regionFrequency(uint8_t){return 906.875f;}
+enum class Use:uint8_t{Chat,Scan};
 struct RadioSession {
  FakeMesh mesh;State state;std::atomic<int>initResult{kInitPending};
- bool readyReported=false;uint32_t lowHeap=UINT32_MAX,lowLargest=UINT32_MAX;uint8_t region;
+ bool readyReported=false;uint32_t lowHeap=UINT32_MAX,lowLargest=UINT32_MAX;uint8_t region;Use use;
  // The radio starts on whatever region Settings holds at that moment.
- RadioSession(Spi&,uint8_t saved):region(saved){assert(saved==gDeviceSettings.meshRegion);++live;}
+ RadioSession(Spi&,uint8_t saved,Use purpose):region(saved),use(purpose){assert(saved==gDeviceSettings.meshRegion);++live;}
  ~RadioSession(){assert(!workerPending);--live;}
  int initialize(){assert(gMeshBusOwned&&!gSdReady);return initError;}
 };
@@ -123,6 +124,10 @@ void render(){++renders;}
 template<class...T>void logf(const char*,T...){ }
 void setStatus(const String&,int){}
 struct Keyboard_Class {struct KeysState {bool ctrl=false,enter=false,del=false;};};
+int scanServices=0,scanKeys=0;
+void serviceRadioScan(s1_mesh::RadioSession& s){assert(gMeshBusOwned&&!gSdReady&&s.use==s1_mesh::Use::Scan);++scanServices;}
+bool handleRadioScanKey(char,const Keyboard_Class::KeysState&){++scanKeys;return true;}
+void startMeshMode(s1_mesh::Use use=s1_mesh::Use::Chat);
 String translateInputChar(char c){return String(1,c);}
 void meshHandlePacket(const libmeshtastic_leaf::MeshPacket&){}
 void setUiMode(UiMode);
@@ -203,6 +208,20 @@ int main() {
  for(int i=0;i<50;++i){serviceMeshMode();}
  assert(sdBegins==0);stopMeshMode(false);restored();
  active();sdSucceeds=false;stopMeshMode(false);assert(!gMeshBusOwned&&!gSdReady&&gStorageReady&&!live);assert(activeVoiceFs()==&LittleFS);assert(activeNotesFs()==&LittleFS);
+ // Scan: S on the start screen. Same bus handoff and guards, no identity written, no mesh run,
+ // no sending, and Esc stops it the same way.
+ reset();Keyboard_Class::KeysState plain;assert(handleMeshKey('s',plain));
+ assert(gMeshBusOwned&&live==1&&workerPending&&gMeshSession->use==s1_mesh::Use::Scan&&nvWrites==0);
+ assert(handleMeshKey('x',plain)&&scanKeys==0);  // Keys wait until the radio is ready.
+ completeWorker();serviceMeshMode();assert(scanServices==1&&updates==0);
+ assert(handleMeshKey('x',plain)&&scanKeys==1&&!gMeshSession->state.input[0]);
+ plain.ctrl=true;assert(!handleMeshKey('n',plain)&&!gMeshSession->state.nodeView);plain.ctrl=false;
+ assert(gMeshSession->state.append("hi")&&!meshSendInput()&&gMeshSession->state.messageCount==0);
+ setUiMode(UiMode::Files);assert(gUiMode==UiMode::Mesh&&gMeshBusOwned);
+ assert(handleMeshEscape());restored();assert(gUiMode==UiMode::Home);
+ // A scan whose radio fails to start is stopped before the scanner ever runs.
+ reset();const int served=scanServices;initError=-19;handleMeshKey('S',plain);assert(gMeshSession->use==s1_mesh::Use::Scan);
+ completeWorker();serviceMeshMode();restored();assert(scanServices==served&&gMeshNotice.find("-19")!=std::string::npos);
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-mesh-mode-') as directory:
@@ -211,4 +230,4 @@ with tempfile.TemporaryDirectory(prefix='s1-mesh-mode-') as directory:
                     '-fsanitize=address,undefined','-fno-omit-frame-pointer',
                     '-I'+str(ROOT/'bots/CardputerADV/src'),str(cpp),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)
-print('PASS actual Mesh lifecycle: busy/heap/NVS/Cap/task failures, cancellation during init, SD exclusivity and rollback, app guards, bounded send and no worker use-after-free (ASan/UBSan)')
+print('PASS actual Mesh lifecycle: busy/heap/NVS/Cap/task failures, cancellation during init, SD exclusivity and rollback, app guards, bounded send, Scan sharing all of it without identity, mesh or sending, and no worker use-after-free (ASan/UBSan)')

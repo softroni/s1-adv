@@ -144,6 +144,14 @@ NFC Notes is under Tab, Tools, and `/nfc` opens it. It needs the M5Stack NFC uni
 - Esc cancels a save, then clears what you typed, then leaves the app.
 - Fn with `;` or `.` scrolls a long note.
 
+## Mesh and Radio Scan
+
+Mesh is under Tab, Tools, and needs the Cap LoRa-1262 with its antenna fitted. On its first
+screen, Enter starts the Meshtastic chat and S starts Radio Scan, which only listens: a sweep
+of signal strength across your region's band, and with Enter, a count of the Meshtastic
+packets heard on a preset's channel (Up and Down change the preset). Esc stops the radio.
+The region is Settings, Device, Mesh region. [Mesh](MESH.md) has the details.
+
 ## Air Music
 
 Air Music is under Tab, Arcade, and `/music` opens it. It needs the M5Stack I2C ultrasonic

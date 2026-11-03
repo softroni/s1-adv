@@ -109,7 +109,7 @@ bool stopMeshMode(bool goHome) {
   return true;
 }
 
-void startMeshMode() {
+void startMeshMode(s1_mesh::Use use) {
   if(gMeshBusOwned)return;
   if(meshStartIsBusy()) {gMeshNotice="Finish current task first";return;}
   if(!gCanvasSpriteActive) {gMeshNotice="Display buffer recovering";return;}
@@ -117,10 +117,11 @@ void startMeshMode() {
     gMeshNotice="Not enough free RAM";return;
   }
   // Busy/heap failures leave SD and radio untouched.
-  gMeshSession.reset(new(std::nothrow) s1_mesh::RadioSession(gSdSpi,gDeviceSettings.meshRegion));
+  gMeshSession.reset(new(std::nothrow) s1_mesh::RadioSession(gSdSpi,gDeviceSettings.meshRegion,use));
   if(!gMeshSession) {gMeshNotice="Not enough free RAM";return;}
   gMeshNotice="Preparing radio...";render();
-  if(!loadMeshIdentity(*gMeshSession)) {
+  // Scan never sends, so it needs no identity and writes nothing to NVS.
+  if(use==s1_mesh::Use::Chat && !loadMeshIdentity(*gMeshSession)) {
     gMeshSession.reset();gMeshNotice="Identity storage failed";return;
   }
   if(!meshEnableCap()) {
@@ -171,6 +172,7 @@ void serviceMeshMode() {
   auto& session=*gMeshSession;
   session.lowHeap=std::min(session.lowHeap,uint32_t(ESP.getFreeHeap()));
   session.lowLargest=std::min(session.lowLargest,uint32_t(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+  if(session.use==s1_mesh::Use::Scan) {serviceRadioScan(session);return;}
   if(!session.readyReported) {
     session.readyReported=true;
     logf("[MESH] ready %s LongFast %.3fMHz node=!%08lx heap=%u largest=%u",s1_mesh::regionName(session.region),
@@ -185,6 +187,7 @@ void serviceMeshMode() {
 bool meshSendInput() {
   if(!gMeshSession || gMeshSession->initResult.load(std::memory_order_acquire)!=0 || gMeshCancelStart)return false;
   auto& s=*gMeshSession;
+  if(s.use!=s1_mesh::Use::Chat)return false;  // Scan only listens.
   if(!s.state.input[0])return true;
   const uint32_t id=s.mesh.sendText(s.state.input);
   if(!id) {gMeshNotice="Radio busy / duty limit";gMeshNoticeUntilMs=millis()+2000;return false;}
@@ -198,7 +201,13 @@ bool handleMeshKey(char key,const Keyboard_Class::KeysState& keys) {
   if(keys.ctrl && (key=='r'||key=='R'||key=='v'||key=='V')) {setStatus("Esc exits Mesh for voice",1600);return true;}
   if(keys.ctrl && key!='n' && key!='N' && key!='o' && key!='O')return false;
   if(!gMeshSession) {
-    if(keys.enter || key=='\r' || key=='\n')startMeshMode();
+    if(keys.enter || key=='\r' || key=='\n')startMeshMode(s1_mesh::Use::Chat);
+    else if(key=='s' || key=='S')startMeshMode(s1_mesh::Use::Scan);
+    return true;
+  }
+  if(gMeshSession->use==s1_mesh::Use::Scan) {
+    if(keys.ctrl)return false;
+    if(gMeshSession->initResult.load(std::memory_order_acquire)==0)handleRadioScanKey(key,keys);
     return true;
   }
   auto& state=gMeshSession->state;
@@ -225,7 +234,8 @@ bool handleMeshKey(char key,const Keyboard_Class::KeysState& keys) {
 bool handleMeshHostCommand(const String& line) {
   if(!line.startsWith("mesh."))return false;
   if(line=="mesh.open")setUiMode(UiMode::Mesh);
-  else if(line=="mesh.start") {setUiMode(UiMode::Mesh);if(gUiMode==UiMode::Mesh)startMeshMode();}
+  else if(line=="mesh.start") {setUiMode(UiMode::Mesh);if(gUiMode==UiMode::Mesh)startMeshMode(s1_mesh::Use::Chat);}
+  else if(line=="mesh.scan") {setUiMode(UiMode::Mesh);if(gUiMode==UiMode::Mesh)startMeshMode(s1_mesh::Use::Scan);}
   else if(line=="mesh.stop") {if(stopMeshMode(true))setUiMode(UiMode::Home);}
   else if(line=="mesh.nodes") {if(gMeshSession)gMeshSession->state.nodeView=true;}
   else if(line=="mesh.status") {
@@ -234,6 +244,7 @@ bool handleMeshHostCommand(const String& line) {
       gMeshSession?gMeshSession->initResult.load():s1_mesh::kInitPending,gSdReady,unsigned(ESP.getFreeHeap()),
       unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)),
       unsigned(gMeshSession?gMeshSession->state.nodeCount:0),unsigned(gMeshSession?gMeshSession->state.messageCount:0));
+    if(gMeshSession && gMeshSession->use==s1_mesh::Use::Scan)logRadioScanStatus(*gMeshSession);
   }
   return true;
 }
@@ -261,15 +272,20 @@ void renderMeshUi() {
   d.drawFastHLine(6,23,228,rgb565_local(48,54,61));
   d.setTextColor(gMeshBusOwned?rgb565_local(255,136,64):muted,bg);d.setCursor(8,29);
   d.print(meshClip(gMeshNotice.isEmpty()?(gSdReady?"Radio off / SD ready":"Radio off / SD unavailable"):gMeshNotice,224));
+  const bool scanning=gMeshSession && gMeshSession->use==s1_mesh::Use::Scan;
+  if(scanning && gMeshSession->initResult.load(std::memory_order_acquire)==0) {renderRadioScanUi(*gMeshSession);return;}
   if(!gMeshSession || gMeshSession->initResult.load(std::memory_order_acquire)!=0) {
-    d.setFont(&fonts::Font2);d.setTextColor(TFT_WHITE,bg);d.setCursor(36,58);d.print("Meshtastic leaf");
-    char channel[40];snprintf(channel,sizeof(channel),"Public channel, %.3f MHz",double(s1_mesh::regionFrequency(region)));
+    d.setFont(&fonts::Font2);d.setTextColor(TFT_WHITE,bg);
+    const char* title=scanning?"Radio Scan":"Meshtastic leaf";d.setCursor(120-d.textWidth(title)/2,58);d.print(title);
+    char channel[40];
+    if(scanning)snprintf(channel,sizeof(channel),"Listening only, nothing sent");
+    else snprintf(channel,sizeof(channel),"Public channel, %.3f MHz",double(s1_mesh::regionFrequency(region)));
     d.setFont(&fonts::Font0);d.setTextColor(muted,bg);d.setCursor(120-d.textWidth(channel)/2,81);d.print(channel);
     if(!gMeshBusOwned) {
       const String where="Region: Settings > Device";
       d.setCursor(120-d.textWidth(where)/2,95);d.print(where);
     }
-    d.setTextColor(cyan,bg);d.setCursor(8,127);d.print(gMeshBusOwned?"Starting...  Esc cancel":"Enter start   Esc back");return;
+    d.setTextColor(cyan,bg);d.setCursor(8,127);d.print(gMeshBusOwned?"Starting...  Esc cancel":"Enter chat   S scan   Esc back");return;
   }
   const auto& state=gMeshSession->state;
   if(state.nodeView) {

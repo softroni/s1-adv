@@ -72,22 +72,68 @@ rules. Until 0.2.269 Mesh was fixed to TH.
 
 The client receives channel text and node announcements and sends channel text
 and its own NodeInfo. It does not relay packets, provide the Meshtastic phone
-API, use the Cap GNSS, scan other frequencies, or provide private-message UI.
+API, use the Cap GNSS, or provide private-message UI. Chat stays on its region's
+LongFast channel; [Radio Scan](#radio-scan) is the only part that tunes anywhere
+else, and it only listens.
 An empty list means no compatible announcements were received during this
 session; it does not establish that there are no nodes nearby. Received radio text
 is display data and is never executed as a device or agent instruction.
+
+## Radio Scan
+
+Press S on the Mesh screen instead of Enter. Radio Scan never transmits, needs
+no identity and writes nothing, and it takes the bus from the SD card exactly as
+Mesh does, so the same apps wait until you leave. Esc stops it.
+
+It opens on a **sweep** of your region's band (Settings → Device → Mesh region),
+one 250 kHz channel at a time. US is 902 to 928 MHz in 104 steps. A region
+narrower than 8 MHz, such as EU_868, is shown 8 MHz wide around its band.
+
+- Each bar is the latest reading on that channel, from -130 dBm at the bottom
+  to -60 dBm at the top. The white tick above it is the strongest reading
+  lately, falling 2 dB a second, so a short burst stays visible for a while.
+- The orange mark under the chart is the region's LongFast public channel.
+- **Floor** is the middle reading of the band, roughly the background noise.
+  **Top** is the strongest recent reading and its channel.
+
+A LongFast packet lasts about a second and most meshes are quiet between
+packets, so a sweep shows bursts rather than a steady signal. Other devices
+share the band too, so a burst isn't necessarily Meshtastic.
+
+Enter switches to **listening**. It tunes to one preset's default public channel
+with Meshtastic's sync word and counts the packets it hears, whoever sent them
+and whatever channel they're on. Up and Down change the preset: LongFast,
+MediumFast, MediumSlow, LongModerate, ShortFast and ShortSlow. If LongFast stays
+quiet, try the others, because some local meshes use another preset. Each
+preset starts counting afresh, and Enter goes back to the sweep.
+
+- The top lines count packets, the senders they came from (up to 32, then
+  `32+`) and **garbled** ones: too short to be Meshtastic, or damaged on the way.
+- Each row is a packet, newest first: the sender's node ID, its signal strength
+  and SNR, how many hops it made (`direct`, a number, or `hops ?` from older
+  firmware), and `pub` when it's on that preset's default public channel or
+  `other` for any other channel, which is often a private one.
+- Only the 16-byte header every Meshtastic packet sends unencrypted is read.
+  Nothing is decrypted or shown as text, and nothing heard is ever treated as
+  an instruction. Reading messages is what Mesh chat (Enter) is for.
+
+If the radio stops answering, the screen says so and Radio Scan stops using it.
 
 ## Checks
 
 `scripts/test_mesh_leaf_state.py`, `test_mesh_lifecycle.py`, `test_mesh_radio.py`
 and `test_mesh_ui.py` exercise the production state, lifecycle, radio setup and
-240×135 renderer. `test_mesh_region.py` checks the region list and channels
-against the library's own table, so it runs after a firmware build. Lifecycle tests use controlled hardware mocks and include
+240×135 renderer. `test_radio_scan.py` runs Radio Scan's sums, service loop, keys
+and screen against a pretend radio that has no way to transmit. `test_mesh_region.py`
+checks the region list, channels and scan presets against the library's own
+table, so it runs after a firmware build. Lifecycle tests use controlled hardware mocks and include
 worker cancellation, partial initialization, SD restoration and app guards.
 State and UI tests include malformed UTF-8, fixed bounds and sanitizers.
 These checks do not substitute for RF communication with a second node.
 
-USB commands: `mesh.open`, `mesh.start`, `mesh.status`, `mesh.nodes`, `mesh.stop`.
+USB commands: `mesh.open`, `mesh.start`, `mesh.scan`, `mesh.status`, `mesh.nodes`, `mesh.stop`.
+During Radio Scan, `mesh.status` adds a line with the sweep's floor and top and the
+listening counts.
 They do not send a test chat message. Serial logs report successful radio init,
 session heap minima and SD restoration. No private keys are logged.
 

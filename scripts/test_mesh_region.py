@@ -18,10 +18,12 @@ nanopb = leaf.parents[1] / 'Nanopb'
 
 CODE = r'''
 #include "mesh_region.h"
+#include "radio_scan.h"
 #include <cassert>
 #include <cmath>
 #include <cstring>
 #include <set>
+#include <string>
 using namespace libmeshtastic_leaf;
 using namespace s1_mesh;
 static bool near(float a, float b) { return std::fabs(a - b) < 0.0005f; }
@@ -65,6 +67,31 @@ int main() {
     assert(code == kRegions[start] && visited.size() == kRegionCount);
   }
   assert(stepRegion(REGION_US, -1) == kRegions[kRegionCount - 1] && stepRegion(0xff, 1) == kRegions[1]);
+  // Radio Scan: LongFast first, every preset's own channel inside each region's band, and each
+  // region's sweep covering its public channel.
+  assert(kScanPresets[0] == PRESET_LONG_FAST && std::strcmp(scanPresetName(0), "LongFast") == 0);
+  std::set<std::string> names;
+  for (size_t i = 0; i < kScanPresetCount; ++i) {
+    const ModemParams m = scanPresetModem(uint8_t(i));
+    assert(m.sf >= 7 && m.sf <= 12 && (m.bw == 125.0f || m.bw == 250.0f) && m.cr >= 5 && m.cr <= 8);
+    assert(names.insert(scanPresetName(uint8_t(i))).second);
+  }
+  assert(scanPreset(uint8_t(kScanPresetCount)) == PRESET_LONG_FAST);
+  for (RegionCode code : kRegions) {
+    float start = 0, end = 0;
+    regionBand(code, start, end);
+    assert(start == MeshRegion::getRegion(code)->freqStart && end == MeshRegion::getRegion(code)->freqEnd);
+    // The centre, not the whole width: the library's slot sum (the one Mesh chat uses too) puts
+    // PH_868's LongFast at 869.375 MHz, whose top edge is 0.1 MHz past that band's 869.4.
+    for (size_t i = 0; i < kScanPresetCount; ++i) {
+      const float f = scanPresetFrequency(code, uint8_t(i));
+      assert(f > start && f < end);
+    }
+    const s1_scan::Plan plan = s1_scan::planFor(start, end);
+    assert(plan.pointAt(regionFrequency(code)) < plan.points && plan.start >= 860.0f && plan.end() <= 930.0f);
+  }
+  const s1_scan::Plan us = s1_scan::planFor(902.0f, 928.0f);
+  assert(near(us.frequency(us.pointAt(906.875f)), 906.875f));  // The US sweep lands right on LongFast.
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-mesh-region-') as directory:
@@ -74,4 +101,4 @@ with tempfile.TemporaryDirectory(prefix='s1-mesh-region-') as directory:
                     '-I' + str(ROOT / 'bots/CardputerADV/src'), '-I' + str(leaf), '-I' + str(nanopb),
                     str(p / 'region.cpp'), '-o', str(p / 'region')], check=True)
     subprocess.run([str(p / 'region')], check=True)
-print('PASS Mesh regions against the real library: US by default at 906.875 MHz, every region inside the Cap band on LongFast and none missing, unknown values fall back to US, left/right wrap')
+print('PASS Mesh regions against the real library: US by default at 906.875 MHz, every region inside the Cap band on LongFast and none missing, unknown values fall back to US, left/right wrap, and Radio Scan presets on their own channels inside every band')
