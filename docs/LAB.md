@@ -121,7 +121,7 @@ The dot beside each device tells you what the Lab knows:
 <td><img src="assets/lab/gps.png" alt="GPS screen with satellites, speed, latitude and longitude" width="100%"><br><sub><b>LoRa Cap GPS.</b> Satellites, position and speed. M opens Mesh.</sub></td>
 </tr>
 <tr>
-<td><img src="assets/lab/led.png" alt="Cardputer LED screen, on and green" width="100%"><br><sub><b>Cardputer LED.</b> Built in. Left and right change the color, and Space turns it off or on.</sub></td>
+<td><img src="assets/lab/led.png" alt="Cardputer LED screen, on and green" width="100%"><br><sub><b>Cardputer LED.</b> Built in. Left and right change the color, and Space turns it off or on. The screen goes to full brightness while it's lit.</sub></td>
 <td><img src="assets/lab/speaker.png" alt="Speaker screen at 930 Hz" width="100%"><br><sub><b>Speaker.</b> Built in. Up and down change the pitch, and Enter beeps.</sub></td>
 <td><img src="assets/lab/lamp.png" alt="smartLamp screen saying it's found" width="100%"><br><sub><b>smartLamp.</b> It looks for one on your Wi-Fi. Enter opens the smartLamp app.</sub></td>
 </tr>
@@ -131,6 +131,8 @@ The dot beside each device tells you what the Lab knows:
 <td></td>
 </tr>
 </table>
+
+The Cardputer LED takes its power from the screen light, and it only gets steady power with the screen at full brightness. So while a test, a rule, a sequence or the chat has it lit, the screen goes to full brightness, and it goes back to your own setting once the LED is off. When the screen turns itself off, the LED goes dark with it, and it comes back on when the screen wakes.
 
 The label at the top right tells you how much the Lab really knows. **ANSWERING** means the part replied just now. **ON CH0** or **ON GROVE** says where it is. **SIGNAL SENT** means a command went out, but an output can't reply, so watch the part itself.
 

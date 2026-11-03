@@ -8,13 +8,14 @@ constexpr uint32_t kLabGpsBaud = 115200;
 constexpr int kLabGpsBytesPerPass = 256;
 constexpr uint8_t kLabWhitePin = 1, kLabYellowPin = 2;   // The Grove port's two signal wires.
 constexpr uint8_t kLabServoChannel = 3;  // IR takes LEDC channel 0 and the backlight takes 7.
-constexpr uint8_t kLabLedPin = 21;       // M5Unified leaves M5.Led unset on the Cardputer.
+constexpr uint8_t kLabLedPin = 21;       // M5.Led can't drive it on this Arduino core, so it's written directly.
 constexpr uint8_t kLabToneChannel = 6;
 constexpr uint32_t kLabToneSliceMs = 60;
 constexpr uint32_t kLabHubReplyUs = 150;   // The hub reads its ADC when it sees the stop.
 constexpr uint32_t kLabProbeMs = 150, kLabEnvMs = 1000, kLabEnvWaitMs = 20, kLabStickMs = 50;
 constexpr uint32_t kLabKnobMs = 40, kLabLightMs = 200, kLabMotionMs = 100, kLabTiltMs = 100;
 constexpr uint32_t kLabServoGapMs = 40, kLabStripGapMs = 50, kLabLedGapMs = 50;
+constexpr uint32_t kLabLedPowerUpMs = 10;  // A color sent the moment the LED's power comes on is lost.
 constexpr uint32_t kLabLampGapMs = 500, kLabAcGapMs = 3000;  // A remote command takes a while to act.
 constexpr uint32_t kLabRedrawMs = 100, kLabSampleMs = 250, kLabAwakeMs = 1000;
 constexpr uint32_t kLabWireCheckMs = 400, kLabRescanMs = 3000;
@@ -149,6 +150,7 @@ lab::StripFrame gLabStripSent;
 bool gLabStripKnown = false;
 lab::RelayGuard gLabRelays[2];
 int gLabLedSent = -1;
+uint32_t gLabLedPowerSeen = 0;  // The LED's power-on time when it was last written.
 bool gLabToneOn = false;
 lab::RemoteSwitch gLabLamp, gLabAcs[2];
 int gLabLampBrightSent = -1;
@@ -669,16 +671,36 @@ void labWriteRelays(uint32_t now) {
     }
   }
 }
+void labLedLetGoOfLight() {
+  gLedWantsLight = false;
+  applyDisplayBrightness();
+}
 void labWriteLed(uint32_t now) {
   if (now - gLabLedMs < kLabLedGapMs) return;
   const lab::Drive& drive = gLabDrive[static_cast<uint8_t>(lab::Out::Led)];
   const int wanted = drive.on ? drive.value : -1;
-  if (wanted == gLabLedSent) return;
-  gLabLedMs = now;
-  gLabLedSent = wanted;
-  uint8_t r = 0, g = 0, b = 0;
-  if (drive.on) lab::hueToRgb(drive.value, r, g, b);
-  neopixelWrite(kLabLedPin, r / kLabLedDivide, g / kLabLedDivide, b / kLabLedDivide);
+  // It's powered from the screen light, so the screen runs at full brightness while it's lit.
+  if (wanted >= 0 && !gLedWantsLight) {
+    gLedWantsLight = true;
+    applyDisplayBrightness();
+  }
+  // It goes dark and forgets its color whenever its power drops, so it's told again after.
+  if (gLedPowerSinceMs != gLabLedPowerSeen) {
+    gLabLedPowerSeen = gLedPowerSinceMs;
+    gLabLedSent = -1;
+  }
+  if (wanted != gLabLedSent) {
+    // Its power may have come on after this pass's now, so the time since is read fresh.
+    if (wanted >= 0 && (!gLedPowerSinceMs || millis() - gLedPowerSinceMs < kLabLedPowerUpMs)) return;
+    gLabLedMs = now;
+    gLabLedSent = wanted;
+    uint8_t r = 0, g = 0, b = 0;
+    if (drive.on) lab::hueToRgb(drive.value, r, g, b);
+    neopixelWrite(kLabLedPin, r / kLabLedDivide, g / kLabLedDivide, b / kLabLedDivide);
+    return;
+  }
+  // Once it's dark, the screen goes back to its own brightness.
+  if (wanted < 0 && gLedWantsLight) labLedLetGoOfLight();
 }
 void labWriteTone() {
   auto& speaker = M5Cardputer.Speaker;
@@ -766,6 +788,7 @@ void labReleaseOutputs() {
   labForgetOutputs();
   if (gLabLedSent >= 0) neopixelWrite(kLabLedPin, 0, 0, 0);
   gLabLedSent = -1;
+  if (gLedWantsLight) labLedLetGoOfLight();
   if (gLabToneOn) M5Cardputer.Speaker.stop(kLabToneChannel);
   gLabToneOn = false;
   // Only what a rule turned on goes back off. The lamp and the AC aren't only the Lab's.

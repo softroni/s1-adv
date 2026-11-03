@@ -189,10 +189,14 @@ void applyDisplayBrightness() {
   uint8_t pct = clampValue<uint8_t>(gDeviceSettings.displayBrightnessPct, 0, 100);
   if (gScreenOffActive) {
     pct = 0;
+  } else if (gLedWantsLight) {
+    pct = 100;  // Or the LED can't light.
   } else if (gScreensaverDimmed) {
     pct = min<uint8_t>(pct, clampValue<uint8_t>(gDeviceSettings.screensaverDimBrightnessPct, 0, 100));
   }
   M5Cardputer.Display.setBrightness(percentToByte(pct));
+  if (pct < 100) gLedPowerSinceMs = 0;
+  else if (!gLedPowerSinceMs) gLedPowerSinceMs = max<uint32_t>(millis(), 1);  // Never ahead of millis().
 }
 
 bool screensaverMayRun() {

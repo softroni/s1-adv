@@ -44,6 +44,7 @@ enum class UiMode{Home,Clock,Face,CMatrix,ChessMind,Ota,ChatFull};UiMode gUiMode
 uint32_t tick=1000,gLastRenderMs=0;uint32_t millis(){return tick;}uint32_t esp_random(){return 42;}
 struct{void invalidate(){}}gUiFramePolicy;
 bool gScreensaverActive=false,gScreensaverDimmed=false,gScreenOffActive=false,gRealtimeScreenVisible=false;
+bool gLedWantsLight=false;uint32_t gLedPowerSinceMs=0;
 bool gRecording=false,gSubmitting=false,gThinking=false,gPlaybackActive=false,gVoiceNoticeVisible=false,gVoiceReplySpeechBusy=false,gTransferUiActive=false,gOtaApplyInProgress=false,gPendingRestart=false;
 bool gLauncherVisible=false,gCMatrixInitialized=true;uint32_t gScreensaverStartedMs=0,gLastUserActivityMs=1000,gLastUserInputMs=1000;
 struct{
@@ -89,6 +90,14 @@ int main(){
  handleChessMindKey(' ',keys);assert(gChessMind.revealed);handleChessMindKey(' ',keys);assert(!gChessMind.revealed&&gChessMind.serial==serial+1);
  keys.enter=true;handleChessMindKey('\r',keys);assert(gChessMind.serial==serial+2);keys.enter=false;
  gScreensaverActive=true;serial=gChessMind.serial;handleChessMindKey(' ',keys);assert(gChessMind.serial==serial&&!gChessMind.revealed);
+ // The Cardputer's LED runs off the screen light, which is only steady at full brightness. So while
+ // it's lit the screen stays full even dimmed, and its power is gone when the screen is off.
+ reset();gLedWantsLight=true;applyDisplayBrightness();assert(M5Cardputer.Display.brightness==255&&gLedPowerSinceMs==tick);
+ tick+=5;gScreensaverDimmed=true;applyDisplayBrightness();assert(M5Cardputer.Display.brightness==255&&gLedPowerSinceMs==tick-5);
+ gScreenOffActive=true;applyDisplayBrightness();assert(M5Cardputer.Display.brightness==0&&!gLedPowerSinceMs);
+ gScreenOffActive=gScreensaverDimmed=false;applyDisplayBrightness();assert(M5Cardputer.Display.brightness==255&&gLedPowerSinceMs==tick);
+ gLedWantsLight=false;applyDisplayBrightness();assert(M5Cardputer.Display.brightness==percentToByte(70)&&!gLedPowerSinceMs);
+ gDeviceSettings.displayBrightnessPct=100;applyDisplayBrightness();assert(gLedPowerSinceMs==tick);gDeviceSettings.displayBrightnessPct=70;applyDisplayBrightness();
  // Render every kind, piece family, answer phase, saver/preview, clock mode,
  // missing time and AM/PM extremes. All primitives/text must fit 240x135.
  for(int i=0;i<500;++i)for(bool saver:{false,true})for(bool reveal:{false,true})for(bool twelve:{false,true}){

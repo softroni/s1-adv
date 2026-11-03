@@ -239,6 +239,15 @@ struct EnvSensors {
 // --- The rest of the board -----------------------------------------------------------------------
 struct { int r = 0, g = 0, b = 0; } gLed;
 void neopixelWrite(uint8_t pin, uint8_t r, uint8_t g, uint8_t b) { assert(pin == 21); gLed.r = r; gLed.g = g; gLed.b = b; }
+// The LED runs off the screen light, which is only steady at 100%. This is what part 009 does with it.
+bool gLedWantsLight = false, gFakeScreenOff = false;
+uint32_t gLedPowerSinceMs = 0;
+int gBacklightPct = 70;
+void applyDisplayBrightness() {
+  gBacklightPct = gFakeScreenOff ? 0 : gLedWantsLight ? 100 : 70;
+  if (gBacklightPct < 100) gLedPowerSinceMs = 0;
+  else if (!gLedPowerSinceMs) gLedPowerSinceMs = std::max<uint32_t>(millis(), 1);
+}
 struct ImuClass { float ax = 0, ay = 0.5f; bool getAccel(float* x, float* y, float* z) { *x = ax; *y = ay; *z = 1; return true; } };
 struct { ImuClass Imu; } M5;
 struct SpeakerClass { int stops = 0, tones = 0, queued = 0; float hz = 0;
@@ -468,7 +477,8 @@ void testDevices() {
   assert(gLabMotionCount == 2); show("motion"); assert(gCanvas.shows("Motion!")); gHubUnit.level[motion] = 0; run(200); esc();
   pickDevice(Dev::Hub); show("hub"); assert(gCanvas.shows("Mini Angle")); esc();
   pickDevice(Dev::Tilt); run(100); show("tilt"); esc();
-  pickDevice(Dev::Led); keys(" "); assert(gLabUi.ledOn && gLed.g > 0); show("led"); keys("/"); esc(); assert(gLed.r == 0 && gLed.g == 0 && gLed.b == 0);
+  assert(gBacklightPct == 70);
+  pickDevice(Dev::Led); keys(" "); assert(gLabUi.ledOn && gLed.g > 0 && gBacklightPct == 100); show("led"); keys("/"); esc(); assert(gLed.r == 0 && gLed.g == 0 && gLed.b == 0 && gBacklightPct == 70);
   pickDevice(Dev::Speaker); keys(";"); assert(M5Cardputer.Speaker.tones > 0 && M5Cardputer.Speaker.hz == 930 && gLabUi.page == 0); show("speaker");
   run(600); assert(!gLabDrive[uint8_t(Out::Tone)].on); esc();
 
@@ -1764,12 +1774,27 @@ void testPlayFromChat() {
   setUiMode(UiMode::Home); gLabSeqCount = 0; gLabBook = lab::Book{}; gDisk.files.clear(); freshBoot();
 }
 
+// The Cardputer LED runs off the screen light, which only holds steady at full brightness.
+void testLedPower() {
+  setUiMode(UiMode::LabDevices); run(100); gLed = {}; assert(gBacklightPct == 70 && !gLedWantsLight);
+  labDriveSet(Out::Led, 120); run(10); assert(gBacklightPct == 100 && gLed.g == 0);  // Its power settles first.
+  run(10); assert(gLed.g > 0);
+  // It goes dark when the screen does, and gets its color back when the screen wakes.
+  gFakeScreenOff = true; applyDisplayBrightness(); gLed = {}; run(300); assert(gLed.g == 0 && gLabLedSent == -1 && gLedWantsLight);
+  gFakeScreenOff = false; applyDisplayBrightness(); run(100); assert(gLed.g > 0 && gBacklightPct == 100);
+  // Turned off, it's sent dark before the screen dims, so it can't keep a stale color.
+  labDriveOff(Out::Led); run(10); assert(gLed.g == 0 && gBacklightPct == 100); run(60); assert(gBacklightPct == 70 && !gLedWantsLight);
+  // Leaving the Lab with it lit puts the screen back too.
+  labDriveSet(Out::Led, 240); run(100); assert(gLed.b > 0 && gBacklightPct == 100);
+  setUiMode(UiMode::Home); assert(gLed.b == 0 && gBacklightPct == 70 && !gLedWantsLight);
+}
+
 int main(int argc, char** argv) {
   if (argc > 1) gDump = std::fopen(argv[1], "w");
   for (bool& live : gLabHistoryLive) live = false;
-  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testGuidePictures(); testSequences(); testChat(); testOnce(); testPlayFromChat(); setUiMode(UiMode::LabRules); run(1500); testGuards();
+  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testGuidePictures(); testSequences(); testChat(); testOnce(); testPlayFromChat(); setUiMode(UiMode::LabRules); run(1500); testGuards(); testLedPower();
   if (gDump) std::fclose(gDump);
-  std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, sequences on their own and from a rule, what the chat can see and offer, one check from the chat, a sequence played from the chat, the lamp and AC guards, units leaving and returning, saving and damage, and every screen stays on the display");
+  std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, sequences on their own and from a rule, what the chat can see and offer, one check from the chat, a sequence played from the chat, the lamp and AC guards, units leaving and returning, saving and damage, the LED waiting for full screen light, and every screen stays on the display");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-lab-ui-') as directory:

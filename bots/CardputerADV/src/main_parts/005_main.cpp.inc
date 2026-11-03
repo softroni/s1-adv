@@ -262,6 +262,10 @@ bool gCanvasSpriteActive = false;
 bool gScreensaverActive = false;
 bool gScreensaverDimmed = false;
 bool gScreenOffActive = false;
+// The Cardputer's RGB LED takes its power from the screen light's pin, and that's only steady at full
+// brightness. Below it the light flickers too fast to see, and each flicker wipes the LED's color.
+bool gLedWantsLight = false;
+uint32_t gLedPowerSinceMs = 0;  // When the LED last got steady power, or 0 while it has none.
 uint32_t gLastUserActivityMs = 0;
 uint32_t gLastUserInputMs = 0;
 uint32_t gScreensaverStartedMs = 0;
