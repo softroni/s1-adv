@@ -233,6 +233,7 @@
                         millis()<gAssistantPulsePressUntilMs);
     drawHomeBatteryStatus(gBatterySnapshot.level, gBatteryPower.state(), nowMs);
   } else drawAssistantPulseButton(154, 105, 62, 21, label, c1, millis() < gAssistantPulsePressUntilMs);
+  drawHomeWifiStatus(homeWifiBars(), homeWifiTrying(), nowMs);
   if (realtime) {
     d.setFont(&fonts::Font2);
     d.setTextColor(rgb565_local(255, 189, 88), bg);

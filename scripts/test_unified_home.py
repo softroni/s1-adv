@@ -84,9 +84,11 @@ struct Canvas {
  void setCursor(int xx,int yy){x=xx;y=yy;}
  void print(const String&s){assert(x>=0&&y>=0&&x+textWidth(s)<=240&&y<135);if(s=="REC"){assert(font==&fonts::Font2&&x>=154&&x+textWidth(s)<=216&&y>=105&&y+fontHeight()<=126);}printed.push_back(s);}
 }gCanvas;
-int badges=0,batteries=0,meters=0;
+int badges=0,batteries=0,meters=0,wifiIcons=0;
 void drawHomeReadyStatus(bool,bool){++badges;}
 void drawHomeBatteryStatus(int32_t,battery_power::State,uint32_t){++batteries;}
+uint8_t homeWifiBars(){return 3;}bool homeWifiTrying(){return false;}
+void drawHomeWifiStatus(uint8_t,bool,uint32_t){++wifiIcons;}
 void drawAssistantPulseArc(int,int,int,int,float a,float b,uint16_t c){gCanvas.arcs.push_back(c);gCanvas.shapes.push_back({int(a*1000),int(b*1000)});}
 void renderLauncherOverlay(){}void renderDebugOverlay(){}void ensureDeviceTimezone(){}
 String fitCurrentFontToWidth(const String&s,int w){return s.substr(0,w/6);}
@@ -122,7 +124,7 @@ for signature in ['void drawHomeBolt(', 'void drawHomeChargeCard(', 'void drawHo
                   'bool assistantPulseWorking(', 'void renderAssistantPulseUi()', 'void renderOtaUi()']:
     code += function(signature) + '\n'
 code += r'''
-void reset(){gCanvas=Canvas{};badges=batteries=meters=0;}
+void reset(){gCanvas=Canvas{};badges=batteries=meters=wifiIcons=0;}
 bool printed(const char*s){return std::find(gCanvas.printed.begin(),gCanvas.printed.end(),s)!=gCanvas.printed.end();}
 std::vector<std::vector<int>> frame(uint32_t at,uint8_t voice){nowMs=at;gVoiceLevel8=voice;reset();renderAssistantPulseUi();nowMs=13000;return gCanvas.shapes;}
 // Same picture at another time and at another voice level.
@@ -153,7 +155,7 @@ void checkPower(){
  assert(!printed("Charging")&&!printed("On battery")&&!printed("Fully charged")&&!printed("Not charging"));
  gBatteryPower=Tracker{};gBatteryPower.update(1000,3900,true);assert(gBatteryPower.state()==State::Charging);
  // Charging says so where the bars were, and moves though nothing else does.
- show();assert(printed("Charging")&&gCanvas.clockRects==1&&gCanvas.chatRects==1&&badges==1&&batteries==1);
+ show();assert(printed("Charging")&&gCanvas.clockRects==1&&gCanvas.chatRects==1&&badges==1&&batteries==1&&wifiIcons==1);
  assert(!still());
  // A pulse only: the rest of the picture is the idle one, in the same place.
  const auto pulseAt=[](uint32_t at){frame(at,64);std::vector<int> tall;for(const auto&s:gCanvas.shapes)if(s.size()==4&&s[2]==3)tall.push_back(s[3]);return tall;};
@@ -164,7 +166,7 @@ void checkPower(){
  const auto rest=pulseAt(1800);for(int h:rest)assert(h==9);
  // Anything the assistant is doing, an update's words and the boot marker keep their place.
  gThinking=true;show();assert(!printed("Charging")&&batteries==1);gThinking=false;
- gRecording=true;show();assert(!printed("Charging")&&batteries==0);gRecording=false;
+ gRecording=true;show();assert(!printed("Charging")&&batteries==0&&wifiIcons==1);gRecording=false;
  gBootBackgroundActive=true;gBootBackgroundLabel="wifi";show();assert(!printed("Charging"));gBootBackgroundActive=false;
  gOtaManifest.notes="Bigger screens, menu letters";candidateAvailable=true;show();
  assert(printed("menu letters")&&!printed("Charging"));gOtaManifest.notes="";candidateAvailable=false;

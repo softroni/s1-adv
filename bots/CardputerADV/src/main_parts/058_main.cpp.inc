@@ -142,6 +142,22 @@ void drawHomeBatteryStatus(int32_t rawLevel, battery_power::State power, uint32_
   d.setFont(&fonts::Font2);
 }
 
+// Wi-Fi in the top right corner, above the clock: rings lit by signal strength while connected,
+// sweeping up in amber while it dials, and a red dot when it's neither. Outline arcs, like Pulse's
+// rings, in the battery's cyan. Unlit rings are a grey that the 8-bit canvas keeps visible.
+void drawHomeWifiStatus(uint8_t bars, bool trying, uint32_t nowMs) {
+  auto& d = gCanvas;
+  constexpr int16_t kX = 228, kY = 12;
+  const uint16_t dim = rgb565_local(36, 73, 85);
+  const uint16_t lit = trying ? rgb565_local(255, 182, 0) : rgb565_local(47, 227, 255);
+  // The dot and up to three rings: one bar is the dot alone, four is everything.
+  const int on = trying ? static_cast<int>((nowMs / 240U) % 5U) : bars;
+  for (int ring = 1; ring <= 3; ++ring) {
+    d.drawArc(kX, kY, ring * 3 + 1, ring * 3, 225, 315, ring < on ? lit : dim);
+  }
+  d.fillRect(kX - 1, kY - 2, 3, 3, !bars && !trying ? rgb565_local(255, 63, 85) : on >= 1 ? lit : dim);
+}
+
 // What the power is doing, in place of the idle bars. The meter is those same bars. While charging a
 // pulse sweeps along them and fills them behind it, then it rests on the true level before the next.
 void drawHomeChargeCard(int32_t rawLevel, battery_power::State power, uint32_t nowMs) {

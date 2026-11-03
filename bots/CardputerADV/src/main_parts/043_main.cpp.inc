@@ -1237,6 +1237,8 @@ void maintainConnectivity() {
       logf("[WIFI] disconnected");
     }
     uint32_t now = millis();
+    // Down a while: the other saved networks. While one is being dialed, leave that attempt be.
+    if (!gSubmitting && !gRecording && serviceWifiRoam(now)) return;
     if (now - gLastWifiReconnectMs >= kWifiReconnectIntervalMs && !gSubmitting && !gRecording && !gWifiSsid.isEmpty()) {
       gLastWifiReconnectMs = now;
       logf("[WIFI] background reconnect attempt");
@@ -1245,6 +1247,7 @@ void maintainConnectivity() {
     return;
   }
 
+  wifiRoamUp();
   if (!gWifiReady) {
     gWifiReady = true;
     setStatus("Wi-Fi restored", 1200);

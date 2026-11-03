@@ -319,6 +319,7 @@ bool wifiSettingsTakesAllKeys() { return gUiMode == UiMode::WifiSettings && gWif
 
 void beginWifiSettings() {
   watchWifiEvents();
+  stopWifiRoam();
   gWifi = wifi_settings::App{};
   gWifi.rescan(millis());
   wifi_store::List saved;
@@ -356,19 +357,23 @@ wifi_fallback::Dial gBootDial;
 String gBootFirstSsid, gBootFirstPassword;
 bool gBootDialSwitched = false;
 
-// Names only, read once before the first dial. Without a card there's nothing else to try.
+// The saved networks' names, most recently used first. Without a card there's nothing else to try.
+std::vector<std::string> savedWifiNames() {
+  std::vector<std::string> names;
+  if (!gSdReady) return names;
+  wifi_store::List saved;
+  wifi_store::load(gWifiDisk, gWifiCipher, saved);
+  for (const auto& network : saved) names.push_back(network.ssid);
+  wifi_store::wipe(saved);
+  return names;
+}
+
+// Names only, read once before the first dial.
 void planBootWifi() {
   gBootFirstSsid = gWifiSsid;
   gBootFirstPassword = gWifiPassword;
   gBootDialSwitched = false;
-  std::vector<std::string> names;
-  if (gSdReady) {
-    wifi_store::List saved;
-    wifi_store::load(gWifiDisk, gWifiCipher, saved);
-    for (const auto& network : saved) names.push_back(network.ssid);
-    wifi_store::wipe(saved);
-  }
-  gBootDial.begin(gWifiSsid.c_str(), names);
+  gBootDial.begin(gWifiSsid.c_str(), savedWifiNames());
   logf("[WIFI] start-up has %u other saved network(s)", static_cast<unsigned>(gBootDial.queued()));
 }
 
@@ -417,6 +422,93 @@ void bootWifiRestoreFirst() {
   logf("[WIFI] start-up tried every saved network");
   gWifiSsid = gBootFirstSsid;
   gWifiPassword = gBootFirstPassword;
+}
+
+// --- Running: the other saved networks, when the one in use is lost -------------------------
+// wifi_fallback::Roam decides when to start and when to move on. maintainConnectivity calls in
+// while the link is down. A network that joins becomes the one in use, as at start-up.
+wifi_fallback::Roam gWifiRoam;
+String gRoamFirstSsid, gRoamFirstPassword;
+
+// Dials the next saved network. False when none of those left is still on the card.
+bool roamDialNext() {
+  wifi_store::List saved;
+  if (gSdReady) wifi_store::load(gWifiDisk, gWifiCipher, saved);
+  const wifi_store::Saved* network = nullptr;
+  while (!network && gWifiRoam.another()) network = wifi_store::find(saved, gWifiRoam.next());
+  if (network) {
+    logf("[WIFI] roam trying saved ssid=%s, lost ssid=%s", wifiLoggedName(network->ssid.c_str()).c_str(),
+         wifiLoggedName(gRoamFirstSsid.c_str()).c_str());
+    gWifiSsid = network->ssid.c_str();
+    gWifiPassword = network->password.c_str();
+    setStatus(String("Trying ") + gWifiSsid, 1500);
+    // A new network's attempt mustn't inherit the last one's "not found".
+    WiFi.disconnect(false, false);
+    delay(80);
+    WiFi.begin(gWifiSsid.c_str(), gWifiPassword.c_str());
+  }
+  wifi_store::wipe(saved);
+  return network != nullptr;
+}
+
+// While the link is down. True while a saved network is being dialed, so the usual reconnect
+// leaves that attempt alone.
+bool serviceWifiRoam(uint32_t now) {
+  if (gWifiSsid.isEmpty()) return false;
+  const bool wasDialing = gWifiRoam.dialing();
+  const auto act = gWifiRoam.down(now, WiFi.status() == WL_NO_SSID_AVAIL, gWifiSsid.c_str(), savedWifiNames);
+  if (act == wifi_fallback::Roam::Act::Dial) {
+    if (!wasDialing) {
+      gRoamFirstSsid = gWifiSsid;
+      gRoamFirstPassword = gWifiPassword;
+    }
+    roamDialNext();
+  } else if (act == wifi_fallback::Roam::Act::BackToFirst) {
+    logf("[WIFI] roam tried every saved network, back to ssid=%s", wifiLoggedName(gRoamFirstSsid.c_str()).c_str());
+    gWifiSsid = gRoamFirstSsid;
+    gWifiPassword = gRoamFirstPassword;
+    WiFi.disconnect(false, false);
+    delay(80);
+    WiFi.begin(gWifiSsid.c_str(), gWifiPassword.c_str());
+    gLastWifiReconnectMs = now;
+  }
+  return gWifiRoam.dialing();
+}
+
+// The link is up. If that's on a network roaming dialed, it becomes the one in use.
+void wifiRoamUp() {
+  if (gWifiRoam.dialing() && gWifiSsid != gRoamFirstSsid) {
+    logf("[WIFI] roam joined saved ssid=%s, lost ssid=%s", wifiLoggedName(gWifiSsid.c_str()).c_str(),
+         wifiLoggedName(gRoamFirstSsid.c_str()).c_str());
+    pushSystem(String("Joined ") + gWifiSsid + ": " + gRoamFirstSsid + " was lost");
+    saveWifiCreds(gWifiSsid, gWifiPassword);
+  }
+  gWifiRoam.up();
+}
+
+// The Wi-Fi screen takes over the radio. It starts from the network that was in use.
+void stopWifiRoam() {
+  if (gWifiRoam.dialing()) {
+    gWifiSsid = gRoamFirstSsid;
+    gWifiPassword = gRoamFirstPassword;
+  }
+  gWifiRoam = wifi_fallback::Roam{};
+}
+
+// --- Pulse's Wi-Fi icon --------------------------------------------------------------------
+// Signal bars, 1 to 4, while connected, else 0.
+uint8_t homeWifiBars() {
+  if (WiFi.status() != WL_CONNECTED || WiFi.localIP() == IPAddress(0, 0, 0, 0)) return 0;
+  return wifi_settings::signalBars(WiFi.RSSI());
+}
+
+// Not connected, but dialing: at start-up, reconnecting, or roaming. Not with the radio off, or
+// while the setup portal waits for someone. Start-up counts from its first step, before the radio
+// is on, so the icon doesn't flash a red dot first.
+bool homeWifiTrying() {
+  if (homeWifiBars() || gSetupPortalActive) return false;
+  if (gBootBackgroundActive && gBootBackgroundStep <= 7) return true;
+  return WiFi.getMode() != WIFI_OFF && !gWifiSsid.isEmpty();
 }
 
 void stopWifiSettings() {

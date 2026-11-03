@@ -67,6 +67,15 @@ in range is passed over after about 6 seconds, and one that's there but refuses 
 one tried always gets the full 20, in case its router is still starting up. This checks that the
 Wi-Fi joins, not that it has internet.
 
+The same happens while you're using the device. When the network in use is lost, the device keeps
+reconnecting to it for 20 seconds, or 8 if the radio says it's gone. Then it tries the other saved
+networks the same way and joins the first that works, and the chat says so. If none does, it goes
+back to the lost one and keeps reconnecting, and tries the others again a minute later. It doesn't
+switch during a recording, or while Settings > Wi-Fi is open.
+
+Pulse shows Wi-Fi in its top right corner. Cyan rings show the signal strength, an amber sweep
+means it's connecting, and a red dot means Wi-Fi is off or the device is waiting in setup.
+
 The setup screen appears only when none of them connects. Press Enter on it to do all of this on
 the device. It restarts once it has joined.
 

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Start-up's way through the saved Wi-Fi networks, on the host.
+"""The way through the saved Wi-Fi networks, at start-up and when one is lost, on the host.
 
 The order and timing rules in wifi_fallback.h are tested directly. Then the firmware's real
-deferred boot, its blocking connect for the install-at-boot updater, and the glue in 079 run
-against a fake radio, card and clock: which networks are dialed, in what order, how long each
-gets, which one is kept, and when the setup portal opens. It doesn't show a real radio's timing.
+deferred boot, its blocking connect for the install-at-boot updater, the running connectivity
+check, and the glue in 079 run against a fake radio, card and clock: which networks are dialed,
+in what order, how long each gets, which one is kept, when the setup portal opens, and what
+Pulse's Wi-Fi icon is told. It doesn't show a real radio's timing.
 """
 from pathlib import Path
 import os
@@ -31,17 +32,20 @@ def function(source, signature):
     return source[start:end] + '\n'
 
 
-boot, wifi, mida = part(40), part(79), part(6)
+boot, wifi, mida, loop = part(40), part(79), part(6), part(43)
 glue = wifi[wifi.index('// --- Start-up: the other saved networks'):wifi.index('void stopWifiSettings() {')]
+assert 'bool serviceWifiRoam(' in glue and 'bool homeWifiTrying(' in glue
 firmware = ''.join(function(mida, s) for s in ['bool temporaryMidaCaptiveEnabled(', 'bool usingTemporaryMidaWifi(',
                                                'bool activateTemporaryMidaWifi('])
 firmware += function(wifi, 'String wifiLoggedName(') + glue
 firmware += ''.join(function(boot, s) for s in ['void beginWifiStationConnect(', 'bool waitForWifiConnection(',
                                                 'bool waitForBootWifi(', 'bool ensureWifi(', 'void beginDeferredWifi(',
                                                 'void serviceDeferredBoot('])
+firmware += function(loop, 'void maintainConnectivity(')
 
 code = r'''
 #include "wifi_fallback.h"
+#include "wifi_settings.h"
 #include "wifi_store.h"
 #include <cassert>
 #include <cstdarg>
@@ -81,17 +85,28 @@ void setStatus(const String&, uint32_t) {}
 void handleHostSerialInput() {}
 
 enum { WL_IDLE_STATUS = 0, WL_NO_SSID_AVAIL = 1, WL_CONNECTED = 3, WL_CONNECT_FAILED = 4, WL_DISCONNECTED = 6 };
-enum { WIFI_STA = 1, WIFI_POWER_19_5dBm = 78, WIFI_PS_NONE = 0 };
+enum { WIFI_OFF = 0, WIFI_STA = 1, WIFI_POWER_19_5dBm = 78, WIFI_PS_NONE = 0 };
 void esp_wifi_set_ps(int) {}
-struct Ip { String toString() const { return "10.0.0.2"; } };
+struct IPAddress {
+  int a = 0, b = 0, c = 0, d = 0;
+  IPAddress(int w, int x, int y, int z) : a(w), b(x), c(y), d(z) {}
+  bool operator==(const IPAddress& o) const { return a == o.a && b == o.b && c == o.c && d == o.d; }
+  bool operator!=(const IPAddress& o) const { return !(*this == o); }
+  String toString() const { return std::to_string(a) + "." + std::to_string(d); }
+};
 constexpr uint32_t kSweepMs = 2500;   // How long the fake radio takes to find, or miss, a network.
 struct Radio {
   std::map<std::string, std::string> air;   // In range, with their passwords.
   std::string ssid, password;
   bool dialing = false;
   uint32_t dialedAt = 0;
+  int radioMode = WIFI_STA, rssi = -60, reconnects = 0;
   std::vector<std::string> dialed;
-  void mode(int) {}
+  void mode(int m) { radioMode = m; }
+  int getMode() const { return radioMode; }
+  int RSSI() const { return rssi; }
+  // The same network again: the driver's own retry.
+  bool reconnect() { if (ssid.empty()) return false; dialing = true; dialedAt = gNow; ++reconnects; return true; }
   void setSleep(bool) {}
   void setAutoReconnect(bool) {}
   void setTxPower(int) {}
@@ -105,7 +120,7 @@ struct Radio {
     return it->second == password ? WL_CONNECTED : WL_DISCONNECTED;
   }
   String SSID() const { return status() == WL_CONNECTED ? String(ssid) : String(""); }
-  Ip localIP() const { return {}; }
+  IPAddress localIP() const { return status() == WL_CONNECTED ? IPAddress(10, 0, 0, 2) : IPAddress(0, 0, 0, 0); }
 } WiFi;
 
 // --- The card, and what the device remembers -------------------------------------------------
@@ -137,6 +152,15 @@ struct { bool checkUpdatesOnBoot = false; bool autoUpdateFirmware = false; } gDe
 std::string gPortal;
 // Like the real one, a second start only reopens what the first started.
 void startSetupPortal(const char* reason) { if (gPortal.empty()) gPortal = reason; }
+// The running check's surroundings.
+constexpr uint32_t kWifiReconnectIntervalMs = 5000;
+constexpr bool kUseHubWebSocket = false;
+uint32_t gLastWifiReconnectMs = 0;
+bool gSetupPortalActive = false, gWsReady = false, gResumeWsAfterVoice = false, gSubmitting = false, gRecording = false;
+String gHubHost;
+struct { bool takeReconnect(uint32_t, bool, bool) { return false; } } gNetworkRecovery;
+bool networkWorkIdle() { return true; }
+void serviceSetupPortal() {}
 bool wifiSettingsOwnsRadio() { return false; }
 bool ensureCaptivePortalAccess(bool, const char*) { return true; }
 void syncClockFromNtp(bool) {}
@@ -154,7 +178,22 @@ void reset(const std::string& ssid, const std::string& password, wifi_store::Lis
   gWifiSsid = ssid; gWifiPassword = password; gCard = card;
   WiFi = Radio{}; WiFi.air = air;
   gBootBackgroundActive = true; gBootBackgroundStep = 6; gBootWifiStarted = false; gWifiReady = false;
+  gSetupPortalActive = false; gSubmitting = false; gRecording = false; gLastWifiReconnectMs = 0;
+  gWifiRoam = wifi_fallback::Roam{};
 }
+// Online on `ssid`, start-up finished, as when someone's using the device.
+void online(const std::string& ssid, const std::string& password, wifi_store::List card, std::map<std::string, std::string> air) {
+  reset(ssid, password, card, air);
+  gBootBackgroundActive = false; gBootBackgroundStep = 10;
+  WiFi.begin(ssid.c_str(), password.c_str());
+  gNow = 3000;
+  maintainConnectivity();
+  assert(gWifiReady && WiFi.status() == WL_CONNECTED);
+  WiFi.dialed.clear(); gChat.clear(); gLog.clear();
+}
+// Runs the running check every 100 ms until `until`.
+void run(uint32_t until) { while (gNow < until) { maintainConnectivity(); gNow += 100; } }
+bool said(const std::string& text) { for (const auto& line : gChat) if (line == text) return true; return false; }
 // Runs start-up's background steps until it's online or has opened the portal.
 void boot() {
   while (gBootBackgroundStep == 6 || gBootBackgroundStep == 7) { serviceDeferredBoot(); gNow += 100; assert(gNow < 600000); }
@@ -250,6 +289,94 @@ int main() {
   reset("", "", {{"Home", "homepass"}}, {{"Home", "homepass"}});
   assert(ensureWifi() && gWifiSsid == "Home" && (WiFi.dialed == Dialed{"Home"}));
   std::cout << "PASS install-at-boot connect: the same order, then the portal\n";
+
+  // --- While running ----------------------------------------------------------------------
+  // The home network goes: after the radio says so for 8 seconds, the next saved one joins.
+  online("Home", "homepass", {{"Home", "homepass"}, {"Phone", "phonepass"}}, {{"Home", "homepass"}, {"Phone", "phonepass"}});
+  WiFi.air.erase("Home");
+  const uint32_t lost = gNow;
+  run(lost + 20000);
+  assert(said("Wi-Fi disconnected.") && said("Joined Phone: Home was lost"));
+  assert(gWifiSsid == "Phone" && gWifiReady && (WiFi.dialed == Dialed{"Phone"}) && (gSavedAsCurrent == std::vector<std::string>{"Phone"}));
+  assert(logged("roam trying saved ssid=Phone, lost ssid=Home") && logged("roam joined saved ssid=Phone"));
+  std::cout << "PASS running: the network in use is lost, and the next saved one joins and is kept\n";
+
+  // A blip: back within the wait, so nothing else is dialed.
+  online("Home", "homepass", {{"Home", "homepass"}, {"Phone", "phonepass"}}, {{"Home", "homepass"}, {"Phone", "phonepass"}});
+  WiFi.air.erase("Home");
+  run(gNow + 5000);
+  WiFi.air["Home"] = "homepass";
+  run(gNow + 30000);
+  assert(gWifiSsid == "Home" && gWifiReady && WiFi.dialed.empty() && gSavedAsCurrent.empty() && WiFi.reconnects > 0);
+
+  // There but dropping us, not "not found": it gets the longer wait before the others are tried.
+  online("Home", "homepass", {{"Home", "homepass"}, {"Phone", "phonepass"}}, {{"Home", "homepass"}, {"Phone", "phonepass"}});
+  WiFi.air["Home"] = "changed";
+  const uint32_t refused = gNow;
+  run(refused + 19000);
+  assert(WiFi.dialed.empty());
+  run(refused + 30000);
+  assert(gWifiSsid == "Phone" && (WiFi.dialed == Dialed{"Phone"}));
+
+  // Nothing anywhere: one round, back to the lost network, a rest, then another round.
+  online("Home", "homepass", {{"Home", "homepass"}, {"Phone", "phonepass"}, {"Cafe", "cafepass"}},
+         {{"Home", "homepass"}});
+  WiFi.air.clear();
+  const uint32_t gone = gNow;
+  // About 8 s, plus a little while a reconnect of its own is still sweeping, then 6 and 20.
+  run(gone + 40000);
+  assert((WiFi.dialed == Dialed{"Phone", "Cafe", "Home"}) && gWifiSsid == "Home" && gSavedAsCurrent.empty());
+  assert(logged("roam tried every saved network, back to ssid=Home"));
+  const int resting = WiFi.reconnects;
+  run(gNow + 50000);
+  assert((WiFi.dialed == Dialed{"Phone", "Cafe", "Home"}) && WiFi.reconnects > resting);
+  run(gNow + 15000);
+  assert(WiFi.dialed.size() >= 4 && WiFi.dialed[3] == "Phone");
+  // The lost network comes back during a round: it's dialed again at the round's end and joins.
+  WiFi.air["Home"] = "homepass";
+  run(gNow + 30000);
+  assert(gWifiSsid == "Home" && gWifiReady && gSavedAsCurrent.empty());
+  std::cout << "PASS running: nothing in range, so rounds with a rest between, then the lost one returns\n";
+
+  // Nothing switches while a recording is under way.
+  online("Home", "homepass", {{"Home", "homepass"}, {"Phone", "phonepass"}}, {{"Home", "homepass"}, {"Phone", "phonepass"}});
+  WiFi.air.erase("Home");
+  gRecording = true;
+  run(gNow + 30000);
+  assert(WiFi.dialed.empty() && gWifiSsid == "Home");
+  gRecording = false;
+  run(gNow + 12000);
+  assert(gWifiSsid == "Phone");
+
+  // With nothing else saved, it keeps reconnecting to the one it has.
+  online("Home", "homepass", {{"Home", "homepass"}}, {{"Home", "homepass"}, {"Phone", "phonepass"}});
+  WiFi.air.erase("Home");
+  run(gNow + 90000);
+  assert(WiFi.dialed.empty() && gWifiSsid == "Home" && WiFi.reconnects > 10);
+
+  // The Wi-Fi screen takes over mid-round, starting from the network that was in use.
+  online("Home", "homepass", {{"Home", "homepass"}, {"Phone", "phonepass"}, {"Cafe", "cafepass"}}, {{"Home", "homepass"}});
+  WiFi.air.clear();
+  run(gNow + 12000);
+  assert(gWifiSsid == "Phone" && gWifiRoam.dialing());
+  stopWifiRoam();
+  assert(gWifiSsid == "Home" && gWifiPassword == "homepass" && !gWifiRoam.dialing());
+  std::cout << "PASS running: recordings, a single saved network and the Wi-Fi screen are left alone\n";
+
+  // --- What Pulse's icon is told ------------------------------------------------------------
+  online("Home", "homepass", {{"Home", "homepass"}}, {{"Home", "homepass"}});
+  for (auto sample : {std::pair<int, int>{-40, 4}, {-60, 3}, {-70, 2}, {-90, 1}}) {
+    WiFi.rssi = sample.first;
+    assert(homeWifiBars() == sample.second && !homeWifiTrying());
+  }
+  WiFi.air.clear();
+  assert(homeWifiBars() == 0 && homeWifiTrying());
+  gSetupPortalActive = true; assert(!homeWifiTrying()); gSetupPortalActive = false;
+  WiFi.mode(WIFI_OFF); assert(!homeWifiTrying());
+  gBootBackgroundActive = true; gBootBackgroundStep = 1; assert(homeWifiTrying());
+  gBootBackgroundStep = 10; gBootBackgroundActive = false;
+  WiFi.mode(WIFI_STA); gWifiSsid = ""; assert(!homeWifiTrying());
+  std::cout << "PASS Pulse icon: signal bars when connected, trying while dialing, neither when off or in setup\n";
 }
 '''
 

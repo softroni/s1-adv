@@ -23,7 +23,7 @@ Put S1-ADV on it and you get a menu of more than 40 apps: an AI assistant that r
 
 <table>
 <tr>
-<td width="33%"><img src="docs/assets/screens/pulse.png" alt="The Pulse screen: a spinning orb, a large clock and a CODING badge" width="100%"><br><sub><b>Pulse.</b> The clock, plus what Claude is doing right now.</sub></td>
+<td width="33%"><img src="docs/assets/screens/pulse.png" alt="The Pulse screen: a spinning orb, a large clock, a CODING badge and Wi-Fi at full signal" width="100%"><br><sub><b>Pulse.</b> The clock, plus what Claude is doing right now.</sub></td>
 <td width="33%"><img src="docs/assets/screens/chat.png" alt="AI Chat showing a short conversation and a yellow Coding bar" width="100%"><br><sub><b>AI Chat.</b> Type or talk. Every kind of work has its own color and sound.</sub></td>
 <td width="33%"><img src="docs/assets/screens/menu.png" alt="The app menu open on the Arcade tab with Flappy Bird selected" width="100%"><br><sub><b>App menu.</b> Nine tabs, one letter key each.</sub></td>
 </tr>
