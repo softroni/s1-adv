@@ -42,8 +42,9 @@ To change network, press Tab, open Settings, then Wi-Fi, or type `/wifi`.
   you're on, the device moves to the next saved one.
 - **Type a name:** Other network, at the end of the list, is for a hidden network. Capitals
   count. Leave the password blank for an open network.
-- **Password:** type it and press Enter. Fn+`;` shows or hides it. Fn+`` ` `` goes back,
-  because `` ` `` and `~` are typed as part of the password here.
+- **Password:** type it and press Enter. Hidden characters show as dots, apart from the last
+  one typed. Fn+`;` shows or hides it. Fn+`` ` ``, shown as Fn+Esc, goes back, because `` ` ``
+  and `~` are typed as part of the password here.
 
 A network is saved only once the device has joined it, which takes up to 20 seconds. Esc
 cancels. If it can't join, the device goes back to the network it was on and keeps what you

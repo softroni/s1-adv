@@ -310,9 +310,30 @@ void wifiSettle() {
   gUiFramePolicy.invalidate();
 }
 
-// Head of a name, cut on a character boundary because a scanned name can be any UTF-8.
+// An iPhone names its hotspot with a curly apostrophe, which the bold font lacks, so the whole
+// name would drop to the small font. Typographic marks are shown as their plain forms instead.
+// Only on screen: the radio always gets the name's exact bytes.
+String wifiShownName(const std::string& name) {
+  static const struct {
+    const char* from;
+    const char* to;
+  } kPlain[] = {{"\xE2\x80\x98", "'"}, {"\xE2\x80\x99", "'"}, {"\xE2\x80\x9C", "\""},
+                {"\xE2\x80\x9D", "\""}, {"\xE2\x80\x93", "-"}, {"\xE2\x80\x94", "-"},
+                {"\xE2\x80\xA6", "..."}, {"\xC2\xA0", " "}};
+  std::string out = name;
+  for (const auto& mark : kPlain) {
+    const size_t fromLen = strlen(mark.from), toLen = strlen(mark.to);
+    for (size_t at = out.find(mark.from); at != std::string::npos; at = out.find(mark.from, at + toLen)) {
+      out.replace(at, fromLen, mark.to);
+    }
+  }
+  return String(out.c_str());
+}
+
+// Head of a name as shown, cut on a character boundary because a scanned name can be any UTF-8.
+// Measured in the current font, so set it from wifiShownName first.
 String wifiFitName(const std::string& text, int32_t limit) {
-  String out(text.c_str());
+  String out = wifiShownName(text);
   if (gCanvas.textWidth(out) <= limit) return out;
   while (out.length() > 1 && gCanvas.textWidth(out + "..") > limit) removeLastUtf8Char(out);
   return out + "..";
@@ -350,13 +371,13 @@ void renderWifiList() {
     }
     const auto& network = gWifi.networks[index];
     const bool current = online && gWifiSsid == network.ssid.c_str();
-    useBigTextFont(network.ssid.c_str());
+    useBigTextFont(wifiShownName(network.ssid));
     drawBigRow(i, wifiFitName(network.ssid, 142), "", picked, accent);
     if (network.inRange) wifiDrawBars(216, y + 5, wifi_settings::signalBars(network.rssi), picked ? black : green, 0x4208);
     const char* label = current ? "joined" : network.saved ? "saved" : !network.secured ? "open" : "";
-    d.setFont(&fonts::Font0);
+    d.setFont(&fonts::Font2);
     d.setTextColor(picked ? black : current ? green : light);
-    d.setCursor(212 - d.textWidth(label), y + 7);
+    d.setCursor(212 - d.textWidth(label), y + 3);
     d.print(label);
   }
   drawBigScrollbar(first, rows, accent);
@@ -369,77 +390,91 @@ void renderWifiList() {
   if (!gWifi.message.empty()) drawBigNotice(String(gWifi.message.c_str()), wifiMoodColor(gWifi.mood));
 }
 
+// The screens behind the list read at the list's size: names and what you type in its bold font,
+// everything else in the medium one, key hints included, since these screens have the room.
+constexpr int16_t kWifiTextW = kBigRight - kBigLeft;
+constexpr int16_t kWifiKeysY = 115;
+constexpr uint16_t kWifiMuted = rgb565_local(146, 146, 170);
+// Dark enough to sit behind white text, light enough to survive the canvas's 8-bit colour.
+constexpr uint16_t kWifiBox = rgb565_local(36, 36, 85);
+
+void wifiLine(const String& text, int16_t y, uint16_t ink) {
+  auto& d = gCanvas;
+  d.setFont(&fonts::Font2);
+  d.setTextColor(ink);
+  d.setCursor(kBigLeft, y);
+  d.print(fitCurrentFontToWidth(text, kWifiTextW));
+}
+
+// The bold font is a few pixels shorter than the one for other scripts, so it sits lower.
+void wifiNameLine(const std::string& name, int16_t y) {
+  auto& d = gCanvas;
+  const int16_t drop = useBigTextFont(wifiShownName(name)) - 3;
+  d.setTextColor(TFT_WHITE);
+  d.setCursor(kBigLeft, y + drop);
+  d.print(wifiFitName(name, kWifiTextW));
+  d.setFont(&fonts::Font2);
+}
+
 void renderWifiField() {
   auto& d = gCanvas;
-  constexpr uint16_t kPanel = 0x0841;
-  const uint16_t input = rgb565_local(14, 30, 44);
   const bool forPassword = gWifi.screen == Screen::Password;
-
-  d.setFont(&fonts::Font2);
-  d.setTextColor(TFT_LIGHTGREY, kPanel);
-  d.setCursor(16, 27);
-  d.print(forPassword ? "Password for" : "Network name");
+  int16_t y = 26;
+  wifiLine(forPassword ? "Password for" : "Network name", y, kWifiMuted);
+  y += 18;
   if (forPassword) {
-    d.setFont(&fonts::efontCN_12);
-    d.setTextColor(TFT_WHITE, kPanel);
-    d.setCursor(16, 43);
-    d.print(wifiFitName(gWifi.name, 208));
+    wifiNameLine(gWifi.name, y);
+    y += 21;
   }
 
-  d.fillRoundRect(14, 57, 212, 22, 5, input);
-  d.setFont(&fonts::efontCN_12);
-  d.setTextColor(TFT_WHITE, input);
-  d.setCursor(20, 62);
+  d.fillRoundRect(2, y, 231, 24, 6, kWifiBox);
+  d.drawRoundRect(2, y, 231, 24, 6, rgb565_local(203, 216, 226));
   const std::string shown = !forPassword ? gWifi.name :
       gWifi.revealed ? gWifi.password : wifi_settings::masked(gWifi.password);
-  d.print(tailUtf8ToFit(String(shown.c_str()) + "_", 198));
+  // The bold font's asterisk is a speck, so each hidden character is a dot, easier to count.
+  // The newest ones stay in view, like the end of the text does.
+  const size_t hidden = forPassword && !gWifi.revealed && !shown.empty() ? shown.size() - 1 : 0;
+  const String typed = String(shown.substr(hidden).c_str()) + "_";
+  const int16_t drop = useBigTextFont(typed);
+  constexpr int16_t kDot = 9;
+  const int16_t typedW = min<int16_t>(d.textWidth(typed), kWifiTextW);
+  const int dots = min<int>(static_cast<int>(hidden), (kWifiTextW - typedW) / kDot);
+  for (int i = 0; i < dots; ++i) d.fillCircle(kBigLeft + 3 + i * kDot, y + 12, 3, TFT_WHITE);
+  d.setTextColor(TFT_WHITE);
+  d.setCursor(kBigLeft + dots * kDot, y + drop + 1);
+  d.print(tailUtf8ToFit(typed, kWifiTextW - dots * kDot));
+  y += 29;
 
   const bool hasMessage = !gWifi.message.empty();
   const String hint = !forPassword ? String("Capitals count. 2.4 GHz only.") :
       gWifi.secured ? String("At least 8 characters") : String("Leave blank for an open network");
-  drawTinyFooter(kPanel, hasMessage ? wifiMoodColor(gWifi.mood) : TFT_LIGHTGREY,
-                 hasMessage ? String(gWifi.message.c_str()) : hint, 16, 86, 208);
-  drawTinyFooter(kPanel, TFT_LIGHTGREY,
-                 forPassword ? "Enter join  Fn+; show  Fn+` back" : "Enter next  Fn+` back", 16, 116, 208);
+  wifiLine(hasMessage ? String(gWifi.message.c_str()) : hint, y,
+           hasMessage ? wifiMoodColor(gWifi.mood) : TFT_LIGHTGREY);
+  // While typing, ` is a character, so going back takes Fn. This font draws ` as a degree sign.
+  wifiLine(forPassword ? "Enter join  Fn+; show  Fn+Esc back" : "Enter next  Fn+Esc back", kWifiKeysY, kWifiMuted);
 }
 
 void renderWifiJoining() {
   auto& d = gCanvas;
-  constexpr uint16_t kPanel = 0x0841;
-  d.setFont(&fonts::Font2);
-  d.setTextColor(TFT_LIGHTGREY, kPanel);
-  d.setCursor(16, 27);
-  d.print("Joining");
-  d.setFont(&fonts::efontCN_12);
-  d.setTextColor(TFT_WHITE, kPanel);
-  d.setCursor(16, 44);
-  d.print(wifiFitName(gWifi.name, 208));
-
+  wifiLine("Joining", 26, kWifiMuted);
+  wifiNameLine(gWifi.name, 44);
   const uint32_t elapsed = min<uint32_t>(gWifi.joinElapsed(millis()), wifi_settings::kJoinTimeoutMs);
-  d.fillRoundRect(16, 62, 208, 8, 3, rgb565_local(14, 30, 44));
-  d.fillRoundRect(16, 62, max<int>(8, 208 * elapsed / wifi_settings::kJoinTimeoutMs), 8, 3,
+  d.fillRoundRect(kBigLeft, 68, kWifiTextW, 8, 3, kWifiBox);
+  d.fillRoundRect(kBigLeft, 68, max<int>(8, kWifiTextW * elapsed / wifi_settings::kJoinTimeoutMs), 8, 3,
                   rgb565_local(47, 227, 255));
-  drawTinyFooter(kPanel, TFT_LIGHTGREY, "Saved only if it connects", 16, 80, 208);
-  drawTinyFooter(kPanel, TFT_LIGHTGREY, "Esc cancel", 16, 116, 208);
+  wifiLine("Saved only if it connects", 84, TFT_LIGHTGREY);
+  wifiLine("Esc cancel", kWifiKeysY, kWifiMuted);
 }
 
 void renderWifiForget() {
-  auto& d = gCanvas;
-  constexpr uint16_t kPanel = 0x0841;
-  d.setFont(&fonts::Font2);
-  d.setTextColor(TFT_LIGHTGREY, kPanel);
-  d.setCursor(16, 27);
-  d.print("Forget this network?");
-  d.setFont(&fonts::efontCN_12);
-  d.setTextColor(TFT_WHITE, kPanel);
-  d.setCursor(16, 44);
-  d.print(wifiFitName(gWifi.name, 208));
+  wifiLine("Forget this network?", 26, TFT_WHITE);
+  wifiNameLine(gWifi.name, 44);
   const bool hasMessage = !gWifi.message.empty();
   const String detail = hasMessage ? String(gWifi.message.c_str()) :
       gWifiRadio.isCurrent(gWifi.name) ? String("Deletes its password, disconnects") :
       String("Its saved password is deleted");
-  drawTinyFooter(kPanel, hasMessage ? wifiMoodColor(gWifi.mood) : TFT_LIGHTGREY, detail, 16, 66, 208);
-  drawTinyFooter(kPanel, TFT_LIGHTGREY, "Enter forget  Esc keep", 16, 116, 208);
+  wifiLine(detail, 70, hasMessage ? wifiMoodColor(gWifi.mood) : TFT_LIGHTGREY);
+  wifiLine("Enter forget  Esc keep", kWifiKeysY, kWifiMuted);
 }
 
 bool wifiSettingsOwnsRadio() { return gWifi.ownsRadio(); }
@@ -570,15 +605,12 @@ void renderWifiSettingsUi() {
   const char* state = gWifi.screen == Screen::Joining ? "" : gWifi.scanning() ? "Scanning..." :
                       online ? "Connected" : "Offline";
   if (gWifi.screen == Screen::List) {
-    const String here = online ? String("On ") + gWifiSsid : gWifiSsid.isEmpty() ? String("") : String("Saved: ") + gWifiSsid;
+    const String current = wifiShownName(gWifiSsid.c_str());
+    const String here = online ? String("On ") + current : current.isEmpty() ? String("") : String("Saved: ") + current;
     drawBigHeader("Wi-Fi", rgb565_local(203, 216, 226), state, here, gWifi.onSavedRow() ? "F forget  R rescan" : "R rescan");
     renderWifiList();
   } else {
-    drawCardHeader("Wi-Fi", 0x7BEF);
-    d.setFont(&fonts::Font0);
-    d.setTextColor(TFT_LIGHTGREY, 0x0841);
-    d.setCursor(226 - d.textWidth(state), 17);
-    d.print(state);
+    drawBigHeader("Wi-Fi", rgb565_local(203, 216, 226), state);
     if (gWifi.screen == Screen::Joining) renderWifiJoining();
     else if (gWifi.screen == Screen::Forget) renderWifiForget();
     else renderWifiField();

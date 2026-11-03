@@ -903,12 +903,15 @@ bool handleHostSerialCommand(String line) {
     runWifiRawScan();
     return true;
   }
+  // These count as a key press, so the screensaver can't close the screen mid-scan.
   if (cmd == "wifi.open") {
+    handleScreensaverWake();
     setUiMode(UiMode::WifiSettings);
     logf("[HOST] wifi.open mode=%d", static_cast<int>(gUiMode));
     return true;
   }
   if (cmd == "wifi.rescan") {
+    markUserActivity();
     rescanWifiSettings();
     return true;
   }
