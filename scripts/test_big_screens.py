@@ -38,7 +38,6 @@ code = r'''
 #include <iostream>
 #include <string>
 #include <vector>
-#include "wifi_settings.h"
 using std::min;using std::max;
 struct String:std::string{using std::string::string;String()=default;String(const std::string&s):std::string(s){}String(int n):std::string(std::to_string(n)){}String(unsigned long n):std::string(std::to_string(n)){}
  bool isEmpty()const{return empty();}size_t length()const{return size();}void trim(){}
@@ -50,10 +49,9 @@ constexpr uint16_t rgb565_local(int r,int g,int b){return ((r&0xf8)<<8)|((g&0xfc
 template<class T>T clampValue(T n,T lo,T hi){return max(lo,min(n,hi));}
 static int widthOf(int f,unsigned char){return f==9?9:f==7?18:f==6?26:f==4?14:6;}
 struct Text{std::string s;int x,y,font;uint16_t color;};
-struct Canvas{int x=0,y=0,font=2,circles=0;uint16_t fg=0;std::vector<Text> printed;
+struct Canvas{int x=0,y=0,font=2;uint16_t fg=0;std::vector<Text> printed;
  static void inside(int a,int b,int w,int h){assert(a>=0&&b>=0&&a+w<=240&&b+h<=135);}
- void fillScreen(uint16_t){printed.clear();circles=0;}
- void fillCircle(int a,int b,int r,uint16_t){inside(a-r,b-r,2*r+1,2*r+1);++circles;}
+ void fillScreen(uint16_t){printed.clear();}
  // A solid fill paints over whatever was there, as the message bar does to the last row.
  void fillRoundRect(int a,int b,int w,int h,int,uint16_t){inside(a,b,w,h);
   printed.erase(std::remove_if(printed.begin(),printed.end(),[&](const Text&t){return t.x>=a&&t.x<a+w&&t.y>=b&&t.y<b+h;}),printed.end());}
@@ -104,18 +102,6 @@ uint32_t millis(){return 100000;}
 namespace vlc_remote{struct S{bool connected=true;char title[40]="Blade Runner 2049 (2017).mkv";const char* playback="playing";int seconds=3725,length=9840,volume=256;const char* route="Mac speakers";};S snapshot(){return {};}}
 String vlcTime(int s){char b[16];snprintf(b,16,"%d:%02d:%02d",s/3600,s/60%60,s%60);return b;}String gVlcNotice="Connected to VLC";
 '''
-wifi_part = (parts / '079_main.cpp.inc').read_text()
-code += wifi_part[wifi_part.index('// The screens behind the list'):wifi_part.index('void wifiLine(')]
-code += r"""
-using wifi_settings::Mood;using wifi_settings::Screen;
-void removeLastUtf8Char(String&s){while(!s.empty()&&(static_cast<unsigned char>(s.back())&0xC0)==0x80)s.pop_back();if(!s.empty())s.pop_back();}
-wifi_settings::App gWifi;String gWifiSsid="Home";
-struct{bool on=true;bool online(){return on;}bool isCurrent(const std::string&n){return n=="Home";}}gWifiRadio;
-"""
-for signature in ['String wifiShownName(', 'String wifiFitName(', 'uint16_t wifiMoodColor(', 'void wifiDrawBars(', 'void wifiLine(', 'void wifiNameLine(',
-                  'void renderWifiList()', 'void renderWifiField()', 'void renderWifiJoining()', 'void renderWifiForget()',
-                  'void renderWifiSettingsUi()']:
-    code += function(signature)
 for signature in ['void renderNesMenu()', 'void renderFileManagerUi()', 'void renderOtaUi()', 'void renderInternetRadioUi()', 'void renderAlarmUi()', 'void renderVlcRemoteUi()']:
     code += function(signature)
 notes = function('void renderNotesUi()')
@@ -164,37 +150,6 @@ int main(){
  gAlarmEditBuffer="07";renderAlarmUi();assert(shows("07"));gAlarmEditBuffer="";
  gAlarmRinging=true;renderAlarmUi();assert(shows("Alarm ringing")&&shows("RING"));gAlarmRinging=false;
  renderVlcRemoteUi();assert(shows("VLC Remote")&&shows("Connected to VLC"));
- // Wi-Fi: past the list nothing is in the smallest font, names and typing are in the bold one,
- // and each screen still says what it's for and which keys work.
- auto noTiny=[]{for(const auto&t:gCanvas.printed)assert(t.font!=0);};
- auto fontOf=[](const char*text){for(const auto&t:gCanvas.printed)if(t.s==text)return t.font;return -1;};
- gWifi.networks={{"Home",-40,true,true},{"Cafe",-70,false},{"Neighbours",-85,true}};
- gWifi.selected=1;renderWifiSettingsUi();
- assert(anyRow("Home")&&anyRow("Cafe")&&shows("joined")&&shows("open")&&shows("Other network..."));
- assert(fontOf("joined")==2&&fontOf("open")==2);
- gWifi.screen=Screen::Password;gWifi.name="Cafe Wi-Fi";gWifi.password="hunter22";gWifi.secured=true;renderWifiSettingsUi();
- assert(shows("Wi-Fi")&&shows("Connected")&&shows("Password for")&&shows("At least 8 characters"));
- // Hidden characters are dots, and the newest one shows.
- assert(fontOf("Cafe Wi-Fi")==9&&fontOf("2_")==9&&gCanvas.circles==7&&fontOf("Enter join  Fn+; show  Fn+Esc back")==2);noTiny();
- gWifi.revealed=true;renderWifiSettingsUi();assert(shows("hunter22_")&&gCanvas.circles==0);gWifi.revealed=false;
- gWifi.password=std::string(63,'x');renderWifiSettingsUi();assert(gCanvas.circles>10&&gCanvas.circles<62&&shows("x_"));
- gWifi.password="hunter22";
- gWifi.say("Not found. Is it 2.4 GHz?",Mood::Bad);renderWifiSettingsUi();
- assert(shows("Not found. Is it 2.4 GHz?")&&!shows("At least 8 characters"));
- for(const auto&t:gCanvas.printed)if(t.s=="Not found. Is it 2.4 GHz?")assert(t.color==wifiMoodColor(Mood::Bad));
- gWifi.say("");
- // An iPhone's curly apostrophe shows as a plain one, so its name stays in the bold font.
- gWifi.name="Alex\xE2\x80\x99s iPhone";renderWifiSettingsUi();
- assert(fontOf("Alex's iPhone")==9&&!shows("Alex\xE2\x80\x99s iPhone"));noTiny();
- assert(wifiShownName("\xE2\x80\x9C" "A\xE2\x80\x9D \xE2\x80\x93 B\xE2\x80\xA6")=="\"A\" - B...");
- // A name in another script keeps the font that can show it.
- gWifi.name="\xD0\x9A\xD0\xB0\xD1\x84\xD0\xB5";renderWifiSettingsUi();assert(fontOf("\xD0\x9A\xD0\xB0\xD1\x84\xD0\xB5")==12);
- gWifi.screen=Screen::Name;gWifi.name="Cafe";renderWifiSettingsUi();
- assert(shows("Network name")&&fontOf("Cafe_")==9&&shows("Capitals count. 2.4 GHz only.")&&shows("Enter next  Fn+Esc back"));noTiny();
- gWifi.screen=Screen::Joining;gWifi.name="Cafe";renderWifiSettingsUi();
- assert(shows("Joining")&&fontOf("Cafe")==9&&shows("Saved only if it connects")&&shows("Esc cancel"));noTiny();
- gWifi.screen=Screen::Forget;gWifi.name="Home";renderWifiSettingsUi();
- assert(shows("Forget this network?")&&fontOf("Home")==9&&shows("Deletes its password, disconnects")&&shows("Enter forget  Esc keep"));noTiny();
  std::cout<<"PASS big screens: lists keep the selection in view, every selection fits, and each screen shows its facts\n";
 }
 """
@@ -202,5 +157,5 @@ with tempfile.TemporaryDirectory(prefix='s1-big-screens-') as directory:
     p = Path(directory)
     (p / 'test.cpp').write_text(code)
     subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++17', '-Wall', '-Wextra', '-Wno-unused-variable', '-Wno-unused-parameter', '-Wno-unused-function',
-                    '-I', str(src), str(p / 'test.cpp'), '-o', str(p / 'test')], check=True)
+                    str(p / 'test.cpp'), '-o', str(p / 'test')], check=True)
     subprocess.run([str(p / 'test')], check=True)

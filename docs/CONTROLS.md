@@ -36,7 +36,9 @@ To change network, press Tab, open Settings, then Wi-Fi, or type `/wifi`.
 
 - **Pick a network:** saved networks come first, most recently used at the top, then what's
   nearby, strongest first. `;` and `.` move, and Enter picks. R looks again. Signal bars show
-  what's in range, and only 2.4 GHz networks appear.
+  what's in range, and only 2.4 GHz networks appear. A filled dot marks the network in use, a
+  hollow one a saved network, and a saved one out of range is greyed. The chip at the top right
+  says whether the device is connected, offline or scanning. The screens share the Lab's look.
 - **Switch:** Enter on a saved network joins it with no password.
 - **Forget:** F on a saved network, then Enter. Its password is deleted. If it's the network
   you're on, the device moves to the next saved one.
