@@ -194,6 +194,8 @@
   const bool micRecording = gRecording || gRealtimeRecording;
   if (state == AssistantPulseState::Ready && !working && radioHomeCardShows()) {
     drawHomeRadioCard();
+  } else if (state == AssistantPulseState::Ready && !working && podcastHomeCardShows()) {
+    drawHomePodcastCard();
   } else if (state == AssistantPulseState::Ready && !working && homeFirmwareUpdateAvailable() && !gOtaManifest.notes.isEmpty()) {
     drawHomeUpdateNote();
   } else if (working && (micRecording || realtime)) {

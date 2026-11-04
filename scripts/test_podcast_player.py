@@ -225,7 +225,7 @@ int main(int argc, char** argv) {
   const uint32_t seconds = uint32_t(mp3.size() / 6000);
   assert(sp.hz == 32000 && sp.maxQueued == 2 && sp.rendered > 25 * seconds);
   assert(position() >= 100 + seconds - 1 && position() <= 100 + seconds + 1);
-  assert(firstSoundAt >= kAudio.size() + kInputTls);  // Not a sound before a whole buffer.
+  assert(firstSoundAt >= kAudio.size() + kInput);  // Not a sound before a whole buffer.
   assert(lastConnect == "tls" && !overHome());
   assert(sp.quietMs == 0);  // And no gap after it.
   assert(clockMs - began >= seconds * 1000);  // It plays in real time, not as fast as it reads.
@@ -295,7 +295,7 @@ int main(int argc, char** argv) {
   assert(error() == Error::None && reachedEnd() && overHome() && lastConnect == "192.168.0.20:31890");
   assert(request.rfind("GET /podcasts/0123456789abcdef0123456789abcdef?t=30 HTTP/1.1\r\nHost: 192.168.0.20:31890\r\n", 0) == 0);
   assert(request.find("Authorization") == std::string::npos && request.find("tok-123") == std::string::npos);
-  assert(firstSoundAt >= kAudio.size() + kInput && position() >= 30 + seconds - 1);  // A bigger cushion with no TLS.
+  assert(firstSoundAt >= kAudio.size() + kInput && position() >= 30 + seconds - 1);
   // Not reachable from this network, or a ticket the bridge has forgotten: errors the screen retries on.
   connectFails = true; assert(startStreamHome(0xC0A80014u, 31890, ticket, 0)); execute(); connectFails = false;
   assert(error() == Error::Connect && position() == 0 && !reachedEnd());

@@ -76,7 +76,8 @@ The right-hand column says how long an episode is, how much is left of one you'v
 | **-** and **+** | Volume, 5% a press. **=** works for + |
 | **S** | Save it to the card |
 | **E** | This show's episodes |
-| **Esc** | Back to the list. It keeps playing |
+| **Esc** | Back to the list. It keeps playing, and from the library Esc goes Home with it playing |
+| **Ctrl+M** | Pause or carry on, from any screen |
 
 Several presses of `,` or `/` in a row add up, and the episode starts again from there once you
 stop pressing. Streaming takes a few seconds to start, and some podcast hosts are slow, so the
@@ -89,8 +90,30 @@ The place is saved every 30 seconds while it plays, and whenever you pause, skip
 episode counts as **done** within 45 seconds of its end. When a book's chapter or an old radio
 episode ends, the next one in the list starts by itself. A podcast stops at the end.
 
-Leaving the app stops the sound, and the place is kept. The app has one player, so loading a list
-or saving an episode pauses what's playing. After a list loads, it carries on by itself.
+The app has one player, so loading a list or saving an episode pauses what's playing. After a
+list loads, it carries on by itself. While something plays, the search's list of shows is let go
+to give the player memory, so going back from the episodes opens Find with your words still
+typed: Enter searches again.
+
+## Listening from Home
+
+Esc on the library goes Home and the episode keeps playing. It also plays on behind Pomodoro,
+Alarm, Stopwatch, Calendar, Calculator and Notes, and the clock and battery screens, the same
+screens Internet Radio plays behind. Home shows the episode in its show's colour with headphones,
+over bars that follow the sound, where Home's own bars usually are. For the first few seconds it
+says **Ctrl+M pauses it**.
+
+**Ctrl+M** pauses it from any screen and keeps the place. Press it again on one of those screens
+and it carries on from there, as long as a podcast was the last thing playing; after the radio,
+Ctrl+M is the radio's. Open Podcasts while it plays and you're on the player.
+
+The place is still saved every 30 seconds behind other screens, and a book's next chapter still
+follows on. If it stops by itself, at the end or because the bridge went quiet, Home says
+**Stopped** and why for a few seconds.
+
+Any other screen stops it first and keeps the place: AI Chat and voice, Internet Radio, the Lab,
+the games and the rest. So do an alarm going off, voice playback and updates. A save on its way
+stops when you leave the app.
 
 ## Saving for offline listening
 
@@ -159,7 +182,7 @@ network. Nothing about what you search for or play is written to the bridge's lo
 ## Not yet
 
 - Streaming away from home when memory is short: save it at home first.
-- Listening while you use another screen.
+- Listening behind screens that need the network, the speaker or the memory, like AI Chat.
 - Chapters, show notes and artwork.
 - Choosing the order of a podcast's episodes.
 - Saving while something plays: the Cardputer has room for one TLS connection at a time.

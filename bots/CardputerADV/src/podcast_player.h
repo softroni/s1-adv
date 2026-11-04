@@ -15,7 +15,7 @@ namespace podcast_player {
 enum class State : uint8_t { Idle, Connecting, Buffering, Playing, Saving, Stopping, Error };
 enum class Error : uint8_t {
   None, NoMemory, TaskFailed, NoBridge, Connect, Timeout, Http, Busy, NotFound, Unavailable,
-  Malformed, TooBig, Decode, Speaker, Card, CardFull
+  Malformed, TooBig, Decode, Speaker, Card, CardFull, Unplayable
 };
 // Where the bridge is. Copies host and token; rootCa must outlive every job (it's a constant).
 void setBridge(const char* host, uint16_t port, const char* token, const char* rootCa);
@@ -56,10 +56,9 @@ bool saveDone();          // The last Save job wrote the whole episode.
 uint16_t level();         // As the radio's: the latest frame's loudness, 0 to 32767.
 
 namespace detail {
-// The compressed audio held: about 1.4 seconds at home or from the card, 0.7 over HTTPS, where
-// memory is short. Wait for the network only when less than kLowWater is held, so a short
-// stall plays from what's held rather than going quiet.
-constexpr size_t kInput = 8192, kInputTls = 4096, kLowWater = 1024;
+// The compressed audio held: 0.7 seconds, as small as memory needs. Wait for the network only
+// when less than kLowWater is held, so a short stall plays from what's held, not silence.
+constexpr size_t kInput = 4096, kLowWater = 1024;
 // One decoded frame, as the bridge sends them: 1152 mono samples. A frame that would need
 // more is refused before it's decoded, so the slots can be half the decoder's largest.
 constexpr size_t kSlotSamples = 1152;

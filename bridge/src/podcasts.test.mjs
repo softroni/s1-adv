@@ -254,11 +254,20 @@ test("an episode that never sounds is an error, not a silent stream", async () =
   const playing = service.audio(res, { device: "d1", show: "aholmes", episode: show.episodes[0].id });
   await new Promise(resolve => setImmediate(resolve));
   await new Promise(resolve => setImmediate(resolve));
-  child.stderr.write("Server returned 404 Not Found\n");
+  child.stderr.write("Connection timed out\n");
   child.exitCode = 1;
   child.emit("close", 1);
-  await assert.rejects(playing, { code: "episode_unavailable" });
+  await assert.rejects(playing, { code: "episode_unavailable", status: 502 });
   assert.equal(res.headersSent, false);
+  // A file ffmpeg can't read is a different answer: asking again won't help.
+  const again = service.audio(fakeResponse(), { device: "d1", show: "aholmes", episode: show.episodes[0].id });
+  await new Promise(resolve => setImmediate(resolve));
+  await new Promise(resolve => setImmediate(resolve));
+  child.stderr.write("Error opening input files: Invalid data found when processing input\n");
+  await new Promise(resolve => setImmediate(resolve));
+  child.exitCode = 1;
+  child.emit("close", 1);
+  await assert.rejects(again, { code: "episode_unplayable", status: 415 });
   await assert.rejects(service.audio(res, { device: "d1", show: "aholmes", episode: "nothex" }), { code: "invalid_episode" });
   await assert.rejects(service.audio(res, { device: "d1", show: "aholmes", episode: "0123456789ab" }), { code: "unknown_episode" });
 });

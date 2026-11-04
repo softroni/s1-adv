@@ -84,7 +84,8 @@ struct Reader {
 
 Error fromStatus(unsigned status) {
   return status == 401 || status == 403 ? Error::NoBridge : status == 404 ? Error::NotFound :
-         status == 503 || status == 429 ? Error::Busy : status == 502 ? Error::Unavailable : Error::Http;
+         status == 503 || status == 429 ? Error::Busy : status == 502 ? Error::Unavailable :
+         status == 415 ? Error::Unplayable : Error::Http;
 }
 
 // Opens the bridge, over HTTPS with the token or at home with the ticket in the path, asks for
@@ -331,10 +332,12 @@ Error play(Source& src, Decoder& d) {
 Error stream(WiFiClient& client, Decoder& d) {
   Reader r(client);
   Headers h;
+  // At home the decoder comes first, before the connection's small pieces can split the heap.
+  // Over HTTPS it waits for the bridge's answer, so TLS's two big buffers get the room.
+  if (home.load() && !d.alloc(kInput)) return Error::NoMemory;
   const Error e = openBridge(client, r, h, false);
   if (e != Error::None || cancel.load()) return e;
-  // Only once the bridge has answered: TLS's buffers came first, so they get the room.
-  if (!d.alloc(home.load() ? kInput : kInputTls)) return Error::NoMemory;
+  if (!home.load() && !d.alloc(kInput)) return Error::NoMemory;
   NetSource src(r, h);
   return play(src, d);
 }
@@ -563,6 +566,7 @@ const char* errorText() {
     case Error::Speaker: return "Speaker unavailable";
     case Error::Card: return "SD card problem";
     case Error::CardFull: return "The SD card is full";
+    case Error::Unplayable: return "That episode's file won't play";
   }
   return "Player error";
 }

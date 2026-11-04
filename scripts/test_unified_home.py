@@ -104,7 +104,7 @@ struct{bool parsed=true,present=true;String version="0.2.178-dev",notes,error;in
 String gOtaRunningSlot="app1",gOtaBootState="valid";
 bool homeFirmwareUpdateAvailable(){return candidateAvailable;}
 // The radio's card on Home is the radio test's; here it's off, so Home draws its own bars.
-bool radioHomeCardShows(){return false;}void drawHomeRadioCard(){}
+bool radioHomeCardShows(){return false;}void drawHomeRadioCard(){}bool podcastHomeCardShows(){return false;}void drawHomePodcastCard(){}
 bool otaInstallStarting(){return false;}
 void renderSdRequiredBanner(const char*){}
 struct FirmwareCapacityInfo{unsigned usableBytes=3000000,freeBytes=900000,reserveBytes=65536;};

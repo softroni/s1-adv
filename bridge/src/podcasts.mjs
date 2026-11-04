@@ -478,7 +478,9 @@ export class PodcastService {
       const cancelled = ended;
       end();
       if (!cancelled) console.warn(`[podcasts] audio failed: ${errors.trim().split("\n").pop()?.slice(0, 120) || "no audio"}`);
-      throw new PodcastError(cancelled ? "cancelled" : "episode_unavailable", 502);
+      // A file that isn't audio, or that its site refuses, won't play however often it's asked.
+      const unplayable = /Invalid data|does not contain any stream|could not find codec|Server returned 4\d\d|HTTP error 4\d\d/iu.test(errors);
+      throw new PodcastError(cancelled ? "cancelled" : unplayable ? "episode_unplayable" : "episode_unavailable", unplayable ? 415 : 502);
     }
     res.writeHead(200, { "content-type": "audio/mpeg", "cache-control": "no-store", "x-content-type-options": "nosniff" });
     res.write(first);

@@ -61,8 +61,17 @@ uint32_t gPodHomeOffFor = 0;  // The device address on which the home way didn't
 bool gPodRetried = false, gPodSaveRetried = false;  // One more try after the home way fails.
 bool gPodPlayHome = false, gPodSaveHome = false;  // How the job under way is getting its audio.
 bool gPodResume = false;  // Playing when a list was asked for, so it carries on after.
+// Playing on behind Home and the light screens, as the radio does: since when, for Home's hint,
+// and why it stopped by itself, which Home says for a while.
+uint32_t gPodBehindSinceMs = 0, gPodBehindNoteUntilMs = 0;
+String gPodBehindNote;
+bool gPodLastAudio = false;  // A podcast played more recently than the radio, so Ctrl+M means it.
 
 void podInvalidate() { gLastRenderMs = 0; gUiFramePolicy.invalidate(); }
+// An episode wants to play: it is, it's starting, or it's waiting to go on from a new place.
+bool podcastOn() { return gPodWantPlaying; }
+// Where it plays on: its own screen, and the light screens the radio plays behind.
+bool podcastMayPlayIn(UiMode mode) { return mode == UiMode::Podcasts || (mode != UiMode::Radio && radioMayPlayIn(mode)); }
 void podSay(const String& text, bool good = false) { gPodNotice = text; gPodNoticeGood = good; podInvalidate(); }
 bool podcastTakesText() { return gUiMode == UiMode::Podcasts && gPodView == PodView::Find; }
 bool podcastTakesArrows() { return gUiMode == UiMode::Podcasts; }
@@ -226,6 +235,14 @@ void podFreeTab() {
   delete[] gPodFollowed; gPodFollowed = nullptr; gPodFollowedCount = 0;
 }
 void podFreeFound() { delete[] gPodFound; gPodFound = nullptr; gPodFoundCount = 0; }
+// Before the player starts: every list it can do without, the emoji cache, and the chat's long
+// history, which the firmware trims the same way whenever memory runs low. The search's shows
+// go too unless they're on screen; going back then opens Find, with the words still there.
+void podFreeForPlay() {
+  podFreeTab();
+  if (gPodView != PodView::Shows || gUiMode != UiMode::Podcasts) podFreeFound();
+  compactMemoryForUi("podcast", true);
+}
 void podFreePage() { delete gPodPage; gPodPage = nullptr; }
 int podTabCount() { return gPodTab == PodTab::Following ? gPodFollowedCount : gPodEntryCount; }
 void podLoadTab() {
@@ -383,6 +400,7 @@ bool podStartTicket(const podcast::Entry& e) {
   if (!podcast::ticketPath(path, sizeof(path), e.show, e.episode)) return false;
   podcast::copyText(gPodTicketShow, sizeof(gPodTicketShow), e.show);
   podcast::copyText(gPodTicketEpisode, sizeof(gPodTicketEpisode), e.episode);
+  podFreeForPlay();
   podPrepareNetwork();
   gPodTicketRunning = podcast_player::startList(path);
   if (!gPodTicketRunning) podForgetTicket();
@@ -499,6 +517,13 @@ void beginPodcasts() {
   }
   gPodView = PodView::Library;
   gPodSel = 0;
+  gPodBehindSinceMs = gPodBehindNoteUntilMs = 0;
+  if (podcastOn() && gPodHasNow) {
+    // Back from a screen it played behind: what's playing, with the library behind it.
+    gPodView = PodView::Player;
+    gPodPlayerBack = PodView::Library;
+    return;
+  }
   podLoadTab();
   if (!gPodCard) podSay(gSdReady ? "SD card isn't answering: nothing is kept" : "No SD card: nothing is kept");
   else if (!podTabCount() && gPodTab == PodTab::Listening) podSay("F finds shows and books", true);
@@ -528,6 +553,7 @@ bool podcastEscape() {
     case PodView::Shows: gPodView = PodView::Find; podSay(""); break;
     case PodView::Episodes:
       gPodView = gPodEpisodesBack;
+      if (gPodView == PodView::Shows && !gPodFound) gPodView = PodView::Find;  // Let go for the player.
       if (gPodView == PodView::Library) podLoadTab();
       podSay("");
       break;
@@ -640,14 +666,42 @@ void podFinished() {
   const int i = podNowIndex();
   if (gPodNow.show[0] == 'a' && i >= 0 && i + 1 < gPodPage->count) {
     podMarkPage();
-    podPlay(podEntryFor(i + 1), PodView::Player, gPodView == PodView::Player);
+    podPlay(podEntryFor(i + 1), PodView::Player, gUiMode == UiMode::Podcasts && gPodView == PodView::Player);
     podSay("Next: " + String(gPodNow.title), true);
     return;
   }
   podSay("Finished", true);
 }
+// Off the podcast screen. True while the episode plays on behind this one: what only the screen
+// uses goes back to the heap, lists and saves on their way stop, and playing carries on. False
+// when it should all stop.
+bool podcastBehind() {
+  if (gRadioModePending || !podcastOn() || internet_radio::busy() || !podcastMayPlayIn(gUiMode)) return false;
+  if (!gPodBehindSinceMs) {
+    gPodBehindSinceMs = max<uint32_t>(millis(), 1);
+    gPodBehindNoteUntilMs = 0;
+    gPodAskPending = gPodSavePending = false;
+    gPodAsking = PodAsk::None;
+    if (podcast_player::listing() && !gPodTicketRunning) podcast_player::stop();
+    podFreeTab();
+    podFreeFound();
+  }
+  return true;
+}
+void servicePodcastWork(bool here);
+// It stopped by itself behind a screen: Home says why for a while, and the status bar now.
+void podStoppedBehind() {
+  gPodBehindNote = gPodNotice.isEmpty() ? String("Stopped") : gPodNotice;
+  gPodBehindNoteUntilMs = max<uint32_t>(millis() + 8000, 1);
+  setStatus("Podcast: " + gPodBehindNote, 3000);
+}
 void servicePodcasts() {
-  if (gUiMode != UiMode::Podcasts) {
+  // The radio streaming is the most recent sound now, so Ctrl+M is for it.
+  if (internet_radio::busy() && !internet_radio::searching() && !internet_radio::fetchingLogo()) gPodLastAudio = false;
+  const bool here = gUiMode == UiMode::Podcasts;
+  const bool wasOn = podcastOn();
+  if (!here && !podcastBehind()) {
+    gPodBehindSinceMs = 0;
     if (gPodDeletePending && !podcast_player::busy()) podFinishDelete();
     if (podcast_player::busy() || gPodWantPlaying || gPodStartPending || gPodAskPending || gPodSavePending) stopPodcasts();
     else if (gPodEntries || gPodFollowed || gPodFound || gPodPage) podRelease();
@@ -656,6 +710,11 @@ void servicePodcasts() {
     gPodAsking = PodAsk::None;
     return;
   }
+  if (here) gPodBehindSinceMs = 0;
+  servicePodcastWork(here);
+  if (!here && wasOn && !podcastOn()) { podStoppedBehind(); }
+}
+void servicePodcastWork(bool here) {
   const bool idle = !podcast_player::busy() && !internet_radio::busy();
   if (gPodDeletePending && !podcast_player::busy()) { podFinishDelete(); podInvalidate(); }
   if (gPodAskRunning && !podcast_player::busy()) {
@@ -686,7 +745,7 @@ void servicePodcasts() {
     podcast_player::clearList();
     podInvalidate();
   }
-  if (gPodAskPending && idle) {
+  if (here && gPodAskPending && idle) {
     gPodAskPending = false;
     if (!podStartAllowed(true, false)) { gPodAsking = PodAsk::None; podSay(!gWifiReady ? "Wi-Fi required" : "Busy: try again"); }
     else {
@@ -697,7 +756,7 @@ void servicePodcasts() {
     podInvalidate();
     return;
   }
-  if (gPodSavePending && idle) {
+  if (here && gPodSavePending && idle) {
     if (!podStartAllowed(true, false)) { gPodSavePending = false; podSay(!gWifiReady ? "Wi-Fi required" : "Busy: try again"); podInvalidate(); return; }
     if (podTicketWanted(gPodSaving)) {
       if (!podStartTicket(gPodSaving)) { gPodSavePending = false; podSay("Save: " + podError(nullptr)); }
@@ -732,6 +791,7 @@ void servicePodcasts() {
       gPodWantPlaying = false;
       podSay(!gPodNowFile && !gWifiReady ? "Wi-Fi required" : "Busy: retry Enter");
     } else {
+      podFreeForPlay();
       initSpeaker();
       bool started = false;
       if (gPodNowFile) started = podcast_player::startFile(podFileName(gPodNow.episode).c_str(), gPodNow.at);
@@ -750,6 +810,7 @@ void servicePodcasts() {
       if (!started) { gPodWantPlaying = false; podSay(podError(nullptr)); }
       else {
         gPodPlayStarted = true;
+        gPodLastAudio = true;
         gPodRememberedMs = millis();
         podRememberNow();  // It's in Listening from the moment it starts.
       }
@@ -1144,7 +1205,7 @@ void podMeterTick(bool playing) {
   memmove(gRadioMeter, gRadioMeter + 1, sizeof(gRadioMeter) - 1);
   const uint16_t level = podcast_player::level();
   const int h = level < 700 ? 1 : int((log2f(float(level)) - 9.5f) * 14.0f / 5.0f + 0.5f);
-  gRadioMeter[4] = uint8_t(h < 1 ? 1 : h > 14 ? 14 : h);
+  gRadioMeter[kRadioMeterLen - 1] = uint8_t(h < 1 ? 1 : h > 14 ? 14 : h);
 }
 void renderPodPlayer() {
   auto& d = gCanvas;
@@ -1235,6 +1296,69 @@ void renderPodPlayer() {
   d.setCursor(120 - d.textWidth(keys) / 2, 127);
   d.print(keys);
   d.setFont(&fonts::Font2);
+}
+// Home, while an episode plays behind it: the episode in its show's colour, over a meter of what
+// it's playing, where the radio's card goes. Ctrl+M's hint shows first; while it starts, that;
+// and if it stops by itself, why, for a few seconds.
+bool podcastHomeCardShows() {
+  return (podcastOn() && gUiMode != UiMode::Podcasts) || (gPodBehindNoteUntilMs && int32_t(gPodBehindNoteUntilMs - millis()) > 0);
+}
+void drawHomePodcastCard() {
+  auto& d = gCanvas;
+  constexpr int16_t kLeft = 121, kRight = 229, kBase = 101;
+  const uint16_t amber = rgb565_local(255, 136, 64), quiet = rgb565_local(150, 165, 175);
+  const bool on = podcastOn();
+  const uint16_t ink = !on ? amber : radioGenreInk(gPodNow.showTitle);
+  // Headphones: the band and two cups.
+  d.fillRect(kLeft + 3, 73, 8, 2, ink);
+  d.fillRect(kLeft + 1, 75, 2, 6, ink);
+  d.fillRect(kLeft + 11, 75, 2, 6, ink);
+  d.fillRoundRect(kLeft, 80, 4, 8, 1, ink);
+  d.fillRoundRect(kLeft + 10, 80, 4, 8, 1, ink);
+  const String name = on ? String(gPodNow.title) : String("Stopped");  // The headphones say what.
+  const bool wide = radioTextFont(name);
+  d.setTextColor(on ? TFT_WHITE : amber);
+  d.setCursor(kLeft + 18, wide ? 74 : 72);
+  d.print(radioFit(name, kRight - kLeft - 18));
+  const auto state = podcast_player::state();
+  const bool sounding = on && podcast_player::playing() && state == podcast_player::State::Playing;
+  podMeterTick(sounding);
+  String line;
+  if (!on) line = gPodBehindNote;
+  else if (gPodBehindSinceMs && millis() - gPodBehindSinceMs < 4000) line = "Ctrl+M pauses it";
+  else if (!sounding) line = gPodStartPending || gPodTicketRunning ? String("Starting...") : String("Buffering...");
+  if (!line.isEmpty() || !sounding) {
+    d.setFont(&fonts::Font0);
+    d.setTextColor(quiet);
+    d.setCursor(kLeft, 93);
+    d.print(radioFit(line, kRight - kLeft));
+    d.setFont(&fonts::Font2);
+    return;
+  }
+  for (int i = 0; i < kRadioMeterLen; ++i) {
+    const int16_t h = int16_t(max<int>(2, gRadioMeter[i] * 13 / 14));
+    d.fillRoundRect(kLeft - 1 + i * 7, kBase - h, 3, h, 1, ink);
+  }
+}
+// Ctrl+M, from any screen: pauses the episode, keeping the place. Paused, it carries on where it
+// may play, if a podcast played last. False leaves the key to the radio.
+bool podcastMusicKey() {
+  if (podcastOn()) {
+    podPause("Paused");
+    gPodBehindNoteUntilMs = 0;
+    setStatus("Podcast paused", 1200);
+    return true;
+  }
+  if (radioOn() || internet_radio::busy() || !gPodHasNow || !gPodLastAudio || !podcastMayPlayIn(gUiMode)) return false;
+  if (!gPodNowFile && !podOnCard(gPodNow.episode) && !gWifiReady) { setStatus("Podcast: Wi-Fi required", 1500); return true; }
+  const bool here = gUiMode == UiMode::Podcasts;
+  podPlay(gPodNow, PodView::Player, here);
+  if (!here) {
+    gPodBehindSinceMs = max<uint32_t>(millis(), 1);
+    gPodBehindNoteUntilMs = 0;
+    setStatus("Podcast: " + String(gPodNow.title), 1500);
+  }
+  return true;
 }
 void renderPodcastsUi() {
   switch (gPodView) {

@@ -56,7 +56,7 @@ struct{struct{int brightness=-1;void setBrightness(int n){assert(n>=0&&n<=255);b
 template<class T>T clampValue(T n,T lo,T hi){return std::min(hi,std::max(lo,n));}
 uint8_t percentToByte(uint8_t p){return (unsigned(p)*255+50)/100;}
 void setStatus(const String&,int){}int eyesReset=0;void resetUncannyEyesRenderer(){++eyesReset;}
-bool fakeRadio=false,fakeRadioOn=false;bool radioBusy(){return fakeRadio;}bool radioOn(){return fakeRadioOn;}
+bool fakeRadio=false,fakeRadioOn=false;bool radioBusy(){return fakeRadio;}bool radioOn(){return fakeRadioOn;}bool podcastOn(){return false;}
 void setUiMode(UiMode mode);void applyDisplayBrightness();
 time_t shownTime=0;time_t fakeTime(time_t*){return shownTime;}
 '''

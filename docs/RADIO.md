@@ -43,7 +43,8 @@ speaker, the mic, the network or much memory. Home shows the station in its genr
 bars that follow the music where Home's own bars usually are. For the first few seconds it says
 **Ctrl+M stops it**, and while the radio reconnects it says that instead.
 
-**Ctrl+M** stops the radio from any screen. On one of the screens above, Ctrl+M again plays the
+**Ctrl+M** stops the radio from any screen. A podcast playing comes first: then Ctrl+M pauses
+that, and [Podcasts](PODCASTS.md) plays behind the same screens. On one of the screens above, Ctrl+M again plays the
 last station from your list. Open Internet Radio and it shows the station that's playing, with
 every key working as usual.
 

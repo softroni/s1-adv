@@ -9,7 +9,7 @@ def fn(file,name):
  return s[a:i]
 code=r'''
 #include <cassert>
-bool radioBusy(){return false;}bool radioOnNow=false;bool radioOn(){return radioOnNow;}
+bool radioBusy(){return false;}bool radioOnNow=false;bool radioOn(){return radioOnNow;}bool podcastOnNow=false;bool podcastOn(){return podcastOnNow;}
 bool synthOwned=false;bool synthAudioBusy(){return synthOwned;}
 void stopInternetRadio(){}
 template<class T>bool deferInternetRadioMode(T){return false;}
@@ -79,6 +79,7 @@ int main(){
  synthOwned=false;focusTone(440,20);assert(tones==1);
  // Between the radio's reconnects too: a tone then could hold the speaker as the stream restarts.
  radioOnNow=true;before=plays;assert(!playFocusCue(FocusState::Focus)&&plays==before);focusTone(440,20);assert(tones==1);radioOnNow=false;
+ podcastOnNow=true;before=plays;assert(!playFocusCue(FocusState::Focus)&&plays==before);podcastOnNow=false;  // A podcast behind the timer too.
  files.erase(pomodoroMeditationAssetPath("ru","start"));assert(!pomodoroMeditationAssetsPresent());
  mounted=false;assert(!pomodoroMeditationAssetsPresent());
 }

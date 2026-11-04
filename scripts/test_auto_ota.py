@@ -11,7 +11,7 @@ def function(file,signature):
  return s[a:i]
 code=r'''
 #include <cassert>
-bool radioBusy(){return false;}bool radioOn(){return false;}
+bool radioBusy(){return false;}bool radioOn(){return false;}bool podcastOn(){return false;}
 void stopInternetRadio(){}
 template<class T>bool deferInternetRadioMode(T){return false;}
 #include <cstdint>

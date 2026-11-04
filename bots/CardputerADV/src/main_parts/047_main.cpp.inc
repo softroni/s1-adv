@@ -1366,7 +1366,7 @@ void triggerAlarm(const String& reason) {
     gPlaybackActive = false;
   }
   // The radio may be playing behind the screen: it gives way, or the alarm couldn't sound.
-  if (radioBusy() || radioOn()) stopInternetRadio();
+  if (radioBusy() || radioOn() || podcastOn()) stopInternetRadio();
   // And a screen dimmed or off while it played lights, so the first key isn't spent waking it.
   if (!gScreensaverActive && (gScreensaverDimmed || gScreenOffActive)) {
     gScreensaverDimmed = gScreenOffActive = false;

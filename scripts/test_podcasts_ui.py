@@ -27,7 +27,8 @@ assert 'bool radioBusy() { return internet_radio::busy() || podcast_player::busy
 harness = (root / 'scripts/test_internet_radio.py').read_text()
 prefix = harness.split("code=r'''", 1)[1].split("'''+app+r'''", 1)[0]
 for old, new in [('enum class UiMode{Home,Radio,Voice,Mesh,Podcasts,Clock,Battery,Focus,Notes,Calculator,Alarm,Stopwatch,Calendar,Chess};UiMode gUiMode=UiMode::Radio;', 'enum class UiMode{Home,Radio,Voice,Mesh,Podcasts,Clock,Battery,Focus,Notes,Calculator,Alarm,Stopwatch,Calendar,Chess};UiMode gUiMode=UiMode::Podcasts;'),
-                 ('namespace podcast_player{bool fakeBusy=false;bool busy(){return fakeBusy;}}\nint podcastStops=0;void stopPodcasts(){++podcastStops;}\n', 'namespace { void stopPodcasts(); }\n'),
+                 ('namespace podcast_player{bool fakeBusy=false;bool busy(){return fakeBusy;}}\nint podcastStops=0;void stopPodcasts(){++podcastStops;}bool podcastOn(){return false;}bool podcastMayPlayIn(UiMode){return false;}\n',
+                  'namespace { void stopPodcasts(); bool podcastOn(); bool podcastMayPlayIn(UiMode mode); }\n'),
                  ('void useBigTextFont(const String&s){bool wide=false;for(unsigned char c:s)wide=wide||c>=0x80;gCanvas.setFont(wide?&fonts::efontCN_12:&fonts::FreeSansBold9pt7b);}',
                   'int16_t useBigTextFont(const String&s){bool wide=false;for(unsigned char c:s)wide=wide||c>=0x80;gCanvas.setFont(wide?&fonts::efontCN_12:&fonts::FreeSansBold9pt7b);return wide?4:3;}'),
                  ('}SD;', ' uint64_t totalBytes(){return cardTotal;}uint64_t usedBytes(){return cardUsed;}\n}SD;'),
@@ -46,6 +47,8 @@ uint16_t gHubPort = 10000;
 int netPreps = 0, emojiClears = 0;
 void prepareNetworkMemory(const char*, bool) { ++netPreps; }
 void clearEmojiCache() { ++emojiClears; }
+int compactions = 0;
+bool compactMemoryForUi(const char*, bool) { ++compactions; return true; }
 uint32_t myAddress = 0;  // No address: nothing to try at home, so audio comes over HTTPS.
 uint32_t wifiLocalAddress() { return myAddress; }
 std::vector<std::string> logged;
@@ -197,8 +200,10 @@ int main() {
   render(); assert(shows("Paused") && showsPart("3:20 / 1:00:00"));
   // Back in the list it says how much is left; the library has it under Listening.
   podcastEscape(); assert(gPodView == PodView::Episodes); render(); assert(shows("57m left"));
-  podcastEscape(); assert(gPodView == PodView::Shows);
-  podcastEscape(); podcastEscape(); assert(gPodView == PodView::Library && gPodEntryCount == 1);
+  // The shows went back to the heap when it played, so the way back is Find, words kept.
+  assert(!gPodFound && compactions);
+  podcastEscape(); assert(gPodView == PodView::Find && gPodQuery == "history");
+  podcastEscape(); assert(gPodView == PodView::Library && gPodEntryCount == 1);
   render(); assert(shows("The Newest") && shows("57m left"));
   // And Enter there carries on from it.
   enter(); service(); assert(pp::streams == 4 && pp::from == 200 && gPodView == PodView::Player);
@@ -307,16 +312,39 @@ int main() {
   press('\b'); assert(gPodView == PodView::Remove); press('y');
   assert(gPodView == PodView::Library && !gPodEntryCount && !disk.count("/podcasts/files/111111111111.mp3") && lines(kSaved) == 0);
   // Only the last 20 places are kept, the latest first.
-  for (int i = 0; i < 25; ++i) { podcast::Entry e{}; snprintf(e.show, sizeof(e.show), "p%d", 100 + i); strcpy(e.episode, "abcdefabcdef"); e.at = 10; e.seconds = 100; podRemember(e); }
+  for (int i = 0; i < 25; ++i) { podcast::Entry e{}; snprintf(e.show, sizeof(e.show), "p%d", 100 + i); strcpy(e.episode, "abcdefabcdef"); e.at = 10; e.seconds = 1000; podRemember(e); }
   assert(lines(kProgress) == podcast::kMaxProgress && disk[kProgress].rfind("p124\t", 0) == 0);
 
-  // Leaving while it plays: it stops, keeps the place, and the screen opens only once it has.
+  // Leaving for Home while it plays: it plays on behind, Home shows it, and the lists go back to
+  // the heap. The place is still kept every 30 seconds.
   press('/'); press('/'); press('/');
   gPodTab = PodTab::Listening; podLoadTab(); gPodSel = 0; enter(); service(); assert(pp::playing()); pp::sound(77);
-  setUiMode(UiMode::Home); assert(gUiMode == UiMode::Podcasts && gRadioModePending && pp::cancelling && gPodNow.at == 77);
-  assert(disk[kProgress].find(std::string(gPodNow.show) + "\t" + gPodNow.episode + "\t77\t") == 0);
-  service(); assert(gUiMode == UiMode::Podcasts);
-  pp::finish(); service(); assert(gUiMode == UiMode::Home); service(); assert(!gPodEntries && !gPodFound && !gPodPage && !gPodFollowed);
+  setUiMode(UiMode::Home); assert(gUiMode == UiMode::Home && !gRadioModePending && pp::playing() && !pp::cancelling);
+  service(); assert(pp::playing() && podcastOn() && !gPodEntries && !gPodFound && !gPodFollowed && gPodBehindSinceMs);
+  assert(podcastHomeCardShows() && !radioHomeCardShows());
+  gCanvas.fillScreen(0); drawHomePodcastCard(); assert(shows("Ctrl+M pauses it") && showsPart(std::string(gPodNow.title).substr(0, 6)));
+  later(5000); pp::sound(50); gCanvas.fillScreen(0); drawHomePodcastCard(); assert(!showsPart("Ctrl+M"));  // The meter now.
+  later(31000); pp::sound(60); service(); assert(has(kProgress, std::string(gPodNow.episode) + "\t60\t"));
+  // Ctrl+M pauses it there, keeping the place, and plays it again from it.
+  assert(podcastMusicKey() && !podcastOn() && pp::cancelling); pp::finish(); service();
+  assert(has(kProgress, std::string(gPodNow.episode) + "\t60\t") && !podcastHomeCardShows());
+  assert(podcastMusicKey() && podcastOn()); service(); assert(pp::playing() && pp::from == 60); pp::sound(65);
+  // Stopping by itself behind Home: Home says why for a while.
+  pp::finish(Error::Connect); service();
+  assert(!podcastOn() && podcastHomeCardShows() && gPodBehindNote == "Couldn't reach the bridge");
+  gCanvas.fillScreen(0); drawHomePodcastCard(); assert(shows("Stopped") && showsPart("Couldn't reach"));
+  later(9000); assert(!podcastHomeCardShows());
+  // A podcast played last, so Ctrl+M is for it; once the radio has played, it's the radio's.
+  assert(podcastMusicKey()); service(); assert(pp::playing()); pp::sound(70);
+  // A screen it can't play behind stops it, keeping the place, and opens once it has.
+  setUiMode(UiMode::Voice); assert(gUiMode == UiMode::Home && gRadioModePending && pp::cancelling && gPodNow.at == 70);
+  service(); assert(gUiMode == UiMode::Home);
+  pp::finish(); service(); assert(gUiMode == UiMode::Voice); service(); assert(!gPodEntries && !gPodFound && !gPodPage && !gPodFollowed);
+  // Opening Podcasts while it plays behind shows the player.
+  gUiMode = UiMode::Home; assert(podcastMusicKey()); service(); assert(pp::playing()); pp::sound(71);
+  setUiMode(UiMode::Podcasts); assert(gPodView == PodView::Player && pp::playing());
+  assert(podcastMusicKey() && !podcastOn()); pp::finish(); service();
+  gUiMode = UiMode::Voice; service(); gUiMode = UiMode::Home; service();
   // Back again, it opens on Listening with that episode first. Esc from the library leaves.
   setUiMode(UiMode::Podcasts); assert(gPodView == PodView::Library && gPodEntryCount && std::string(gPodEntries[0].episode) == gPodNow.episode);
   assert(!podcastEscape());

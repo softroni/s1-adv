@@ -146,7 +146,8 @@ bool deferInternetRadioMode(UiMode mode) {
   // Each player may keep going on its own screen, but never into the other's. The radio's
   // stream also plays on behind the light screens; anything else the radio's doing stops.
   const bool keeps = (mode == UiMode::Radio && !podcast_player::busy()) || (mode == UiMode::Podcasts && !internet_radio::busy()) ||
-                     (radioMayPlayIn(mode) && radioOn() && !podcast_player::busy());
+                     (radioMayPlayIn(mode) && radioOn() && !podcast_player::busy()) ||
+                     (podcastMayPlayIn(mode) && podcastOn() && !internet_radio::busy());
   if (!radioBusy() || keeps) return false;
   const bool podcast = podcast_player::busy();
   stopInternetRadio(); gRadioModePending = true; gRadioNextMode = mode;
@@ -1053,7 +1054,8 @@ bool radioMusicKey() {
 }
 // Esc past the radio's own views with a player busy: true when it stops, as it always did. The
 // radio's stream instead plays on at Home, where Esc goes.
-bool radioStopsOnEscape() { return radioBusy() && (!radioOn() || podcast_player::busy()); }
+// A podcast playing goes on at Home too.
+bool radioStopsOnEscape() { return radioBusy() && !(radioOn() && !podcast_player::busy()) && !podcastOn(); }
 
 // --- Drawing ------------------------------------------------------------------------------
 // Font2 has ASCII only. A name or song in another script needs the font with its letters,

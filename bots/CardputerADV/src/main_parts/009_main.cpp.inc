@@ -275,7 +275,7 @@ void serviceIdleScreensaver() {
   // A player keeps its screen, or the radio the one it plays behind: the saver would take it
   // and stop the music. So the screen dims when the saver would start, and goes off when it would
   // have, and a key brings it back as it was.
-  if (!gScreensaverActive && (radioBusy() || radioOn())) {
+  if (!gScreensaverActive && (radioBusy() || radioOn() || podcastOn())) {
     const uint32_t offAfterMs = (gDeviceSettings.screensaverEnabled ? saverTimeoutMs : 0) + offTimeoutMs;
     if (gDeviceSettings.screensaverEnabled && !gScreensaverDimmed && !gScreenOffActive && idleMs >= saverTimeoutMs) {
       gScreensaverPreviousMode = gUiMode;

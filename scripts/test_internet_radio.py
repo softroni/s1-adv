@@ -6,7 +6,7 @@ from pathlib import Path
 import os, subprocess, tempfile
 root=Path(__file__).resolve().parents[1];src=root/'bots/CardputerADV/src';parts=src/'main_parts'
 app=(parts/'070_main.cpp.inc').read_text()
-for f,s in [('004_main.cpp.inc','{"Internet Radio", UiMode::Radio}'),('024_main.cpp.inc','if (deferInternetRadioMode(mode)) return;'),('033_main.cpp.inc','if (radioBusy())'),('042_main.cpp.inc','if (radioBusy())'),('017_main.cpp.inc','if (radioBusy())'),('022_main.cpp.inc','if (radioBusy())'),('010_main.cpp.inc','gInboxHttpBusy || radioBusy()'),('063_main.cpp.inc','if (radioBusy() || radioOn()) return false;'),('061_main.cpp.inc','serviceInternetRadio();'),('048_main.cpp.inc','handleInternetRadioKey(key, keys)')]:
+for f,s in [('004_main.cpp.inc','{"Internet Radio", UiMode::Radio}'),('024_main.cpp.inc','if (deferInternetRadioMode(mode)) return;'),('033_main.cpp.inc','if (radioBusy())'),('042_main.cpp.inc','if (radioBusy())'),('017_main.cpp.inc','if (radioBusy())'),('022_main.cpp.inc','if (radioBusy())'),('010_main.cpp.inc','gInboxHttpBusy || radioBusy()'),('063_main.cpp.inc','if (radioBusy() || radioOn() || podcastOn()) return false;'),('061_main.cpp.inc','serviceInternetRadio();'),('048_main.cpp.inc','handleInternetRadioKey(key, keys)')]:
  assert s in (parts/f).read_text(),(f,s)
 loop=(parts/'061_main.cpp.inc').read_text().split('void loop() {',1)[1]
 assert loop.index('if (radioBusy())')<loop.index('serviceVoiceReplySpeech')
@@ -22,15 +22,15 @@ escape=(parts/'047_main.cpp.inc').read_text()
 assert escape.index('gUiMode == UiMode::Radio && !gLauncherVisible && radioEscape()')<escape.index('if (radioStopsOnEscape()) { stopInternetRadio(); setUiMode(UiMode::Home); return true; }')
 # An alarm stops the radio playing behind its screen, and lights a screen dimmed for it.
 alarm=escape.split('void triggerAlarm(',1)[1].split('\n}\n',1)[0]
-assert alarm.index('if (radioBusy() || radioOn()) stopInternetRadio();')<alarm.index('gAlarmRinging = true;')<alarm.index('setUiMode(UiMode::Alarm);')
+assert alarm.index('if (radioBusy() || radioOn() || podcastOn()) stopInternetRadio();')<alarm.index('gAlarmRinging = true;')<alarm.index('setUiMode(UiMode::Alarm);')
 assert alarm.index('gScreensaverDimmed = gScreenOffActive = false;')<alarm.index('gAlarmRinging = true;')
 # Ctrl+M goes ahead of the text boxes, which take every other key.
-assert typing.index("if (keys.ctrl && lowerKey == 'm' && !keys.alt && !keys.fn && radioMusicKey()) return;")<typing.index('if (wifiSettingsTakesAllKeys()')
+assert typing.index("if (keys.ctrl && lowerKey == 'm' && !keys.alt && !keys.fn && (podcastMusicKey() || radioMusicKey())) return;")<typing.index('if (wifiSettingsTakesAllKeys()')
 # The player branch of the loop lets the screen dim; Home draws the card in place of its bars.
 assert 'serviceAlarm(); serviceIdleScreensaver();' in loop[loop.index('if (radioBusy())'):loop.index('servicePocketSynth();')]
 home=(parts/'059_main.cpp.inc').read_text()
 assert home.index('radioHomeCardShows()')<home.index('homeFirmwareUpdateAvailable() && !gOtaManifest.notes.isEmpty()')
-assert 'if (radioBusy() || radioOn()) return false;' in (parts/'063_main.cpp.inc').read_text()
+assert 'if (radioBusy() || radioOn() || podcastOn()) return false;' in (parts/'063_main.cpp.inc').read_text()
 # A message typed on Home while the radio plays waits for it to stop before it's sent.
 send=(parts/'037_main.cpp.inc').read_text().split('void maybeStartNextTextTurn() {',1)[1]
 assert send.index('if (radioBusy()) return;')<send.index('new TextTurnTaskPayload()')
@@ -163,7 +163,7 @@ std::string fakeJpeg(int w,int h){std::string j="\xFF\xD8\xFF\xC0";const unsigne
 void setUiMode(UiMode);
 // The podcast player shares the speaker and the heap, so the radio waits for it too.
 namespace podcast_player{bool fakeBusy=false;bool busy(){return fakeBusy;}}
-int podcastStops=0;void stopPodcasts(){++podcastStops;}
+int podcastStops=0;void stopPodcasts(){++podcastStops;}bool podcastOn(){return false;}bool podcastMayPlayIn(UiMode){return false;}
 namespace internet_radio{
  bool running=false,cancelling=false,fail=false,searchJob=false;int starts=0,stops=0,searches=0;String url,query,country;bool byGenre=false;
  State phase=State::Idle;Error err=Error::None;uint32_t got=0;std::string song;std::vector<Found> results;size_t shown=0;
