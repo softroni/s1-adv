@@ -138,6 +138,27 @@ int main() {
     assert(at % kFrameBytes == 0 && at <= t * kBytesPerSecond && t * kBytesPerSecond - at < kFrameBytes);
   }
 
+  // The home-network ticket: the bridge's address on this device's network, or none.
+  HomeTicket t;
+  const char ticket[] = "ticket\t31890\t/podcasts/0123456789abcdef0123456789abcdef\nlan\t192.168.0.20\t22\nlan\t10.0.0.7\t24\n";
+  assert(parseTicket(ticket, sizeof(ticket) - 1, t) && !t.none && t.port == 31890 && t.count == 2);
+  assert(S(t.path) == "/podcasts/0123456789abcdef0123456789abcdef" && t.ip[0] == 0xC0A80014u && t.prefix[0] == 22);
+  assert(homeFor(t, 0xC0A8021Eu) == 0xC0A80014u);    // 192.168.2.30 is on 192.168.0.0/22.
+  assert(homeFor(t, 0x0A000063u) == 0x0A000007u);    // 10.0.0.99, on the second.
+  assert(!homeFor(t, 0xC0A80814u) && !homeFor(t, 0) && !homeFor(t, 0xC0A80014u));  // Another network, none, or itself.
+  assert(homeAudioPath(url, sizeof(url), t, 95) && S(url) == "/podcasts/0123456789abcdef0123456789abcdef?t=95");
+  assert(parseTicket("none\n", 5, t) && t.none && !homeFor(t, 0xC0A8021Eu) && !homeAudioPath(url, sizeof(url), t, 0));
+  assert(parseTicket("ticket\t31890\t/podcasts/0123456789abcdef0123456789abcdef\n", 55, t) && t.none);  // No address: none.
+  for (const char* bad : {"{\"error\":\"not_found\"}", "ticket\t0\t/podcasts/0123456789abcdef0123456789abcdef\nlan\t1.2.3.4\t24\n",
+                          "ticket\t80\t/elsewhere/0123456789abcdef0123456789abcdef\nlan\t1.2.3.4\t24\n", ""})
+    assert(!parseTicket(bad, strlen(bad), t) && t.none);
+  const char badLan[] = "ticket\t80\t/podcasts/0123456789abcdef0123456789abcdef\nlan\t300.1.1.1\t24\nlan\t1.2.3\t24\nlan\t1.2.3.4\t40\n";
+  assert(parseTicket(badLan, sizeof(badLan) - 1, t) && t.none && !t.count);
+  uint32_t ip = 0;
+  assert(parseIpv4("192.168.0.20", ip) && ip == 0xC0A80014u && !parseIpv4("192.168.4", ip) && !parseIpv4("1.2.3.4.5", ip) && !parseIpv4("01234.1.1.1", ip));
+  assert(ticketPath(url, sizeof(url), "p42", "111111111111") && S(url) == "/api/cardputer/podcasts/ticket?show=p42&ep=111111111111");
+  assert(!ticketPath(url, sizeof(url), "p42", "x"));
+
   // Times.
   char b[24];
   clock(b, sizeof(b), 42); assert(S(b) == "0:42");

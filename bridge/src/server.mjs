@@ -1,6 +1,6 @@
 import { REPLY_LANGUAGE_POLICY, requestedReplyLanguage } from "./reply-language.mjs";
 import { WeatherService, parseCoordinates, validPlace } from "./weather.mjs";
-import { PodcastError, PodcastService, showLines } from "./podcasts.mjs";
+import { LAN_PORT, PodcastError, PodcastService, lanHandler, showLines } from "./podcasts.mjs";
 import { startFirmwareJob, updateFirmwareJob, publicFirmwareJob, firmwareJobDeliveryUncertain } from "./firmware-job-status.mjs";
 import { firmwareCapability, firmwareWorkflowPaths } from "./firmware-automation.mjs";
 import { AGENT_STATES, WORK_KINDS, hasAgentStatusAccess, publishedAfterTask } from './agent-status.mjs';
@@ -6550,6 +6550,7 @@ async function main() {
       try {
         if (what === "search") lines(showLines(await runtime.podcasts.search(params.get("kind") || "podcast", params.get("q") || "")));
         else if (what === "episodes") lines(await runtime.podcasts.episodes(params.get("show") || "", params.get("from") || 0));
+        else if (what === "ticket") lines(runtime.podcasts.ticketLines(device.device_id, params.get("show") || "", params.get("ep") || ""));
         else if (what === "audio") await runtime.podcasts.audio(res, { device: device.device_id, show: params.get("show") || "",
           episode: params.get("ep") || "", seconds: params.get("t") || 0 });
         else json(res, 404, { error: "not_found" });
@@ -7826,6 +7827,21 @@ async function main() {
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => {
     void Promise.resolve(runtime.upstream.stop()).finally(() => process.exit(0));
   });
+
+  // Podcast audio for a Cardputer at home, over plain HTTP with a ticket from the HTTPS side.
+  // Set podcasts.lanPort to 0 to keep it closed; the device then streams over HTTPS.
+  const lanPort = config.podcasts?.lanPort === undefined ? LAN_PORT : Number(config.podcasts.lanPort);
+  if (Number.isInteger(lanPort) && lanPort > 0 && lanPort < 65536) {
+    const lan = createServer(lanHandler(runtime.podcasts));
+    lan.on("error", (error) => {
+      runtime.podcasts.lanPort = 0;
+      console.warn(`[podcasts] home network audio off: ${String(error.code || error.message || error).slice(0, 80)}`);
+    });
+    lan.listen(lanPort, "0.0.0.0", () => {
+      runtime.podcasts.lanPort = lanPort;
+      console.log(`[podcasts] home network audio on port ${lanPort}`);
+    });
+  }
 
   server.listen(config.server.port, config.server.host, () => {
     console.log(

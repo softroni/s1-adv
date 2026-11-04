@@ -5,8 +5,13 @@ and listen. The Cardputer remembers where you stopped, and can save episodes to 
 play with no Wi-Fi.
 
 This app needs the bridge. The bridge does the searching, reads each show's list of episodes,
-and passes the episode on as a small MP3 that the radio's player can play. The Cardputer talks
-to the bridge over HTTPS with its device token, the same as everything else it does there.
+and passes the episode on as a small MP3 that the radio's player can play. Searches and lists
+go over HTTPS with the device token, the same as everything else the Cardputer asks the bridge.
+
+At home, the sound itself comes straight from the bridge's computer over your Wi-Fi as plain
+HTTP, because the Cardputer hasn't the memory for an HTTPS connection and the MP3 decoder at
+once. Away from home it tries HTTPS, which may run out of memory, so save episodes to the card
+before you go. [How the sound gets there](#how-the-sound-gets-there) has the details.
 
 | What | Where it comes from |
 |---|---|
@@ -77,6 +82,9 @@ Several presses of `,` or `/` in a row add up, and the episode starts again from
 stop pressing. Streaming takes a few seconds to start, and some podcast hosts are slow, so the
 screen says **Asking the bridge...** for up to 20 seconds or so.
 
+On the right under the title it says where the sound is coming from: **card**, **home** for your
+home Wi-Fi, or **https** through the bridge's public address.
+
 The place is saved every 30 seconds while it plays, and whenever you pause, skip or leave. An
 episode counts as **done** within 45 seconds of its end. When a book's chapter or an old radio
 episode ends, the next one in the list starts by itself. A podcast stops at the end.
@@ -119,6 +127,24 @@ places remembered and nothing saved.
 
 ## How the sound gets there
 
+Before an episode plays or saves, the Cardputer asks the bridge over HTTPS for a ticket for it.
+The answer is a random 32-character ticket and the bridge computer's addresses on its home
+networks. If one is on the Cardputer's own Wi-Fi network, the audio comes from there:
+`http://<that address>:31890/podcasts/<ticket>?t=<second>`. Nothing else travels that way, not
+even the device token. The ticket is good for that episode for 12 hours, so pausing and skipping
+need no HTTPS. That door only answers home-network addresses (10.x, 172.16-31.x and 192.168.x) and
+only for tickets it gave out.
+
+If the address doesn't answer, as on another network with the same numbers, the Cardputer goes
+over HTTPS and stays on it on that network. If the bridge restarted and forgot the ticket, it
+asks for a new one. Set `"podcasts": { "lanPort": 0 }` in the bridge's config to keep the door
+closed; then everything goes over HTTPS.
+
+HTTPS needs two buffers of about 17 KB each. With the decoder that's about 80 KB at once, which
+the Cardputer may not have. When something runs short the screen says what and how much there
+was, like **No memory: TLS 61K/15K**: 61 KB free, the largest piece 15 KB. Saving over HTTPS needs
+much less than playing, so saving first is the way to listen away from home.
+
 The bridge runs `ffmpeg` to turn each episode into one format: MP3, one channel, 32 kHz and
 48 kbit/s. Every frame is the same 216 bytes, so the Cardputer can find any second in a saved file
 by arithmetic, and the bridge can start a stream from any second. It also means podcasts in AAC or
@@ -132,6 +158,7 @@ network. Nothing about what you search for or play is written to the bridge's lo
 
 ## Not yet
 
+- Streaming away from home when memory is short: save it at home first.
 - Listening while you use another screen.
 - Chapters, show notes and artwork.
 - Choosing the order of a podcast's episodes.

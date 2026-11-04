@@ -656,6 +656,7 @@ bool handleVlcRemoteKey(char key, const Keyboard_Class::KeysState& keys);
 void renderVlcRemoteUi();
 void stopInternetRadio();
 void stopPodcasts();
+uint32_t wifiLocalAddress();
 bool podcastTakesText();
 bool podcastTakesArrows();
 bool podcastEscape();

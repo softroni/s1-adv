@@ -177,7 +177,8 @@ Podcasts is under Tab, Media, and needs the bridge. It opens on three tabs, List
 Saved, and `,` and `/` move between them. F finds podcasts, free audiobooks or old-time radio, S
 follows a show or saves an episode to the SD card, and Enter plays, carrying on from where you
 stopped. While it plays, `,` and `/` go back 15 or ahead 30 seconds, and `;` and `.` go to the
-previous or next episode. [Podcasts](PODCASTS.md) has the details.
+previous or next episode. At home the sound comes straight over your Wi-Fi; away, save episodes
+first. [Podcasts](PODCASTS.md) has the details.
 
 ## NFC Notes
 

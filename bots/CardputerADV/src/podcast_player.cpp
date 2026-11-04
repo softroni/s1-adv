@@ -28,12 +28,11 @@ using internet_radio::detail::Headers;
 using namespace detail;
 namespace {
 constexpr uint8_t kChannel = 2;
-constexpr size_t kChunk = 4096;
-constexpr uint32_t kStreamStack = 24576, kTlsStack = 16384;
+constexpr size_t kChunk = 4096, kScratch = 1024;
 enum class Job : uint8_t { List, Stream, File, Save };
 std::atomic<State> current{State::Idle};
 std::atomic<Error> failure{Error::None};
-std::atomic<bool> owned{false}, cancel{false}, ended{false}, wholeSave{false};
+std::atomic<bool> owned{false}, cancel{false}, ended{false}, wholeSave{false}, home{false}, lastHome{false};
 std::atomic<Job> job{Job::List};
 std::atomic<uint32_t> fromSeconds{0}, played{0}, rate{podcast::kRate}, written{0}, answer{0};
 std::atomic<uint16_t> loudness{0};
@@ -43,6 +42,13 @@ char bridgeHost[128] = "", bridgeToken[192] = "";
 uint16_t bridgePort = 443;
 const char* bridgeCa = nullptr;
 char requested[512] = "", filePath[64] = "", partPath[64] = "";
+uint32_t homeIp = 0;
+uint16_t homePort = 0;
+char memNote[48] = "";
+void noteMemory(const char* what) {
+  snprintf(memNote, sizeof(memNote), "%s %uK/%uK", what, unsigned(ESP.getFreeHeap() / 1024),
+           unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024));
+}
 char* listData = nullptr;
 std::atomic<size_t> listLength{0};
 
@@ -54,9 +60,9 @@ void setState(State s) {
 
 // Buffered, bounded reads: no call here can wait longer than kIdleMs for a byte.
 struct Reader {
-  explicit Reader(WiFiClientSecure& client) : tls(client) {}
-  WiFiClientSecure& tls;
-  uint8_t buf[1024];
+  explicit Reader(WiFiClient& client) : tls(client) {}
+  WiFiClient& tls;  // A WiFiClientSecure over HTTPS, a plain one at home.
+  uint8_t buf[512];
   size_t pos = 0, count = 0;
   uint32_t last = millis(), idle = kIdleMs;
   bool ready() { return pos < count || tls.available() > 0; }
@@ -81,68 +87,87 @@ Error fromStatus(unsigned status) {
          status == 503 || status == 429 ? Error::Busy : status == 502 ? Error::Unavailable : Error::Http;
 }
 
-// Opens the bridge, asks for `requested` with the device's token, and leaves r at the start of
-// a 200 answer's body. Error::None with cancel set means it was stopped.
-Error openBridge(WiFiClientSecure& tls, Reader& r, Headers& h, bool text) {
-  if (!bridgeHost[0] || !bridgeCa) return Error::NoBridge;
+// Opens the bridge, over HTTPS with the token or at home with the ticket in the path, asks for
+// `requested`, and leaves r at the start of a 200 answer's body. Error::None with cancel set
+// means it was stopped. The request and header lines share one small buffer on the heap, so
+// this worker's stack can stay small.
+Error openBridge(WiFiClient& client, Reader& r, Headers& h, bool text) {
+  const bool atHome = home.load();
+  if (atHome ? !homeIp || !homePort : !bridgeHost[0] || !bridgeCa) return Error::NoBridge;
   setState(State::Connecting);
-  tls.setCACert(bridgeCa);
-  tls.setHandshakeTimeout(15);
-  if (!tls.connect(bridgeHost, bridgePort)) {
-    char detail[32] = {};
-    return tls.lastError(detail, sizeof(detail)) == MBEDTLS_ERR_SSL_ALLOC_FAILED ? Error::NoMemory : Error::Connect;
+  if (atHome) {
+    const IPAddress ip(uint8_t(homeIp >> 24), uint8_t(homeIp >> 16), uint8_t(homeIp >> 8), uint8_t(homeIp));
+    if (!client.connect(ip, homePort, 3000)) return Error::Connect;
+  } else {
+    auto& tls = static_cast<WiFiClientSecure&>(client);
+    tls.setCACert(bridgeCa);
+    tls.setHandshakeTimeout(15);
+    if (!tls.connect(bridgeHost, bridgePort)) {
+      char detail[32] = {};
+      if (tls.lastError(detail, sizeof(detail)) != MBEDTLS_ERR_SSL_ALLOC_FAILED) return Error::Connect;
+      noteMemory("TLS");
+      return Error::NoMemory;
+    }
   }
   if (cancel.load()) return Error::None;
+  auto* buf = static_cast<char*>(heap_caps_malloc(kScratch, MALLOC_CAP_8BIT));
+  if (!buf) { noteMemory("request"); return Error::NoMemory; }
   char host[140];
-  if (bridgePort == 443) snprintf(host, sizeof(host), "%s", bridgeHost);
+  if (atHome) snprintf(host, sizeof(host), "%u.%u.%u.%u:%u", unsigned(homeIp >> 24), unsigned((homeIp >> 16) & 255),
+                       unsigned((homeIp >> 8) & 255), unsigned(homeIp & 255), unsigned(homePort));
+  else if (bridgePort == 443) snprintf(host, sizeof(host), "%s", bridgeHost);
   else snprintf(host, sizeof(host), "%s:%u", bridgeHost, unsigned(bridgePort));
-  char request[1024];
-  const int n = snprintf(request, sizeof(request),
-    "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: S1-ADV-Podcasts/1\r\nAuthorization: Bearer %s\r\n"
-    "Accept: %s\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n",
-    requested, host, bridgeToken, text ? "text/plain" : "audio/mpeg");
-  if (n <= 0 || size_t(n) >= sizeof(request)) return Error::Malformed;
-  if (tls.write(reinterpret_cast<const uint8_t*>(request), size_t(n)) != size_t(n)) return Error::Connect;
+  int n = atHome ? snprintf(buf, kScratch, "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: S1-ADV-Podcasts/1\r\n"
+                            "Accept: audio/mpeg\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n", requested, host)
+                 : snprintf(buf, kScratch, "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: S1-ADV-Podcasts/1\r\nAuthorization: Bearer %s\r\n"
+                            "Accept: %s\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n",
+                            requested, host, bridgeToken, text ? "text/plain" : "audio/mpeg");
+  Error e = Error::None;
+  if (n <= 0 || size_t(n) >= kScratch) e = Error::Malformed;
+  else if (client.write(reinterpret_cast<const uint8_t*>(buf), size_t(n)) != size_t(n)) e = Error::Connect;
   h = Headers{};
   h.text = text;
   r.pos = r.count = 0;
   r.last = millis();
   r.idle = kHeaderMs;  // The bridge answers only once the show's site has sent sound.
-  char line[768];
   size_t len = 0;
   bool cr = false;
   const uint32_t began = millis();
-  while (!h.done && !cancel.load()) {
-    if (millis() - began > kHeaderMs) return Error::Timeout;
+  while (e == Error::None && !h.done && !cancel.load()) {
+    if (millis() - began > kHeaderMs) { e = Error::Timeout; break; }
     const int b = r.next();
-    if (b < 0) return b == -3 ? Error::None : b == -2 ? Error::Timeout : Error::Connect;
+    if (b < 0) { e = b == -3 ? Error::None : b == -2 ? Error::Timeout : Error::Connect; break; }
     if (cr) {
-      if (b != '\n') return Error::Malformed;
-      line[len] = 0;
-      const auto e = h.line(line);
+      if (b != '\n') { e = Error::Malformed; break; }
+      buf[len] = 0;
+      const auto got = h.line(buf);
       if (h.status) answer.store(h.status);
-      if (e == internet_radio::Error::Http || e == internet_radio::Error::Redirect) return fromStatus(h.status);
-      if (e != internet_radio::Error::None) return Error::Malformed;
+      if (got == internet_radio::Error::Http || got == internet_radio::Error::Redirect) { e = fromStatus(h.status); break; }
+      if (got != internet_radio::Error::None) { e = Error::Malformed; break; }
       len = 0;
       cr = false;
     } else if (b == '\r') cr = true;
     else {
-      if (b == '\n' || b == 0 || len >= sizeof(line) - 1) return Error::Malformed;
-      line[len++] = char(b);
+      if (b == '\n' || b == 0 || len >= 767) { e = Error::Malformed; break; }
+      buf[len++] = char(b);
     }
   }
+  free(buf);
   r.idle = kIdleMs;
-  return Error::None;
+  return e;
 }
 
-Error list(WiFiClientSecure& tls) {
-  Reader r(tls);
+Error list(WiFiClient& client) {
+  Reader r(client);
   Headers h;
-  Error e = openBridge(tls, r, h, true);
+  Error e = openBridge(client, r, h, true);
   if (e != Error::None || cancel.load()) return e;
   setState(State::Buffering);
-  auto* data = static_cast<char*>(heap_caps_malloc(kListBytes + 1, MALLOC_CAP_8BIT));
-  if (!data) return Error::NoMemory;
+  // As big as the answer says, which is usually a couple of KB; grown as it comes if it didn't.
+  if (h.hasLength && h.length > kListBytes) return Error::TooBig;
+  size_t room = h.hasLength ? size_t(h.length) : 2048;
+  auto* data = static_cast<char*>(heap_caps_malloc(room + 1, MALLOC_CAP_8BIT));
+  if (!data) { noteMemory("list"); return Error::NoMemory; }
   Body body(h);
   size_t n = 0;
   while (!cancel.load() && !body.done()) {
@@ -157,6 +182,13 @@ Error list(WiFiClientSecure& tls) {
     if (kind < 0) { e = Error::Malformed; break; }
     if (kind == 1) {
       if (n >= kListBytes) { e = Error::TooBig; break; }
+      if (n >= room) {
+        const size_t more = room * 2 > kListBytes ? kListBytes : room * 2;
+        auto* bigger = static_cast<char*>(realloc(data, more + 1));
+        if (!bigger) { noteMemory("list"); e = Error::NoMemory; break; }
+        data = bigger;
+        room = more;
+      }
       data[n++] = char(b);
     }
   }
@@ -212,12 +244,15 @@ struct FileSource : Source {
 struct Decoder {
   mp3dec_t* dec = nullptr;
   uint8_t* input = nullptr;
+  size_t size = 0;
   int16_t* pcm[2] = {nullptr, nullptr};
-  bool alloc() {
+  bool alloc(size_t inputBytes) {
+    size = inputBytes;
     dec = static_cast<mp3dec_t*>(heap_caps_malloc(sizeof(mp3dec_t), MALLOC_CAP_8BIT));
-    input = static_cast<uint8_t*>(heap_caps_malloc(kInput, MALLOC_CAP_8BIT));
-    for (auto*& slot : pcm) slot = static_cast<int16_t*>(heap_caps_malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(int16_t), MALLOC_CAP_8BIT));
-    return dec && input && pcm[0] && pcm[1];
+    input = static_cast<uint8_t*>(heap_caps_malloc(size, MALLOC_CAP_8BIT));
+    for (auto*& slot : pcm) slot = static_cast<int16_t*>(heap_caps_malloc(kSlotSamples * sizeof(int16_t), MALLOC_CAP_8BIT));
+    if (!dec || !input || !pcm[0] || !pcm[1]) { noteMemory("player"); return false; }
+    return true;
   }
   void release() { free(pcm[1]); free(pcm[0]); free(input); free(dec); *this = Decoder{}; }
 };
@@ -239,15 +274,15 @@ Error play(Source& src, Decoder& d) {
       vTaskDelay(pdMS_TO_TICKS(2));
     }
     if (cancel.load()) break;
-    if (!atEnd && used < kInput) {
-      const int got = src.fill(d.input + used, kInput - used, sounded ? used < kLowWater : used < kInput);
+    if (!atEnd && used < d.size) {
+      const int got = src.fill(d.input + used, d.size - used, sounded ? used < kLowWater : used < d.size);
       if (got == kEnd) atEnd = true;
       else if (got < 0) return Error(-got);
       else used += size_t(got);
     }
     if (cancel.load()) break;
     // A second's cushion before the first sound, so a slow start doesn't stutter.
-    if (!sounded && !atEnd && used < kInput) continue;
+    if (!sounded && !atEnd && used < d.size) continue;
     if (!used) {
       if (atEnd) {
         if (!sounded) return Error::Decode;  // It ended with never a frame in it.
@@ -258,7 +293,10 @@ Error play(Source& src, Decoder& d) {
       continue;
     }
     mp3dec_frame_info_t info{};
-    const int samples = mp3dec_decode_frame(d.dec, d.input, int(used), d.pcm[slot], &info);
+    // A look at the frame's header first: one that wouldn't fit a slot is never decoded into it.
+    const int coming = mp3dec_decode_frame(d.dec, d.input, int(used), nullptr, &info);
+    if (coming > 0 && size_t(coming) * size_t(info.channels) > kSlotSamples) return Error::Decode;
+    const int samples = coming > 0 ? mp3dec_decode_frame(d.dec, d.input, int(used), d.pcm[slot], &info) : 0;
     if (info.frame_bytes < 0 || size_t(info.frame_bytes) > used) return Error::Decode;
     if (samples > 0) {
       if (info.layer != 3 || (info.channels != 1 && info.channels != 2) || info.hz < 8000 || info.hz > 48000 || samples > 1152) return Error::Decode;
@@ -276,7 +314,7 @@ Error play(Source& src, Decoder& d) {
       setState(State::Playing);
     }
     size_t consumed = size_t(info.frame_bytes);
-    if (!consumed && used == kInput) consumed = used - 2048;  // No frame in a full buffer: skip most of it.
+    if (!consumed && used == d.size) consumed = used - 2048;  // No frame in a full buffer: skip most of it.
     if (!samples) junk += unsigned(consumed);
     if (consumed) { used -= consumed; memmove(d.input, d.input + consumed, used); }
     if (junk > 65536 || millis() - lastFrame > kIdleMs + 5000) return Error::Decode;
@@ -290,13 +328,13 @@ Error play(Source& src, Decoder& d) {
   return Error::None;
 }
 
-Error stream(WiFiClientSecure& tls, Decoder& d) {
-  Reader r(tls);
+Error stream(WiFiClient& client, Decoder& d) {
+  Reader r(client);
   Headers h;
-  const Error e = openBridge(tls, r, h, false);
+  const Error e = openBridge(client, r, h, false);
   if (e != Error::None || cancel.load()) return e;
   // Only once the bridge has answered: TLS's buffers came first, so they get the room.
-  if (!d.alloc()) return Error::NoMemory;
+  if (!d.alloc(home.load() ? kInput : kInputTls)) return Error::NoMemory;
   NetSource src(r, h);
   return play(src, d);
 }
@@ -307,20 +345,20 @@ Error playFile(Decoder& d) {
   const uint32_t size = uint32_t(f.size()), offset = podcast::fileOffset(fromSeconds.load());
   if (offset >= size) { f.close(); ended.store(true); return Error::None; }
   if (offset && !f.seek(offset)) { f.close(); return Error::Card; }
-  if (!d.alloc()) { f.close(); return Error::NoMemory; }
+  if (!d.alloc(kInput)) { f.close(); return Error::NoMemory; }
   FileSource src(f);
   const Error e = play(src, d);
   f.close();
   return e;
 }
 
-Error save(WiFiClientSecure& tls) {
-  Reader r(tls);
+Error save(WiFiClient& client) {
+  Reader r(client);
   Headers h;
-  Error e = openBridge(tls, r, h, false);
+  Error e = openBridge(client, r, h, false);
   if (e != Error::None || cancel.load()) return e;
   auto* chunk = static_cast<uint8_t*>(heap_caps_malloc(kChunk, MALLOC_CAP_8BIT));
-  if (!chunk) return Error::NoMemory;
+  if (!chunk) { noteMemory("save"); return Error::NoMemory; }
   SD.remove(partPath);
   File f = SD.open(partPath, FILE_WRITE);
   if (!f) { free(chunk); return Error::Card; }
@@ -365,12 +403,12 @@ void worker(void*) {
   Decoder d;
   if (kind == Job::File) e = playFile(d);
   else {
-    auto* tls = new (std::nothrow) WiFiClientSecure();
-    if (!tls) e = Error::NoMemory;
+    WiFiClient* client = home.load() ? new (std::nothrow) WiFiClient() : new (std::nothrow) WiFiClientSecure();
+    if (!client) { noteMemory("client"); e = Error::NoMemory; }
     else {
-      e = kind == Job::List ? list(*tls) : kind == Job::Save ? save(*tls) : stream(*tls, d);
-      tls->stop();
-      delete tls;
+      e = kind == Job::List ? list(*client) : kind == Job::Save ? save(*client) : stream(*client, d);
+      client->stop();
+      delete client;
     }
   }
   current.store(State::Stopping);
@@ -393,14 +431,17 @@ void refuse(Error e) {
   portEXIT_CRITICAL(&gate);
 }
 
-bool begin(Job kind, uint32_t from) {
-  const uint32_t stack = kind == Job::Stream || kind == Job::File ? kStreamStack : kTlsStack;
-  if (ESP.getFreeHeap() < 49152 || heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < stack) { refuse(Error::NoMemory); return false; }
+bool begin(Job kind, uint32_t from, bool atHome) {
+  const uint32_t stack = kind == Job::Stream || kind == Job::File ? kPlayStack : kNetStack;
+  if (heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < stack) { noteMemory("worker"); refuse(Error::NoMemory); return false; }
   if (kind == Job::List) clearList();
   portENTER_CRITICAL(&gate);
   if (owned.load()) { portEXIT_CRITICAL(&gate); return false; }
   owned.store(true);
   cancel.store(false);
+  home.store(atHome);
+  if (kind == Job::Stream || kind == Job::File) lastHome.store(atHome);
+  memNote[0] = 0;
   failure.store(Error::None);
   answer.store(0);
   job.store(kind);
@@ -435,24 +476,41 @@ void setBridge(const char* host, uint16_t port, const char* token, const char* r
 bool startList(const char* path) {
   if (owned.load()) return false;
   if (!copyPath(requested, sizeof(requested), path)) { refuse(Error::Malformed); return false; }
-  return begin(Job::List, 0);
+  return begin(Job::List, 0, false);
 }
 bool startStream(const char* path, uint32_t from) {
   if (owned.load()) return false;
   if (!copyPath(requested, sizeof(requested), path)) { refuse(Error::Malformed); return false; }
-  return begin(Job::Stream, from);
+  return begin(Job::Stream, from, false);
+}
+bool startStreamHome(uint32_t ip, uint16_t port, const char* path, uint32_t from) {
+  if (owned.load()) return false;
+  if (!ip || !port || !copyPath(requested, sizeof(requested), path)) { refuse(Error::Malformed); return false; }
+  homeIp = ip;
+  homePort = port;
+  return begin(Job::Stream, from, true);
 }
 bool startFile(const char* sdPath, uint32_t from) {
   if (owned.load()) return false;
   if (!copyPath(filePath, sizeof(filePath), sdPath)) { refuse(Error::Card); return false; }
-  return begin(Job::File, from);
+  return begin(Job::File, from, false);
 }
 bool startSave(const char* path, const char* part, const char* sdPath, uint32_t) {
   if (owned.load()) return false;
   if (!copyPath(requested, sizeof(requested), path)) { refuse(Error::Malformed); return false; }
   if (!copyPath(partPath, sizeof(partPath), part) || !copyPath(filePath, sizeof(filePath), sdPath)) { refuse(Error::Card); return false; }
-  return begin(Job::Save, 0);
+  return begin(Job::Save, 0, false);
 }
+bool startSaveHome(uint32_t ip, uint16_t port, const char* path, const char* part, const char* sdPath, uint32_t) {
+  if (owned.load()) return false;
+  if (!ip || !port || !copyPath(requested, sizeof(requested), path)) { refuse(Error::Malformed); return false; }
+  if (!copyPath(partPath, sizeof(partPath), part) || !copyPath(filePath, sizeof(filePath), sdPath)) { refuse(Error::Card); return false; }
+  homeIp = ip;
+  homePort = port;
+  return begin(Job::Save, 0, true);
+}
+const char* memoryNote() { return owned.load() ? "" : memNote; }
+bool overHome() { return lastHome.load(); }
 void stop() {
   portENTER_CRITICAL(&gate);
   if (owned.load()) { cancel.store(true); current.store(State::Stopping); }

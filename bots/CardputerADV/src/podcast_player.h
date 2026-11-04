@@ -7,8 +7,9 @@
 //   Stream  plays an episode as the bridge sends it, from any second.
 //   File    plays an episode saved on the SD card, from any second, with no network.
 //   Save    writes an episode to the SD card as the bridge sends it.
-// The bridge is reached over HTTPS with the device's token, the same as everything else it
-// does, since an episode's own address is HTTPS too and the bridge has to fetch it anyway.
+// Lists, and audio away from home, come from the bridge over HTTPS with the device's token.
+// At home, audio comes straight from the bridge's computer over plain HTTP, with a ticket the
+// HTTPS side gave out: TLS's two 17 KB buffers and the decoder don't fit in memory together.
 // Audio decodes with the radio's MP3 decoder on its own speaker channel, 2.
 namespace podcast_player {
 enum class State : uint8_t { Idle, Connecting, Buffering, Playing, Saving, Stopping, Error };
@@ -21,14 +22,21 @@ void setBridge(const char* host, uint16_t port, const char* token, const char* r
 
 bool startList(const char* path);
 bool startStream(const char* path, uint32_t fromSeconds);
+// The same over the home network: ip is the bridge's computer, host order, and path holds
+// the ticket. No token goes this way.
+bool startStreamHome(uint32_t ip, uint16_t port, const char* path, uint32_t fromSeconds);
 bool startFile(const char* sdPath, uint32_t fromSeconds);
 // expectBytes is only for showing progress: the bridge's answer has no length.
 bool startSave(const char* path, const char* partPath, const char* sdPath, uint32_t expectBytes);
+bool startSaveHome(uint32_t ip, uint16_t port, const char* path, const char* partPath, const char* sdPath, uint32_t expectBytes);
 void stop();      // Cancels; poll busy() before starting the next job.
 bool busy();
 State state();
 Error error();
 const char* errorText();  // A short line for the screen, or nullptr.
+// After NoMemory: what ran short, then the memory free and its largest piece, like "TLS 61K/15K".
+const char* memoryNote();
+bool overHome();          // The last audio job came over the home network.
 unsigned httpStatus();    // The bridge's answer to the last job, 0 before it answered.
 bool playing();           // A Stream or File job is under way.
 bool saving();            // A Save job is under way.
@@ -48,9 +56,16 @@ bool saveDone();          // The last Save job wrote the whole episode.
 uint16_t level();         // As the radio's: the latest frame's loudness, 0 to 32767.
 
 namespace detail {
-// How many bytes to fill before decoding: wait for the network only when less than this is
-// waiting, so a short stall plays from what's held rather than going quiet.
-constexpr size_t kInput = 6144, kLowWater = 1024;
+// The compressed audio held: about 1.4 seconds at home or from the card, 0.7 over HTTPS, where
+// memory is short. Wait for the network only when less than kLowWater is held, so a short
+// stall plays from what's held rather than going quiet.
+constexpr size_t kInput = 8192, kInputTls = 4096, kLowWater = 1024;
+// One decoded frame, as the bridge sends them: 1152 mono samples. A frame that would need
+// more is refused before it's decoded, so the slots can be half the decoder's largest.
+constexpr size_t kSlotSamples = 1152;
+// A list or a save needs no decoder, so its worker's stack is near the 8 KB the device's other
+// HTTPS requests use. A player's holds the decoder's 16 KB of scratch.
+constexpr uint32_t kNetStack = 10240, kPlayStack = 24576;
 // The bridge can take a while to start: some podcast hosts take 20 seconds to send sound.
 constexpr uint32_t kHeaderMs = 40000, kIdleMs = 25000;
 constexpr size_t kListBytes = 12288;

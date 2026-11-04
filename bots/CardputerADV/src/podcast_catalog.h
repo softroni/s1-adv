@@ -303,6 +303,79 @@ inline bool filePath(char* out, size_t room, const char* episode, bool partial =
   const int len = snprintf(out, room, "/podcasts/files/%s.%s", episode, partial ? "part" : "mp3");
   return len > 0 && size_t(len) < room;
 }
+// The ticket for an episode over the home network, as the bridge answers:
+//   ticket <port> /podcasts/<32 hex>
+//   lan <ip> <prefix>        one for each of the bridge computer's home addresses
+// or "none" when it has no home network open. The device picks the address on its own network.
+struct HomeTicket {
+  char path[48] = "";
+  uint16_t port = 0;
+  uint8_t count = 0;
+  uint32_t ip[4] = {};
+  uint8_t prefix[4] = {};
+  bool none = true;
+};
+inline bool parseIpv4(const char* s, uint32_t& out) {
+  uint32_t value = 0;
+  for (int part = 0; part < 4; ++part) {
+    if (*s < '0' || *s > '9') return false;
+    uint32_t n = 0;
+    int digits = 0;
+    while (*s >= '0' && *s <= '9') { n = n * 10 + uint32_t(*s++ - '0'); if (++digits > 3 || n > 255) return false; }
+    value = (value << 8) | n;
+    if (part < 3 && *s++ != '.') return false;
+  }
+  if (*s) return false;
+  out = value;
+  return true;
+}
+inline bool ticketPathValid(const char* path) {
+  static const char kStart[] = "/podcasts/";
+  if (strncmp(path, kStart, sizeof(kStart) - 1)) return false;
+  const char* id = path + sizeof(kStart) - 1;
+  size_t n = 0;
+  for (; id[n]; ++n) if (n >= 32 || !((id[n] >= '0' && id[n] <= '9') || (id[n] >= 'a' && id[n] <= 'f'))) return false;
+  return n == 32;
+}
+// False when the answer isn't a ticket at all, so an old bridge reads as having none.
+inline bool parseTicket(const char* text, size_t len, HomeTicket& out) {
+  out = HomeTicket{};
+  bool none = false, ticket = false, bad = false;
+  eachLine(text, len, [&](char* line, size_t) {
+    char* f[3];
+    const size_t n = splitFields(line, f, 3);
+    uint32_t number = 0, ip = 0;
+    if (n == 1 && !strcmp(f[0], "none")) none = true;
+    else if (n == 3 && !strcmp(f[0], "ticket") && readNumber(f[1], number, 65535) && number && ticketPathValid(f[2]) && strlen(f[2]) < sizeof(out.path)) {
+      out.port = uint16_t(number); strcpy(out.path, f[2]); ticket = true;
+    } else if (n == 3 && !strcmp(f[0], "lan") && parseIpv4(f[1], ip) && readNumber(f[2], number, 30) && number >= 8) {
+      if (out.count < 4) { out.ip[out.count] = ip; out.prefix[out.count] = uint8_t(number); ++out.count; }
+    } else bad = true;
+  });
+  if (bad && !ticket) return false;
+  out.none = none || !ticket || !out.count;
+  return none || ticket;
+}
+// The bridge's address on the same network as `mine`, or 0 when none is.
+inline uint32_t homeFor(const HomeTicket& t, uint32_t mine) {
+  if (t.none || !mine) return 0;
+  for (uint8_t i = 0; i < t.count; ++i) {
+    const uint32_t mask = t.prefix[i] >= 32 ? 0xFFFFFFFFu : ~(0xFFFFFFFFu >> t.prefix[i]);
+    if ((t.ip[i] & mask) == (mine & mask) && t.ip[i] != mine) return t.ip[i];
+  }
+  return 0;
+}
+inline bool ticketPath(char* out, size_t room, const char* show, const char* episode) {
+  if (!showIdValid(show) || !episodeIdValid(episode)) return false;
+  const int len = snprintf(out, room, "/api/cardputer/podcasts/ticket?show=%s&ep=%s", show, episode);
+  return len > 0 && size_t(len) < room;
+}
+inline bool homeAudioPath(char* out, size_t room, const HomeTicket& t, uint32_t seconds) {
+  if (t.none || !ticketPathValid(t.path)) return false;
+  const int len = snprintf(out, room, "%s?t=%lu", t.path, static_cast<unsigned long>(seconds));
+  return len > 0 && size_t(len) < room;
+}
+
 // Where a second starts in a saved file: a whole frame, since the bridge's are all one size.
 inline uint32_t fileOffset(uint32_t seconds) {
   const uint64_t frame = uint64_t(seconds) * kRate / kFrameSamples;

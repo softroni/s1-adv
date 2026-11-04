@@ -29,7 +29,8 @@ uint32_t millis() { return clockMs; }
 constexpr int MALLOC_CAP_8BIT = 1;
 int allocateAfter = -1;  // Fail the nth allocation from now, or never.
 void* heap_caps_malloc(size_t n, int) { if (allocateAfter == 0) { allocateAfter = -1; return nullptr; } if (allocateAfter > 0) --allocateAfter; return malloc(n); }
-size_t heap_caps_get_largest_free_block(int) { return 100000; }
+size_t largestBlock = 100000;
+size_t heap_caps_get_largest_free_block(int) { return largestBlock; }
 struct { int getFreeHeap() { return 150000; } } ESP;
 using portMUX_TYPE = int;
 #define portMUX_INITIALIZER_UNLOCKED 0
@@ -41,7 +42,7 @@ bool createFails = false;
 uint32_t lastStack = 0;
 void (*scheduled)(void*) = nullptr;
 int xTaskCreate(void (*f)(void*), const char*, uint32_t n, void*, int, void*) {
-  assert(n == 24576 || n == 16384); lastStack = n;
+  assert(n == 24576 || n == 10240); lastStack = n;
   if (createFails) return 0;
   assert(!scheduled); scheduled = f; return pdPASS;
 }
@@ -54,34 +55,45 @@ size_t stallAt = SIZE_MAX; uint32_t stallMs = 0, stallUntil = 0; bool stalled = 
 bool connectFails = false, tlsNoMemory = false;
 std::function<void()> readHook;
 size_t firstSoundAt = 0;  // How much of the reply had been read when the first frame was queued.
-struct WiFiClientSecure;
-WiFiClientSecure* lastTls = nullptr;
-struct WiFiClientSecure {
-  WiFiClientSecure() { lastTls = this; }
-  ~WiFiClientSecure() { if (lastTls == this) lastTls = nullptr; }
-  size_t pos = 0; bool open = false; const char* ca = nullptr;
-  void setCACert(const char* c) { ca = c; }
-  void setHandshakeTimeout(unsigned long) {}
-  int connect(const char* host, uint16_t port) {
-    assert(ca && std::string(ca) == "ROOT CA" && std::string(host) == "bridge.example" && port == 10000);
-    pos = 0; stalled = false; open = !connectFails && !tlsNoMemory; return open;
+struct IPAddress { uint8_t a[4]; IPAddress(uint8_t w, uint8_t x, uint8_t y, uint8_t z) : a{w, x, y, z} {} };
+std::string lastConnect;
+struct WiFiClient;
+WiFiClient* lastTls = nullptr;
+// A plain connection, as at home, and an HTTPS one built on it, as the real classes are.
+struct WiFiClient {
+  WiFiClient() { lastTls = this; }
+  virtual ~WiFiClient() { if (lastTls == this) lastTls = nullptr; }
+  size_t pos = 0; bool open = false;
+  int connect(IPAddress ip, uint16_t port, int32_t timeout) {
+    char b[40]; snprintf(b, sizeof(b), "%u.%u.%u.%u:%u", ip.a[0], ip.a[1], ip.a[2], ip.a[3], unsigned(port)); lastConnect = b;
+    assert(timeout == 3000); pos = 0; stalled = false; open = !connectFails; return open;
   }
-  int lastError(char*, size_t) { return tlsNoMemory ? MBEDTLS_ERR_SSL_ALLOC_FAILED : -1; }
   size_t write(const uint8_t* p, size_t n) { request.assign((const char*)p, n); return n; }
   size_t limit() {
     if (pos < stallAt) return stallAt;
     if (!stalled) { stalled = true; stallUntil = clockMs + stallMs; }
     return clockMs >= stallUntil ? reply.size() : stallAt;
   }
-  int available() { return open ? int(std::min(reply.size(), limit()) - pos) : 0; }
-  uint8_t connected() { return open && pos < reply.size(); }
-  int read(uint8_t* p, size_t n) {
+  virtual int available() { return open ? int(std::min(reply.size(), limit()) - pos) : 0; }
+  virtual uint8_t connected() { return open && pos < reply.size(); }
+  virtual int read(uint8_t* p, size_t n) {
     n = std::min(n, std::min(reply.size(), limit()) - pos); memcpy(p, reply.data() + pos, n); pos += n;
     if (readHook) readHook();
     return int(n);
   }
-  void stop() { open = false; }
+  virtual void stop() { open = false; }
 };
+struct WiFiClientSecure : WiFiClient {
+  const char* ca = nullptr;
+  void setCACert(const char* c) { ca = c; }
+  void setHandshakeTimeout(unsigned long) {}
+  int connect(const char* host, uint16_t port) {
+    assert(ca && std::string(ca) == "ROOT CA" && std::string(host) == "bridge.example" && port == 10000);
+    lastConnect = "tls"; pos = 0; stalled = false; open = !connectFails && !tlsNoMemory; return open;
+  }
+  int lastError(char*, size_t) { return tlsNoMemory ? MBEDTLS_ERR_SSL_ALLOC_FAILED : -1; }
+};
+
 // The card: files in memory, and a write that can fail.
 std::map<std::string, std::string> card;
 bool cardFull = false;
@@ -113,7 +125,7 @@ struct FakeSpeaker {
   std::deque<Frame> queue; unsigned rendered = 0; size_t maxQueued = 0; uint32_t quietMs = 0, lastEnd = 0; uint32_t hz = 0;
   size_t isPlaying(uint8_t channel) { assert(channel == 2); return queue.size(); }
   bool playRaw(const int16_t* p, size_t n, uint32_t rate, bool stereo, int repeat, uint8_t channel, bool stop) {
-    assert(channel == 2 && !stop && repeat == 1 && queue.size() < 2 && !stereo && n > 0 && n <= 1152);
+    assert(channel == 2 && !stop && repeat == 1 && queue.size() < 2 && !stereo && n > 0 && n <= 1152);  // podcast_player::detail::kSlotSamples
     for (auto& f : queue) assert(f.data != p);  // Never the slot the speaker is still reading.
     if (!rendered && queue.empty() && !firstSoundAt) firstSoundAt = lastTls ? lastTls->pos : 1;
     hz = rate;
@@ -131,6 +143,7 @@ void vTaskDelay(unsigned n) { clockMs += n; M5Cardputer.Speaker.advance(); }
 #include "podcast_player.cpp"
 
 using namespace podcast_player;
+static_assert(detail::kSlotSamples == 1152, "the fake speaker checks frames against one slot");
 void execute() {
   assert(scheduled); auto f = scheduled; scheduled = nullptr; f(nullptr);
   assert(!busy() && M5Cardputer.Speaker.queue.empty());
@@ -146,9 +159,9 @@ std::string text(const std::string& body, const char* status = "200 OK", const c
 }
 void reset() { M5Cardputer.Speaker = FakeSpeaker{}; firstSoundAt = 0; stallAt = SIZE_MAX; stallMs = 0; readHook = {}; }
 int main(int argc, char** argv) {
-  assert(argc == 2);
-  std::ifstream in(argv[1], std::ios::binary);
-  const std::string mp3((std::istreambuf_iterator<char>(in)), {});
+  assert(argc == 3);
+  std::ifstream in(argv[1], std::ios::binary), in2(argv[2], std::ios::binary);
+  const std::string mp3((std::istreambuf_iterator<char>(in)), {}), stereo((std::istreambuf_iterator<char>(in2)), {});
   assert(mp3.size() > 20000);
   // Nothing goes anywhere before the bridge is known.
   assert(startList("/api/cardputer/podcasts/search?kind=podcast&q=x")); execute();
@@ -159,7 +172,7 @@ int main(int argc, char** argv) {
   // A list: asked with the token, read whole, kept after the worker has gone.
   const std::string lines = "show\tp1\t3\tHistory & Tea\tAnn\n";
   reply = text(lines);
-  assert(startList("/api/cardputer/podcasts/search?kind=podcast&q=tea") && busy() && listing() && lastStack == 16384);
+  assert(startList("/api/cardputer/podcasts/search?kind=podcast&q=tea") && busy() && listing() && lastStack == 10240);
   assert(!startList("/x") && !startStream("/y", 0));  // One job at a time.
   size_t length = 9;
   assert(!listText(length) && !length);  // Not while it's being read.
@@ -188,6 +201,9 @@ int main(int argc, char** argv) {
   }
   connectFails = true; assert(startList("/l")); execute(); assert(error() == Error::Connect); connectFails = false;
   tlsNoMemory = true; assert(startList("/l")); execute(); assert(error() == Error::NoMemory && std::string(errorText()) == "Not enough memory"); tlsNoMemory = false;
+  // What ran short is noted with the memory then, for the screen to show.
+  assert(std::string(memoryNote()).rfind("TLS ", 0) == 0 && std::string(memoryNote()).find("K/") != std::string::npos);
+  largestBlock = 9000; assert(!startList("/l") && error() == Error::NoMemory && std::string(memoryNote()).rfind("worker ", 0) == 0); largestBlock = 100000;
   allocateAfter = 0; reply = text(lines); assert(startList("/l")); execute(); assert(error() == Error::NoMemory);
   createFails = true; assert(!startList("/l") && !busy() && error() == Error::TaskFailed); createFails = false;
   assert(!startList("") && error() == Error::Malformed);
@@ -209,7 +225,8 @@ int main(int argc, char** argv) {
   const uint32_t seconds = uint32_t(mp3.size() / 6000);
   assert(sp.hz == 32000 && sp.maxQueued == 2 && sp.rendered > 25 * seconds);
   assert(position() >= 100 + seconds - 1 && position() <= 100 + seconds + 1);
-  assert(firstSoundAt >= kAudio.size() + kInput);  // Not a sound before a whole buffer.
+  assert(firstSoundAt >= kAudio.size() + kInputTls);  // Not a sound before a whole buffer.
+  assert(lastConnect == "tls" && !overHome());
   assert(sp.quietMs == 0);  // And no gap after it.
   assert(clockMs - began >= seconds * 1000);  // It plays in real time, not as fast as it reads.
   // A stall shorter than the idle limit plays on from what's held; a long one is a timeout.
@@ -240,7 +257,7 @@ int main(int argc, char** argv) {
   reset(); card.clear();
   reply = kAudio + chunks(mp3, 4000);
   assert(startSave("/api/cardputer/podcasts/audio?show=p1&ep=618afa868312&t=0", "/podcasts/files/618afa868312.part", "/podcasts/files/618afa868312.mp3", 0));
-  assert(saving() && !playing() && lastStack == 16384);
+  assert(saving() && !playing() && lastStack == 10240);
   execute();
   assert(error() == Error::None && saveDone() && savedBytes() == mp3.size());
   assert(card.count("/podcasts/files/618afa868312.mp3") && card["/podcasts/files/618afa868312.mp3"] == mp3 && !card.count("/podcasts/files/618afa868312.part"));
@@ -270,6 +287,28 @@ int main(int argc, char** argv) {
   reset(); assert(startFile("/podcasts/files/618afa868312.mp3", 99999)); execute(); assert(error() == Error::None && reachedEnd() && !M5Cardputer.Speaker.rendered);
   assert(startFile("/podcasts/files/nothere.mp3", 0)); execute(); assert(error() == Error::Card && std::string(errorText()) == "SD card problem");
   readHook = {};
+  // At home: plain HTTP to the bridge's computer, the ticket in the path and no token sent.
+  reset(); reply = kAudio + chunks(mp3); request.clear();
+  const char* ticket = "/podcasts/0123456789abcdef0123456789abcdef?t=30";
+  assert(startStreamHome(0xC0A80014u, 31890, ticket, 30) && lastStack == 24576);
+  execute();
+  assert(error() == Error::None && reachedEnd() && overHome() && lastConnect == "192.168.0.20:31890");
+  assert(request.rfind("GET /podcasts/0123456789abcdef0123456789abcdef?t=30 HTTP/1.1\r\nHost: 192.168.0.20:31890\r\n", 0) == 0);
+  assert(request.find("Authorization") == std::string::npos && request.find("tok-123") == std::string::npos);
+  assert(firstSoundAt >= kAudio.size() + kInput && position() >= 30 + seconds - 1);  // A bigger cushion with no TLS.
+  // Not reachable from this network, or a ticket the bridge has forgotten: errors the screen retries on.
+  connectFails = true; assert(startStreamHome(0xC0A80014u, 31890, ticket, 0)); execute(); connectFails = false;
+  assert(error() == Error::Connect && position() == 0 && !reachedEnd());
+  reply = text("not_found\n", "404 Not Found"); assert(startStreamHome(0xC0A80014u, 31890, ticket, 0)); execute(); assert(error() == Error::NotFound);
+  // Saving at home, the same way.
+  card.erase("/h.mp3"); reply = kAudio + chunks(mp3, 4000); request.clear();
+  assert(startSaveHome(0xC0A80014u, 31890, "/podcasts/0123456789abcdef0123456789abcdef?t=0", "/h.part", "/h.mp3", 0) && lastStack == 10240);
+  execute(); assert(error() == Error::None && saveDone() && card["/h.mp3"] == mp3 && request.find("Authorization") == std::string::npos);
+  assert(!startStreamHome(0, 31890, ticket, 0) && !startStreamHome(1, 0, ticket, 0) && !startSaveHome(1, 1, "", "/a", "/b", 0));
+  // The streaming TLS path was refused nothing on the way.
+  // A frame bigger than a slot, as a stereo stream's would be, is refused before it's decoded.
+  reset(); reply = kAudio + chunks(stereo); assert(startStreamHome(0xC0A80014u, 31890, ticket, 0)); execute();
+  assert(error() == Error::Decode && !M5Cardputer.Speaker.rendered);
   // The bridge isn't changed under a running job.
   reply = text(lines); assert(startList("/l")); setBridge("elsewhere.example", 1, "other", "X"); execute(); assert(error() == Error::None);
   puts("PASS podcast player: lists, streaming and saved files from a second, saving, the cushion, stalls, stops and failures (ASan/UBSan)");
@@ -280,9 +319,11 @@ with tempfile.TemporaryDirectory(prefix='s1-podcast-player-') as d:
     # What the bridge sends: 32 kHz mono at 48 kbit/s, every frame the same size, no tags.
     subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=4:sample_rate=44100',
                     '-ac', '1', '-ar', '32000', '-c:a', 'libmp3lame', '-b:a', '48k', '-write_xing', '0', '-id3v2_version', '0', '-f', 'mp3', str(p / 'test.mp3')], check=True)
+    subprocess.run(['ffmpeg', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=2:sample_rate=44100',
+                    '-ac', '2', '-ar', '32000', '-c:a', 'libmp3lame', '-b:a', '96k', '-write_xing', '0', '-id3v2_version', '0', '-f', 'mp3', str(p / 'stereo.mp3')], check=True)
     data = (p / 'test.mp3').read_bytes()
     assert len(data) % 216 == 0 and all(data[i] == 0xFF for i in range(0, len(data), 216)), 'every frame 216 bytes'
     subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++17', '-O1', '-g', '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
                     '-DPODCAST_PLAYER_HOST_TEST', '-DINTERNET_RADIO_HOST_TEST', '-fsanitize=address,undefined', '-fno-omit-frame-pointer',
                     '-I' + str(src), str(p / 'test.cpp'), str(src / 'internet_radio_transport.cpp'), '-o', str(p / 'test')], check=True)
-    subprocess.run([str(p / 'test'), str(p / 'test.mp3')], check=True, timeout=120)
+    subprocess.run([str(p / 'test'), str(p / 'test.mp3'), str(p / 'stereo.mp3')], check=True, timeout=120)

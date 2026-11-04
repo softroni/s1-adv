@@ -264,6 +264,13 @@ String hubBaseUrl() {
   return String(hubUsesTls() ? "https://" : "http://") + gHubHost + ":" + String(gHubPort);
 }
 
+// This device's address on its Wi-Fi, in host order, or 0 while it has none.
+uint32_t wifiLocalAddress() {
+  if (WiFi.status() != WL_CONNECTED) return 0;
+  const IPAddress ip = WiFi.localIP();
+  return (uint32_t(ip[0]) << 24) | (uint32_t(ip[1]) << 16) | (uint32_t(ip[2]) << 8) | uint32_t(ip[3]);
+}
+
 // The request never reached the network, because TLS couldn't get its two buffers.
 bool tlsRanOutOfMemory(WiFiClientSecure& client) {
   char detail[32] = {};

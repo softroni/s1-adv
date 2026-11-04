@@ -3,7 +3,8 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 import { AUDIO, LIMITS, PAGE, PodcastError, PodcastService, archiveSearchUrl, checkAudioUrl, cleanText, decodeEntities,
-  episodeId, episodeLines, ffmpegArgs, parseArchiveItem, parseDuration, parseFeed, publicAddress, showLines, validQuery } from "./podcasts.mjs";
+  episodeId, episodeLines, ffmpegArgs, homeAddress, lanAddresses, lanHandler, parseArchiveItem, parseDuration, parseFeed,
+  publicAddress, showLines, validQuery } from "./podcasts.mjs";
 
 const FEED = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
@@ -113,9 +114,9 @@ test("searches are words of reasonable length, and the Archive's syntax is taken
 
 test("episodes may only come from the public internet", async () => {
   for (const ok of ["8.8.8.8", "151.101.1.1", "2606:4700::1111"]) assert.ok(publicAddress(ok), ok);
-  for (const bad of ["127.0.0.1", "10.1.2.3", "192.168.4.20", "172.20.0.1", "169.254.1.1", "100.100.1.1", "0.0.0.0",
+  for (const bad of ["127.0.0.1", "10.1.2.3", "192.168.0.30", "172.20.0.1", "169.254.1.1", "100.100.1.1", "0.0.0.0",
     "::1", "fd7a:115c::1", "fe80::1", "::ffff:192.168.1.1", "nonsense"]) assert.ok(!publicAddress(bad), bad);
-  const lookup = async host => host === "inside.example" ? [{ address: "192.168.4.20" }] : host === "mixed.example"
+  const lookup = async host => host === "inside.example" ? [{ address: "192.168.0.30" }] : host === "mixed.example"
     ? [{ address: "8.8.8.8" }, { address: "10.0.0.1" }] : [{ address: "93.184.216.34" }];
   assert.equal(await checkAudioUrl("https://cdn.example.com/a.mp3", lookup), "https://cdn.example.com/a.mp3");
   for (const bad of ["file:///etc/passwd", "concat:a|b", "https://user:pw@cdn.example.com/a.mp3", "https://inside.example/a.mp3",
@@ -264,4 +265,77 @@ test("an episode that never sounds is an error, not a silent stream", async () =
 
 test("limits match what the device keeps", () => {
   assert.deepEqual(LIMITS, { id: 100, title: 96, by: 48 });
+});
+
+const INTERFACES = {
+  lo0: [{ address: "127.0.0.1", family: "IPv4", internal: true, cidr: "127.0.0.1/8" }],
+  en0: [{ address: "192.168.0.20", family: "IPv4", internal: false, cidr: "192.168.0.20/22" },
+        { address: "fe80::1", family: "IPv6", internal: false, cidr: "fe80::1/64" }],
+  en1: [{ address: "192.168.0.20", family: "IPv4", internal: false, cidr: "192.168.0.20/22" }],
+  utun4: [{ address: "100.101.102.103", family: "IPv4", internal: false, cidr: "100.101.102.103/32" }],
+  en5: [{ address: "10.0.0.7", family: 4, internal: false, cidr: "10.0.0.7/24" }]
+};
+
+test("the home-network door is only for home addresses", () => {
+  for (const home of ["192.168.0.30", "10.1.2.3", "172.16.0.1", "172.31.255.255"]) assert.ok(homeAddress(home), home);
+  for (const not of ["100.101.102.103", "8.8.8.8", "172.32.0.1", "127.0.0.1", "::1", "fd7a:115c::1", "x"]) assert.ok(!homeAddress(not), not);
+  assert.deepEqual(lanAddresses(INTERFACES), [{ address: "192.168.0.20", prefix: 22 }, { address: "10.0.0.7", prefix: 24 }]);
+});
+
+test("a ticket is one per device and episode, and lasts 12 hours", () => {
+  let time = 1000;
+  const service = new PodcastService({ now: () => time });
+  const a = service.ticket("d1", "p42", "111111111111");
+  assert.match(a, /^[0-9a-f]{32}$/u);
+  assert.equal(service.ticket("d1", "p42", "111111111111"), a);
+  assert.notEqual(service.ticket("d2", "p42", "111111111111"), a);
+  assert.notEqual(service.ticket("d1", "p42", "222222222222"), a);
+  assert.deepEqual({ ...service.redeem(a), expires: 0 }, { device: "d1", show: "p42", episode: "111111111111", expires: 0 });
+  time += 12 * 60 * 60 * 1000 + 1;
+  assert.equal(service.redeem(a), null);
+  assert.throws(() => service.ticket("d1", "../x", "111111111111"), { code: "invalid_show" });
+  assert.throws(() => service.ticket("d1", "p42", "nope"), { code: "invalid_episode" });
+  for (let i = 0; i < 100; ++i) service.ticket("d1", "p42", i.toString(16).padStart(12, "0"));
+  assert.equal(service.tickets.size, 64);
+});
+
+test("the device is told where to fetch it at home, or that it can't", () => {
+  const service = new PodcastService();
+  assert.equal(service.ticketLines("d1", "p42", "111111111111", INTERFACES), "none\n");  // The door isn't open.
+  service.lanPort = 31890;
+  const lines = service.ticketLines("d1", "p42", "111111111111", INTERFACES).trim().split("\n");
+  assert.match(lines[0], /^ticket\t31890\t\/podcasts\/[0-9a-f]{32}$/u);
+  assert.deepEqual(lines.slice(1), ["lan\t192.168.0.20\t22", "lan\t10.0.0.7\t24"]);
+  assert.equal(service.ticketLines("d1", "p42", "111111111111", { utun4: INTERFACES.utun4 }), "none\n");
+});
+
+test("the door plays a ticket's episode from the second asked, and nothing else", async () => {
+  const fetch = fakeFetch([["archive.org/metadata/holmes", ARCHIVE]]);
+  const children = [];
+  const service = new PodcastService({ fetchImpl: fetch.impl, lookupImpl: publicLookup,
+    spawnImpl: (command, args) => { const child = fakeChild(); child.args = args; children.push(child); return child; } });
+  const episode = parseArchiveItem("holmes", ARCHIVE).episodes[0];
+  const id = service.ticket("d1", "aholmes", episode.id);
+  const handler = lanHandler(service);
+  const call = async (path, remote = "192.168.0.30", method = "GET") => {
+    const res = fakeResponse();
+    res.end = (body) => { res.body = String(body || ""); res.ended = true; };
+    handler({ method, url: path, socket: { remoteAddress: remote } }, res);
+    for (let i = 0; i < 6; ++i) await new Promise(resolve => setImmediate(resolve));
+    return res;
+  };
+  for (const [path, remote, method] of [[`/podcasts/${"0".repeat(32)}`], [`/podcasts/${id}`, "100.101.102.103"], [`/podcasts/${id}`, "8.8.8.8"],
+    [`/podcasts/${id}`, "192.168.0.30", "POST"], [`/api/cardputer/podcasts/search?q=x`], [`/podcasts/${id}/../x`]]) {
+    const res = await call(path, remote, method);
+    assert.equal(res.status, 404, `${path} ${remote} ${method}`);
+  }
+  assert.equal(children.length, 0);
+  const res = await call(`/podcasts/${id}?t=95`, "::ffff:192.168.0.30");
+  assert.equal(children.length, 1);
+  assert.equal(children[0].args[children[0].args.indexOf("-ss") + 1], "95");
+  children[0].stdout.write(Buffer.from([0xff, 0xfb]));
+  for (let i = 0; i < 4; ++i) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(res.status, 200);
+  assert.equal(res.headers["content-type"], "audio/mpeg");
+  res.emit("close");
 });

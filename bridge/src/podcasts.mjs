@@ -5,10 +5,11 @@
 // ffmpeg as one small MP3 format, starting at whatever second the device asks for. No
 // account or key is needed anywhere.
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { existsSync } from "node:fs";
 import net from "node:net";
+import os from "node:os";
 
 const ITUNES_SEARCH_URL = "https://itunes.apple.com/search";
 const ITUNES_LOOKUP_URL = "https://itunes.apple.com/lookup";
@@ -34,6 +35,12 @@ const REQUEST_TIMEOUT_MS = 15000;
 const FIRST_AUDIO_TIMEOUT_MS = 30000;
 const MAX_AUDIO_GLOBAL = 2;
 const USER_AGENT = "S1-ADV-Podcasts/1 (+https://github.com/softroni/s1-adv)";
+// Audio for a Cardputer on the same home network goes straight there over plain HTTP, so the
+// device needs no TLS while it plays: TLS and the decoder together don't fit in its memory.
+// The device asks for a ticket over HTTPS first, with its token; the ticket is the only key.
+export const LAN_PORT = 31890;
+const TICKET_MS = 12 * 60 * 60 * 1000;
+const MAX_TICKETS = 64;
 const ARCHIVE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,98}$/u;
 const SHOW_ID = /^(p\d{1,12}|a[A-Za-z0-9][A-Za-z0-9._-]{0,98})$/u;
 const EPISODE_ID = /^[0-9a-f]{12}$/u;
@@ -249,6 +256,26 @@ export function publicAddress(address) {
   return false;
 }
 
+// A home network's own addresses, which is all the plain-HTTP door answers. Tailscale's and
+// other carrier-grade addresses aren't among them.
+export function homeAddress(address) {
+  if (!net.isIPv4(address)) return false;
+  const [a, b] = address.split(".").map(Number);
+  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+
+// This computer's addresses on home networks, each with its prefix, so the device can pick the
+// one on its own network.
+export function lanAddresses(interfaces = os.networkInterfaces()) {
+  const out = [];
+  for (const list of Object.values(interfaces || {})) for (const entry of list || []) {
+    if (entry?.internal || !(entry.family === "IPv4" || entry.family === 4) || !homeAddress(entry.address)) continue;
+    const prefix = Number(String(entry.cidr || "").split("/")[1]);
+    if (prefix >= 8 && prefix <= 30 && !out.some(known => known.address === entry.address)) out.push({ address: entry.address, prefix });
+  }
+  return out;
+}
+
 export async function checkAudioUrl(url, lookupImpl = lookup) {
   let parsed;
   try { parsed = new URL(url); } catch { throw new PodcastError("bad_episode_url", 502); }
@@ -291,6 +318,36 @@ export class PodcastService {
     this.shows = new Map();
     this.loading = new Map();
     this.playing = new Map();  // One ffmpeg per device: a new request ends the last.
+    this.tickets = new Map();
+    this.lanPort = 0;  // Set once the home-network door is open.
+  }
+
+  // One ticket per device and episode, good for 12 hours and any second of it.
+  ticket(device, show, episode) {
+    if (!SHOW_ID.test(String(show || ""))) throw new PodcastError("invalid_show", 400);
+    if (!EPISODE_ID.test(String(episode || ""))) throw new PodcastError("invalid_episode", 400);
+    const now = this.now();
+    for (const [id, held] of this.tickets) if (held.expires <= now) this.tickets.delete(id);
+    for (const [id, held] of this.tickets) {
+      if (held.device === device && held.show === show && held.episode === episode) { held.expires = now + TICKET_MS; return id; }
+    }
+    while (this.tickets.size >= MAX_TICKETS) this.tickets.delete(this.tickets.keys().next().value);
+    const id = randomBytes(16).toString("hex");
+    this.tickets.set(id, { device, show, episode, expires: now + TICKET_MS });
+    return id;
+  }
+
+  redeem(id) {
+    const held = this.tickets.get(id);
+    return held && held.expires > this.now() ? held : null;
+  }
+
+  // For the device: where to fetch this episode on the home network, or "none".
+  ticketLines(device, show, episode, interfaces) {
+    const addresses = this.lanPort ? lanAddresses(interfaces) : [];
+    const id = this.ticket(device, show, episode);
+    if (!addresses.length) return "none\n";
+    return [`ticket\t${this.lanPort}\t/podcasts/${id}`, ...addresses.map(entry => `lan\t${entry.address}\t${entry.prefix}`)].join("\n") + "\n";
   }
 
   async get(url, { json = true, maxBytes = 4 * 1024 * 1024 } = {}) {
@@ -432,4 +489,30 @@ export class PodcastService {
       ended = true;
     });
   }
+}
+
+// The home-network door: GET /podcasts/<ticket>?t=<second>, from a home address only.
+export function lanHandler(service) {
+  return (req, res) => {
+    void (async () => {
+      const remote = String(req.socket?.remoteAddress || "").replace(/^::ffff:/u, "");
+      let url;
+      try { url = new URL(req.url || "/", "http://lan"); } catch { url = new URL("http://lan/"); }
+      const match = url.pathname.match(/^\/podcasts\/([0-9a-f]{32})$/u);
+      const held = req.method === "GET" && match && (homeAddress(remote) || remote === "127.0.0.1") ? service.redeem(match[1]) : null;
+      if (!held) {
+        res.writeHead(404, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+        res.end("not_found\n");
+        return;
+      }
+      try {
+        await service.audio(res, { device: held.device, show: held.show, episode: held.episode, seconds: url.searchParams.get("t") || 0 });
+      } catch (error) {
+        if (res.headersSent || res.destroyed) { res.destroy(); return; }
+        if (error.code !== "cancelled") console.warn(`[podcasts] home audio failed: ${String(error.code || error.message || error).slice(0, 120)}`);
+        res.writeHead(error instanceof PodcastError ? error.status : 503, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+        res.end(`${error.code || "podcasts_unavailable"}\n`);
+      }
+    })();
+  };
 }
