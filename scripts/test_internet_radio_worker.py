@@ -45,11 +45,12 @@ uint32_t lwip_ntohl(uint32_t x){return x;}
 int dns_gethostbyname(const char*,ip_addr_t*addr,void(*)(const char*,const ip_addr_t*,void*),void*){addr->value=0x08080808;return ERR_OK;}
 int tcpip_callback(void(*f)(void*),void*p){f(p);return ERR_OK;}
 std::string response,request;std::function<void()>readHook;
+std::deque<std::string> replies;std::vector<std::string> requests;  // One reply per connection, when set.
 struct WiFiClient{
  size_t pos=0;bool open=false;
  int fd(){return 123;}
  void setTimeout(int){}
- bool connect(IPAddress,uint16_t,int timeout){assert(timeout==600);pos=0;open=!connectFails;return open;}
+ bool connect(IPAddress,uint16_t,int timeout){assert(timeout==600);pos=0;open=!connectFails;if(open&&!replies.empty()){response=replies.front();replies.pop_front();}return open;}
  size_t write(const uint8_t*p,size_t n){request.assign((const char*)p,n);assert(request.find("Authorization:")==std::string::npos);return n;}
  int available(){return open?int(response.size()-pos):0;}
  bool connected(){return open&&pos<response.size();}
@@ -57,7 +58,7 @@ struct WiFiClient{
  void stop(){open=false;}
 };
 constexpr int MSG_DONTWAIT=1;
-int send(int fd,const void*p,size_t n,int flags){assert(fd==123&&flags==MSG_DONTWAIT);request.assign((const char*)p,n);assert(request.find("Authorization:")==std::string::npos);return int(n);}
+int send(int fd,const void*p,size_t n,int flags){assert(fd==123&&flags==MSG_DONTWAIT);request.assign((const char*)p,n);requests.push_back(request);assert(request.find("Authorization:")==std::string::npos);return int(n);}
 uint64_t hashPcm(const int16_t*p,size_t n){uint64_t h=1469598103934665603ULL;for(size_t i=0;i<n;++i){h^=uint16_t(p[i]);h*=1099511628211ULL;}return h;}
 struct Frame{const int16_t*data;size_t n;uint64_t hash;uint32_t end;};
 struct FakeSpeaker{
@@ -144,7 +145,45 @@ int main(int argc,char**argv){
  assert(!internet_radio::startSearch(true,std::string(65,'x').c_str())&&internet_radio::error()==Error::InvalidUrl);
  assert(!internet_radio::startSearch(true,"jazz","usa")&&!internet_radio::busy()&&internet_radio::error()==Error::InvalidUrl);
  assert(internet_radio::startSearch(true,"jazz"));execute();assert(internet_radio::foundCount()==2);internet_radio::clearFound();
- puts("PASS actual radio worker: bounded TCP/ICY/chunked MP3 decode, song titles, searches on the same worker, two safe PCM slots, async cancel and release, allocation/task/connect/malformed/public-IP failures (ASan/UBSan)");
+ // Logos. Given an address, it asks the image service for a small JPEG of it.
+ using internet_radio::LogoResult;
+ const std::string jpeg(1700,'\xAB');
+ const std::string image="HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: 1700\r\n\r\n"+jpeg;
+ auto jsonReply=[](const std::string&b){return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"+b;};
+ const char* stream="http://ice2.somafm.com/groovesalad-128-mp3";
+ requests.clear();replies={image};assert(internet_radio::startLogo(stream,"Groove Salad","https://radioparadise.com/apple-touch-icon.png"));
+ assert(internet_radio::fetchingLogo()&&internet_radio::logoResult()==LogoResult::None&&!internet_radio::start("http://radio.example/stream"));
+ execute();{size_t n=0;const uint8_t*p=internet_radio::logoJpeg(n);assert(internet_radio::logoResult()==LogoResult::Found&&p&&n==1700&&p[0]==0xAB);}
+ assert(requests.size()==1&&requests[0].rfind("GET /?url=https://radioparadise.com/apple-touch-icon.png&w=60&h=60&fit=cover&output=jpg&q=85 ",0)==0);
+ assert(requests[0].find("Host: wsrv.nl:80\r\n")!=npos&&requests[0].find("Accept: image/jpeg\r\n")!=npos&&requests[0].find("Icy-MetaData")==npos);
+ internet_radio::clearLogo();{size_t n=1;assert(!internet_radio::logoJpeg(n)&&!n&&internet_radio::logoResult()==LogoResult::None);}
+ // Not given: by the stream's address first.
+ requests.clear();replies={jsonReply(R"([{"name":"x","url_resolved":"http://ice2.somafm.com/groovesalad-128-mp3","favicon":"https://somafm.com/img/gs.png"}])"),image};
+ assert(internet_radio::startLogo(stream,"Groove Salad",""));execute();assert(internet_radio::logoResult()==LogoResult::Found&&requests.size()==2);
+ assert(requests[0].rfind("GET /json/stations/byurl?url=http://ice2.somafm.com/groovesalad-128-mp3 ",0)==0&&requests[1].find("url=https://somafm.com/img/gs.png&")!=npos);
+ // Then by name, only on the same website: another site's Rock FM isn't this one.
+ requests.clear();replies={jsonReply("[]"),jsonReply(R"([{"name":"Rock FM","url_resolved":"https://rockfm-cope.flumotion.com/x","favicon":"https://wrong.example/w.png"},
+   {"name":"Rock FM","url_resolved":"http://nashe2.hostingradio.ru/rock","favicon":"https://lh3.example/rock.png"}])"),image};
+ assert(internet_radio::startLogo("http://nashe1.hostingradio.ru/rock-128.mp3","Rock FM",""));execute();
+ assert(internet_radio::logoResult()==LogoResult::Found&&requests.size()==3&&requests[1].rfind("GET /json/stations/search?name=Rock%20FM&limit=10 ",0)==0&&requests[2].find("url=https://lh3.example/rock.png&")!=npos);
+ // Nothing anywhere, or a logo the service can't fetch: Missing, so it isn't asked again.
+ replies={jsonReply("[]"),jsonReply(R"([{"name":"Rock FM","url_resolved":"https://other.example/","favicon":"https://other.example/o.png"}])")};
+ assert(internet_radio::startLogo("http://nashe1.hostingradio.ru/rock-128.mp3","Rock FM",""));execute();assert(internet_radio::logoResult()==LogoResult::Missing);
+ replies={"HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n\r\n{}"};
+ assert(internet_radio::startLogo(stream,"G","https://dead.example/x.png"));execute();assert(internet_radio::logoResult()==LogoResult::Missing);
+ // A busy service, a lost connection, an answer too big or not a JPEG: Failed, to try later.
+ for(const std::string&wire:{std::string("HTTP/1.1 503 Busy\r\n\r\n"),std::string("HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: 20000\r\n\r\n")+std::string(20000,'x'),
+   std::string("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html>"),std::string("HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: 1700\r\n\r\nshort")}){
+  replies={wire};assert(internet_radio::startLogo(stream,"G","https://a.example/x.png"));execute();assert(internet_radio::logoResult()==LogoResult::Failed);
+ }
+ connectFails=true;assert(internet_radio::startLogo(stream,"G",""));execute();assert(internet_radio::logoResult()==LogoResult::Failed);connectFails=false;
+ // Stopped, it's undecided. Bad input is refused before anything is sent.
+ replies={image};readHook=[](){internet_radio::stop();};assert(internet_radio::startLogo(stream,"G","https://a.example/x.png"));execute();readHook={};
+ assert(internet_radio::logoResult()==LogoResult::None);
+ assert(!internet_radio::startLogo(stream,"G","ftp://a.example/x.png")&&internet_radio::error()==Error::InvalidUrl);
+ assert(!internet_radio::startLogo("","G","")&&!internet_radio::startLogo(stream,std::string(80,'n').c_str(),""));
+ replies.clear();response=header+"\r\n"+mp3;
+ puts("PASS actual radio worker: bounded TCP/ICY/chunked MP3 decode, song titles, searches and logos on the same worker, two safe PCM slots, async cancel and release, allocation/task/connect/malformed/public-IP failures (ASan/UBSan)");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-radio-worker-') as d:

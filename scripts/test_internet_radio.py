@@ -46,6 +46,8 @@ struct String:std::string {using std::string::string;String()=default;String(con
 };
 namespace fonts{const int Font0=0,Font2=2,Font4=4,efontCN_12=12,FreeSansBold9pt7b=9;}
 const uint16_t TFT_WHITE=0xffff,TFT_BLACK=0;
+namespace lgfx{struct rgb332_t{uint8_t raw;};}
+int pushedImages=0;
 struct Box{int x,y,w,h;};
 struct Canvas{
  const int*font=&fonts::Font0;int x=0,y=0;std::vector<Box>texts;std::vector<std::string>printed;
@@ -58,6 +60,7 @@ struct Canvas{
  void drawLine(int a,int b,int c,int e,uint16_t){bounds(min(a,c),min(b,e),abs(c-a)+1,abs(e-b)+1);}
  void drawCircle(int a,int b,int r,uint16_t c){assert(r>0);fillRect(a-r,b-r,2*r+1,2*r+1,c);}
  void fillCircle(int a,int b,int r,uint16_t c){drawCircle(a,b,r,c);}
+ template<class T>void pushImage(int a,int b,int w,int h,const T*p){assert(p);bounds(a,b,w,h);++pushedImages;}
  void fillTriangle(int a,int b,int c,int d,int e,int f,uint16_t color){fillRect(min({a,c,e}),min({b,d,f}),max({a,c,e})-min({a,c,e})+1,max({b,d,f})-min({b,d,f})+1,color);}
  void setFont(const int*f){font=f;}void setTextColor(uint16_t,uint16_t=0){}
  void setCursor(int a,int b){x=a;y=b;}
@@ -130,12 +133,17 @@ struct{
  bool rename(const char*a,const char*b){if(!cardAnswers||!disk.count(a)||disk.count(b))return false;disk[b]=disk[a];disk.erase(a);return true;}
 }SD;
 template<class F>bool ensureDirRecursive(F&,const String&){return cardAnswers;}
+// The JPEG decoder is the device's; here it fills the logo with one colour, or fails on cue.
+#define RADIO_HOST_TEST
+bool decodeFails=false;
+bool radioDecodeLogo(const uint8_t*,size_t size,uint8_t*out){if(decodeFails||!size)return false;memset(out,0x1C,3600);return true;}
 void setUiMode(UiMode);
 namespace internet_radio{
  bool running=false,cancelling=false,fail=false,searchJob=false;int starts=0,stops=0,searches=0;String url,query,country;bool byGenre=false;
  State phase=State::Idle;Error err=Error::None;uint32_t got=0;std::string song;std::vector<Found> results;size_t shown=0;
- bool start(const char*u){assert(!running);++starts;url=u;searchJob=false;err=Error::None;got=0;song.clear();if(fail){phase=State::Error;err=Error::Timeout;return false;}running=true;phase=State::Connecting;return true;}
- bool startSearch(bool g,const char*t,const char*c){assert(!running);++searches;byGenre=g;query=t;country=c;searchJob=true;err=Error::None;shown=0;running=true;phase=State::Connecting;return true;}
+ bool logosOn=false,logoJob=false;int logoStarts=0;String logoStream,logoName,logoGiven;LogoResult logoRes=LogoResult::None;std::string jpegBytes;
+ bool start(const char*u){assert(!running);++starts;url=u;searchJob=false;logoJob=false;err=Error::None;got=0;song.clear();if(fail){phase=State::Error;err=Error::Timeout;return false;}running=true;phase=State::Connecting;return true;}
+ bool startSearch(bool g,const char*t,const char*c){assert(!running);++searches;byGenre=g;query=t;country=c;searchJob=true;logoJob=false;err=Error::None;shown=0;running=true;phase=State::Connecting;return true;}
  void stop(){++stops;if(running){cancelling=true;phase=State::Stopping;}}
  bool busy(){return running;}bool searching(){return running&&searchJob;}
  State state(){return phase;}Error error(){return err;}uint32_t bytes(){return got;}
@@ -147,7 +155,13 @@ namespace internet_radio{
  const Found* found(size_t i){return i<foundCount()?&results[i]:nullptr;}
  void clearFound(){if(!searching())shown=0;}
  void playing(uint32_t b){phase=State::Playing;got=b;}
- void finish(State s=State::Idle,Error e=Error::None){if(searchJob&&!cancelling&&e==Error::None)shown=results.size();running=false;cancelling=false;phase=s;err=e;}
+ bool startLogo(const char*s,const char*n,const char*l){if(!logosOn||running)return false;++logoStarts;logoStream=s;logoName=n;logoGiven=l;logoJob=true;searchJob=false;running=true;phase=State::Connecting;logoRes=LogoResult::None;return true;}
+ bool fetchingLogo(){return running&&logoJob;}
+ LogoResult logoResult(){return fetchingLogo()?LogoResult::None:logoRes;}
+ const uint8_t* logoJpeg(size_t&n){if(fetchingLogo()||logoRes!=LogoResult::Found){n=0;return nullptr;}n=jpegBytes.size();return reinterpret_cast<const uint8_t*>(jpegBytes.data());}
+ void clearLogo(){if(!fetchingLogo())logoRes=LogoResult::None;}
+ void endLogo(LogoResult r){assert(logoJob&&running);running=false;logoJob=false;phase=State::Idle;logoRes=cancelling?LogoResult::None:r;cancelling=false;}
+ void finish(State s=State::Idle,Error e=Error::None){assert(!logoJob);if(searchJob&&!cancelling&&e==Error::None)shown=results.size();running=false;cancelling=false;phase=s;err=e;}
 }
 '''+app+r'''
 void setUiMode(UiMode m){if(deferInternetRadioMode(m))return;gUiMode=m;}
@@ -156,8 +170,8 @@ void type(const char*s){for(;*s;++s)key(*s);}
 void service(int n=1){for(int i=0;i<n;++i)serviceInternetRadio();}
 void reopen(){if(radioBusy()){stopInternetRadio();internet_radio::finish();}gUiMode=UiMode::Home;service();assert(!gRadioList);gUiMode=UiMode::Radio;beginInternetRadio();}
 void render(){selectedRow=-1;renderInternetRadioUi();}
-internet_radio::Found make(const char*name,const char*url,const char*tags,const char*country,uint16_t bitrate,bool russian){
- internet_radio::Found f{};snprintf(f.name,sizeof(f.name),"%s",name);snprintf(f.url,sizeof(f.url),"%s",url);snprintf(f.tags,sizeof(f.tags),"%s",tags);
+internet_radio::Found make(const char*name,const char*url,const char*tags,const char*country,uint16_t bitrate,bool russian,const char*logo=""){
+ internet_radio::Found f{};snprintf(f.logo,sizeof(f.logo),"%s",logo);snprintf(f.name,sizeof(f.name),"%s",name);snprintf(f.url,sizeof(f.url),"%s",url);snprintf(f.tags,sizeof(f.tags),"%s",tags);
  snprintf(f.country,sizeof(f.country),"%s",country);f.bitrate=bitrate;f.russian=russian;return f;}
 void search(const char*text,bool genre,std::vector<internet_radio::Found> results){
  key('f');assert(gRadioView==RadioView::Find);while(!gRadioQuery.isEmpty())key('\b');type(text);
@@ -412,6 +426,49 @@ int main(){
  search("jazz",true,jazz);key('s');assert(gRadioList->count()==1&&std::string(gRadioList->genre(0))=="Jazz");radioEscape();
  disk[kList]=kStarter;reopen();
 
+ // Logos. A second's rest on a station, with nothing playing, asks for its logo. A fetch isn't
+ // a stream: the screen doesn't say Connecting and Enter plays rather than pauses.
+ using internet_radio::LogoResult;
+ internet_radio::logosOn=true;gRadioLogoTriedCount=0;
+ auto logoPath=[](int i,const char*kind){return std::string(radioLogoPath(radioHash(gRadioList->at(size_t(i)).url),kind));};
+ gRadioSelection.select(11);service();n=internet_radio::logoStarts;tick+=500;service();assert(internet_radio::logoStarts==n);
+ tick+=600;service();assert(internet_radio::logoStarts==n+1&&internet_radio::fetchingLogo()&&!radioStreaming());
+ assert(internet_radio::logoStream==gRadioList->at(11).url&&internet_radio::logoName=="Groove Salad"&&internet_radio::logoGiven.empty());
+ render();assert(!showsPart("Connecting")&&!pushedImages);
+ // Found: decoded once, kept on the card ready to draw, and shown.
+ internet_radio::jpegBytes=std::string(1700,'j');internet_radio::endLogo(LogoResult::Found);service();
+ assert(disk.count(logoPath(11,"332"))&&disk[logoPath(11,"332")].size()==3600&&gRadioLogo&&gRadioLogoFile==RadioLogoFile::Have);
+ render();assert(pushedImages==1);tick+=5000;service();assert(internet_radio::logoStarts==n+1);
+ reopen();gRadioSelection.select(11);service();assert(gRadioLogo&&internet_radio::logoStarts==n+1);  // From the card next time.
+ { const int s0=internet_radio::starts;key('\n');service();assert(internet_radio::starts==s0+1);internet_radio::playing(100000);
+   for(int k=0;k<6;++k){internet_radio::loud=9000;tick+=100;render();}assert(pushedImages>1);key(' ');internet_radio::finish();service(); }
+ // Missing, or a JPEG that won't decode: marked, and never asked about again, even next time.
+ gRadioSelection.select(12);service();tick+=1100;service();assert(internet_radio::logoStarts==n+2);internet_radio::endLogo(LogoResult::Missing);service();
+ assert(disk.count(logoPath(12,"no"))&&!gRadioLogo&&gRadioLogoFile==RadioLogoFile::None);tick+=5000;service();assert(internet_radio::logoStarts==n+2);
+ reopen();gRadioSelection.select(12);service();tick+=5000;service();assert(internet_radio::logoStarts==n+2);
+ decodeFails=true;gRadioSelection.select(13);service();tick+=1100;service();internet_radio::endLogo(LogoResult::Found);service();decodeFails=false;
+ assert(disk.count(logoPath(13,"no"))&&!disk.count(logoPath(13,"332"))&&!gRadioLogo);
+ // The network failing: not again this session, but the next.
+ gRadioSelection.select(14);service();tick+=1100;service();assert(internet_radio::logoStarts==n+4);internet_radio::endLogo(LogoResult::Failed);service();
+ tick+=5000;service();assert(internet_radio::logoStarts==n+4&&!disk.count(logoPath(14,"no")));
+ gRadioLogoTriedCount=0;tick+=100;service();assert(internet_radio::logoStarts==n+5);internet_radio::endLogo(LogoResult::Missing);service();
+ // Enter during a fetch stops it, undecided, and plays as soon as the worker is free.
+ gRadioSelection.select(15);service();tick+=1100;service();assert(internet_radio::fetchingLogo());
+ { const int s0=internet_radio::starts;key('\n');assert(internet_radio::cancelling&&gRadioStartPending&&gRadioWantPlaying);service();assert(internet_radio::starts==s0);
+   internet_radio::endLogo(LogoResult::Found);service();assert(internet_radio::starts==s0+1&&radioStreaming()&&!disk.count(logoPath(15,"332"))&&!disk.count(logoPath(15,"no")));
+   const int l0=internet_radio::logoStarts;tick+=5000;service();assert(internet_radio::logoStarts==l0);  // Never while it plays.
+   key(' ');internet_radio::finish();service();tick+=1100;service();assert(internet_radio::fetchingLogo()&&internet_radio::logoStream==gRadioList->at(15).url); }
+ // A search stops one too. A station saved from it brings its logo's address, asked for first.
+ key('f');while(!gRadioQuery.isEmpty())key('\b');key('\n');assert(internet_radio::cancelling);internet_radio::endLogo(LogoResult::Found);service();
+ assert(internet_radio::searching()&&!disk.count(logoPath(15,"332")));
+ internet_radio::results={make("With Logo","http://withlogo.example/","jazz","US",128,false,"https://withlogo.example/l.png")};internet_radio::finish();service();
+ key('s');assert(gRadioNotice=="Saved to Jazz");radioEscape();service();
+ assert(internet_radio::fetchingLogo()&&internet_radio::logoGiven=="https://withlogo.example/l.png"&&internet_radio::logoStream=="http://withlogo.example/");
+ internet_radio::endLogo(LogoResult::Found);service();assert(disk.count(std::string(radioLogoPath(radioHash("http://withlogo.example/"),"332"))));
+ // No card, no logos: there's nowhere to keep them. Leaving frees the one shown.
+ gSdReady=false;reopen();gRadioSelection.select(4);{const int l0=internet_radio::logoStarts;tick+=5000;service();assert(internet_radio::logoStarts==l0&&!gRadioLogo);}
+ gSdReady=true;disk[kList]=kStarter;reopen();gRadioSelection.select(11);service();assert(gRadioLogo);setUiMode(UiMode::Home);service();assert(!gRadioLogo);
+ gUiMode=UiMode::Radio;beginInternetRadio();internet_radio::logosOn=false;
  // Every reachable view fits on screen, with long names, Cyrillic, and every state.
  internet_radio::song="Очень длинное название песни, которое не помещается на экране - Исполнитель";
  for(int lang=0;lang<3;++lang){gRadioSelection.language=static_cast<Language>(lang);

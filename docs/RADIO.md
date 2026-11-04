@@ -33,6 +33,27 @@ because it's more likely broken than dropped. Press Enter to try it yourself.
 
 The radio opens on the last station you played. It doesn't start playing until you press Enter.
 
+## Logos
+
+When the radio can find a station's logo, it fills the station's tile instead of the initials.
+While the station plays, the bars sit in a dark strip along the logo's bottom.
+
+- A station saved from a search brings its logo's address with it. For the stations already in
+  your list, the radio asks the directory, first by the stream's address and then by the
+  station's name. A name only counts on the stream's own website, because names like Rock FM
+  aren't unique.
+- [wsrv.nl](https://wsrv.nl), a free image service, shrinks the logo to the tile's size and
+  sends it as a small JPEG over plain HTTP, whatever format the logo was in. The radio decodes
+  it once and keeps it on the card in `/radio/logos/`, ready to draw.
+- It only fetches while nothing is playing, after you've rested on a station for a second on
+  the play screen, so browsing doesn't fetch one per station and a stream never waits for one.
+  Pressing Enter stops a fetch at once.
+- A station with no logo is noted, so it isn't asked about again. If the network fails, it
+  tries again the next time the Cardputer starts. Delete `/radio/logos/` to fetch them all
+  afresh.
+- The logo addresses go to wsrv.nl, so like the search words they're not private. With no SD
+  card there's nowhere to keep logos, so the tiles show initials.
+
 ## Visuals
 
 Press **V** while it plays for a full-screen picture of the music, with the station above and
@@ -123,6 +144,7 @@ other line stay exactly as you typed them.
 - A line it can't read is skipped, and the radio tells you how many it skipped.
 - Only `http://` addresses play. `https://`, AAC, HLS (`.m3u8`) and playlist files (`.pls`,
   `.m3u`) don't.
+- `/radio/logos/` holds the stations' logos.
 - `/radio/last.txt` holds the last station you played, and `/radio/country.txt` the country
   you last searched in.
 

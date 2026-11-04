@@ -43,8 +43,9 @@ bool visuals(Visuals& out);  // False until a frame playing now has been analyse
 // A station found by searching radio-browser.info, a public directory with no account.
 struct Found {
   char name[48];
-  char url[256];
-  char tags[48];
+  char url[200];
+  char tags[40];
+  char logo[160];  // The directory's address for its logo, http or https, or empty.
   char country[3];
   uint16_t bitrate;
   bool russian;
@@ -60,6 +61,20 @@ size_t foundCount();
 const Found* found(size_t i);
 void clearFound();  // Frees the results. Does nothing while a search runs.
 
+// Station logos. The logo's address comes with a search, or is looked up in the directory: by
+// the stream's address, then by the station's name on the same website. A public image
+// service, wsrv.nl, shrinks it to a 60x60 JPEG and serves that over plain HTTP whatever the
+// logo's own format, so no HTTPS and no PNG decoder are needed here. The same single worker.
+enum class LogoResult : uint8_t { None, Found, Missing, Failed };
+constexpr size_t kLogoBytes = 16384;  // The largest JPEG kept. The service's are about 2 KB.
+bool startLogo(const char* stream, const char* name, const char* logo);  // logo may be empty.
+bool fetchingLogo();
+// How the last logo job ended: Missing means there's no logo to get, Failed that the network
+// let it down and it's worth trying later. None while one runs, after a stop, or once cleared.
+LogoResult logoResult();
+const uint8_t* logoJpeg(size_t& size);  // The JPEG when Found, else nullptr.
+void clearLogo();
+
 // Portable production parsers, also exercised by host tests. No allocation.
 namespace detail {
 constexpr size_t kUrlSize = 512;
@@ -72,7 +87,8 @@ struct Headers {
   uint16_t bitrate = 0;  // From icy-br, which some stations send as "128,128". Never an error.
   bool chunked = false, hasLength = false, hasType = false;
   bool hasTransfer = false, hasMeta = false, hasLocation = false, done = false;
-  bool json = false;  // Set before the first line: a search wants JSON, a stream MP3.
+  bool json = false;   // Set before the first line: a search wants JSON, a stream MP3,
+  bool image = false;  // and a logo a JPEG.
   char location[kUrlSize]{};
   Error line(const char*);  // Lines exclude CRLF; empty line finalizes.
 };
@@ -106,6 +122,15 @@ class Body {
 // One frame's analysis: a Hann-windowed 512-point FFT of its start, mixed to mono, read as
 // the bands above, and its waveform. Uses 4 KB of stack and no allocation.
 void analyse(const int16_t* pcm, int samples, int channels, int hz, Visuals& out);
+// The image service's address for a logo, sized for the radio's tile. False when the logo
+// isn't an http or https address, or it won't fit.
+bool logoImageUrl(char* out, size_t room, const char* logo);
+// The directory's lookups for a station's logo: by its stream's address, and by its name.
+bool logoByStreamUrl(char* out, size_t room, const char* stream);
+bool logoByNameUrl(char* out, size_t room, const char* name);
+// Whether an address is on the same website as a host: their last two labels match, so
+// ice1.somafm.com and ice2.somafm.com do.
+bool sameSite(const char* host, const char* address);
 // The directory's search address. Empty text finds the most listened. False when the text is
 // over 64 bytes, or the country isn't empty or two capital letters.
 bool searchUrl(char* out, size_t room, bool byGenre, const char* text, const char* country = "");
@@ -114,13 +139,14 @@ bool searchUrl(char* out, size_t room, bool byGenre, const char* text, const cha
 // values and the parts of values too long to keep are skipped without being stored.
 class StationJson {
  public:
-  StationJson(Found* out, size_t room) : out_(out), room_(room) {}
+  // With logos set, it keeps any station that has a logo, whatever its stream, for a lookup.
+  StationJson(Found* out, size_t room, bool logos = false) : out_(out), room_(room), logos_(logos) {}
   bool feed(uint8_t c);  // False: not the JSON expected. Stop reading.
   bool finished() const { return phase_ == Phase::Done; }
   size_t count() const { return count_; }
  private:
   enum class Phase : uint8_t { Start, Item, AfterItem, Key, KeyText, Colon, Value, ValueText, Number, Word, Nested, AfterMember, Done, Bad };
-  enum class Field : uint8_t { None, Name, Url, Tags, Country, Language, Codec, Bitrate, Hls };
+  enum class Field : uint8_t { None, Name, Url, Tags, Country, Language, Codec, Bitrate, Hls, Logo };
   bool fail() { phase_ = Phase::Bad; return false; }
   bool text(uint8_t c, bool& closed);
   void emit(uint32_t codepoint);
@@ -135,7 +161,8 @@ class StationJson {
   char language_[32]{}, codec_[8]{};
   char* dst_ = nullptr;
   size_t dstRoom_ = 0, dstLen_ = 0;
-  bool overflow_ = false, urlTooLong_ = false, expectItem_ = false, expectKey_ = false, hls_ = false;
+  bool logos_ = false;
+  bool overflow_ = false, urlTooLong_ = false, logoTooLong_ = false, expectItem_ = false, expectKey_ = false, hls_ = false;
   bool nestedString_ = false, nestedEscape_ = false;
   Field field_ = Field::None;
   uint32_t number_ = 0, unit_ = 0, high_ = 0;

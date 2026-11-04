@@ -175,6 +175,33 @@ int main(int argc,char**argv){
   for(int b=bandOf(4000)+1;b<16;++b)assert(lr.bands[b]==0);  // Nothing above what 8 kHz can hold.
   internet_radio::Visuals none{};analyse(nullptr,0,2,44100,none);for(auto b:none.bands)assert(b==0);
  }
+ // Logos: the directory's favicon comes with each station; a cut one is dropped, not kept.
+ // A lookup keeps any station with a logo, whatever its stream, and skips the ones without.
+ {
+  const std::string json=R"([{"name":"A","url_resolved":"http://a.example/","codec":"MP3","favicon":"https://a.example/logo.png"},
+   {"name":"B","url_resolved":"http://b.example/","codec":"MP3","favicon":"https://b.example/)"+std::string(200,'x')+R"(.png"},
+   {"name":"C","url_resolved":"https://c.example/live","codec":"AAC","hls":1,"favicon":"http://c.example/c.ico"},
+   {"name":"D","url_resolved":"http://d.example/","codec":"MP3","favicon":""}])";
+  Found f[8];StationJson j(f,8);for(unsigned char ch:json)assert(j.feed(ch));
+  assert(j.count()==3&&std::string(f[0].logo)=="https://a.example/logo.png"&&!f[1].logo[0]&&!f[2].logo[0]);
+  StationJson k(f,8,true);for(unsigned char ch:json)assert(k.feed(ch));
+  assert(k.count()==2&&std::string(f[0].logo)=="https://a.example/logo.png"&&std::string(f[1].logo)=="http://c.example/c.ico"&&std::string(f[1].url)=="https://c.example/live");
+  char u[kUrlSize];Url p;
+  assert(logoImageUrl(u,sizeof(u),"https://radioparadise.com/apple-touch-icon.png")&&
+         std::string(u)=="http://wsrv.nl/?url=https://radioparadise.com/apple-touch-icon.png&w=60&h=60&fit=cover&output=jpg&q=85"&&parseUrl(u,p)&&std::string(p.host)=="wsrv.nl");
+  assert(logoImageUrl(u,sizeof(u),"http://a.example/x.png?s=1&t=2#z")&&std::string(u).find("url=http://a.example/x.png%3Fs%3D1%26t%3D2%23z&w=60")!=std::string::npos&&parseUrl(u,p));
+  for(const char* bad:{"","ftp://a.example/x.png","data:image/png;base64,AAAA","https://a.example/a b.png","https://a.example/\xD0\x96.png"})assert(!logoImageUrl(u,sizeof(u),bad));
+  assert(!logoImageUrl(u,sizeof(u),("https://a.example/"+std::string(500,'x')).c_str()));
+  assert(logoByStreamUrl(u,sizeof(u),"http://kathy.torontocast.com:3330/stream/1/?esPlayer&cb=82181.mp3")&&
+         std::string(u)=="http://all.api.radio-browser.info/json/stations/byurl?url=http://kathy.torontocast.com:3330/stream/1/%3FesPlayer%26cb%3D82181.mp3"&&parseUrl(u,p));
+  assert(logoByNameUrl(u,sizeof(u),"\xD0\xA0\xD0\xB0 FM")&&std::string(u)=="http://all.api.radio-browser.info/json/stations/search?name=%D0%A0%D0%B0%20FM&limit=10"&&parseUrl(u,p));
+  assert(!logoByStreamUrl(u,sizeof(u),"")&&!logoByNameUrl(u,sizeof(u),""));
+  assert(sameSite("ice2.somafm.com","http://ice1.somafm.com/groovesalad")&&sameSite("nashe1.hostingradio.ru","https://nashe2.hostingradio.ru:8000/x"));
+  assert(sameSite("a.b.example.com","example.com")&&sameSite("RADIO.Example.org","http://radio.example.ORG/"));
+  assert(!sameSite("nashe1.hostingradio.ru","https://rockfm-cope.flumotion.com/")&&!sameSite("localhost","http://localhost/")&&!sameSite("ice2.somafm.com",""));
+  Headers ih;ih.image=true;assert(ih.line("HTTP/1.1 200 OK")==Error::None&&ih.line("Content-Type: image/jpeg")==Error::None);
+  Headers ph;ph.image=true;assert(ph.line("HTTP/1.1 200 OK")==Error::None&&ph.line("Content-Type: image/png")==Error::Unsupported);
+ }
  // Actual pinned decoder, not a decoder stub, on generated mono/stereo MP3.
  for(int file=1;file<argc;++file){std::ifstream in(argv[file],std::ios::binary);std::vector<uint8_t>data((std::istreambuf_iterator<char>(in)),{});assert(data.size()>2000);
   mp3dec_t decoder;mp3dec_init(&decoder);size_t pos=0,frames=0;long long energy=0;int16_t pcm[MINIMP3_MAX_SAMPLES_PER_FRAME];

@@ -49,11 +49,26 @@ uint32_t gRadioLookShownMs = 0, gRadioVisualAtMs = 0;
 bool gRadioVisualsKnown = false;
 uint32_t gRadioCardUntilMs = 0;
 uint8_t gRadioShown[internet_radio::kBands] = {}, gRadioPeaks[internet_radio::kBands] = {};
+// Logos, kept on the card as the canvas's own 8-bit colours, ready to draw: 60x60, 3600 bytes.
+constexpr const char* kRadioLogoDir = "/radio/logos";
+constexpr int16_t kRadioLogoSide = 60;
+constexpr size_t kRadioLogoBytes = size_t(kRadioLogoSide) * kRadioLogoSide;
+enum class RadioLogoFile : uint8_t { Unknown, Have, None, Absent };  // Absent: no file, so ask.
+uint8_t* gRadioLogo = nullptr;           // The shown station's, when the card has it.
+uint32_t gRadioLogoFor = 0;              // Whose: its stream address's hash.
+RadioLogoFile gRadioLogoFile = RadioLogoFile::Unknown;
+uint32_t gRadioLogoAsked = 0;            // The station a logo job is for.
+uint32_t gRadioRestSinceMs = 0;          // When the selection last changed.
+uint32_t gRadioLogoTried[16] = {};       // Failed this session, so not tried again until next.
+uint8_t gRadioLogoTriedCount = 0;
+String gRadioLogoQueuedUrl, gRadioLogoQueuedName, gRadioLogoQueuedLogo;  // From a save.
 // Remove.
 uint16_t gRadioRemoveLine = 0;
 String gRadioRemoveName, gRadioRemoveUrl, gRadioRemoveGenre;
 
 bool radioBusy() { return internet_radio::busy(); }
+// The worker plays, or is getting ready to: not a search or a logo, which also keep it busy.
+bool radioStreaming() { return radioBusy() && !internet_radio::searching() && !internet_radio::fetchingLogo(); }
 // Five percent a press, landing on the nearest five, so the number reads 60, 65, 70.
 void radioStepVolume(int direction) {
   const int pct = (int(gSpeakerVolume) * 100 + 127) / 255;
@@ -226,6 +241,12 @@ void radioRememberCountry(const String& code) {
 }
 // Off the Radio screen, with the worker gone: the list and any results go back to the heap.
 void radioRelease() {
+  free(gRadioLogo);
+  gRadioLogo = nullptr;
+  gRadioLogoFor = gRadioLogoAsked = 0;
+  gRadioLogoFile = RadioLogoFile::Unknown;
+  gRadioLogoQueuedUrl = "";
+  internet_radio::clearLogo();
   delete gRadioList;
   gRadioList = nullptr;
   gRadioSelection.list = nullptr;
@@ -334,7 +355,7 @@ void radioSearchDone() {
 }
 const internet_radio::Found* radioFound() { return internet_radio::found(size_t(gRadioFoundSel)); }
 bool radioPlayingUrl(const char* url) {
-  return (gRadioWantPlaying || radioBusy()) && gRadioWantUrl == url;
+  return (gRadioWantPlaying || radioStreaming()) && gRadioWantUrl == url;
 }
 void radioPlayFound() {
   const auto* found = radioFound();
@@ -369,10 +390,12 @@ void radioSaveFound() {
   gRadioSelection.select(gRadioList ? gRadioList->find(url.c_str()) : -1);
   gRadioNotice = String("Saved to ") + genre;
   gRadioNoticeGood = true;
+  // Its logo's address came with it, so that's asked for first, once the worker is free.
+  if (found->logo[0]) { gRadioLogoQueuedUrl = url; gRadioLogoQueuedName = found->name; gRadioLogoQueuedLogo = found->logo; }
 }
 // Back to the player, which only ever plays a station on the list.
 void radioLeaveResults() {
-  if (gRadioWantPlaying || radioBusy()) {
+  if (gRadioWantPlaying || radioStreaming()) {
     const int on = gRadioList ? gRadioList->find(gRadioWantUrl.c_str()) : -1;
     if (on >= 0) gRadioSelection.select(on);
     else { stopInternetRadio(); gRadioNotice = "Stopped: not on your list"; }
@@ -429,6 +452,107 @@ bool radioEscape() {
   return true;
 }
 
+// --- Logos ----------------------------------------------------------------------------------
+uint32_t radioHash(const char* text) {
+  uint32_t h = 2166136261u;
+  for (const char* p = text; *p; ++p) h = (h ^ uint8_t(*p)) * 16777619u;
+  return h ? h : 1;
+}
+String radioLogoPath(uint32_t hash, const char* kind) {
+  char path[40];
+  snprintf(path, sizeof(path), "%s/%08lx.%s", kRadioLogoDir, static_cast<unsigned long>(hash), kind);
+  return String(path);
+}
+#ifndef RADIO_HOST_TEST
+// The service's JPEG, decoded once into the canvas's 8-bit colours.
+bool radioDecodeLogo(const uint8_t* jpeg, size_t size, uint8_t* out) {
+  M5Canvas logo(&M5Cardputer.Display);
+  logo.setColorDepth(8);
+  logo.setPsram(false);
+  if (!logo.createSprite(kRadioLogoSide, kRadioLogoSide)) return false;
+  logo.fillSprite(TFT_BLACK);
+  const bool ok = logo.drawJpg(jpeg, size, 0, 0, kRadioLogoSide, kRadioLogoSide);
+  if (ok) memcpy(out, logo.getBuffer(), kRadioLogoBytes);
+  logo.deleteSprite();
+  return ok;
+}
+#endif
+bool radioWriteLogoFile(uint32_t hash, const char* kind, const uint8_t* bytes, size_t size) {
+  if (!ensureDirRecursive(SD, kRadioLogoDir)) return false;
+  File file = SD.open(radioLogoPath(hash, kind).c_str(), FILE_WRITE);
+  if (!file) return false;
+  const bool ok = !size || file.write(bytes, size) == size;
+  file.close();
+  return ok;
+}
+// Shows the selected station's logo if the card has it, and notes whether to ask for one.
+void radioShowLogoFor(const radio_catalog::Station* station) {
+  const uint32_t hash = station ? radioHash(station->url) : 0;
+  if (hash == gRadioLogoFor) return;
+  gRadioLogoFor = hash;
+  gRadioRestSinceMs = millis();
+  gRadioLogoFile = RadioLogoFile::Unknown;
+  if (!hash || !gRadioListOnCard) { free(gRadioLogo); gRadioLogo = nullptr; return; }
+  File file = SD.open(radioLogoPath(hash, "332").c_str(), "r");
+  if (file && file.size() == kRadioLogoBytes) {
+    if (!gRadioLogo) gRadioLogo = static_cast<uint8_t*>(malloc(kRadioLogoBytes));
+    if (gRadioLogo && file.read(gRadioLogo, kRadioLogoBytes) == kRadioLogoBytes) gRadioLogoFile = RadioLogoFile::Have;
+  }
+  if (file) file.close();
+  if (gRadioLogoFile != RadioLogoFile::Have) {
+    free(gRadioLogo);
+    gRadioLogo = nullptr;
+    gRadioLogoFile = SD.exists(radioLogoPath(hash, "no").c_str()) ? RadioLogoFile::None : RadioLogoFile::Absent;
+  }
+}
+bool radioLogoTried(uint32_t hash) {
+  for (uint8_t i = 0; i < gRadioLogoTriedCount; ++i) if (gRadioLogoTried[i] == hash) return true;
+  return false;
+}
+// Fetches only while nothing plays or searches, after a second's rest on a station, so browsing
+// doesn't set off a fetch per station and a stream never waits on one. Enter stops one at once.
+void serviceRadioLogos() {
+  if (gRadioLogoAsked && !internet_radio::fetchingLogo()) {
+    const uint32_t hash = gRadioLogoAsked;
+    gRadioLogoAsked = 0;
+    const auto result = internet_radio::logoResult();
+    if (result == internet_radio::LogoResult::Found) {
+      size_t size = 0;
+      const uint8_t* jpeg = internet_radio::logoJpeg(size);
+      uint8_t* pixels = static_cast<uint8_t*>(malloc(kRadioLogoBytes));
+      if (pixels && jpeg && radioDecodeLogo(jpeg, size, pixels)) {
+        radioWriteLogoFile(hash, "332", pixels, kRadioLogoBytes);
+        if (hash == gRadioLogoFor) { free(gRadioLogo); gRadioLogo = pixels; pixels = nullptr; gRadioLogoFile = RadioLogoFile::Have; radioInvalidate(); }
+      } else if (pixels) {
+        radioWriteLogoFile(hash, "no", nullptr, 0);  // A JPEG that won't decode won't next time.
+        if (hash == gRadioLogoFor) gRadioLogoFile = RadioLogoFile::None;
+      }
+      free(pixels);
+    } else if (result == internet_radio::LogoResult::Missing) {
+      radioWriteLogoFile(hash, "no", nullptr, 0);
+      if (hash == gRadioLogoFor) gRadioLogoFile = RadioLogoFile::None;
+    } else if (result == internet_radio::LogoResult::Failed && gRadioLogoTriedCount < 16) {
+      gRadioLogoTried[gRadioLogoTriedCount++] = hash;
+    }
+    internet_radio::clearLogo();
+  }
+  const auto* station = gRadioSelection.station();
+  radioShowLogoFor(station);
+  if (gRadioLogoAsked || radioBusy() || gRadioWantPlaying || gRadioStartPending || gRadioRetryWaiting ||
+      gRadioSearchPending || gRadioSearching || !gRadioListOnCard || !radioStartAllowed()) return;
+  if (!gRadioLogoQueuedUrl.isEmpty()) {
+    const uint32_t hash = radioHash(gRadioLogoQueuedUrl.c_str());
+    if (!SD.exists(radioLogoPath(hash, "332").c_str()) &&
+        internet_radio::startLogo(gRadioLogoQueuedUrl.c_str(), gRadioLogoQueuedName.c_str(), gRadioLogoQueuedLogo.c_str())) gRadioLogoAsked = hash;
+    gRadioLogoQueuedUrl = "";
+    return;
+  }
+  // Only for the station the play screen shows, not one left behind it during a search.
+  if (gRadioView != RadioView::Player || !station || gRadioLogoFile != RadioLogoFile::Absent ||
+      millis() - gRadioRestSinceMs < 1000 || radioLogoTried(gRadioLogoFor)) return;
+  if (internet_radio::startLogo(station->url, station->name, "")) gRadioLogoAsked = gRadioLogoFor;
+  else if (gRadioLogoTriedCount < 16) gRadioLogoTried[gRadioLogoTriedCount++] = gRadioLogoFor;  // A name too long, say.
+}
 void serviceInternetRadio() {
   if (gRadioModePending && !radioBusy()) {
     gRadioModePending = false; const UiMode next = gRadioNextMode;
@@ -470,6 +594,7 @@ void serviceInternetRadio() {
     if (!radioScheduleRetry()) { gRadioWantPlaying = false; gRadioRetries = 0; gRadioNotice = internet_radio::status(); }
     radioInvalidate();
   }
+  serviceRadioLogos();
 }
 
 // --- Keys ---------------------------------------------------------------------------------
@@ -548,7 +673,7 @@ bool handleInternetRadioKey(char key, const Keyboard_Class::KeysState& keys) {
   else if (key == '-' || key == '_') { radioStepVolume(-1); radioInvalidate(); }
   else if (key == '+' || key == '=') { radioStepVolume(1); radioInvalidate(); }
   else if (keys.enter || key == '\r' || key == '\n' || key == ' ') {
-    if (gRadioWantPlaying || radioBusy()) { stopInternetRadio(); gRadioNotice = "Paused"; }
+    if (gRadioWantPlaying || radioStreaming()) { stopInternetRadio(); gRadioNotice = "Paused"; }
     else radioPlaySelected();
     radioInvalidate();
   }
@@ -599,7 +724,7 @@ String radioStatusText(bool* song = nullptr) {
     return "Reconnecting in " + String((left + 999) / 1000) + "s";
   }
   if (gRadioStartPending) return "Tuning...";
-  if (radioBusy() && !internet_radio::searching()) {
+  if (radioStreaming()) {
     char title[128];
     if (internet_radio::state() == internet_radio::State::Playing && internet_radio::title(title, sizeof(title))) {
       if (song) *song = true;
@@ -670,9 +795,28 @@ String radioInitials(const char* name) {
 }
 // The station's tile: its genre's colour, its initials, and while it plays the meter in black
 // beneath them. While it connects, a raised bar runs along the meter.
-void drawRadioTile(int16_t x, int16_t y, const char* name, const char* genre, bool playing, bool waiting) {
+void drawRadioTile(int16_t x, int16_t y, const char* name, const char* genre, bool playing, bool waiting, const uint8_t* logo) {
   auto& d = gCanvas;
   constexpr int16_t kSize = 60;
+  const int lit = int((millis() / 150) % 5);
+  if (logo) {
+    // The station's logo, its corners rounded like the tiles', and while it plays the meter in
+    // white on a dark strip, which reads on any logo.
+    d.pushImage(x, y, kSize, kSize, reinterpret_cast<const lgfx::rgb332_t*>(logo));
+    static const uint8_t kCorner[10] = {7, 5, 3, 2, 2, 1, 1, 0, 0, 0};
+    for (int i = 0; i < 10; ++i) {
+      if (!kCorner[i]) continue;
+      d.fillRect(x, y + i, kCorner[i], 1, TFT_BLACK); d.fillRect(x + kSize - kCorner[i], y + i, kCorner[i], 1, TFT_BLACK);
+      d.fillRect(x, y + kSize - 1 - i, kCorner[i], 1, TFT_BLACK); d.fillRect(x + kSize - kCorner[i], y + kSize - 1 - i, kCorner[i], 1, TFT_BLACK);
+    }
+    if (!playing && !waiting) return;
+    d.fillRoundRect(x + 8, y + 41, 44, 15, 4, TFT_BLACK);
+    for (int i = 0; i < 5; ++i) {
+      const int16_t h = playing ? int16_t(max<int>(1, gRadioMeter[i] * 10 / 14)) : (i == lit ? 6 : 2);
+      d.fillRect(x + 12 + i * 8, y + 53 - h, 5, h, TFT_WHITE);
+    }
+    return;
+  }
   d.fillRoundRect(x, y, kSize, kSize, 10, radioGenreInk(genre));
   const String initials = radioInitials(name);
   const bool meter = playing || waiting;
@@ -689,7 +833,6 @@ void drawRadioTile(int16_t x, int16_t y, const char* name, const char* genre, bo
   }
   if (!meter) return;
   const int16_t left = x + (kSize - 37) / 2, bottom = y + kSize - 6;
-  const int lit = int((millis() / 150) % 5);
   for (int i = 0; i < 5; ++i) {
     const int16_t h = playing ? (gRadioMeter[i] ? gRadioMeter[i] : 1) : (i == lit ? 6 : 2);
     d.fillRect(left + i * 8, bottom - h, 5, h, TFT_BLACK);
@@ -741,7 +884,7 @@ void renderRadioPlayer() {
   const bool searching = internet_radio::searching();
   const bool playing = state == internet_radio::State::Playing && !searching;
   const bool waiting = !playing && !searching && (gRadioStartPending || gRadioRetryWaiting ||
-                       (radioBusy() && state != internet_radio::State::Stopping));
+                       (radioStreaming() && state != internet_radio::State::Stopping));
   radioMeterTick(playing);
   d.fillScreen(TFT_BLACK);
   // Above: the genre, and the clock with the language filter while it's on.
@@ -764,7 +907,8 @@ void renderRadioPlayer() {
   d.print(radioFit(genre, rightX - kBigLeft - 8));
   // The station: its tile, its name, the song, and the small facts.
   const String name = station ? station->name : "No stations";
-  drawRadioTile(kBigLeft, 22, name.c_str(), station ? genre.c_str() : "", playing, waiting);
+  const uint8_t* logo = station && gRadioLogo && gRadioLogoFor == radioHash(station->url) ? gRadioLogo : nullptr;
+  drawRadioTile(kBigLeft, 22, name.c_str(), station ? genre.c_str() : "", playing, waiting, logo);
   constexpr int16_t textX = 76, textW = 229 - 76;
   useBigTextFont(name);
   d.setTextColor(white); d.setCursor(textX, 22);
@@ -774,7 +918,7 @@ void renderRadioPlayer() {
   const bool wide = radioTextFont(status);
   String lines[2];
   const int n = radioWrap(status, textW, lines, 2);
-  d.setTextColor(song ? white : radioBusy() || gRadioRetryWaiting ? green : amber);
+  d.setTextColor(song ? white : radioStreaming() || gRadioRetryWaiting ? green : amber);
   for (int i = 0; i < n; ++i) { d.setCursor(textX, (wide ? 40 : 38) + i * 16); d.print(lines[i]); }
   if (station) {
     String facts = String(gRadioSelection.index + 1) + " of " + String(gRadioSelection.count(gRadioSelection.genre));
@@ -783,7 +927,7 @@ void renderRadioPlayer() {
     d.setFont(&fonts::Font0);
     d.setTextColor(muted); d.setCursor(textX, 75); d.print(facts);
   }
-  drawRadioControls(gRadioWantPlaying || radioBusy(), playing ? green : cyan, muted);
+  drawRadioControls(gRadioWantPlaying || radioStreaming(), playing ? green : cyan, muted);
   // The rest of the keys, quieter than the buttons' own.
   d.setFont(&fonts::Font0);
   d.setTextColor(rgb565_local(110,150,180));
@@ -842,7 +986,7 @@ void renderRadioFind() {
   String line = gRadioNotice;
   uint16_t ink = amber;
   if (gRadioSearching || gRadioSearchPending) { line = "Searching..."; ink = green; }
-  else if (line.isEmpty() && (gRadioWantPlaying || radioBusy())) { line = "Searching stops the radio"; ink = muted; }
+  else if (line.isEmpty() && (gRadioWantPlaying || radioStreaming())) { line = "Searching stops the radio"; ink = muted; }
   else if (line.isEmpty()) { line = gRadioQuery.isEmpty() ? "Blank finds the most listened" : "Searches radio-browser.info"; ink = muted; }
   d.setTextColor(ink);
   d.setCursor(8, 100);
@@ -860,7 +1004,7 @@ void renderRadioResults() {
   drawBigHeader("Found", cyan, count ? String(gRadioFoundSel + 1) + "/" + String(count) : String(""),
                 "Enter play  S save", "F search  Esc back");
   const String status = radioStatusText();
-  const bool notice = !gRadioNotice.isEmpty() || radioBusy();
+  const bool notice = !gRadioNotice.isEmpty() || radioStreaming();
   // The notice takes the last row, so the selection has to stay in the four above it.
   const int visible = notice ? kBigVisibleRows - 1 : kBigVisibleRows;
   const int first = max<int>(0, min<int>(gRadioFoundSel - visible / 2, count - visible));
@@ -878,7 +1022,7 @@ void renderRadioResults() {
   drawBigScrollbar(first, count, cyan);
   if (notice) {
     const String text = gRadioNotice.isEmpty() ? status : gRadioNotice;
-    const bool good = radioBusy() || gRadioNoticeGood;
+    const bool good = radioStreaming() || gRadioNoticeGood;
     drawBigNotice(radioFit(text, kBigRight - kBigLeft), good ? green : amber);
   }
 }
@@ -994,7 +1138,7 @@ void renderRadioVisual() {
   bool song = false;
   const String status = radioStatusText(&song);
   const bool wide = radioTextFont(status);
-  d.setTextColor(song ? white : radioBusy() || gRadioRetryWaiting ? green : amber);
+  d.setTextColor(song ? white : radioStreaming() || gRadioRetryWaiting ? green : amber);
   d.setCursor(kBigLeft, wide ? 120 : 118);
   d.print(song ? radioMarquee(status, 222) : radioFit(status, 222));
   // The first time only: what the look is called and the keys, for a few seconds.

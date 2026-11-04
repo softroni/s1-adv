@@ -98,7 +98,8 @@ Error Headers::line(const char* s) {
     char* semi = strchr(value,';'); if (semi) *semi=0;
     for (char* p=value;*p;++p) *p=tolower(static_cast<unsigned char>(*p));
     const bool audio = !strcmp(value,"audio/mpeg") || !strcmp(value,"audio/mp3");
-    if (status == 200 && (json ? strcmp(value,"application/json") != 0 : !audio)) return Error::Unsupported;
+    const bool wanted = json ? !strcmp(value,"application/json") : image ? !strcmp(value,"image/jpeg") : audio;
+    if (status == 200 && !wanted) return Error::Unsupported;
     hasType=true;
   } else if (!strcmp(name,"transfer-encoding")) {
     if (hasTransfer || strcasecmp(value,"chunked")) return Error::Malformed;
@@ -204,6 +205,63 @@ size_t cleanText(const char* in, size_t n, char* out, size_t room) {
   while (len && out[len-1] == ' ') --len;
   out[len] = 0;
   return len;
+}
+// Appends s, escaping what an address can't carry. Keeps : and / so a logo's address stays
+// short enough to fit inside another.
+static bool appendEscaped(char* out, size_t room, size_t& at, const char* s, size_t n) {
+  static const char kHex[] = "0123456789ABCDEF";
+  for (size_t i = 0; i < n; ++i) {
+    const unsigned char c = static_cast<unsigned char>(s[i]);
+    const bool plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+                       c == '-' || c == '.' || c == '_' || c == '~' || c == ':' || c == '/';
+    if (at + (plain ? 1 : 3) >= room) return false;
+    if (plain) out[at++] = char(c);
+    else { out[at++] = '%'; out[at++] = kHex[c >> 4]; out[at++] = kHex[c & 15]; }
+  }
+  out[at] = 0;
+  return true;
+}
+static bool startsWith(const char* s, const char* prefix) { return !strncmp(s, prefix, strlen(prefix)); }
+static bool composed(char* out, size_t room, const char* head, const char* value, const char* tail) {
+  if (!out || !room || !value) return false;
+  size_t at = strlen(head);
+  if (at >= room) return false;
+  memcpy(out, head, at + 1);
+  if (!appendEscaped(out, room, at, value, strlen(value))) return false;
+  const size_t n = strlen(tail);
+  if (at + n >= room || at + n >= kUrlSize) return false;
+  memcpy(out + at, tail, n + 1);
+  return true;
+}
+bool logoImageUrl(char* out, size_t room, const char* logo) {
+  if (!logo || !(startsWith(logo, "http://") || startsWith(logo, "https://"))) return false;
+  for (const char* p = logo; *p; ++p) if (static_cast<unsigned char>(*p) <= ' ' || static_cast<unsigned char>(*p) >= 127) return false;
+  // Square, cropped to fill the tile; a JPEG, which needs only a small decoder.
+  return composed(out, room, "http://wsrv.nl/?url=", logo, "&w=60&h=60&fit=cover&output=jpg&q=85");
+}
+bool logoByStreamUrl(char* out, size_t room, const char* stream) {
+  return stream && *stream && composed(out, room, "http://all.api.radio-browser.info/json/stations/byurl?url=", stream, "");
+}
+bool logoByNameUrl(char* out, size_t room, const char* name) {
+  return name && *name && composed(out, room, "http://all.api.radio-browser.info/json/stations/search?name=", name, "&limit=10");
+}
+// The last two labels of a host, like somafm.com.
+static const char* site(const char* host, size_t n, size_t& len) {
+  size_t dots = 0, i = n;
+  while (i > 0) { if (host[i - 1] == '.' && ++dots == 2) break; --i; }
+  len = n - i;
+  return host + i;
+}
+bool sameSite(const char* host, const char* address) {
+  if (!host || !address) return false;
+  const char* a = strstr(address, "://");
+  a = a ? a + 3 : address;
+  size_t an = 0;
+  while (a[an] && a[an] != '/' && a[an] != ':' && a[an] != '?') ++an;
+  size_t aLen = 0, hLen = 0;
+  const char* as = site(a, an, aLen);
+  const char* hs = site(host, strlen(host), hLen);
+  return aLen && aLen == hLen && !strncasecmp(as, hs, aLen) && memchr(hs, '.', hLen);
 }
 bool searchUrl(char* out, size_t room, bool byGenre, const char* text, const char* country) {
   if (!out || !room || !text) return false;
@@ -349,6 +407,7 @@ void StationJson::startValue() {
     case Field::Country: dst_ = cur_.country; dstRoom_ = sizeof(cur_.country); break;
     case Field::Language: dst_ = language_; dstRoom_ = sizeof(language_); break;
     case Field::Codec: dst_ = codec_; dstRoom_ = sizeof(codec_); break;
+    case Field::Logo: dst_ = cur_.logo; dstRoom_ = sizeof(cur_.logo); break;
     default: break;
   }
   dstLen_ = 0; overflow_ = false; escape_ = 0; high_ = 0;
@@ -361,6 +420,7 @@ void StationJson::endValue() {
     while (j && (static_cast<unsigned char>(dst_[j-1]) & 0xC0) == 0x80) --j;
     if (j && utf8Length(static_cast<unsigned char>(dst_[j-1])) > dstLen_ - (j - 1)) dstLen_ = j - 1;
     if (field_ == Field::Url) urlTooLong_ = true;  // A cut address would play nothing.
+    if (field_ == Field::Logo) logoTooLong_ = true;  // Nor would a cut logo show.
   }
   dst_[dstLen_] = 0;
   dst_ = nullptr;
@@ -373,6 +433,11 @@ void StationJson::endItem() {
   memcpy(cur_.name, clean, n + 1);
   char tags[sizeof(cur_.tags)];
   memcpy(cur_.tags, tags, cleanText(cur_.tags, strlen(cur_.tags), tags, sizeof(tags)) + 1);
+  if (logoTooLong_) cur_.logo[0] = 0;
+  if (logos_) {  // A lookup: any station with a logo, its address kept as it came.
+    if (cur_.logo[0] && count_ < room_) { if (urlTooLong_) cur_.url[0] = 0; out_[count_++] = cur_; }
+    return;
+  }
   Url url;
   if (!n || urlTooLong_ || hls_ || count_ >= room_ || !parseUrl(cur_.url, url)) return;
   if (codec_[0] && strcasecmp(codec_, "MP3")) return;
@@ -399,7 +464,7 @@ bool StationJson::feed(uint8_t c) {
       if (space) return true;
       if (c == ']' && !expectItem_) { phase_ = Phase::Done; return true; }
       if (c != '{') return fail();
-      cur_ = Found{}; language_[0] = codec_[0] = 0; hls_ = urlTooLong_ = expectKey_ = false;
+      cur_ = Found{}; language_[0] = codec_[0] = 0; hls_ = urlTooLong_ = logoTooLong_ = expectKey_ = false;
       phase_ = Phase::Key; return true;
     case Phase::AfterItem:
       if (space) return true;
@@ -420,7 +485,8 @@ bool StationJson::feed(uint8_t c) {
       field_ = overflow_ ? Field::None : !strcmp(key_, "name") ? Field::Name : !strcmp(key_, "url_resolved") ? Field::Url :
         !strcmp(key_, "tags") ? Field::Tags : !strcmp(key_, "countrycode") ? Field::Country :
         !strcmp(key_, "language") ? Field::Language : !strcmp(key_, "codec") ? Field::Codec :
-        !strcmp(key_, "bitrate") ? Field::Bitrate : !strcmp(key_, "hls") ? Field::Hls : Field::None;
+        !strcmp(key_, "bitrate") ? Field::Bitrate : !strcmp(key_, "hls") ? Field::Hls :
+        !strcmp(key_, "favicon") ? Field::Logo : Field::None;
       phase_ = Phase::Colon; return true;
     }
     case Phase::Colon:
@@ -490,7 +556,8 @@ constexpr uint8_t kChannel=7;
 constexpr size_t kInput=8192;
 constexpr uint32_t kIdleMs=5000, kHeaderMs=8000;
 constexpr uint32_t kSearchBytes=128*1024;  // 30 stations come to about 35 KB.
-enum class Job : uint8_t { Stream, Search };
+enum class Job : uint8_t { Stream, Search, Logo };
+enum class Want : uint8_t { Audio, Json, Image };
 std::atomic<State> current{State::Idle};
 std::atomic<Error> failure{Error::None};
 std::atomic<bool> owned{false}, cancel{false};
@@ -503,6 +570,12 @@ char nowTitle[128];  // Guarded by gate.
 // Search results outlive the search, so a found station can play while the list shows.
 Found* results=nullptr;
 std::atomic<size_t> resultCount{0};
+// A logo job's inputs, written only while no job runs, and its JPEG once it has one.
+char logoStream[detail::kUrlSize], logoName[64], logoGiven[sizeof(Found::logo)];
+uint8_t* logoData=nullptr;
+std::atomic<size_t> logoLength{0};
+std::atomic<LogoResult> logoOutcome{LogoResult::None};
+unsigned logoStatus=0;  // The image service's HTTP status, so a 404 reads as Missing.
 portMUX_TYPE gate=portMUX_INITIALIZER_UNLOCKED;
 char requested[detail::kUrlSize];
 // lwIP DNS callbacks may outlive a cancelled worker. Static storage deliberately
@@ -583,7 +656,8 @@ Error sendRequest(WiFiClient& tcp, const char* data, size_t size) {
 }
 // Connects to the requested address, following up to three redirects, and leaves r at the
 // start of a 200 answer's body. Error::None with cancel set means it was stopped.
-Error open(WiFiClient& tcp, Reader& r, detail::Headers& h, bool json) {
+Error open(WiFiClient& tcp, Reader& r, detail::Headers& h, Want want) {
+  const bool json = want == Want::Json;
   detail::Url url; if (!detail::parseUrl(requested,url)) return Error::InvalidUrl;
   for (unsigned redirect=0;redirect<=3 && !cancel.load();++redirect) {
     setState(State::Connecting);
@@ -593,10 +667,11 @@ Error open(WiFiClient& tcp, Reader& r, detail::Headers& h, bool json) {
     if (!tcp.connect(ip,url.port,600)) return Error::Connect;
     char request[768]; int n=snprintf(request,sizeof(request),
       "GET %s HTTP/1.1\r\nHost: %s:%u\r\nUser-Agent: S1-ADV-Radio/1\r\nAccept: %s\r\nAccept-Encoding: identity\r\n%sConnection: close\r\n\r\n",
-      url.path,url.host,url.port,json?"application/json":"audio/mpeg",json?"":"Icy-MetaData: 1\r\n");
+      url.path,url.host,url.port,json?"application/json":want==Want::Image?"image/jpeg":"audio/mpeg",want==Want::Audio?"Icy-MetaData: 1\r\n":"");
     if (n<=0 || size_t(n)>=sizeof(request)) return Error::Connect;
     e=sendRequest(tcp,request,n); if(e!=Error::None || cancel.load()) return e;
-    r.reset(); h=detail::Headers{}; h.json=json; e=readHeaders(r,h);
+    r.reset(); h=detail::Headers{}; h.json=json; h.image=want==Want::Image; e=readHeaders(r,h);
+    if(want==Want::Image) logoStatus=h.status;
     if(e!=Error::None || cancel.load()) return e;
     if(h.status==200) return Error::None;
     tcp.stop(); if(redirect==3) return Error::Redirect;
@@ -615,11 +690,13 @@ void showTitle(const char* text) {
   memcpy(nowTitle,text,n); nowTitle[n]=0;
   portEXIT_CRITICAL(&gate);
 }
-Error search(WiFiClient& tcp) {
+// Reads the directory's JSON answer at requested into out. With logos set, for a lookup.
+Error stations(WiFiClient& tcp, Found* out, size_t room, bool logos, size_t& count) {
+  count=0;
   Reader r{tcp}; detail::Headers h;
-  Error e=open(tcp,r,h,true); if(e!=Error::None || cancel.load()) return e;
+  Error e=open(tcp,r,h,Want::Json); if(e!=Error::None || cancel.load()) return e;
   setState(State::Buffering);
-  detail::Body body(h); detail::StationJson json(results,kMaxFound);
+  detail::Body body(h); detail::StationJson json(out,room,logos);
   uint32_t total=0;
   while (!cancel.load() && !json.finished() && !body.done()) {
     int b=r.next();
@@ -629,13 +706,67 @@ Error search(WiFiClient& tcp) {
   }
   if (cancel.load()) return Error::None;
   if (!json.finished()) return Error::Malformed;
-  resultCount.store(json.count());
+  count=json.count();
+  return Error::None;
+}
+Error search(WiFiClient& tcp) {
+  size_t count=0;
+  const Error e=stations(tcp,results,kMaxFound,false,count);
+  if(e==Error::None && !cancel.load()) resultCount.store(count);
+  return e;
+}
+// Finds the logo's address if it wasn't given, then has the image service send it as a small
+// JPEG. Sets Found or Missing itself; a network error returned is Failed.
+Error logo(WiFiClient& tcp) {
+  char address[sizeof(Found::logo)];
+  strcpy(address,logoGiven);
+  if(!*address) {
+    constexpr size_t kRoom=10;
+    auto* found=static_cast<Found*>(heap_caps_malloc(sizeof(Found)*kRoom,MALLOC_CAP_8BIT));
+    if(!found) return Error::NoMemory;
+    size_t count=0;
+    Error e=stations(tcp,found,4,true,count);  // requested is the lookup by stream address.
+    for(size_t i=0;e==Error::None && !*address && i<count;++i) strcpy(address,found[i].logo);
+    detail::Url stream;
+    if(e==Error::None && !cancel.load() && !*address && detail::parseUrl(logoStream,stream) &&
+       detail::logoByNameUrl(requested,sizeof(requested),logoName)) {
+      tcp.stop();
+      // By name, only a station on the same website: names like Rock FM aren't unique.
+      e=stations(tcp,found,kRoom,true,count);
+      for(size_t i=0;e==Error::None && !*address && i<count;++i)
+        if(detail::sameSite(stream.host,found[i].url)) strcpy(address,found[i].logo);
+    }
+    free(found);
+    if(e!=Error::None || cancel.load()) return e;
+    if(!*address || !detail::logoImageUrl(requested,sizeof(requested),address)) { logoOutcome.store(LogoResult::Missing); return Error::None; }
+    tcp.stop();
+  }
+  auto* jpeg=static_cast<uint8_t*>(heap_caps_malloc(kLogoBytes,MALLOC_CAP_8BIT));
+  if(!jpeg) return Error::NoMemory;
+  Reader r{tcp}; detail::Headers h; logoStatus=0;
+  Error e=open(tcp,r,h,Want::Image);
+  size_t size=0;
+  if(e==Error::None && !cancel.load()) {
+    detail::Body body(h);
+    while(!cancel.load() && !body.done()) {
+      const int b=r.next();
+      if(b<0) { if(b==-2) e=Error::Timeout; else if(b!=-3 && !body.complete()) e=Error::Malformed; break; }
+      const int kind=body.feed(uint8_t(b)); if(kind<0) { e=Error::Malformed; break; }
+      if(kind==1) { if(size>=kLogoBytes) { e=Error::Malformed; break; } jpeg[size++]=uint8_t(b); }
+    }
+  }
+  // The service answers 404 or 400 for a logo it can't fetch, so there's nothing to get.
+  if(e==Error::Http && logoStatus>=400 && logoStatus<500) { free(jpeg); logoOutcome.store(LogoResult::Missing); return Error::None; }
+  if(e!=Error::None || cancel.load() || size<4) { free(jpeg); return e!=Error::None ? e : cancel.load() ? Error::None : Error::Malformed; }
+  // Only what it needs is kept: the service's JPEGs are about 2 KB of the 16 KB allowed.
+  if(auto* fit=static_cast<uint8_t*>(realloc(jpeg,size))) jpeg=fit;
+  logoData=jpeg; logoLength.store(size); logoOutcome.store(LogoResult::Found);
   return Error::None;
 }
 Error stream(WiFiClient& tcp, mp3dec_t* decoder, uint8_t* input, int16_t* pcm[2]) {
   {
     Reader r{tcp}; detail::Headers h;
-    Error e=open(tcp,r,h,false); if(e!=Error::None || cancel.load()) return e;
+    Error e=open(tcp,r,h,Want::Audio); if(e!=Error::None || cancel.load()) return e;
     kbps.store(h.bitrate);
     detail::Body body(h); size_t used=0; unsigned slot=0, junk=0; uint32_t titles=0;
     bool played=false; uint32_t lastFrame=millis();
@@ -706,6 +837,10 @@ void worker(void*) {
   Error e=Error::None;
   mp3dec_t* decoder=nullptr; uint8_t* input=nullptr; int16_t* pcm[2]={nullptr,nullptr};
   if (job.load()==Job::Search) { WiFiClient tcp; e=search(tcp); tcp.stop(); }
+  else if (job.load()==Job::Logo) {
+    WiFiClient tcp; e=logo(tcp); tcp.stop();
+    if(!cancel.load() && e!=Error::None && logoOutcome.load()==LogoResult::None) logoOutcome.store(LogoResult::Failed);
+  }
   else {
   // All active allocations, TCP and decoder lifetime are worker-owned.
   decoder=static_cast<mp3dec_t*>(heap_caps_malloc(sizeof(mp3dec_t),MALLOC_CAP_8BIT));
@@ -741,12 +876,13 @@ bool begin(const char* url, Job kind) {
   owned.store(true);cancel.store(false);failure.store(Error::None);received.store(0);job.store(kind);
   strcpy(requested,url);current.store(State::Connecting);
   if(kind==Job::Stream) { nowTitle[0]=0; loudness.store(0); kbps.store(0); shownVisuals=Visuals{}; }
-  else resultCount.store(0);
+  else if(kind==Job::Search) resultCount.store(0);
+  else logoOutcome.store(LogoResult::None);
   portEXIT_CRITICAL(&gate);
   if(kind==Job::Search && !results) results=static_cast<Found*>(heap_caps_malloc(sizeof(Found)*kMaxFound,MALLOC_CAP_8BIT));
   // ESP-IDF task stack size is bytes. minimp3 has sizeable decode scratch; a search hasn't.
   if((kind==Job::Search && !results) ||
-     xTaskCreate(worker,kind==Job::Search?"radio_search":"radio_stream",kind==Job::Search?12288:24576,nullptr,2,nullptr)!=pdPASS) {
+     xTaskCreate(worker,kind==Job::Stream?"radio_stream":kind==Job::Search?"radio_search":"radio_logo",kind==Job::Stream?24576:12288,nullptr,2,nullptr)!=pdPASS) {
     portENTER_CRITICAL(&gate);failure.store(results||kind==Job::Stream?Error::TaskFailed:Error::NoMemory);current.store(State::Error);owned.store(false);portEXIT_CRITICAL(&gate);
     return false;
   }
@@ -764,6 +900,29 @@ bool startSearch(bool byGenre, const char* text, const char* country) {
   return begin(url,Job::Search);
 }
 bool searching() { return owned.load() && job.load()==Job::Search; }
+bool startLogo(const char* stream, const char* name, const char* logo) {
+  if(!stream || !name || !logo || strnlen(stream,detail::kUrlSize)>=detail::kUrlSize ||
+     strnlen(name,sizeof(logoName))>=sizeof(logoName) || strnlen(logo,sizeof(logoGiven))>=sizeof(logoGiven)) { refuse(Error::InvalidUrl); return false; }
+  char first[detail::kUrlSize];
+  if(*logo ? !detail::logoImageUrl(first,sizeof(first),logo) : !detail::logoByStreamUrl(first,sizeof(first),stream)) { refuse(Error::InvalidUrl); return false; }
+  if(owned.load()) return false;
+  clearLogo();  // An answer nobody read goes, so only one JPEG is ever kept.
+  strcpy(logoStream,stream); strcpy(logoName,name); strcpy(logoGiven,logo);
+  return begin(first,Job::Logo);
+}
+bool fetchingLogo() { return owned.load() && job.load()==Job::Logo; }
+LogoResult logoResult() { return fetchingLogo() ? LogoResult::None : logoOutcome.load(); }
+const uint8_t* logoJpeg(size_t& size) {
+  if(fetchingLogo() || logoOutcome.load()!=LogoResult::Found) { size=0; return nullptr; }
+  size=logoLength.load(); return logoData;
+}
+void clearLogo() {
+  portENTER_CRITICAL(&gate);
+  if(owned.load() && job.load()==Job::Logo) { portEXIT_CRITICAL(&gate); return; }
+  uint8_t* gone=logoData; logoData=nullptr; logoLength.store(0); logoOutcome.store(LogoResult::None);
+  portEXIT_CRITICAL(&gate);
+  free(gone);
+}
 uint16_t level() { return current.load()==State::Playing ? loudness.load() : 0; }
 uint16_t bitrate() { return kbps.load(); }
 void wantVisuals(bool on) { visualsWanted.store(on); }
