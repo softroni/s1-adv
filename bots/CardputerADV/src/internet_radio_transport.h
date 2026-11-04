@@ -24,6 +24,11 @@ uint32_t bytes();     // Decoded transport audio bytes (wraps at UINT32_MAX).
 // The song the station says is on, UTF-8, from the stream's ICY metadata. Copies at most
 // room-1 bytes and returns the length; 0 until the station sends a title.
 size_t title(char* out, size_t room);
+// How loud the latest decoded frame is: the mean of its samples' sizes, 0 to 32767, and 0
+// while nothing plays. Measured from the audio itself, for a level meter.
+uint16_t level();
+// The station's own figure from its icy-br header, in kbit/s, or 0 when it didn't say.
+uint16_t bitrate();
 
 // A station found by searching radio-browser.info, a public directory with no account.
 struct Found {
@@ -54,6 +59,7 @@ bool publicIpv4(uint32_t hostOrder);
 struct Headers {
   unsigned status = 0, total = 0;
   uint32_t metaint = 0, length = 0;
+  uint16_t bitrate = 0;  // From icy-br, which some stations send as "128,128". Never an error.
   bool chunked = false, hasLength = false, hasType = false;
   bool hasTransfer = false, hasMeta = false, hasLocation = false, done = false;
   bool json = false;  // Set before the first line: a search wants JSON, a stream MP3.

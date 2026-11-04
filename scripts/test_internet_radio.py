@@ -41,6 +41,7 @@ struct String:std::string {using std::string::string;String()=default;String(con
  bool isEmpty()const{return empty();}
  void remove(size_t i){if(i<size())erase(i);}void remove(size_t i,size_t n){if(i<size())erase(i,n);}
  String substring(size_t i)const{return i<size()?String(substr(i)):String();}
+ String substring(size_t i,size_t j)const{return i<size()?String(substr(i,j>i?j-i:0)):String();}
  void trim(){size_t a=find_first_not_of(' ');if(a==npos){clear();return;}erase(0,a);erase(find_last_not_of(' ')+1);}
 };
 namespace fonts{const int Font0=0,Font2=2,efontCN_12=12,FreeSansBold9pt7b=9;}
@@ -76,7 +77,8 @@ String marqueeText(const String&s,int w,uint16_t){return fitCurrentFontToWidth(s
 constexpr int kBigVisibleRows=5;[[maybe_unused]] constexpr int16_t kBigListY=24,kBigRowH=22,kBigLeft=8,kBigRight=229;
 void useBigTextFont(const String&s){bool wide=false;for(unsigned char c:s)wide=wide||c>=0x80;gCanvas.setFont(wide?&fonts::efontCN_12:&fonts::FreeSansBold9pt7b);}
 int bigListFirstRow(int s,int c){return max<int>(0,min<int>(s-kBigVisibleRows/2,c-kBigVisibleRows));}
-void drawBigHeader(const String&t,uint16_t,const String& =String(),const String& =String(),const String& =String()){gCanvas.fillScreen(0);gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,3);gCanvas.print(t);}
+void drawBigHeader(const String&t,uint16_t,const String&r=String(),const String& =String(),const String& =String()){gCanvas.fillScreen(0);gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,3);gCanvas.print(t);
+ if(!r.empty()){gCanvas.setCursor(229-gCanvas.textWidth(r),3);gCanvas.print(r);}}
 int selectedRow=-1;
 void drawBigRow(int row,const String&l,const String&v,bool selected,uint16_t,uint16_t=0,uint16_t=0){assert(row>=0&&row<kBigVisibleRows);if(selected)selectedRow=row;
  useBigTextFont(l);gCanvas.setCursor(8,26+row*22);String shown=l;while(gCanvas.textWidth(shown)>130){size_t n=shown.size();while(n&&(static_cast<unsigned char>(shown[n-1])&0xC0)==0x80)--n;shown.erase(n-1);}gCanvas.print(shown);
@@ -136,6 +138,7 @@ namespace internet_radio{
  State state(){return phase;}Error error(){return err;}uint32_t bytes(){return got;}
  const char*status(){return phase==State::Error?"Radio timed out":phase==State::Stopping?"Stopping":phase==State::Playing?"Playing":"Connecting";}
  size_t title(char*o,size_t room){size_t n=std::min(song.size(),room-1);memcpy(o,song.data(),n);o[n]=0;return n;}
+ uint16_t loud=0,kbps=0;uint16_t level(){return phase==State::Playing?loud:0;}uint16_t bitrate(){return kbps;}
  size_t foundCount(){return searching()?0:shown;}
  const Found* found(size_t i){return i<foundCount()?&results[i]:nullptr;}
  void clearFound(){if(!searching())shown=0;}
@@ -192,7 +195,8 @@ int main(){
  internet_radio::finish();service();assert(internet_radio::starts==2&&internet_radio::url==gRadioSelection.station()->url);
  // Pause stays paused and language browsing stays silent.
  key(' ');assert(!gRadioWantPlaying&&radioBusy());internet_radio::finish();service();int n=internet_radio::starts;
- key('l');service();assert(internet_radio::starts==n);
+ key('l');service();assert(internet_radio::starts==n);render();assert(gCanvas.printed[1].rfind("EN/INT  ",0)==0);
+ key('l');render();assert(gCanvas.printed[1].rfind("RU  ",0)==0);key('l');render();assert(gCanvas.printed[1].find("  ")==std::string::npos);
  for(int i=0;i<40;++i)key('+');assert(gSpeakerVolume==255);for(int i=0;i<40;++i)key('-');assert(gSpeakerVolume==0);
  // Every audio/network owner blocks a new radio worker, without touching it.
  for(bool*p:{&gBootBackgroundActive,&gRecording,&gSubmitting,&gThinking,&gPlaybackActive,&gTransferUiActive,&gOtaApplyInProgress,&gInboxHttpBusy,&gVoiceDialBusy,&gVoiceReplySpeechBusy,&gRealtimeActive,&gRealtimeDialBusy,&gRealtimeExclusiveMode,&gPendingRealtimeStart,&gMeshBusOwned,&gG0VoicePending,&gVoiceCapturePreparing}){
@@ -206,8 +210,18 @@ int main(){
 
  // A stream that played and dropped comes back after 3 s, 10 s and 30 s, then gives up.
  key('\n');service();internet_radio::playing(100000);internet_radio::song="Artist - Song";render();assert(shows("Artist - Song"));
+ // The player: the station's place in its genre, its bitrate, a song over two lines, and a
+ // meter that follows the audio's loudness, settling to a dot when it's quiet.
+ internet_radio::kbps=128;render();assert(shows("128k")&&showsPart(" of ")&&shows("63%")==(gSpeakerVolume==160));
+ internet_radio::song="Robert Glasper Experiment featuring Erykah Badu - Afro Blue (Live at the Blue Note)";render();
+ { int lines=0;bool cut=false;for(auto&t:gCanvas.printed){if(t.rfind("Robert Glasper",0)==0||t.rfind("featuring",0)==0){++lines;cut=cut||(t.size()>2&&t.compare(t.size()-2,2,"..")==0);}}
+   assert(shows("Robert Glasper Experiment")&&lines==2&&cut&&!shows(internet_radio::song)); }  // Whole words, two lines, the rest cut.
+ internet_radio::loud=8000;for(int i=0;i<6;++i){tick+=100;render();}assert(gRadioMeter[4]==10&&gRadioMeter[0]==10);
+ internet_radio::loud=0;tick+=100;render();assert(gRadioMeter[4]==1&&gRadioMeter[3]==10);
+ internet_radio::loud=3000;tick+=100;render();assert(gRadioMeter[4]==6);internet_radio::loud=699;tick+=100;render();assert(gRadioMeter[4]==1);
+ internet_radio::loud=32767;tick+=100;render();assert(gRadioMeter[4]==14);internet_radio::loud=0;internet_radio::kbps=0;internet_radio::song="Artist - Song";
  internet_radio::finish(State::Error,Error::Timeout);service();assert(gRadioWantPlaying&&gRadioRetryWaiting);
- render();assert(shows("Reconnecting in 3s"));n=internet_radio::starts;
+ render();assert(shows("Reconnecting in 3s")&&!gRadioMeter[4]);n=internet_radio::starts;
  tick+=2999;service();assert(internet_radio::starts==n);tick+=1;service();assert(internet_radio::starts==n+1&&radioBusy());
  internet_radio::finish(State::Error,Error::Connect);service();assert(gRadioRetryWaiting);tick+=10000;service();assert(internet_radio::starts==n+2);
  internet_radio::finish(State::Error,Error::Dns);service();assert(gRadioRetryWaiting);tick+=30000;service();assert(internet_radio::starts==n+3);

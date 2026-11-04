@@ -92,13 +92,14 @@ struct{uint8_t minBatteryForUpdate=40;bool clockTwelveHour=true;}gDeviceSettings
 bool powerOk=true,installStarting=false;bool otaInstallStarting(){return installStarting;}
 namespace release_delivery{bool otaPowerAllowed(int,bool,int){return powerOk;}}
 namespace clock_display{void format(char*p,size_t n,int,int,bool){snprintf(p,n,"6:45");}}
-namespace radio_catalog{const char* languageName(int){return "EN";}struct St{const char* name="WBGO Jazz 88.3 Newark";int language=0;};}
-namespace internet_radio{enum class State{Idle,Playing};State state(){return State::Playing;}String status(){return "Playing 128 kbps";}}
-struct{int genre=0,index=2,language=0;radio_catalog::St st;const radio_catalog::St* station(){return &st;}int count(int){return 14;}const char* genreName()const{return "Jazz & Blues";}}gRadioSelection;
+namespace radio_catalog{enum class Language{All,International,Russian};const char* languageName(Language){return "EN";}struct St{const char* name="WBGO Jazz 88.3 Newark";Language language=Language::International;};}
+namespace internet_radio{enum class State{Idle,Playing,Stopping};State state(){return State::Playing;}String status(){return "Playing 128 kbps";}bool searching(){return false;}uint16_t bitrate(){return 128;}}
+struct{int genre=0,index=2;radio_catalog::Language language=radio_catalog::Language::All;radio_catalog::St st;const radio_catalog::St* station(){return &st;}int count(int){return 14;}const char* genreName()const{return "Jazz & Blues";}}gRadioSelection;
+void drawRadioMeter(bool,bool,uint16_t,uint16_t){}int radioWrap(const String&s,int w,String*out,int){out[0]=fitCurrentFontToWidth(s,w);return 1;}
 bool gRadioStartPending=false,gRadioRetryWaiting=false;String gRadioNotice;bool radioBusy(){return true;}uint8_t gSpeakerVolume=170;
 String radioStatusText(bool* song=nullptr){if(song)*song=false;return "Playing 128 kbps";}
 bool radioTextFont(const String&){gCanvas.setFont(&fonts::Font2);return false;}
-String radioFit(String s,int w){return fitCurrentFontToWidth(s,w);}String radioMarquee(const String&s,int w){return fitCurrentFontToWidth(s,w);}
+String radioFit(String s,int w){return fitCurrentFontToWidth(s,w);}
 struct{bool enabled=true;int hour=6,minute=30;}gAlarmSettings;bool gAlarmRinging=false;String gAlarmEditBuffer,gAlarmStatus="Rings in 11h 45m";
 String alarmClockText(){return "6:45 PM";}String alarmSnoozeUntilText(){return "";}String alarmTimeString(int,int){return "06:30";}
 uint32_t millis(){return 100000;}
@@ -147,7 +148,7 @@ int main(){
  }
  installStarting=false;powerOk=true;
  // The rest show their main facts in the bigger fonts.
- renderRadioPlayer();assert(shows("Internet Radio")&&shows("Playing 128 kbps")&&shows("Jazz & Blues"));
+ renderRadioPlayer();assert(shows("Internet Radio")&&shows("Playing 128 kbps")&&shows("Jazz & Blues")&&shows("3 of 14"));
  for(const auto&t:gCanvas.printed)if(t.s=="Jazz & Blues")assert(t.font==2);
  renderAlarmUi();assert(shows("Alarm")&&shows("06:30")&&shows("6:45 PM")&&shows("Daily alarm is on"));
  gAlarmEditBuffer="07";renderAlarmUi();assert(shows("07"));gAlarmEditBuffer="";

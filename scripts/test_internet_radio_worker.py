@@ -63,7 +63,9 @@ struct Frame{const int16_t*data;size_t n;uint64_t hash;uint32_t end;};
 struct FakeSpeaker{
  std::deque<Frame>queue;unsigned rendered=0;size_t maxQueued=0;
  size_t isPlaying(uint8_t channel){assert(channel==7);return queue.size();}
+ uint16_t loudest=0;
  bool playRaw(const int16_t*p,size_t n,uint32_t hz,bool stereo,int repeat,uint8_t channel,bool stop){
+  loudest=std::max(loudest,internet_radio::level());
   assert(channel==7&&!stop&&repeat==1&&queue.size()<2&&hz==44100&&stereo);
   assert(n>0&&n<=2304);for(auto&f:queue)assert(f.data!=p);
   uint32_t end=(queue.empty()?clockMs:queue.back().end)+uint32_t(n*1000/(hz*2));queue.push_back({p,n,hashPcm(p,n),end});maxQueued=std::max(maxQueued,queue.size());return true;
@@ -105,8 +107,9 @@ int main(int argc,char**argv){
  using internet_radio::Error;using internet_radio::State;const auto npos=std::string::npos;
  // A song title in the stream reaches the screen, and a new stream starts without one.
  std::string titled;for(size_t pos=0;pos<mp3.size();pos+=777){auto b=mp3.substr(pos,777);titled+=b;if(b.size()==777){std::string m="StreamTitle='Artist - Song';";m.resize(32,'\0');titled+=char(2);titled+=m;}}
- response=header+"icy-metaint: 777\r\n\r\n"+titled;
+ response=header+"icy-metaint: 777\r\nicy-br: 128\r\n\r\n"+titled;M5Cardputer.Speaker.loudest=0;
  assert(internet_radio::start("http://radio.example/stream"));execute();
+ assert(M5Cardputer.Speaker.loudest>500&&M5Cardputer.Speaker.loudest<32768&&!internet_radio::level()&&internet_radio::bitrate()==128);
  assert(request.find("Icy-MetaData: 1\r\n")!=npos&&request.find("Accept: audio/mpeg\r\n")!=npos);
  char song[64];assert(internet_radio::title(song,sizeof(song))==13&&std::string(song)=="Artist - Song");
  assert(internet_radio::title(song,5)==4&&std::string(song)=="Arti");

@@ -77,6 +77,12 @@ int main(int argc,char**argv){
   assert(cleanText("\xD0\x96\xD0\x96\xD0\x96\xD0\x96",8,out,sizeof(out))==6);
   assert(cleanText("",0,out,sizeof(out))==0&&!out[0]);
  }
+ // A station's own bitrate, when it gives one. An odd value is just unknown, never an error.
+ assert(header({"ICY 200 OK","icy-br: 128","Content-Type: audio/mpeg",""}).bitrate==128);
+ assert(header({"ICY 200 OK","icy-br:192,192","Content-Type: audio/mpeg",""}).bitrate==192);
+ assert(header({"ICY 200 OK","icy-br: fast","Content-Type: audio/mpeg",""}).bitrate==0);
+ assert(header({"ICY 200 OK","icy-br: 99999","Content-Type: audio/mpeg",""}).bitrate==0);
+ assert(header({"ICY 200 OK","Content-Type: audio/mpeg",""}).bitrate==0);
  // The search asks only for what this player can play, with the words safely escaped.
  {
   char url[kUrlSize];

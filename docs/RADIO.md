@@ -16,8 +16,14 @@ stations live in a text file on the SD card, and Find adds new ones from a publi
 | **Del** | Remove this station from your list |
 | **Esc** | Stop and go Home |
 
-Pausing leaves the live stream, so playing again joins the broadcast where it is now. When the
-station sends the song's name, it shows under the genre and scrolls if it's long.
+Pausing leaves the live stream, so playing again joins the broadcast where it is now.
+
+The screen shows the station, its genre and its place there ("Chill · 1 of 3"), and the
+station's bitrate when it gives one. When the station sends the song's name, it shows below,
+over two lines if it needs them. The bars beside the station's name follow how loud the music is,
+measured from the sound itself, so they move with the beat and drop in a quiet passage. While it
+connects, one bar runs along them, and stopped, they're a play mark. The language filter shows
+next to the clock while it's on.
 
 If a station that was playing drops, the radio tries again after 3, 10 and 30 seconds. If Wi-Fi
 went, it waits up to a minute for it first. A station that never started isn't tried again,

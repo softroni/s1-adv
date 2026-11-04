@@ -529,21 +529,6 @@ void radioDropLastLetter(String& text) {
   while (n > 0 && !radioLetterStart(text[n - 1])) --n;
   text.remove(n > 0 ? n - 1 : 0);
 }
-// Scrolls a letter at a time. marqueeText steps by bytes, which would split a Cyrillic letter.
-String radioMarquee(const String& text, int32_t pixelLimit) {
-  if (gCanvas.textWidth(text) <= pixelLimit) return text;
-  const String padded = text + "    " + text;
-  size_t letters = 0;
-  for (size_t i = 0; i < text.length() + 4; ++i) if (radioLetterStart(padded[i])) ++letters;
-  const size_t step = letters ? (millis() / 240) % letters : 0;
-  size_t at = 0;
-  for (size_t seen = 0; at < padded.length(); ++at) {
-    if (radioLetterStart(padded[at]) && seen++ == step) break;
-  }
-  String out = padded.substring(at);
-  while (out.length() > 1 && gCanvas.textWidth(out) > pixelLimit) radioDropLastLetter(out);
-  return out;
-}
 String radioFit(String text, int32_t pixelLimit) {
   if (gCanvas.textWidth(text) <= pixelLimit) return text;
   while (text.length() > 1 && gCanvas.textWidth(text + "..") > pixelLimit) radioDropLastLetter(text);
@@ -567,49 +552,131 @@ String radioStatusText(bool* song = nullptr) {
   }
   return gRadioNotice;
 }
+// Whole words over up to `lines` lines of `width` pixels in the current font. The last line
+// ends in ".." if there's more. Returns how many lines it used.
+int radioWrap(const String& text, int32_t width, String* out, int lines) {
+  String rest = text;
+  int n = 0;
+  while (!rest.isEmpty() && n < lines) {
+    if (n == lines - 1 || gCanvas.textWidth(rest) <= width) { out[n++] = radioFit(rest, width); break; }
+    int cut = -1;
+    for (int i = 1; i < int(rest.length()); ++i) {
+      if (rest[i] != ' ') continue;
+      if (gCanvas.textWidth(rest.substring(0, i)) > width) break;
+      cut = i;
+    }
+    if (cut < 0) { out[n++] = radioFit(rest, width); break; }  // One word too long for a line.
+    out[n++] = rest.substring(0, cut);
+    rest = rest.substring(cut + 1);
+  }
+  return n;
+}
+// The meter's last five readings, about a tenth of a second apart, newest on the right.
+uint8_t gRadioMeter[5] = {};
+uint32_t gRadioMeterAtMs = 0;
+// Bars from the decoded audio's loudness, on a log scale as a VU meter reads, so they move with
+// the music and settle in a quiet passage. While it connects, a raised bar runs along them.
+// Stopped, it's a play mark.
+void drawRadioMeter(bool playing, bool waiting, uint16_t accent, uint16_t dim) {
+  auto& d = gCanvas;
+  const int16_t left = 205, bottom = 41;
+  if (playing) {
+    if (millis() - gRadioMeterAtMs >= 90) {
+      gRadioMeterAtMs = millis();
+      memmove(gRadioMeter, gRadioMeter + 1, sizeof(gRadioMeter) - 1);
+      const uint16_t level = internet_radio::level();
+      // Music sits between about 700 and 23000, some 30 dB, so that's what the 14 pixels cover.
+      // Spread wider, every song would fill the bars and they'd stop looking alive.
+      const int h = level < 700 ? 1 : int((log2f(float(level)) - 9.5f) * 14.0f / 5.0f + 0.5f);
+      gRadioMeter[4] = uint8_t(h < 1 ? 1 : h > 14 ? 14 : h);
+    }
+    // A bar with no reading yet sits on the baseline, as a quiet one does.
+    for (int i = 0; i < 5; ++i) {
+      const int16_t h = gRadioMeter[i] ? gRadioMeter[i] : 1;
+      d.fillRect(left + i * 5, bottom - h, 4, h, accent);
+    }
+    return;
+  }
+  memset(gRadioMeter, 0, sizeof(gRadioMeter));
+  if (waiting) {
+    const int lit = int((millis() / 150) % 5);
+    for (int i = 0; i < 5; ++i) d.fillRect(left + i * 5, bottom - (i == lit ? 6 : 2), 4, i == lit ? 6 : 2, i == lit ? accent : dim);
+  } else {
+    d.fillTriangle(219, 27, 219, 40, 230, 33, accent);
+  }
+}
 void renderRadioPlayer() {
   auto& d = gCanvas;
   const uint16_t cyan = rgb565_local(47,227,255), white = TFT_WHITE, muted = rgb565_local(182,219,255);
   const uint16_t green = rgb565_local(88,240,141), amber = rgb565_local(255,136,64), dim = rgb565_local(36,73,85);
-  const bool playing = internet_radio::state() == internet_radio::State::Playing;
+  const auto state = internet_radio::state();
+  const bool searching = internet_radio::searching();
+  const bool playing = state == internet_radio::State::Playing && !searching;
+  const bool waiting = !playing && !searching && (gRadioStartPending || gRadioRetryWaiting ||
+                       (radioBusy() && state != internet_radio::State::Stopping));
   const uint16_t accent = playing ? green : cyan;
-  String hhmm = "--:--";
+  String right = "--:--";
   const time_t now = time(nullptr);
   if (now > 100000) {
     struct tm ti; localtime_r(&now,&ti); char buf[6];
     clock_display::format(buf,sizeof(buf),ti.tm_hour,ti.tm_min,gDeviceSettings.clockTwelveHour);
-    hhmm = buf;
+    right = buf;
   }
-  drawBigHeader("Internet Radio",accent,hhmm);
+  // The language filter only shows while it's hiding something.
+  if (gRadioSelection.language != radio_catalog::Language::All) right = String(radio_catalog::languageName(gRadioSelection.language)) + "  " + right;
+  drawBigHeader("Internet Radio",accent,right);
   const auto* station = gRadioSelection.station();
   const String name = station ? station->name : "No stations";
   useBigTextFont(name);
-  d.setTextColor(white); d.setCursor(kBigLeft,27);
-  d.print(radioFit(name,202));
-  // Shows whether the stream is on, in the same spot the title ends.
-  if (playing) { d.fillRect(218,29,4,13,accent); d.fillRect(226,29,4,13,accent); }
-  else d.fillTriangle(219,29,219,42,230,35,accent);
-  const String genre = station ? gRadioSelection.genreName() : "";
-  radioTextFont(genre);
-  d.setTextColor(cyan); d.setCursor(kBigLeft,48);
-  d.print(radioFit(genre,150));
-  d.setFont(&fonts::Font2);
-  const String where = station ? String(gRadioSelection.index+1)+"/"+String(gRadioSelection.count(gRadioSelection.genre))+" "+
-      radio_catalog::languageName(station->language) : String("");
-  d.setTextColor(muted); d.setCursor(kBigRight-d.textWidth(where),48); d.print(where);
+  d.setTextColor(white); d.setCursor(kBigLeft,26);
+  d.print(radioFit(name,194));
+  drawRadioMeter(playing, waiting, gRadioRetryWaiting ? amber : accent, dim);
+  // Genre, then where this station is in it, and a Russian station says so.
+  if (station) {
+    const String genre = gRadioSelection.genreName();
+    const bool wideGenre = radioTextFont(genre);
+    d.setTextColor(cyan); d.setCursor(kBigLeft, wideGenre ? 47 : 45);
+    const String shownGenre = radioFit(genre, 120);
+    d.print(shownGenre);
+    int16_t x = kBigLeft + d.textWidth(shownGenre) + 5;
+    d.setFont(&fonts::Font2);
+    d.fillRect(x, 52, 2, 2, muted);
+    x += 7;
+    String where = String(gRadioSelection.index + 1) + " of " + String(gRadioSelection.count(gRadioSelection.genre));
+    if (station->language == radio_catalog::Language::Russian) where += "  RU";
+    d.setTextColor(muted); d.setCursor(x, 45); d.print(where);
+    if (playing && internet_radio::bitrate()) {
+      const String kbps = String(internet_radio::bitrate()) + "k";
+      d.setCursor(kBigRight - d.textWidth(kbps), 45); d.print(kbps);
+    }
+  }
+  // The song, over two lines if it needs them, or what the radio is doing.
   bool song = false;
   const String status = radioStatusText(&song);
   const bool wide = radioTextFont(status);
-  d.setTextColor(song ? white : radioBusy() || gRadioRetryWaiting ? green : amber);
-  d.setCursor(kBigLeft, wide ? 68 : 66);
-  d.print(song ? radioMarquee(status,222) : radioFit(status,222));
-  d.setFont(&fonts::Font2);
-  const int volume = (int(gSpeakerVolume)*100+127)/255;
-  d.setTextColor(muted); d.setCursor(kBigLeft,84); d.print("Vol "+String(volume)+"%");
-  for (int i = 0; i < 9; ++i) d.fillRect(84+i*16,87,12,9,i*255/9<int(gSpeakerVolume)?accent:dim);
+  const int16_t top = wide ? 66 : 64;
+  if (song) {
+    String lines[2];
+    const int n = radioWrap(status, 222, lines, 2);
+    d.setTextColor(white);
+    for (int i = 0; i < n; ++i) { d.setCursor(kBigLeft, top + i * 16); d.print(lines[i]); }
+  } else {
+    d.setTextColor(radioBusy() || gRadioRetryWaiting ? green : amber);
+    d.setCursor(kBigLeft, top);
+    d.print(radioFit(status, 222));
+  }
+  // Volume: a speaker, a thin bar and the number.
+  d.fillRect(8, 101, 3, 5, muted);
+  d.fillTriangle(10, 103, 15, 98, 15, 108, muted);
+  const int16_t barX = 20, barW = 176;
+  d.fillRect(barX, 102, barW, 4, dim);
+  const int16_t filled = int16_t(int32_t(barW) * gSpeakerVolume / 255);
+  if (filled > 0) d.fillRect(barX, 102, filled, 4, accent);
   d.setFont(&fonts::Font0);
-  d.setTextColor(muted); d.setCursor(8,108); d.print("W/S genre  A/D tune  Enter play/pause");
-  d.setCursor(8,120); d.print("F find  Del remove  L EN/RU  +/- vol");
+  const String volume = String((int(gSpeakerVolume) * 100 + 127) / 255) + "%";
+  d.setTextColor(muted); d.setCursor(kBigRight - d.textWidth(volume), 100); d.print(volume);
+  d.setCursor(8,112); d.print("A/D station  W/S genre  Enter play");
+  d.setCursor(8,123); d.print("F find  L EN/RU  Del remove  +/- vol");
   d.setFont(&fonts::Font2);
 }
 void renderRadioFind() {

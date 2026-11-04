@@ -105,6 +105,9 @@ Error Headers::line(const char* s) {
   } else if (!strcmp(name,"content-length")) {
     if (hasLength || !number(value,length,0x7fffffff)) return Error::Malformed;
     hasLength=true;
+  } else if (!strcmp(name,"icy-br")) {
+    unsigned n = 0; for (const char* p = value; *p >= '0' && *p <= '9' && n < 10000; ++p) n = n * 10 + unsigned(*p - '0');
+    bitrate = n < 10000 ? uint16_t(n) : 0;
   } else if (!strcmp(name,"icy-metaint")) {
     if (hasMeta || !number(value,metaint,16*1024*1024) || !metaint) return Error::Malformed;
     hasMeta=true;
@@ -433,6 +436,7 @@ std::atomic<State> current{State::Idle};
 std::atomic<Error> failure{Error::None};
 std::atomic<bool> owned{false}, cancel{false};
 std::atomic<uint32_t> received{0};
+std::atomic<uint16_t> loudness{0}, kbps{0};
 std::atomic<Job> job{Job::Stream};
 char nowTitle[128];  // Guarded by gate.
 // Search results outlive the search, so a found station can play while the list shows.
@@ -571,6 +575,7 @@ Error stream(WiFiClient& tcp, mp3dec_t* decoder, uint8_t* input, int16_t* pcm[2]
   {
     Reader r{tcp}; detail::Headers h;
     Error e=open(tcp,r,h,false); if(e!=Error::None || cancel.load()) return e;
+    kbps.store(h.bitrate);
     detail::Body body(h); size_t used=0; unsigned slot=0, junk=0; uint32_t titles=0;
     bool played=false; uint32_t lastFrame=millis();
     mp3dec_init(decoder); setState(State::Buffering);
@@ -607,6 +612,10 @@ Error stream(WiFiClient& tcp, mp3dec_t* decoder, uint8_t* input, int16_t* pcm[2]
       if(info.frame_bytes<0 || size_t(info.frame_bytes)>used) return Error::Decode;
       if(samples>0) {
         if(info.layer!=3 || (info.channels!=1 && info.channels!=2) || info.hz<8000 || info.hz>48000 || samples>1152) return Error::Decode;
+        // Every other sample is plenty for a meter, and it's done before the frame is queued.
+        uint32_t sum=0; const int count=samples*info.channels;
+        for(int i=0;i<count;i+=2){ const int v=pcm[slot][i]; sum+=uint32_t(v<0?-v:v); }
+        loudness.store(uint16_t(sum/uint32_t((count+1)/2)));
         if(!M5Cardputer.Speaker.playRaw(pcm[slot],samples*info.channels,info.hz,info.channels==2,1,kChannel,false)) return Error::Speaker;
         slot^=1; played=true; junk=0; lastFrame=millis(); setState(State::Playing);
       }
@@ -643,6 +652,7 @@ void worker(void*) {
   // frames naturally (at most two queued). If the speaker fails, retain buffers
   // and busy rather than free a possibly live pointer; never force-delete.
   current.store(State::Stopping);
+  loudness.store(0);
   while(M5Cardputer.Speaker.isPlaying(kChannel)) vTaskDelay(pdMS_TO_TICKS(5));
   free(pcm[1]);free(pcm[0]);free(input);free(decoder);
   portENTER_CRITICAL(&gate);
@@ -663,7 +673,7 @@ bool begin(const char* url, Job kind) {
   if(owned.load()) {portEXIT_CRITICAL(&gate);return false;}
   owned.store(true);cancel.store(false);failure.store(Error::None);received.store(0);job.store(kind);
   strcpy(requested,url);current.store(State::Connecting);
-  if(kind==Job::Stream) nowTitle[0]=0;
+  if(kind==Job::Stream) { nowTitle[0]=0; loudness.store(0); kbps.store(0); }
   else resultCount.store(0);
   portEXIT_CRITICAL(&gate);
   if(kind==Job::Search && !results) results=static_cast<Found*>(heap_caps_malloc(sizeof(Found)*kMaxFound,MALLOC_CAP_8BIT));
@@ -687,6 +697,8 @@ bool startSearch(bool byGenre, const char* text, const char* country) {
   return begin(url,Job::Search);
 }
 bool searching() { return owned.load() && job.load()==Job::Search; }
+uint16_t level() { return current.load()==State::Playing ? loudness.load() : 0; }
+uint16_t bitrate() { return kbps.load(); }
 size_t foundCount() { return searching() ? 0 : resultCount.load(); }
 const Found* found(size_t i) { return results && i<foundCount() ? &results[i] : nullptr; }
 void clearFound() {
