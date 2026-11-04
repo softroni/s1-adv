@@ -19,12 +19,13 @@ stations live in a text file on the SD card, and Find adds new ones from a publi
 
 Pausing leaves the live stream, so playing again joins the broadcast where it is now.
 
-The screen shows the station, its genre and its place there ("Chill · 1 of 3"), and the
-station's bitrate when it gives one. The volume is the number beside the speaker. When the station sends the song's name, it shows below,
-over two lines if it needs them. The bars beside the station's name follow how loud the music is,
-measured from the sound itself, so they move with the beat and drop in a quiet passage. While it
-connects, one bar runs along them, and stopped, they're a play mark. The language filter shows
-next to the clock while it's on.
+The screen works like a media player. The station has a tile in its genre's colour with its
+initials, and while it plays, bars in the tile follow how loud the music is, measured from the
+sound itself. While it connects, one bar runs along them. Beside the tile are the station's name,
+the song over two lines when the station sends it, and its place in the genre with its bitrate.
+Below are the buttons, drawn with their keys: W/S for genre, A, Enter and D for back, play and
+next, and the volume with - and +. The other keys are along the bottom, and the language filter
+shows next to the clock while it's on.
 
 If a station that was playing drops, the radio tries again after 3, 10 and 30 seconds. If Wi-Fi
 went, it waits up to a minute for it first. A station that never started isn't tried again,
@@ -35,7 +36,8 @@ The radio opens on the last station you played. It doesn't start playing until y
 ## Visuals
 
 Press **V** while it plays for a full-screen picture of the music, with the station above and
-the song below. **V** again changes the look, and **Esc** goes back. Enter, the station keys and
+the song below. **V** again changes the look, and its name shows next to the clock for a moment.
+**Esc** goes back. The first time you open them, a card in the middle shows these keys. Enter, the station keys and
 the volume keys work there as they do on the play screen.
 
 | Look | What it shows |

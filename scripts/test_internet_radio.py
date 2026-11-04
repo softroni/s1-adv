@@ -44,7 +44,7 @@ struct String:std::string {using std::string::string;String()=default;String(con
  String substring(size_t i,size_t j)const{return i<size()?String(substr(i,j>i?j-i:0)):String();}
  void trim(){size_t a=find_first_not_of(' ');if(a==npos){clear();return;}erase(0,a);erase(find_last_not_of(' ')+1);}
 };
-namespace fonts{const int Font0=0,Font2=2,efontCN_12=12,FreeSansBold9pt7b=9;}
+namespace fonts{const int Font0=0,Font2=2,Font4=4,efontCN_12=12,FreeSansBold9pt7b=9;}
 const uint16_t TFT_WHITE=0xffff,TFT_BLACK=0;
 struct Box{int x,y,w,h;};
 struct Canvas{
@@ -63,8 +63,8 @@ struct Canvas{
  void setCursor(int a,int b){x=a;y=b;}
  // Roughly the real widths: wider letters outside ASCII, and a byte is never half a letter.
  int textWidth(const String&s){int w=0;for(size_t i=0;i<s.size();++i){unsigned char c=s[i];if((c&0xC0)==0x80)continue;
-  w+=*font==9?9:*font==2?7:*font==12?(c<0x80?6:12):6;}return w;}
- int height(){return *font==2?16:*font==9?14:*font==12?13:8;}
+  w+=*font==4?14:*font==9?9:*font==2?7:*font==12?(c<0x80?6:12):6;}return w;}
+ int height(){return *font==4?26:*font==2?16:*font==9?14:*font==12?13:8;}
  void print(const String&s){if(s.empty())return;
   for(size_t i=0;i<s.size();){unsigned char c=s[i];size_t k=c<0x80?1:(c&0xE0)==0xC0?2:(c&0xF0)==0xE0?3:4;assert(c<0x80||(c&0xC0)==0xC0);
    assert(i+k<=s.size());for(size_t j=1;j<k;++j)assert((static_cast<unsigned char>(s[i+j])&0xC0)==0x80);i+=k;}  // Whole letters only.
@@ -199,10 +199,10 @@ int main(){
  internet_radio::finish();service();assert(internet_radio::starts==2&&internet_radio::url==gRadioSelection.station()->url);
  // Pause stays paused and language browsing stays silent.
  key(' ');assert(!gRadioWantPlaying&&radioBusy());internet_radio::finish();service();int n=internet_radio::starts;
- key('l');service();assert(internet_radio::starts==n);render();assert(gCanvas.printed[1].rfind("EN/INT  ",0)==0);
- key('l');render();assert(gCanvas.printed[1].rfind("RU  ",0)==0);key('l');render();assert(gCanvas.printed[1].find("  ")==std::string::npos);
+ key('l');service();assert(internet_radio::starts==n);render();assert(gCanvas.printed[0].rfind("EN/INT  ",0)==0);
+ key('l');render();assert(gCanvas.printed[0].rfind("RU  ",0)==0);key('l');render();assert(gCanvas.printed[0].find("  ")==std::string::npos);
  for(int i=0;i<40;++i)key('+');assert(gSpeakerVolume==255);for(int i=0;i<40;++i)key('-');assert(gSpeakerVolume==0);
- key('=');assert(gSpeakerVolume==16);render();assert(shows("6%"));key('_');assert(gSpeakerVolume==0);render();assert(shows("0%"));  // No Shift needed.
+ key('=');assert(gSpeakerVolume==16);render();assert(shows("6"));key('_');assert(gSpeakerVolume==0);render();assert(shows("0"));  // No Shift needed.
  // Every audio/network owner blocks a new radio worker, without touching it.
  for(bool*p:{&gBootBackgroundActive,&gRecording,&gSubmitting,&gThinking,&gPlaybackActive,&gTransferUiActive,&gOtaApplyInProgress,&gInboxHttpBusy,&gVoiceDialBusy,&gVoiceReplySpeechBusy,&gRealtimeActive,&gRealtimeDialBusy,&gRealtimeExclusiveMode,&gPendingRealtimeStart,&gMeshBusOwned,&gG0VoicePending,&gVoiceCapturePreparing}){
   *p=true;key('\n');serviceInternetRadio();assert(!radioBusy()&&!gRadioWantPlaying);*p=false;
@@ -217,10 +217,11 @@ int main(){
  key('\n');service();internet_radio::playing(100000);internet_radio::song="Artist - Song";render();assert(shows("Artist - Song"));
  // The player: the station's place in its genre, its bitrate, a song over two lines, and a
  // meter that follows the audio's loudness, settling to a dot when it's quiet.
- internet_radio::kbps=128;render();assert(shows("128k")&&showsPart(" of ")&&shows("63%")==(gSpeakerVolume==160));
+ internet_radio::kbps=128;render();assert(showsPart("128 kbps")&&showsPart(" of ")&&shows("Enter")&&shows("W/S")&&shows("- +"));
+ assert(shows(std::to_string((int(gSpeakerVolume)*100+127)/255)));
  internet_radio::song="Robert Glasper Experiment featuring Erykah Badu - Afro Blue (Live at the Blue Note)";render();
- { int lines=0;bool cut=false;for(auto&t:gCanvas.printed){if(t.rfind("Robert Glasper",0)==0||t.rfind("featuring",0)==0){++lines;cut=cut||(t.size()>2&&t.compare(t.size()-2,2,"..")==0);}}
-   assert(shows("Robert Glasper Experiment")&&lines==2&&cut&&!shows(internet_radio::song)); }  // Whole words, two lines, the rest cut.
+ { bool cut=false;for(auto&t:gCanvas.printed)cut=cut||(t.size()>2&&t.compare(t.size()-2,2,"..")==0&&t.find("Robert")==std::string::npos);
+   assert(showsPart("Robert Glasper")&&cut&&!shows(internet_radio::song)); }  // Whole words, two lines, the rest cut.
  internet_radio::loud=8000;for(int i=0;i<6;++i){tick+=100;render();}assert(gRadioMeter[4]==10&&gRadioMeter[0]==10);
  internet_radio::loud=0;tick+=100;render();assert(gRadioMeter[4]==1&&gRadioMeter[3]==10);
  internet_radio::loud=3000;tick+=100;render();assert(gRadioMeter[4]==6);internet_radio::loud=699;tick+=100;render();assert(gRadioMeter[4]==1);
@@ -250,9 +251,16 @@ int main(){
  // V opens the visuals, and the worker analyses frames only while they show. V again changes
  // the look; the player's keys still work; Esc goes back, and leaving the radio turns them off.
  key('\n');service();internet_radio::playing(100000);assert(gRadioView==RadioView::Player);service();assert(!internet_radio::wantV);
+ // The card with the keys shows the first time only, and the card keeps that it has.
+ assert(!disk.count("/radio/visuals.seen"));
  key('v');assert(gRadioView==RadioView::Visual&&gRadioLook==0);service();assert(internet_radio::wantV);render();assert(shows("Bars")&&shows("V next  Esc back"));
+ assert(disk.count("/radio/visuals.seen"));tick+=3100;render();assert(!shows("Bars")&&!shows("V next  Esc back"));
+ // Changing the look names it beside the clock for a moment, with no card.
+ for(int i=1;i<=4;++i){key('V');assert(gRadioLook==i%4&&gRadioView==RadioView::Visual);render();assert(shows(kRadioLooks[i%4])&&!shows("V next  Esc back"));}
  tick+=1600;render();assert(!shows("Bars"));
- for(int i=1;i<=4;++i){key('V');assert(gRadioLook==i%4&&gRadioView==RadioView::Visual);render();assert(shows(kRadioLooks[i%4]));}
+ radioEscape();key('v');render();assert(!shows("V next  Esc back"));radioEscape();
+ { const bool known=gRadioVisualsKnown;gRadioVisualsKnown=false;reopen();assert(gRadioVisualsKnown);gRadioVisualsKnown=known;
+   key('\n');service();internet_radio::playing(100000);key('v'); }
  { const int s=gRadioSelection.stationIndex();key('d');assert(gRadioSelection.stationIndex()!=s&&gRadioStartPending&&gRadioView==RadioView::Visual);
    internet_radio::finish();service();assert(radioBusy());internet_radio::playing(100000);
    const int vol=gSpeakerVolume;key('=');assert(gSpeakerVolume>vol||vol==255);key('-'); }
