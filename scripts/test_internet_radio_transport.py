@@ -86,6 +86,12 @@ int main(int argc,char**argv){
   assert(!searchUrl(url,sizeof(url),true,"   ")&&!searchUrl(url,sizeof(url),true,"")&&!searchUrl(url,40,true,"jazz"));
   assert(!searchUrl(url,sizeof(url),true,std::string(65,'a').c_str())&&searchUrl(url,sizeof(url),true,std::string(64,'%').c_str()));
   assert(parseUrl(url,u));
+  // A country is two capital letters and goes in as the directory's countrycode.
+  assert(searchUrl(url,sizeof(url),true,"jazz","GB")&&std::string(url)=="http://all.api.radio-browser.info/json/stations/search?tag=jazz&countrycode=GB&codec=MP3&is_https=false&hidebroken=true&order=clickcount&reverse=true&limit=30");
+  assert(searchUrl(url,sizeof(url),false,"bbc","")&&std::string(url).find("countrycode")==std::string::npos);
+  assert(searchUrl(url,sizeof(url),false,"bbc",nullptr)&&std::string(url).find("countrycode")==std::string::npos);
+  for(const char* bad:{"gb","G","GBR","G1","&x"})assert(!searchUrl(url,sizeof(url),true,"jazz",bad));
+  assert(searchUrl(url,sizeof(url),true,std::string(64,'%').c_str(),"US")&&parseUrl(url,u));
  }
  // The directory's answer: keys in any order, nested values, escapes and surrogate pairs. It
  // keeps MP3 on plain HTTP once each, and skips HLS, AAC, https, cut-off and empty entries.

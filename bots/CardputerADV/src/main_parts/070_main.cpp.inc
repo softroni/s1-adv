@@ -7,6 +7,7 @@ constexpr const char* kRadioDir = "/radio";
 constexpr const char* kRadioListPath = "/radio/stations.txt";
 constexpr const char* kRadioListNewPath = "/radio/stations.new";
 constexpr const char* kRadioLastPath = "/radio/last.txt";
+constexpr const char* kRadioCountryPath = "/radio/country.txt";
 constexpr uint32_t kRadioPlayedBytes = 32768;  // About two seconds of 128k: it was playing.
 constexpr uint32_t kRadioRetryMs[] = {3000, 10000, 30000};
 constexpr uint32_t kRadioWifiWaitMs = 60000;
@@ -30,8 +31,10 @@ String gRadioLastUrl;  // What last.txt holds, so it's only written when it chan
 uint8_t gRadioRetries = 0;
 bool gRadioRetryWaiting = false;
 uint32_t gRadioRetryAtMs = 0, gRadioDroppedAtMs = 0;
-// Find.
+// Find. The country is two capital letters, or empty for anywhere, and the card keeps it.
 String gRadioQuery, gRadioSearchedQuery;
+String gRadioCountry, gRadioSearchedCountry, gRadioSavedCountry;
+bool gRadioOnCountry = false;  // Find's cursor is in the country box, not the words.
 bool gRadioByGenre = true, gRadioSearchedByGenre = true;
 bool gRadioSearchPending = false, gRadioSearching = false;
 int gRadioFoundSel = 0;
@@ -178,6 +181,29 @@ void radioRememberLast(const String& url) {
   file.close();
   gRadioLastUrl = url;
 }
+void radioReadCountry() {
+  if (!gRadioListOnCard) return;
+  File file = SD.open(kRadioCountryPath, "r");
+  char code[3] = {};
+  if (file) {
+    if (file.read(reinterpret_cast<uint8_t*>(code), 2) != 2) code[0] = 0;
+    file.close();
+  }
+  gRadioSavedCountry = radio_countries::name(code) ? code : "";
+  gRadioCountry = gRadioSavedCountry;
+}
+void radioRememberCountry(const String& code) {
+  if (!gRadioListOnCard || code == gRadioSavedCountry) return;
+  if (code.isEmpty()) SD.remove(kRadioCountryPath);  // No file means anywhere.
+  else {
+    File file = SD.open(kRadioCountryPath, FILE_WRITE);
+    if (!file) return;
+    file.write(reinterpret_cast<const uint8_t*>(code.c_str()), code.length());
+    file.write('\n');
+    file.close();
+  }
+  gRadioSavedCountry = code;
+}
 // Off the Radio screen, with the worker gone: the list and any results go back to the heap.
 void radioRelease() {
   delete gRadioList;
@@ -190,6 +216,8 @@ void beginInternetRadio() {
   gRadioView = RadioView::Player;
   radioLoadList();
   radioReadLast();
+  radioReadCountry();
+  gRadioOnCountry = false;
   gRadioNotice = gRadioListNote.isEmpty() ? "Enter to listen" : gRadioListNote;
   radioInvalidate();
 }
@@ -252,12 +280,21 @@ void radioRequestSearch() {
   query.trim();
   if (query.isEmpty()) {
     gRadioNotice = gRadioByGenre ? "Type a genre, like jazz" : "Type part of a name";
+    gRadioOnCountry = false;
+  } else if (gRadioCountry.length() == 1) {
+    gRadioNotice = "Type 2 letters, like US";
+    gRadioOnCountry = true;
+  } else if (!gRadioCountry.isEmpty() && !radio_countries::name(gRadioCountry.c_str())) {
+    gRadioNotice = "No country " + gRadioCountry + ": try one like US";
+    gRadioOnCountry = true;
   } else if (!gWifiReady) {
     gRadioNotice = "Wi-Fi required";
   } else {
     if (radioBusy() || gRadioWantPlaying) stopInternetRadio();  // One worker: the stream gives way.
     gRadioSearchedQuery = query;
     gRadioSearchedByGenre = gRadioByGenre;
+    gRadioSearchedCountry = gRadioCountry;
+    radioRememberCountry(gRadioCountry);
     gRadioSearchPending = true;
     gRadioNotice = "Searching...";
   }
@@ -265,14 +302,14 @@ void radioRequestSearch() {
 }
 void radioStartSearch() {
   if (!radioStartAllowed()) gRadioNotice = !gWifiReady ? "Wi-Fi required" : "Busy: retry Enter";
-  else if (internet_radio::startSearch(gRadioSearchedByGenre, gRadioSearchedQuery.c_str())) gRadioSearching = true;
+  else if (internet_radio::startSearch(gRadioSearchedByGenre, gRadioSearchedQuery.c_str(), gRadioSearchedCountry.c_str())) gRadioSearching = true;
   else gRadioNotice = radioSearchError();
   radioInvalidate();
 }
 void radioSearchDone() {
   const size_t found = internet_radio::foundCount();
   if (internet_radio::error() != internet_radio::Error::None) gRadioNotice = radioSearchError();
-  else if (!found) gRadioNotice = "Nothing found for " + gRadioSearchedQuery;
+  else if (!found) gRadioNotice = "Nothing found for " + gRadioSearchedQuery + (gRadioSearchedCountry.isEmpty() ? "" : " in " + gRadioSearchedCountry);
   else if (gRadioView == RadioView::Find) { gRadioView = RadioView::Results; gRadioFoundSel = 0; gRadioNotice = ""; }
   radioInvalidate();
 }
@@ -411,11 +448,21 @@ void serviceInternetRadio() {
 }
 
 // --- Keys ---------------------------------------------------------------------------------
-// char(1) and char(2) are the arrow keys here, so ; , . / can be typed.
+// char(1) to char(4) are the arrow keys up, down, left and right, so ; , . / can be typed.
+// Left and right pick genre or name; up and down move between the words and the country.
 bool radioFindKey(char key, const Keyboard_Class::KeysState& keys) {
-  if (key == char(1) || key == char(2)) { gRadioByGenre = !gRadioByGenre; gRadioNotice = ""; }
-  else if (key == '\b') { if (!gRadioQuery.isEmpty()) gRadioQuery.remove(gRadioQuery.length() - 1); }
+  String& field = gRadioOnCountry ? gRadioCountry : gRadioQuery;
+  if (key == char(3) || key == char(4)) { gRadioByGenre = !gRadioByGenre; gRadioNotice = ""; }
+  else if (key == char(1) || key == char(2)) { gRadioOnCountry = !gRadioOnCountry; gRadioNotice = ""; }
+  else if (key == '\b') { if (!field.isEmpty()) field.remove(field.length() - 1); }
   else if (keys.enter || key == '\n' || key == '\r') { if (!gRadioSearching && !gRadioSearchPending) radioRequestSearch(); }
+  else if (gRadioOnCountry) {
+    const char letter = static_cast<char>(toupper(static_cast<unsigned char>(key)));
+    if (letter >= 'A' && letter <= 'Z' && gRadioCountry.length() < 2) {
+      gRadioCountry += letter;
+      gRadioCountry = radio_countries::alias(gRadioCountry.c_str());
+    }
+  }
   else if (key >= ' ' && key < 127 && gRadioQuery.length() < kRadioQueryChars) gRadioQuery += key;
   radioInvalidate();
   return true;
@@ -423,8 +470,8 @@ bool radioFindKey(char key, const Keyboard_Class::KeysState& keys) {
 bool radioResultsKey(char key, const Keyboard_Class::KeysState& keys) {
   const int count = int(internet_radio::foundCount());
   const char lower = static_cast<char>(tolower(static_cast<unsigned char>(key)));
-  if (key == char(1) || key == ';' || key == ',') gRadioFoundSel = count ? (gRadioFoundSel + count - 1) % count : 0;
-  else if (key == char(2) || key == '.' || key == '/') gRadioFoundSel = count ? (gRadioFoundSel + 1) % count : 0;
+  if (key == char(1) || key == char(3) || key == ';' || key == ',') gRadioFoundSel = count ? (gRadioFoundSel + count - 1) % count : 0;
+  else if (key == char(2) || key == char(4) || key == '.' || key == '/') gRadioFoundSel = count ? (gRadioFoundSel + 1) % count : 0;
   else if (keys.enter || key == '\r' || key == '\n' || key == ' ') radioPlayFound();
   else if (lower == 's') radioSaveFound();
   else if (lower == 'f') { radioLeaveResults(); gRadioView = RadioView::Find; gRadioNotice = ""; }
@@ -563,7 +610,7 @@ void renderRadioFind() {
   auto& d = gCanvas;
   const uint16_t cyan = rgb565_local(47,227,255), white = TFT_WHITE, muted = rgb565_local(182,219,255);
   const uint16_t green = rgb565_local(88,240,141), amber = rgb565_local(255,136,64), dim = rgb565_local(36,73,85);
-  drawBigHeader("Find stations", cyan, "", "Arrows switch");
+  drawBigHeader("Find stations", cyan, "", "Left/Right kind", "Up/Down country");
   d.setFont(&fonts::Font2);
   const char* tabs[] = {"By genre", "By name"};
   for (int i = 0; i < 2; ++i) {
@@ -575,25 +622,44 @@ void renderRadioFind() {
     d.setCursor(x + (108 - d.textWidth(tabs[i])) / 2, 30);
     d.print(tabs[i]);
   }
-  d.fillRoundRect(8, 54, 222, 22, 5, TFT_BLACK);
-  d.drawRoundRect(8, 54, 222, 22, 5, cyan);
-  d.setTextColor(white);
-  String shown = gRadioQuery + "_";
+  // The words, with a hint of what to type while there are none.
+  d.fillRoundRect(8, 52, 222, 20, 5, TFT_BLACK);
+  d.drawRoundRect(8, 52, 222, 20, 5, gRadioOnCountry ? dim : cyan);
+  String shown = gRadioQuery + (gRadioOnCountry ? "" : "_");
   while (shown.length() > 1 && d.textWidth(shown) > 210) shown.remove(0, 1);  // The end, where typing is.
-  d.setCursor(14, 57);
+  d.setTextColor(white);
+  d.setCursor(14, 54);
   d.print(shown);
-  d.setFont(&fonts::Font0);
+  if (gRadioQuery.isEmpty()) {
+    const int16_t x = 14 + d.textWidth(shown) + (shown.isEmpty() ? 0 : 4);
+    d.setTextColor(muted);
+    d.setCursor(x, 54);
+    d.print(radioFit(gRadioByGenre ? "jazz, rock, chillout, 80s" : "part of a name, like BBC", 222 - x));
+  }
+  // The country: its code, and its name to show the code is the one meant.
   d.setTextColor(muted);
-  d.setCursor(8, 82);
-  d.print(gRadioByGenre ? "Like jazz, rock, chillout, 80s or news" : "Part of a name, like BBC or Paradise");
-  d.setFont(&fonts::Font2);
+  d.setCursor(8, 78);
+  d.print("Country");
+  d.fillRoundRect(72, 76, 158, 20, 5, TFT_BLACK);
+  d.drawRoundRect(72, 76, 158, 20, 5, gRadioOnCountry ? cyan : dim);
+  const String code = gRadioCountry + (gRadioOnCountry && gRadioCountry.length() < 2 ? "_" : "");
+  d.setTextColor(white);
+  d.setCursor(78, 78);
+  d.print(code);
+  const char* name = radio_countries::name(gRadioCountry.c_str());
+  String about = name ? String(name) : gRadioCountry.length() == 2 ? String("not a country") :
+                 gRadioOnCountry ? String("like US, GB, DE") : gRadioCountry.isEmpty() ? String("Anywhere") : String("");
+  const int16_t aboutX = 78 + d.textWidth(code) + (code.isEmpty() ? 0 : 8);
+  d.setTextColor(!name && gRadioCountry.length() == 2 ? amber : muted);
+  d.setCursor(aboutX, 78);
+  d.print(radioFit(about, 224 - aboutX));
   String line = gRadioNotice;
   uint16_t ink = amber;
   if (gRadioSearching || gRadioSearchPending) { line = "Searching..."; ink = green; }
   else if (line.isEmpty() && (gRadioWantPlaying || radioBusy())) { line = "Searching stops the radio"; ink = muted; }
   else if (line.isEmpty()) { line = "Searches radio-browser.info"; ink = muted; }
   d.setTextColor(ink);
-  d.setCursor(8, 96);
+  d.setCursor(8, 100);
   d.print(radioFit(line, 222));
   d.setFont(&fonts::Font0);
   d.setTextColor(muted);

@@ -201,8 +201,10 @@ size_t cleanText(const char* in, size_t n, char* out, size_t room) {
   out[len] = 0;
   return len;
 }
-bool searchUrl(char* out, size_t room, bool byGenre, const char* text) {
+bool searchUrl(char* out, size_t room, bool byGenre, const char* text, const char* country) {
   if (!out || !room || !text) return false;
+  if (!country) country = "";
+  if (*country && (strlen(country) != 2 || country[0] < 'A' || country[0] > 'Z' || country[1] < 'A' || country[1] > 'Z')) return false;
   while (*text == ' ') ++text;
   size_t n = strlen(text);
   while (n && text[n-1] == ' ') --n;
@@ -217,6 +219,11 @@ bool searchUrl(char* out, size_t room, bool byGenre, const char* text) {
     if (at + (plain ? 1 : 3) >= room) return false;
     if (plain) out[at++] = char(c);
     else { out[at++] = '%'; out[at++] = kHex[c >> 4]; out[at++] = kHex[c & 15]; }
+  }
+  if (*country) {
+    if (at + 15 >= room) return false;
+    memcpy(out + at, "&countrycode=", 13); at += 13;
+    out[at++] = country[0]; out[at++] = country[1];
   }
   // Only what this player can play, most listened first. 30 leaves room for the duplicates.
   static const char kRest[] = "&codec=MP3&is_https=false&hidebroken=true&order=clickcount&reverse=true&limit=30";
@@ -674,9 +681,9 @@ bool start(const char* url) {
   if(!detail::parseUrl(url,parsed)) { refuse(Error::InvalidUrl); return false; }
   return begin(url,Job::Stream);
 }
-bool startSearch(bool byGenre, const char* text) {
+bool startSearch(bool byGenre, const char* text, const char* country) {
   char url[detail::kUrlSize];
-  if(!detail::searchUrl(url,sizeof(url),byGenre,text)) { refuse(Error::InvalidUrl); return false; }
+  if(!detail::searchUrl(url,sizeof(url),byGenre,text,country)) { refuse(Error::InvalidUrl); return false; }
   return begin(url,Job::Search);
 }
 bool searching() { return owned.load() && job.load()==Job::Search; }

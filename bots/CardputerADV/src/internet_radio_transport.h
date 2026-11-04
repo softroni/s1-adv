@@ -36,8 +36,9 @@ struct Found {
 };
 constexpr size_t kMaxFound = 20;
 // Searches by genre (the directory's tags) or by part of a name, for plain-HTTP MP3 stations
-// only, most listened first. It's the same single worker as start(), so stop playback first.
-bool startSearch(bool byGenre, const char* text);
+// only, most listened first. country is a two-letter code like US, or empty for anywhere.
+// It's the same single worker as start(), so stop playback first.
+bool startSearch(bool byGenre, const char* text, const char* country = "");
 bool searching();  // The worker is busy with a search rather than a stream.
 // The last search's results, for reading while no search runs. A stream doesn't touch them.
 size_t foundCount();
@@ -86,8 +87,9 @@ class Body {
   char meta_[256]{};
   char title_[128]{};
 };
-// The directory's search address. False when the text is empty or too long.
-bool searchUrl(char* out, size_t room, bool byGenre, const char* text);
+// The directory's search address. False when the text is empty or too long, or the country
+// isn't empty or two capital letters.
+bool searchUrl(char* out, size_t room, bool byGenre, const char* text, const char* country = "");
 // Reads the directory's JSON answer, an array of flat objects, a byte at a time. Keeps MP3
 // stations with a plain-HTTP address not already kept, up to `room`. Other keys, nested
 // values and the parts of values too long to keep are skipped without being stored.

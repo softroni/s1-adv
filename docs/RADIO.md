@@ -27,11 +27,21 @@ The radio opens on the last station you played. It doesn't start playing until y
 
 ## Finding stations
 
-Press **F**. The arrow keys switch between **By genre** and **By name**, then type and press
-Enter.
+Press **F**, type, and press Enter.
+
+| Key | What it does |
+|---|---|
+| Left / Right | Search **By genre** or **By name** |
+| Up / Down | Move between the words and the country |
+| Enter | Search |
+| Esc | Back to your stations |
 
 - **By genre** looks for a tag, like `jazz`, `rock`, `chillout`, `80s` or `news`.
 - **By name** looks for part of a station's name, like `BBC` or `Paradise`.
+- **Country** keeps the search to one country. Type its two-letter code, like `US`, `GB`, `DE`
+  or `RU`, and its name shows beside it so you can tell it's the right one. `UK` becomes `GB`,
+  the code the directory uses. Leave it empty to search everywhere. The radio remembers the
+  country you last searched with, in `/radio/country.txt`.
 
 You get up to 20 stations, the most listened first. The search only asks for stations this
 radio can play, which means plain `http://` addresses and MP3. A search stops the radio while it
@@ -85,7 +95,8 @@ other line stay exactly as you typed them.
 - A line it can't read is skipped, and the radio tells you how many it skipped.
 - Only `http://` addresses play. `https://`, AAC, HLS (`.m3u8`) and playlist files (`.pls`,
   `.m3u`) don't.
-- `/radio/last.txt` holds the last station you played.
+- `/radio/last.txt` holds the last station you played, and `/radio/country.txt` the country
+  you last searched in.
 
 With no card, the built-in stations play, and nothing can be saved or removed.
 

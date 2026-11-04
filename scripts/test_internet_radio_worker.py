@@ -114,10 +114,10 @@ int main(int argc,char**argv){
  // A search: JSON in chunks, read into results that outlast the worker, on the one worker.
  const std::string body=R"([{"name":"One","url_resolved":"http://one.example/","codec":"MP3","bitrate":128,"tags":"jazz"},{"name":"Two","url_resolved":"http://two.example/","codec":"MP3"}])";
  response="HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n"+chunks(body);
- assert(internet_radio::startSearch(true,"smooth jazz"));assert(internet_radio::searching()&&!internet_radio::foundCount());
+ assert(internet_radio::startSearch(true,"smooth jazz","US"));assert(internet_radio::searching()&&!internet_radio::foundCount());
  assert(!internet_radio::start("http://radio.example/stream")&&!internet_radio::startSearch(true,"rock"));
  execute();assert(!internet_radio::searching());
- assert(request.rfind("GET /json/stations/search?tag=smooth%20jazz&codec=MP3",0)==0&&request.find("Host: all.api.radio-browser.info:80\r\n")!=npos);
+ assert(request.rfind("GET /json/stations/search?tag=smooth%20jazz&countrycode=US&codec=MP3",0)==0&&request.find("Host: all.api.radio-browser.info:80\r\n")!=npos);
  assert(request.find("Accept: application/json\r\n")!=npos&&request.find("Icy-MetaData")==npos);
  assert(internet_radio::error()==Error::None&&internet_radio::foundCount()==2);
  assert(std::string(internet_radio::found(0)->name)=="One"&&internet_radio::found(0)->bitrate==128&&!internet_radio::found(2));
@@ -134,6 +134,7 @@ int main(int argc,char**argv){
  assert(internet_radio::state()==State::Idle&&!internet_radio::foundCount());
  internet_radio::clearFound();allocateFails=true;assert(!internet_radio::startSearch(true,"jazz")&&!internet_radio::busy()&&internet_radio::error()==Error::NoMemory);allocateFails=false;
  assert(!internet_radio::startSearch(true,"   ")&&internet_radio::error()==Error::InvalidUrl);
+ assert(!internet_radio::startSearch(true,"jazz","usa")&&!internet_radio::busy()&&internet_radio::error()==Error::InvalidUrl);
  assert(internet_radio::startSearch(true,"jazz"));execute();assert(internet_radio::foundCount()==2);internet_radio::clearFound();
  puts("PASS actual radio worker: bounded TCP/ICY/chunked MP3 decode, song titles, searches on the same worker, two safe PCM slots, async cancel and release, allocation/task/connect/malformed/public-IP failures (ASan/UBSan)");
 }

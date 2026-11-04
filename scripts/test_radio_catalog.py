@@ -7,6 +7,7 @@ root = Path(__file__).resolve().parents[1]
 src = root / 'bots/CardputerADV/src'
 code = r'''
 #include "radio_catalog.h"
+#include "radio_countries.h"
 #include <cassert>
 #include <cstdio>
 #include <string>
@@ -131,7 +132,20 @@ int main() {
   List empty; s.list = &empty; s.fit(); assert(!s.station() && !s.count(0));
   s.moveGenre(1); s.moveStation(1); s.nextLanguage(); assert(!s.station());
   Selection none; assert(!none.station() && !none.count(0) && std::string(none.genreName()).empty());
-  puts("PASS radio station list: the built-in file, typed files, limits, safe saved lines, genre choice, line removal and selection");
+  // Countries: sorted and unique for the halving search, two capitals each, ASCII names.
+  for (size_t i = 0; i < radio_countries::kCountryCount; ++i) {
+    const auto& k = radio_countries::kCountries[i];
+    assert(strlen(k.code) == 2 && k.code[0] >= 'A' && k.code[0] <= 'Z' && k.code[1] >= 'A' && k.code[1] <= 'Z');
+    assert(i == 0 || strcmp(radio_countries::kCountries[i - 1].code, k.code) < 0);
+    assert(*k.name && strlen(k.name) <= 31);
+    for (const char* q = k.name; *q; ++q) assert(*q >= ' ' && *q < 127);
+    assert(radio_countries::name(k.code) == k.name);
+  }
+  assert(radio_countries::kCountryCount > 240 && std::string(radio_countries::name("GB")) == "United Kingdom");
+  assert(std::string(radio_countries::name("US")) == "United States" && std::string(radio_countries::name("RU")) == "Russia");
+  for (const char* bad : {"gb", "ZZ", "UK", "G", "GBR", ""}) assert(!radio_countries::name(bad));
+  assert(!radio_countries::name(nullptr) && std::string(radio_countries::alias("UK")) == "GB" && std::string(radio_countries::alias("US")) == "US");
+  puts("PASS radio station list: the built-in file, typed files, limits, safe saved lines, genre choice, line removal, selection and the country table");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-radio-catalog-') as d:
