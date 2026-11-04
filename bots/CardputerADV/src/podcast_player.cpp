@@ -119,7 +119,8 @@ Error openBridge(WiFiClient& client, Reader& r, Headers& h, bool text) {
   else if (bridgePort == 443) snprintf(host, sizeof(host), "%s", bridgeHost);
   else snprintf(host, sizeof(host), "%s:%u", bridgeHost, unsigned(bridgePort));
   int n = atHome ? snprintf(buf, kScratch, "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: S1-ADV-Podcasts/1\r\n"
-                            "Accept: audio/mpeg\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n", requested, host)
+                            "Accept: %s\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n", requested, host,
+                            text ? "text/plain" : "audio/mpeg")
                  : snprintf(buf, kScratch, "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: S1-ADV-Podcasts/1\r\nAuthorization: Bearer %s\r\n"
                             "Accept: %s\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n",
                             requested, host, bridgeToken, text ? "text/plain" : "audio/mpeg");
@@ -480,6 +481,13 @@ bool startList(const char* path) {
   if (owned.load()) return false;
   if (!copyPath(requested, sizeof(requested), path)) { refuse(Error::Malformed); return false; }
   return begin(Job::List, 0, false);
+}
+bool startListHome(uint32_t ip, uint16_t port, const char* path) {
+  if (owned.load()) return false;
+  if (!ip || !port || !copyPath(requested, sizeof(requested), path)) { refuse(Error::Malformed); return false; }
+  homeIp = ip;
+  homePort = port;
+  return begin(Job::List, 0, true);
 }
 bool startStream(const char* path, uint32_t from) {
   if (owned.load()) return false;

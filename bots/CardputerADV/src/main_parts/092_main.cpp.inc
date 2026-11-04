@@ -52,11 +52,18 @@ podcast::Entry gPodSaving;
 bool gPodSavePending = false, gPodSaveRunning = false;
 podcast::Entry gPodRemove;
 bool gPodDeletePending = false;  // Waiting for the player to let go of the file first.
-// The home-network ticket for one episode, asked of the bridge over HTTPS before it plays or
-// saves, so the audio itself needs no TLS. Kept for the session: it's good for any second.
+// The home-network session: one ticket asked of the bridge over HTTPS, after which searches,
+// lists and audio all come over the home door as plain HTTP, so the device needs no TLS at home.
+// TLS's two 17 KB buffers split the heap the player's 24 KB stack needs, so it's kept to one.
 podcast::HomeTicket gPodTicket;
-char gPodTicketShow[podcast::kIdBytes + 1] = "", gPodTicketEpisode[podcast::kEpisodeIdBytes + 1] = "";
+uint32_t gPodTicketFor = 0;  // The device's address the ticket was asked on: another network asks again.
 bool gPodTicketRunning = false;
+bool gPodAskHome = false, gPodAskRetried = false;  // How the list on its way is coming.
+// What went wrong last, sent to the bridge's log once the worker is free, and the memory just
+// before the player began, for it.
+String gPodReport;
+bool gPodReportRunning = false;
+uint32_t gPodStartFree = 0, gPodStartBig = 0;
 uint32_t gPodHomeOffFor = 0;  // The device address on which the home way didn't answer: HTTPS there.
 bool gPodRetried = false, gPodSaveRetried = false;  // One more try after the home way fails.
 bool gPodPlayHome = false, gPodSaveHome = false;  // How the job under way is getting its audio.
@@ -378,33 +385,44 @@ void stopPodcasts() {
 void podPrepareNetwork() {
   podUseBridge();
   prepareNetworkMemory("podcast", true);
-  clearEmojiCache();
+  compactMemoryForUi("podcast", true);
 }
-bool podTicketFor(const podcast::Entry& e) {
-  return !gPodTicketRunning && !strcmp(gPodTicketShow, e.show) && !strcmp(gPodTicketEpisode, e.episode);
-}
-// A ticket is worth asking for when this episode has none and the home way hasn't already
-// failed on this network.
-bool podTicketWanted(const podcast::Entry& e) {
+// Asked once on each network, unless the home way has already failed on it.
+bool podTicketWanted() {
   const uint32_t mine = wifiLocalAddress();
-  return mine && gPodHomeOffFor != mine && !podTicketFor(e);
+  return mine && gPodHomeOffFor != mine && gPodTicketFor != mine && !gPodTicketRunning;
 }
-uint32_t podHomeIp(const podcast::Entry& e) {
+// The bridge's computer on this network, or 0 to go over HTTPS.
+uint32_t podHomeIp() {
   const uint32_t mine = wifiLocalAddress();
-  return podTicketFor(e) && gPodHomeOffFor != mine ? podcast::homeFor(gPodTicket, mine) : 0;
+  return mine && !gPodTicketRunning && gPodTicketFor == mine && gPodHomeOffFor != mine ? podcast::homeFor(gPodTicket, mine) : 0;
 }
-void podForgetTicket() { gPodTicket = podcast::HomeTicket{}; gPodTicketShow[0] = gPodTicketEpisode[0] = 0; }
-bool podStartTicket(const podcast::Entry& e) {
-  char path[200];
+void podForgetTicket() { gPodTicket = podcast::HomeTicket{}; gPodTicketFor = 0; }
+bool podStartTicket() {
   podForgetTicket();
-  if (!podcast::ticketPath(path, sizeof(path), e.show, e.episode)) return false;
-  podcast::copyText(gPodTicketShow, sizeof(gPodTicketShow), e.show);
-  podcast::copyText(gPodTicketEpisode, sizeof(gPodTicketEpisode), e.episode);
-  podFreeForPlay();
   podPrepareNetwork();
-  gPodTicketRunning = podcast_player::startList(path);
-  if (!gPodTicketRunning) podForgetTicket();
+  gPodTicketRunning = podcast_player::startList(podcast::kSessionTicketPath);
   return gPodTicketRunning;
+}
+// A list over the home door when there's a session, else over HTTPS.
+bool podStartListVia(const char* httpsPath, bool& viaHome) {
+  char home[320];
+  const uint32_t ip = podHomeIp();
+  viaHome = ip && podcast::homePath(home, sizeof(home), gPodTicket, httpsPath);
+  if (viaHome) return podcast_player::startListHome(ip, gPodTicket.port, home);
+  podPrepareNetwork();
+  return podcast_player::startList(httpsPath);
+}
+// Once the worker is free, the bridge's log hears what went wrong: where, the error, the memory
+// now and just before it began, and how the sound came. It's sent once, and its answer ignored.
+void podQueueReport(const char* stage, bool viaHome) {
+  char path[360];
+  const uint32_t played = podcast_player::position() > gPodNow.at ? podcast_player::position() - gPodNow.at : 0;
+  if (!podcast::reportPath(path, sizeof(path), stage, unsigned(podcast_player::error()), podcast_player::memoryNote(),
+                           ESP.getFreeHeap(), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), gPodStartFree, gPodStartBig,
+                           viaHome ? "home" : "https", played, kAppVersion)) return;
+  gPodReport = path;
+  logf("[PODCAST] report %s", path + sizeof("/api/cardputer/podcasts/report?") - 1);
 }
 void podAsk(PodAsk what, const String& path, const char* saying) {
   if (gPodAskPending || gPodAskRunning) return;
@@ -414,6 +432,7 @@ void podAsk(PodAsk what, const String& path, const char* saying) {
   gPodAsking = what;
   gPodAskPath = path;
   gPodAskPending = true;
+  gPodAskRetried = false;
   podFreeTab();  // Its memory goes to the request; the library is read again on the way back.
   podSay(saying, true);
 }
@@ -652,6 +671,7 @@ void podSaveDone() {
     else podSay("Saved, but saved.txt couldn't change");
     if (gPodHasNow && sameEpisode(gPodNow, gPodSaving.show, gPodSaving.episode)) gPodNowSaved = true;
   } else {
+    if (podcast_player::error() != podcast_player::Error::None) podQueueReport("save", gPodSaveHome);
     podSay(podcast_player::error() == podcast_player::Error::None ? String("Saving stopped") : "Save: " + podError(nullptr));
   }
   if (gPodView == PodView::Episodes) podMarkPage();
@@ -719,6 +739,19 @@ void servicePodcastWork(bool here) {
   if (gPodDeletePending && !podcast_player::busy()) { podFinishDelete(); podInvalidate(); }
   if (gPodAskRunning && !podcast_player::busy()) {
     gPodAskRunning = false;
+    using podcast_player::Error;
+    const Error e = podcast_player::error();
+    // The home way failed before anything came: HTTPS from now on here, or a new session for a
+    // ticket a restarted bridge forgot. The list is asked again once.
+    if (gPodAskHome && !gPodAskRetried && gPodAsking != PodAsk::None && (e == Error::Connect || e == Error::Timeout || e == Error::NotFound)) {
+      gPodAskRetried = true;
+      if (e == Error::NotFound) podForgetTicket();
+      else gPodHomeOffFor = wifiLocalAddress();
+      podcast_player::clearList();
+      gPodAskPending = true;
+      return;
+    }
+    if (e != Error::None && e != Error::NotFound) podQueueReport(gPodAsking == PodAsk::Search ? "search" : "episodes", gPodAskHome);
     podListDone();
     if (gPodResume && gPodHasNow && !gPodAskPending) podPlay(gPodNow, PodView::Player, false);
     gPodResume = false;
@@ -732,45 +765,59 @@ void servicePodcastWork(bool here) {
     size_t length = 0;
     const char* text = podcast_player::listText(length);
     podcast::HomeTicket ticket;
-    if (e == Error::None && text && podcast::parseTicket(text, length, ticket)) gPodTicket = ticket;
+    const uint32_t mine = wifiLocalAddress();
+    if (e == Error::None && text && podcast::parseTicket(text, length, ticket)) { gPodTicket = ticket; gPodTicketFor = mine; }
     else if (e == Error::None && !text) podForgetTicket();  // Stopped on the way: asked again next time.
-    else if (e == Error::None || e == Error::NotFound || e == Error::Http || e == Error::Malformed) gPodTicket = podcast::HomeTicket{};  // None: over HTTPS.
-    else {
-      // Couldn't ask at all, so the audio couldn't come either.
+    else if (e == Error::None || e == Error::NotFound || e == Error::Http || e == Error::Malformed) {
+      gPodTicket = podcast::HomeTicket{};  // None: over HTTPS on this network.
+      gPodTicketFor = mine;
+    } else {
+      // Couldn't ask at all, so nothing else over HTTPS could come either.
       const String why = podError(nullptr);
+      podQueueReport("ticket", false);
       podForgetTicket();
       if (gPodStartPending) { gPodStartPending = gPodWantPlaying = false; podSay(why); }
       if (gPodSavePending) { gPodSavePending = false; podSay("Save: " + why); }
+      if (gPodAskPending) { gPodAskPending = false; gPodAsking = PodAsk::None; podSay(why); }
     }
     podcast_player::clearList();
     podInvalidate();
   }
+  if (gPodReportRunning && !podcast_player::busy()) { gPodReportRunning = false; podcast_player::clearList(); }
+  // Every job over the network first has the session's ticket, or knows there's none.
+  const bool networkWanted = (here && (gPodAskPending || gPodSavePending)) ||
+                             (gPodStartPending && !gPodNowFile && int32_t(millis() - gPodStartAtMs) >= 0);
+  if (networkWanted && idle && gWifiReady && podTicketWanted() && podStartAllowed(true, false)) {
+    if (!podStartTicket()) {
+      const String why = podError(nullptr);
+      if (gPodStartPending) { gPodStartPending = gPodWantPlaying = false; podSay(why); }
+      if (gPodSavePending) { gPodSavePending = false; podSay("Save: " + why); }
+      if (gPodAskPending) { gPodAskPending = false; gPodAsking = PodAsk::None; podSay(why); }
+    }
+    podInvalidate();
+    return;
+  }
   if (here && gPodAskPending && idle) {
     gPodAskPending = false;
     if (!podStartAllowed(true, false)) { gPodAsking = PodAsk::None; podSay(!gWifiReady ? "Wi-Fi required" : "Busy: try again"); }
-    else {
-      podPrepareNetwork();
-      if (podcast_player::startList(gPodAskPath.c_str())) gPodAskRunning = true;
-      else { gPodAsking = PodAsk::None; podSay(podError(nullptr)); }
-    }
+    else if (podStartListVia(gPodAskPath.c_str(), gPodAskHome)) gPodAskRunning = true;
+    else { gPodAsking = PodAsk::None; podSay(podError(nullptr)); }
     podInvalidate();
     return;
   }
   if (here && gPodSavePending && idle) {
     if (!podStartAllowed(true, false)) { gPodSavePending = false; podSay(!gWifiReady ? "Wi-Fi required" : "Busy: try again"); podInvalidate(); return; }
-    if (podTicketWanted(gPodSaving)) {
-      if (!podStartTicket(gPodSaving)) { gPodSavePending = false; podSay("Save: " + podError(nullptr)); }
-      podInvalidate();
-      return;
-    }
     gPodSavePending = false;
-    char path[300];
+    char path[300], https[300];
     const String part = podFileName(gPodSaving.episode, true), file = podFileName(gPodSaving.episode);
-    const uint32_t ip = podHomeIp(gPodSaving), expect = gPodSaving.seconds * podcast::kBytesPerSecond;
-    if (!ensureDirRecursive(SD, kPodFilesDir) || part.isEmpty() ||
-        !(ip ? podcast::homeAudioPath(path, sizeof(path), gPodTicket, 0) : podcast::audioPath(path, sizeof(path), gPodSaving.show, gPodSaving.episode, 0))) podSay("Can't save that one");
+    uint32_t ip = podHomeIp();
+    const uint32_t expect = gPodSaving.seconds * podcast::kBytesPerSecond;
+    const bool known = podcast::audioPath(https, sizeof(https), gPodSaving.show, gPodSaving.episode, 0);
+    if (ip && !(known && podcast::homePath(path, sizeof(path), gPodTicket, https))) ip = 0;
+    if (!ip && known) strcpy(path, https);
+    if (!ensureDirRecursive(SD, kPodFilesDir) || part.isEmpty() || !known) podSay("Can't save that one");
     else {
-      podPrepareNetwork();
+      if (!ip) podPrepareNetwork();
       gPodSaveHome = ip != 0;
       if (ip ? podcast_player::startSaveHome(ip, gPodTicket.port, path, part.c_str(), file.c_str(), expect)
              : podcast_player::startSave(path, part.c_str(), file.c_str(), expect)) gPodSaveRunning = true;
@@ -781,11 +828,6 @@ void servicePodcastWork(bool here) {
   }
   if (gPodStartPending && idle && int32_t(millis() - gPodStartAtMs) >= 0) {
     if (gPodNowFile && !podOnCard(gPodNow.episode)) gPodNowFile = gPodNowSaved = false;  // Deleted meanwhile.
-    if (!gPodNowFile && gWifiReady && podTicketWanted(gPodNow) && podStartAllowed(true, false)) {
-      if (!podStartTicket(gPodNow)) { gPodStartPending = gPodWantPlaying = false; podSay(podError(nullptr)); }
-      podInvalidate();
-      return;  // Starts once the ticket is in.
-    }
     gPodStartPending = false;
     if (!podStartAllowed(!gPodNowFile, true)) {
       gPodWantPlaying = false;
@@ -793,21 +835,24 @@ void servicePodcastWork(bool here) {
     } else {
       podFreeForPlay();
       initSpeaker();
+      gPodStartFree = ESP.getFreeHeap();
+      gPodStartBig = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+      logf("[PODCAST] play start free=%u largest=%u", unsigned(gPodStartFree), unsigned(gPodStartBig));
       bool started = false;
       if (gPodNowFile) started = podcast_player::startFile(podFileName(gPodNow.episode).c_str(), gPodNow.at);
       else {
-        char path[300];
-        const uint32_t ip = podHomeIp(gPodNow);
-        gPodPlayHome = ip != 0;
-        if (ip) started = podcast::homeAudioPath(path, sizeof(path), gPodTicket, gPodNow.at) &&
-                          podcast_player::startStreamHome(ip, gPodTicket.port, path, gPodNow.at);
+        char path[300], https[300];
+        const uint32_t ip = podHomeIp();
+        gPodPlayHome = ip && podcast::audioPath(https, sizeof(https), gPodNow.show, gPodNow.episode, gPodNow.at) &&
+                       podcast::homePath(path, sizeof(path), gPodTicket, https);
+        if (gPodPlayHome) started = podcast_player::startStreamHome(ip, gPodTicket.port, path, gPodNow.at);
         else {
           podPrepareNetwork();
           started = podcast::audioPath(path, sizeof(path), gPodNow.show, gPodNow.episode, gPodNow.at) &&
                     podcast_player::startStream(path, gPodNow.at);
         }
       }
-      if (!started) { gPodWantPlaying = false; podSay(podError(nullptr)); }
+      if (!started) { gPodWantPlaying = false; podQueueReport("play", gPodPlayHome); podSay(podError(nullptr)); }
       else {
         gPodPlayStarted = true;
         gPodLastAudio = true;
@@ -825,11 +870,17 @@ void servicePodcastWork(bool here) {
       gPodPlayStarted = false;
       gPodStartAtMs = millis();
     } else {
+      if (podcast_player::error() != podcast_player::Error::None) podQueueReport(gPodNowFile ? "file" : "play", gPodPlayHome);
       if (gPodPlayStarted) gPodNow.at = podcast_player::position();
       podRememberNow();
       podSay(podError("Episode"));
     }
     podInvalidate();
+  }
+  if (!gPodReport.isEmpty() && idle && !podcastOn() && !gPodAskPending && !gPodSavePending && gWifiReady && podStartAllowed(true, false)) {
+    bool viaHome = false;
+    if (podStartListVia(gPodReport.c_str(), viaHome)) gPodReportRunning = true;
+    gPodReport = "";  // Once only, whatever happens.
   }
   if (gPodWantPlaying && podcast_player::playing() && millis() - gPodRememberedMs >= kPodRememberEveryMs) {
     podcast::Entry e = gPodNow;

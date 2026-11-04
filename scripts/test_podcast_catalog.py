@@ -157,6 +157,19 @@ int main() {
   uint32_t ip = 0;
   assert(parseIpv4("192.168.0.20", ip) && ip == 0xC0A80014u && !parseIpv4("192.168.4", ip) && !parseIpv4("1.2.3.4.5", ip) && !parseIpv4("01234.1.1.1", ip));
   assert(ticketPath(url, sizeof(url), "p42", "111111111111") && S(url) == "/api/cardputer/podcasts/ticket?show=p42&ep=111111111111");
+  // A session's paths: the HTTPS route's own path behind the ticket, so both ends read the same.
+  assert(S(kSessionTicketPath) == "/api/cardputer/podcasts/ticket");
+  parseTicket(ticket, sizeof(ticket) - 1, t);
+  assert(homePath(url, sizeof(url), t, "/api/cardputer/podcasts/search?kind=book&q=sherlock") &&
+         S(url) == "/podcasts/0123456789abcdef0123456789abcdef/search?kind=book&q=sherlock");
+  assert(homePath(url, sizeof(url), t, "/api/cardputer/podcasts/audio?show=p42&ep=111111111111&t=40") &&
+         S(url) == "/podcasts/0123456789abcdef0123456789abcdef/audio?show=p42&ep=111111111111&t=40");
+  assert(!homePath(url, sizeof(url), t, "/api/cardputer/weather") && !homePath(url, 20, t, "/api/cardputer/podcasts/search?q=x"));
+  { HomeTicket none; assert(!homePath(url, sizeof(url), none, "/api/cardputer/podcasts/search?q=x")); }
+  assert(reportPath(url, sizeof(url), "play", 1, "player 17K/9K", 61000, 15000, 88000, 30000, "home", 0, "0.2.298-dev") &&
+         S(url) == "/api/cardputer/podcasts/report?stage=play&e=1&free=61000&big=15000&startfree=88000&startbig=30000&via=home&played=0&fw=0.2.298-dev&note=player%2017K%2F9K");
+  assert(reportPath(url, sizeof(url), "ticket", 4, "", 1, 2, 3, 4, "https", 5, "") && S(url).find("&fw=&note=") != std::string::npos);
+  assert(!reportPath(url, 60, "play", 1, "x", 1, 2, 3, 4, "home", 0, "v"));
   assert(!ticketPath(url, sizeof(url), "p42", "x"));
 
   // Times.

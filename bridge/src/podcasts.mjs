@@ -322,10 +322,14 @@ export class PodcastService {
     this.lanPort = 0;  // Set once the home-network door is open.
   }
 
-  // One ticket per device and episode, good for 12 hours and any second of it.
-  ticket(device, show, episode) {
-    if (!SHOW_ID.test(String(show || ""))) throw new PodcastError("invalid_show", 400);
-    if (!EPISODE_ID.test(String(episode || ""))) throw new PodcastError("invalid_episode", 400);
+  // A ticket for one device, good for 12 hours. With a show and episode it's for that episode at
+  // any second (what 0.2.294 to 0.2.296 asked for); without, it's a session: searches, lists
+  // and audio all go over the home door with it, so the device needs no TLS at home.
+  ticket(device, show = "", episode = "") {
+    if (show || episode) {
+      if (!SHOW_ID.test(String(show || ""))) throw new PodcastError("invalid_show", 400);
+      if (!EPISODE_ID.test(String(episode || ""))) throw new PodcastError("invalid_episode", 400);
+    }
     const now = this.now();
     for (const [id, held] of this.tickets) if (held.expires <= now) this.tickets.delete(id);
     for (const [id, held] of this.tickets) {
@@ -337,13 +341,24 @@ export class PodcastService {
     return id;
   }
 
+  // What the device says went wrong, for the log. Only short plain values are kept; nothing
+  // about what was playing is among them.
+  report(params) {
+    const keep = [];
+    for (const key of ["stage", "e", "note", "free", "big", "startfree", "startbig", "via", "played", "fw"]) {
+      const value = String(params?.get?.(key) ?? "").replace(/[^A-Za-z0-9 ./:_-]/gu, "").slice(0, 40);
+      if (value) keep.push(`${key}=${value.replace(/ /gu, "_")}`);
+    }
+    console.log(`[podcasts] device report ${keep.join(" ") || "(empty)"}`);
+  }
+
   redeem(id) {
     const held = this.tickets.get(id);
     return held && held.expires > this.now() ? held : null;
   }
 
   // For the device: where to fetch this episode on the home network, or "none".
-  ticketLines(device, show, episode, interfaces) {
+  ticketLines(device, show = "", episode = "", interfaces) {
     const addresses = this.lanPort ? lanAddresses(interfaces) : [];
     const id = this.ticket(device, show, episode);
     if (!addresses.length) return "none\n";
@@ -447,7 +462,8 @@ export class PodcastService {
 
   // Streams the episode to res from `seconds` in, as AUDIO. Answers only once ffmpeg has
   // sound to send, so a dead link is an error the device can show, not a silent stream.
-  async audio(res, { device = "device", show, episode, seconds = 0 }) {
+  async audio(res, { device = "device", show, episode, seconds = 0, via = "https" }) {
+    const began = this.now();
     const found = await this.episode(show, episode);
     const url = await checkAudioUrl(found.url, this.lookupImpl);
     this.playing.get(device)?.();
@@ -482,36 +498,67 @@ export class PodcastService {
       const unplayable = /Invalid data|does not contain any stream|could not find codec|Server returned 4\d\d|HTTP error 4\d\d/iu.test(errors);
       throw new PodcastError(cancelled ? "cancelled" : unplayable ? "episode_unplayable" : "episode_unavailable", unplayable ? 415 : 502);
     }
+    // How each one goes, without what it is: enough to tell a device that never read from one
+    // that played an hour.
+    const from = Math.max(0, Math.floor(Number(seconds) || 0));
+    const started = this.now();
+    let sent = first.length, logged = false;
+    const finish = (how) => {
+      if (logged) return;
+      logged = true;
+      console.log(`[podcasts] audio end via=${via} from=${from}s sent=${Math.round(sent / 1024)}KB after=${Math.round((this.now() - started) / 1000)}s ${how}`);
+    };
+    console.log(`[podcasts] audio start via=${via} from=${from}s first=${started - began}ms`);
     res.writeHead(200, { "content-type": "audio/mpeg", "cache-control": "no-store", "x-content-type-options": "nosniff" });
     res.write(first);
+    child.stdout.on("data", chunk => { sent += chunk.length; });
     child.stdout.pipe(res);
+    res.once("close", () => finish(child.exitCode === 0 ? "whole" : "device closed"));
     child.once("close", code => {
       if (code && !ended) console.warn(`[podcasts] audio stopped: ${errors.trim().split("\n").pop()?.slice(0, 120) || code}`);
       if (this.playing.get(device) === end) this.playing.delete(device);
       ended = true;
+      if (code !== 0 && code !== null) finish(`ffmpeg ${code}`);
     });
   }
 }
 
-// The home-network door: GET /podcasts/<ticket>?t=<second>, from a home address only.
+// The home-network door, for home addresses only:
+//   GET /podcasts/<episode ticket>?t=<second>                  the episode the ticket is for
+//   GET /podcasts/<session ticket>/search?kind=&q=             as the HTTPS routes answer
+//   GET /podcasts/<session ticket>/episodes?show=&from=
+//   GET /podcasts/<session ticket>/audio?show=&ep=&t=
+//   GET /podcasts/<session ticket>/report?...                  what went wrong, for the log
 export function lanHandler(service) {
   return (req, res) => {
     void (async () => {
       const remote = String(req.socket?.remoteAddress || "").replace(/^::ffff:/u, "");
       let url;
       try { url = new URL(req.url || "/", "http://lan"); } catch { url = new URL("http://lan/"); }
-      const match = url.pathname.match(/^\/podcasts\/([0-9a-f]{32})$/u);
+      const match = url.pathname.match(/^\/podcasts\/([0-9a-f]{32})(?:\/(search|episodes|audio|report))?$/u);
       const held = req.method === "GET" && match && (homeAddress(remote) || remote === "127.0.0.1") ? service.redeem(match[1]) : null;
-      if (!held) {
+      const what = match?.[2] || "";
+      // An episode's ticket is only for its audio; a session's only for the named routes.
+      if (!held || (held.show ? what !== "" : what === "")) {
         res.writeHead(404, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
         res.end("not_found\n");
         return;
       }
+      const params = url.searchParams;
+      const lines = (body) => {
+        const data = Buffer.from(body, "utf8");
+        res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "content-length": String(data.length), "cache-control": "no-store" });
+        res.end(data);
+      };
       try {
-        await service.audio(res, { device: held.device, show: held.show, episode: held.episode, seconds: url.searchParams.get("t") || 0 });
+        if (what === "search") lines(showLines(await service.search(params.get("kind") || "podcast", params.get("q") || "")));
+        else if (what === "episodes") lines(await service.episodes(params.get("show") || "", params.get("from") || 0));
+        else if (what === "report") { service.report(params); lines("ok\n"); }
+        else await service.audio(res, { device: held.device, via: "home", show: held.show || params.get("show") || "",
+          episode: held.episode || params.get("ep") || "", seconds: params.get("t") || 0 });
       } catch (error) {
         if (res.headersSent || res.destroyed) { res.destroy(); return; }
-        if (error.code !== "cancelled") console.warn(`[podcasts] home audio failed: ${String(error.code || error.message || error).slice(0, 120)}`);
+        if (error.code !== "cancelled") console.warn(`[podcasts] home ${what || "audio"} failed: ${String(error.code || error.message || error).slice(0, 120)}`);
         res.writeHead(error instanceof PodcastError ? error.status : 503, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
         res.end(`${error.code || "podcasts_unavailable"}\n`);
       }

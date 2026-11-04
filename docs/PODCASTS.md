@@ -5,13 +5,13 @@ and listen. The Cardputer remembers where you stopped, and can save episodes to 
 play with no Wi-Fi.
 
 This app needs the bridge. The bridge does the searching, reads each show's list of episodes,
-and passes the episode on as a small MP3 that the radio's player can play. Searches and lists
-go over HTTPS with the device token, the same as everything else the Cardputer asks the bridge.
+and passes the episode on as a small MP3 that the radio's player can play.
 
-At home, the sound itself comes straight from the bridge's computer over your Wi-Fi as plain
-HTTP, because the Cardputer hasn't the memory for an HTTPS connection and the MP3 decoder at
-once. Away from home it tries HTTPS, which may run out of memory, so save episodes to the card
-before you go. [How the sound gets there](#how-the-sound-gets-there) has the details.
+At home, after one HTTPS request that gets a ticket, everything comes straight from the bridge's
+computer over your Wi-Fi as plain HTTP: searches, lists and the sound. HTTPS takes memory the
+player then can't have, so at home it's kept to that one request. Away from home it all goes
+over HTTPS, which may run out of memory while playing, so save episodes to the card before you
+go. [How the sound gets there](#how-the-sound-gets-there) has the details.
 
 | What | Where it comes from |
 |---|---|
@@ -150,17 +150,16 @@ places remembered and nothing saved.
 
 ## How the sound gets there
 
-Before an episode plays or saves, the Cardputer asks the bridge over HTTPS for a ticket for it.
-The answer is a random 32-character ticket and the bridge computer's addresses on its home
-networks. If one is on the Cardputer's own Wi-Fi network, the audio comes from there:
-`http://<that address>:31890/podcasts/<ticket>?t=<second>`. Nothing else travels that way, not
-even the device token. The ticket is good for that episode for 12 hours, so pausing and skipping
-need no HTTPS. That door only answers home-network addresses (10.x, 172.16-31.x and 192.168.x) and
-only for tickets it gave out.
+The first time the app goes to the network on a Wi-Fi network, the Cardputer asks the bridge
+over HTTPS for a ticket. The answer is a random 32-character ticket and the bridge computer's
+addresses on its home networks. If one is on the Cardputer's own network, searches, lists and
+audio all come from there, `http://<that address>:31890/podcasts/<ticket>/search?...`,
+`/episodes?...` and `/audio?...`, the same requests as over HTTPS. The device token never
+travels that way. The ticket is good for 12 hours. That door only answers home-network addresses
+(10.x, 172.16-31.x and 192.168.x), and only for tickets it gave out.
 
-If the address doesn't answer, as on another network with the same numbers, the Cardputer goes
-over HTTPS and stays on it on that network. If the bridge restarted and forgot the ticket, it
-asks for a new one. Set `"podcasts": { "lanPort": 0 }` in the bridge's config to keep the door
+If the address doesn't answer, the Cardputer asks that once more over HTTPS and stays on HTTPS
+on that network. If the bridge restarted and forgot the ticket, it asks for a new one. Set `"podcasts": { "lanPort": 0 }` in the bridge's config to keep the door
 closed; then everything goes over HTTPS.
 
 HTTPS needs two buffers of about 17 KB each. With the decoder that's about 80 KB at once, which
@@ -178,6 +177,13 @@ The bridge needs `ffmpeg` on its computer. On a Mac with Homebrew it's `brew ins
 Episode addresses come from feeds that anyone can write, so the bridge fetches only from public
 internet addresses, never from its own computer or network, and lets `ffmpeg` read only from the
 network. Nothing about what you search for or play is written to the bridge's log.
+
+What the log does get, to see what went wrong: one line when an episode's sound starts and one
+when it ends, saying how it came (home or https), from which second, how much was sent and
+whether the Cardputer hung up or the episode ended. When something fails on the Cardputer, it
+sends the bridge a short report once the player is free: where it failed, the error, the memory
+then and just before it began, how the sound came and how long it played. Neither says what was
+playing.
 
 ## Not yet
 

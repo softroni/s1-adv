@@ -348,3 +348,51 @@ test("the door plays a ticket's episode from the second asked, and nothing else"
   assert.equal(res.headers["content-type"], "audio/mpeg");
   res.emit("close");
 });
+
+test("a session ticket carries searches, lists and audio over the home door, and nothing else", async () => {
+  const fetch = fakeFetch([["advancedsearch", { response: { docs: [{ identifier: "holmes", title: "Holmes", creator: "Doyle" }] } }],
+    ["archive.org/metadata/holmes", ARCHIVE]]);
+  const children = [];
+  const service = new PodcastService({ fetchImpl: fetch.impl, lookupImpl: publicLookup,
+    spawnImpl: (command, args) => { const child = fakeChild(); child.args = args; children.push(child); return child; } });
+  service.lanPort = 31890;
+  const lines = service.ticketLines("d1", "", "", INTERFACES).trim().split("\n");
+  const id = lines[0].match(/\/podcasts\/([0-9a-f]{32})$/u)[1];
+  assert.equal(service.ticketLines("d1", "", "", INTERFACES).split("\n")[0], lines[0]);  // The same session again.
+  const handler = lanHandler(service);
+  const call = async (path, remote = "192.168.0.30") => {
+    const res = fakeResponse();
+    res.end = (body) => { res.body = String(body || ""); res.ended = true; };
+    handler({ method: "GET", url: path, socket: { remoteAddress: remote } }, res);
+    for (let i = 0; i < 8; ++i) await new Promise(resolve => setImmediate(resolve));
+    return res;
+  };
+  const found = await call(`/podcasts/${id}/search?kind=book&q=sherlock`);
+  assert.equal(found.status, 200);
+  assert.equal(found.body, "show\taholmes\t0\tHolmes\tDoyle\n");
+  const page = await call(`/podcasts/${id}/episodes?show=aholmes&from=0`);
+  assert.match(page.body, /^about\t3\t0\tThe Adventures of Sherlock Holmes\t/u);
+  assert.equal((await call(`/podcasts/${id}`)).status, 404, "a session isn't one episode's ticket");
+  assert.equal((await call(`/podcasts/${id}/search?kind=book&q=x`, "100.101.102.103")).status, 404);
+  const episode = parseArchiveItem("holmes", ARCHIVE).episodes[1];
+  const audio = await call(`/podcasts/${id}/audio?show=aholmes&ep=${episode.id}&t=42`);
+  assert.equal(children.length, 1);
+  assert.equal(children[0].args[children[0].args.indexOf("-ss") + 1], "42");
+  assert.equal(children[0].args[children[0].args.indexOf("-i") + 1], episode.url);
+  children[0].stdout.write(Buffer.from([0xff, 0xfb]));
+  for (let i = 0; i < 4; ++i) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(audio.status, 200);
+  audio.emit("close");
+  // An episode's ticket can't open the session's routes.
+  const single = service.ticket("d1", "aholmes", episode.id);
+  assert.equal((await call(`/podcasts/${single}/search?kind=book&q=x`)).status, 404);
+  // A report goes to the log, its values cut to plain words.
+  const logged = [];
+  const log = console.log;
+  console.log = (line) => logged.push(line);
+  try {
+    const said = await call(`/podcasts/${id}/report?stage=play&e=1&note=player%2017K%2F9K&free=61000&via=home&secret=x&title=%3Cscript%3E`);
+    assert.equal(said.body, "ok\n");
+  } finally { console.log = log; }
+  assert.deepEqual(logged, ["[podcasts] device report stage=play e=1 note=player_17K/9K free=61000 via=home"]);
+});

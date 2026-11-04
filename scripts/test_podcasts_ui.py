@@ -42,6 +42,7 @@ fakes = r'''
 #include <cstdarg>
 #define FILE_READ "r"
 const char* kTlsRootCaPem = "ROOT CA";
+const char* kAppVersion = "0.2.298-dev";
 String gHubHost = "bridge.example", gDeviceToken = "tok-1";
 uint16_t gHubPort = 10000;
 int netPreps = 0, emojiClears = 0;
@@ -70,7 +71,11 @@ uint16_t port = 0;
 int lists = 0, streams = 0, files = 0, saves = 0, stops = 0;
 void setBridge(const char* h, uint16_t p, const char* t, const char* ca) { assert(std::string(ca) == "ROOT CA"); if (running) return; host = h; port = p; token = t; }
 bool begin(Job j) { if (running) return false; running = true; cancelling = false; job = j; err = Error::None; phase = State::Connecting; return true; }
-bool startList(const char* p) { if (running) return false; ++lists; path = p; listReady = false; listBody.clear(); return begin(Job::List); }
+std::vector<std::string> reports;
+bool report(const char* p) { const std::string q = p; if (q.find("/report?") == std::string::npos) return false; reports.push_back(q); return true; }
+bool startList(const char* p) { if (running) return false; if (report(p)) return true; ++lists; path = p; listReady = false; listBody.clear(); home = false; return begin(Job::List); }
+bool startListHome(uint32_t ip, uint16_t port, const char* p) {
+  if (running) return false; assert(port == 31890); if (report(p)) return true; ++lists; path = p; listReady = false; listBody.clear(); home = true; homeIp = ip; return begin(Job::List); }
 bool startStream(const char* p, uint32_t f) { if (running) return false; ++streams; path = p; from = pos = f; ended = false; home = false; return begin(Job::Stream); }
 bool startStreamHome(uint32_t ip, uint16_t port, const char* p, uint32_t f) { if (running) return false; assert(port == 31890); ++streams; path = p; from = pos = f; ended = false; home = true; homeIp = ip; return begin(Job::Stream); }
 bool startFile(const char* p, uint32_t f) { if (running) return false; ++files; sdPath = p; from = pos = f; ended = false; return begin(Job::File); }
@@ -148,7 +153,7 @@ int main() {
   // Finding: the words and the kind of thing go to the bridge, through its own address. The
   // library's list goes first, so the request has its memory.
   searchFor("history", podcast::Kind::Podcast);
-  assert(!gPodEntries && !gPodFollowed && emojiClears);
+  assert(!gPodEntries && !gPodFollowed && compactions);  // The firmware's own low-memory tidy, emoji cache and all.
   assert(pp::path == "/api/cardputer/podcasts/search?kind=podcast&q=history" && pp::host == "bridge.example" && pp::port == 10000 && pp::token == "tok-1" && netPreps);
   pp::answer(kFound); service();
   assert(gPodView == PodView::Shows && gPodFoundCount == 2 && std::string(gPodFound[0].title) == "History & Tea" && gPodFound[0].count == 3);
@@ -357,58 +362,84 @@ int main() {
   // Volume: 5% a press, as on the radio.
   const uint8_t before = gSpeakerVolume; press('='); assert(gSpeakerVolume > before); press('-'); assert(gSpeakerVolume == before);
 
-  // At home: a ticket over HTTPS first, then the audio straight from the bridge's computer, with
-  // no TLS while it plays. The ticket lasts the session, so moving about needs no HTTPS.
+  // At home: one ticket over HTTPS, then searches, lists and audio straight from the bridge's
+  // computer as plain HTTP, so nothing at home needs TLS after it.
   if (pp::running) { pp::finish(); } service();
   myAddress = 0xC0A8021Eu;  // 192.168.2.30, on the bridge's 192.168.0.0/22.
+  const std::string session = "/podcasts/" + kHex;
+  pp::reports.clear();
+  podForgetTicket(); gPodHomeOffFor = 0;
+  gUiMode = UiMode::Podcasts; gPodView = PodView::Find; gPodKind = podcast::Kind::Podcast; while (!gPodQuery.isEmpty()) press('\b'); type("tea"); enter(); service();
+  assert(pp::listing() && pp::path == "/api/cardputer/podcasts/ticket" && !pp::home && gPodAskPending);
+  pp::answer(kTicket); service(); service();
+  assert(pp::listing() && pp::home && pp::homeIp == 0xC0A80014u && pp::path == session + "/search?kind=podcast&q=tea");
+  pp::answer(kFound); service(); assert(gPodView == PodView::Shows && gPodFoundCount == 2);
+  enter(); service(); assert(pp::home && pp::path == session + "/episodes?show=p42&from=0");
+  pp::answer(kTea); service(); assert(gPodView == PodView::Episodes);
+  int lists = pp::lists, streams = pp::streams;
   podcast::Entry tea{};
   strcpy(tea.show, "p42"); strcpy(tea.episode, "111111111111"); strcpy(tea.showTitle, "History & Tea"); strcpy(tea.title, "The Newest");
   tea.seconds = 3600; tea.at = 40;
-  gPodHasNow = false; gPodView = PodView::Episodes; podPlay(tea, PodView::Episodes); service();
-  assert(pp::listing() && pp::path == "/api/cardputer/podcasts/ticket?show=p42&ep=111111111111" && gPodStartPending);
-  render(); assert(shows("Starting..."));
-  int streams = pp::streams;
-  pp::answer(kTicket); service(); service();
-  assert(pp::playing() && pp::home && pp::homeIp == 0xC0A80014u && pp::path == "/podcasts/" + kHex + "?t=40" && pp::streams == streams + 1);
+  gPodHasNow = false; podPlay(tea, PodView::Episodes); service();
+  assert(pp::playing() && pp::home && pp::path == session + "/audio?show=p42&ep=111111111111&t=40" && pp::streams == streams + 1 && pp::lists == lists);
+  render(); assert(shows("Asking the bridge..."));
   pp::sound(45); render(); assert(shows("home"));
-  const int lists = pp::lists;
   press('/'); pp::finish(); later(800); service();
-  assert(pp::home && pp::path == "/podcasts/" + kHex + "?t=75" && pp::lists == lists);
-  // A ticket the bridge has forgotten since it restarted: a new one, once.
+  assert(pp::home && pp::path == session + "/audio?show=p42&ep=111111111111&t=75" && pp::lists == lists);
+  // A ticket the bridge has forgotten since it restarted: a new session, once.
   pp::finish(Error::NotFound); service(); service();
-  assert(pp::listing() && pp::path.find("/ticket?") != std::string::npos && gPodWantPlaying);
-  pp::answer(kTicket); service(); service(); assert(pp::home && pp::path == "/podcasts/" + kHex + "?t=75");
+  assert(pp::listing() && pp::path == "/api/cardputer/podcasts/ticket" && gPodWantPlaying);
+  pp::answer(kTicket); service(); service(); assert(pp::home && pp::path == session + "/audio?show=p42&ep=111111111111&t=75");
   // Not reachable from here: over HTTPS straight away, and on this network from then on.
   pp::finish(Error::Connect); service(); service();
   assert(pp::playing() && !pp::home && pp::path == "/api/cardputer/podcasts/audio?show=p42&ep=111111111111&t=75");
   pp::sound(80); enter(); pp::finish(); service();
-  enter(); service(); assert(pp::playing() && !pp::home && pp::lists == lists + 1);  // No ticket asked again here.
+  lists = pp::lists;
+  enter(); service(); assert(pp::playing() && !pp::home && pp::lists == lists);  // No ticket asked again here.
   pp::sound(90); enter(); pp::finish(); service();
-  // On another network the ticket's addresses don't match, so it's HTTPS without asking again.
-  myAddress = 0x0A000063u; enter(); service(); assert(pp::playing() && !pp::home && pp::lists == lists + 1);
+  // Lists go over HTTPS here too now.
+  press(','); service(); if (pp::listing()) { assert(!pp::home); pp::finish(Error::NotFound); service(); }
+  // Another network asks again; this ticket has no address on it, so it's HTTPS there.
+  myAddress = 0x0A000063u; enter(); service(); assert(pp::listing() && pp::path == "/api/cardputer/podcasts/ticket");
+  pp::answer(kTicket); service(); service(); assert(pp::playing() && !pp::home);
   pp::sound(95); enter(); pp::finish(); service();
+  // A list at home that can't connect is asked again over HTTPS, at once.
+  myAddress = 0xC0A8021Eu; gPodHomeOffFor = 0; podForgetTicket();
+  gPodView = PodView::Find; enter(); service(); assert(pp::path == "/api/cardputer/podcasts/ticket"); pp::answer(kTicket); service(); service();
+  assert(pp::home && pp::path == session + "/search?kind=podcast&q=tea");
+  pp::finish(Error::Connect); service(); service();
+  assert(pp::listing() && !pp::home && pp::path == "/api/cardputer/podcasts/search?kind=podcast&q=tea" && gPodHomeOffFor == myAddress);
+  pp::answer(kFound); service(); assert(gPodView == PodView::Shows);
   // A bridge with no home door open says none, and HTTPS it is.
-  myAddress = 0xC0A8021Eu; gPodHomeOffFor = 0; podForgetTicket();
-  enter(); service(); assert(pp::listing()); pp::answer("none\n"); service(); service();
-  assert(pp::playing() && !pp::home); pp::sound(95); enter(); pp::finish(); service();
-  // When the ticket can't be had for memory, the screen says what ran short.
-  myAddress = 0xC0A8021Eu; gPodHomeOffFor = 0; podForgetTicket();
-  enter(); service(); assert(pp::listing());
+  gPodHomeOffFor = 0; podForgetTicket(); gPodView = PodView::Episodes;
+  enter(); service(); assert(pp::listing() && pp::path == "/api/cardputer/podcasts/ticket"); pp::answer("none\n"); service(); service();
+  assert(!pp::home);
+  if (pp::listing()) { pp::answer(kTea); service(); }
+  if (pp::playing()) { pp::sound(95); enter(); pp::finish(); service(); }
+  // When the ticket can't be had for memory, the screen says what ran short, and the bridge hears.
+  gPodHomeOffFor = 0; podForgetTicket(); gPodView = PodView::Player; gPodHasNow = true; gPodNow = tea; pp::reports.clear();
+  enter(); service(); assert(pp::listing() && pp::path == "/api/cardputer/podcasts/ticket");
   pp::note = "TLS 61K/15K"; pp::finish(Error::NoMemory); service();
-  assert(!gPodWantPlaying && gPodNotice == "No memory: TLS 61K/15K" && !logged.empty() && logged.back().find("no memory TLS 61K/15K") != std::string::npos);
-  pp::note.clear();
-  // Saving at home uses the episode's ticket too.
-  enter(); service(); pp::answer(kTicket); service(); service(); assert(pp::home && pp::playing()); pp::sound(96);
+  assert(!gPodWantPlaying && gPodNotice == "No memory: TLS 61K/15K" && !logged.empty());
+  service(); pp::note.clear();
+  assert(pp::reports.size() == 1 && pp::reports[0].rfind("/api/cardputer/podcasts/report?stage=ticket&e=1&free=61000&big=15000&", 0) == 0 &&
+         pp::reports[0].find("&note=TLS%2061K%2F15K") != std::string::npos);
+  // A player that runs short reports too, over the home door when there's one.
+  enter(); service(); pp::answer(kTicket); service(); service(); assert(pp::home && pp::playing());
+  pp::note = "player 17K/9K"; pp::finish(Error::NoMemory); service(); service(); pp::note.clear();
+  assert(gPodNotice == "No memory: player 17K/9K" && pp::reports.size() == 2 && pp::reports[1].rfind(session + "/report?stage=play&e=1&", 0) == 0 &&
+         pp::reports[1].find("&via=home&") != std::string::npos);
+  // Saving at home goes the same way.
+  enter(); service(); assert(pp::home && pp::playing()); pp::sound(96);
   disk.erase("/podcasts/files/111111111111.mp3");
   { std::string kept; std::swap(kept, disk[kSaved]); press('s'); assert(gPodSavePending); pp::finish(); service(); service();
-    assert(pp::saving() && pp::home && pp::path == "/podcasts/" + kHex + "?t=0" && pp::partPath == "/podcasts/files/111111111111.part");
+    assert(pp::saving() && pp::home && pp::path == session + "/audio?show=p42&ep=111111111111&t=0" && pp::partPath == "/podcasts/files/111111111111.part");
     pp::wrote(3600 * 6000); service(); assert(has(kSaved, "p42\t111111111111\t3600\t")); disk[kSaved] = kept; }
   // And a home save that can't connect goes over HTTPS.
   podDeleteSaved("111111111111"); gPodHomeOffFor = 0; press('s'); service(); assert(pp::saving() && pp::home);
   pp::finish(Error::Connect); service(); service(); assert(pp::saving() && !pp::home && pp::path == "/api/cardputer/podcasts/audio?show=p42&ep=111111111111&t=0");
   pp::wrote(100); service();
   myAddress = 0;
-
   // Every screen fits, with long names and other scripts, in each state.
   const char* titles[] = {"A", "The Very Long Title Of An Episode That Goes On And On Past Two Lines Of The Player Screen Easily",
                           "Привет мир, это очень длинное название выпуска подкаста", "日本語のタイトル"};

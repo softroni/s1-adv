@@ -300,6 +300,13 @@ int main(int argc, char** argv) {
   connectFails = true; assert(startStreamHome(0xC0A80014u, 31890, ticket, 0)); execute(); connectFails = false;
   assert(error() == Error::Connect && position() == 0 && !reachedEnd());
   reply = text("not_found\n", "404 Not Found"); assert(startStreamHome(0xC0A80014u, 31890, ticket, 0)); execute(); assert(error() == Error::NotFound);
+  // Lists at home too: plain HTTP, asking for text, and no token.
+  reply = text(lines); request.clear();
+  assert(startListHome(0xC0A80014u, 31890, "/podcasts/0123456789abcdef0123456789abcdef/search?kind=book&q=x") && lastStack == 10240);
+  execute();
+  assert(error() == Error::None && lastConnect == "192.168.0.20:31890" && std::string(listText(length), length) == lines);
+  assert(request.find("Accept: text/plain\r\n") != std::string::npos && request.find("Authorization") == std::string::npos);
+  clearList();
   // Saving at home, the same way.
   card.erase("/h.mp3"); reply = kAudio + chunks(mp3, 4000); request.clear();
   assert(startSaveHome(0xC0A80014u, 31890, "/podcasts/0123456789abcdef0123456789abcdef?t=0", "/h.part", "/h.mp3", 0) && lastStack == 10240);

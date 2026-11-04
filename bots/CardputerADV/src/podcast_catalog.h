@@ -370,6 +370,31 @@ inline bool ticketPath(char* out, size_t room, const char* show, const char* epi
   const int len = snprintf(out, room, "/api/cardputer/podcasts/ticket?show=%s&ep=%s", show, episode);
   return len > 0 && size_t(len) < room;
 }
+// A session ticket, for everything over the home door, is asked for with no episode.
+constexpr const char kSessionTicketPath[] = "/api/cardputer/podcasts/ticket";
+// The same request over the home door: an HTTPS route's path, behind the session's ticket.
+inline bool homePath(char* out, size_t room, const HomeTicket& t, const char* httpsPath) {
+  static const char kBase[] = "/api/cardputer/podcasts/";
+  if (t.none || !ticketPathValid(t.path) || !httpsPath || strncmp(httpsPath, kBase, sizeof(kBase) - 1)) return false;
+  const int len = snprintf(out, room, "%s/%s", t.path, httpsPath + sizeof(kBase) - 1);
+  return len > 0 && size_t(len) < room;
+}
+// What went wrong, for the bridge's log: where, the error, the memory then and before it began,
+// how the sound came and how long it played. Nothing about what was playing.
+inline bool reportPath(char* out, size_t room, const char* stage, unsigned code, const char* note, uint32_t freeNow,
+                       uint32_t bigNow, uint32_t freeStart, uint32_t bigStart, const char* via, uint32_t played, const char* fw) {
+  int len = snprintf(out, room, "/api/cardputer/podcasts/report?stage=%s&e=%u&free=%lu&big=%lu&startfree=%lu&startbig=%lu&via=%s&played=%lu&fw=",
+                     stage, code, static_cast<unsigned long>(freeNow), static_cast<unsigned long>(bigNow),
+                     static_cast<unsigned long>(freeStart), static_cast<unsigned long>(bigStart), via, static_cast<unsigned long>(played));
+  if (len <= 0 || size_t(len) >= room) return false;
+  size_t at = putEscaped(out, room, size_t(len), fw ? fw : "");
+  if (!at && fw && *fw) return false;
+  if (!at) at = size_t(len);
+  if (at + 7 >= room) return false;
+  memcpy(out + at, "&note=", 7);
+  at += 6;
+  return putEscaped(out, room, at, note ? note : "") > 0 || !(note && *note);
+}
 inline bool homeAudioPath(char* out, size_t room, const HomeTicket& t, uint32_t seconds) {
   if (t.none || !ticketPathValid(t.path)) return false;
   const int len = snprintf(out, room, "%s?t=%lu", t.path, static_cast<unsigned long>(seconds));

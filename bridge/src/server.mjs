@@ -6551,6 +6551,7 @@ async function main() {
         if (what === "search") lines(showLines(await runtime.podcasts.search(params.get("kind") || "podcast", params.get("q") || "")));
         else if (what === "episodes") lines(await runtime.podcasts.episodes(params.get("show") || "", params.get("from") || 0));
         else if (what === "ticket") lines(runtime.podcasts.ticketLines(device.device_id, params.get("show") || "", params.get("ep") || ""));
+        else if (what === "report") { runtime.podcasts.report(params); lines("ok\n"); }
         else if (what === "audio") await runtime.podcasts.audio(res, { device: device.device_id, show: params.get("show") || "",
           episode: params.get("ep") || "", seconds: params.get("t") || 0 });
         else json(res, 404, { error: "not_found" });

@@ -21,6 +21,7 @@ enum class Error : uint8_t {
 void setBridge(const char* host, uint16_t port, const char* token, const char* rootCa);
 
 bool startList(const char* path);
+bool startListHome(uint32_t ip, uint16_t port, const char* path);  // A list over the home door.
 bool startStream(const char* path, uint32_t fromSeconds);
 // The same over the home network: ip is the bridge's computer, host order, and path holds
 // the ticket. No token goes this way.
