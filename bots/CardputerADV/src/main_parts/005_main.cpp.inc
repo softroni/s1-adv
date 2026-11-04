@@ -526,7 +526,9 @@ void meshLoadProfile(s1_mesh::RadioSession& session);
 bool meshSaveContacts(const s1_mesh::Contacts& contacts);
 void meshLoadHistory(s1_mesh::State& state);
 bool meshWriteHistory(const s1_mesh::State& state);
-void meshChime(bool important);
+// Mesh's sounds, in part 090; quiet when Settings > Device > Mesh sounds is off.
+void meshSound(s1_mesh::Sound sound);
+void meshPacketTick(int16_t dbm);
 void meshScreenService(uint32_t now, bool helpOn);
 void meshWakeScreen();
 

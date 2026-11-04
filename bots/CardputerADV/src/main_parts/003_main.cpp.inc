@@ -269,6 +269,7 @@ struct DeviceSettings {
   String audioLanguage = "en";
   uint8_t meshRegion = s1_mesh::kDefaultRegion;
   uint8_t meshPublicLocation = static_cast<uint8_t>(s1_mesh::Sharing::Off);
+  bool meshSounds = true;
   uint8_t units = static_cast<uint8_t>(units::kDefault);
 };
 

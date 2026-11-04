@@ -147,7 +147,7 @@ void adjustCurrentSetting(int delta) {
   }
 
   switch (gSelectedSetting) {
-    case 2: case 3: case 6: toggleCurrentSetting(); return;
+    case 2: case 3: case 6: case kMeshSoundsSetting: toggleCurrentSetting(); return;
     case 0:
       cycleAudioLanguage(delta >= 0 ? 1 : -1);
       break;
@@ -265,6 +265,10 @@ void toggleCurrentSetting() {
     case kMeshLocationSetting:
       gDeviceSettings.meshPublicLocation = static_cast<uint8_t>(
           (static_cast<uint8_t>(s1_mesh::sharingOrDefault(gDeviceSettings.meshPublicLocation)) + 1) % s1_mesh::kSharingCount);
+      break;
+    case kMeshSoundsSetting:
+      gDeviceSettings.meshSounds = !gDeviceSettings.meshSounds;
+      meshSound(s1_mesh::Sound::Saved);  // Turned on, it says so the way it will sound.
       break;
     case kUnitsSetting:
       gDeviceSettings.units = static_cast<uint8_t>(displayUnits() == units::System::US ? units::System::Metric : units::System::US);

@@ -17,6 +17,7 @@ drawing = mesh[mesh.index('// --- Mesh drawing'):mesh.index('// --- end of Mesh 
 code = r'''
 #include "launcher_icons.h"
 #include "radio_scan.h"
+#include "mesh_sounds.h"
 #include <cassert>
 #include <cmath>
 #include <cstdarg>
@@ -113,6 +114,10 @@ struct RadioSession {
 };
 }
 std::unique_ptr<s1_mesh::RadioSession> gMeshSession;
+// Radio Scan's sounds: a tick for each packet, at its strength, and the knock when the radio gives up.
+std::vector<int16_t> ticks;std::vector<s1_mesh::Sound> sounds;
+void meshPacketTick(int16_t dbm){ticks.push_back(dbm);}
+void meshSound(s1_mesh::Sound s){sounds.push_back(s);}
 namespace {  // As in 005: declared in the same unnamed namespace the part defines them in.
 void serviceRadioScan(s1_mesh::RadioSession& session);
 bool handleRadioScanKey(char key, const Keyboard_Class::KeysState& keys);
@@ -171,13 +176,13 @@ int main(){
  // Nothing is read until DIO1 says a packet arrived.
  const int reads=s.radio.reads;for(int i=0;i<5;++i)serviceRadioScan(s);assert(s.radio.reads==reads);
  auto arrive=[&](Packet p){s.radio.packets.push_back(p);dio1=HIGH;serviceRadioScan(s);assert(dio1==LOW&&s.radio.receiving);};
- arrive(packet(0xa1b2c3d4,(3<<5)|1,pub));
+ ticks.clear();arrive(packet(0xa1b2c3d4,(3<<5)|1,pub));assert(ticks.size()==1&&ticks[0]==-90);  // A tick, at its strength.
  auto& l=s.scan.listen;
  assert(l.packets==1&&l.nodeCount==1&&l.recent[0].from==0xa1b2c3d4&&l.recent[0].hops==2&&l.recent[0].publicChannel);
  assert(l.recent[0].rssi==-90&&l.recent[0].snrTenths==50);
  Packet bad=packet(0x11,0,pub);bad.result=RADIOLIB_ERR_CRC_MISMATCH;arrive(bad);
  Packet tiny;tiny.bytes={1,2,3};arrive(tiny);
- assert(l.packets==1&&l.damaged==2);
+ assert(l.packets==1&&l.damaged==2&&ticks.size()==1);  // Broken ones don't tick.
  // Extremes still fit on the screen: a weak, noisy packet seven hops out on another channel.
  Packet far=packet(0xffffffff,(7<<5),99);far.rssi=-200;far.snr=-120;arrive(far);
  Packet odd2=packet(0x22,0,pub);odd2.rssi=0;arrive(odd2);
@@ -207,6 +212,8 @@ int main(){
  for(int i=0;i<10;++i)serviceRadioScan(b);
  assert(b.scan.failures==kScanGiveUp);const size_t tunes=b.radio.tunes.size();
  for(int i=0;i<10;++i)serviceRadioScan(b);enter();key(2);assert(b.radio.tunes.size()==tunes&&!b.scan.listening);
+ // Giving up knocks once, not on every pass after.
+ size_t knocks=0;for(auto q:sounds)knocks+=q==s1_mesh::Sound::Failed;assert(knocks==1);
  render();assert(gCanvas.printed.count("Radio not answering"));
  // One good reading clears the count.
  gMeshSession=std::make_unique<s1_mesh::RadioSession>();auto& c=*gMeshSession;

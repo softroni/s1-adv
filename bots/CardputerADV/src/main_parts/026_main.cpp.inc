@@ -201,6 +201,7 @@ void loadDeviceSettings() {
   if (!weather_view::validPlace(gDeviceSettings.weatherPlace.c_str())) gDeviceSettings.weatherPlace = weather_view::kDefaultPlace;
   gDeviceSettings.meshRegion = s1_mesh::regionOrDefault(gPrefs.getUChar("mesh_reg", s1_mesh::kDefaultRegion));
   gDeviceSettings.meshPublicLocation = static_cast<uint8_t>(s1_mesh::sharingOrDefault(gPrefs.getUChar("mesh_loc", 0)));
+  gDeviceSettings.meshSounds = gPrefs.getBool("mesh_snd", true);
   gDeviceSettings.units = static_cast<uint8_t>(units::fromSaved(gPrefs.getUChar("units", static_cast<uint8_t>(units::kDefault))));
   launcher_favorites::read(gFavorites, kLauncherGroups, kLauncherGroupCount, gPrefs.getString("favs", "").c_str());
   launcher_order::read(gLauncherOrder, kLauncherGroups, kLauncherGroupCount, gPrefs.getString("menu_order", "").c_str());
@@ -257,6 +258,7 @@ void saveDeviceSettings() {
   gPrefs.putString("wx_place", gDeviceSettings.weatherPlace);
   gPrefs.putUChar("mesh_reg", gDeviceSettings.meshRegion);
   gPrefs.putUChar("mesh_loc", gDeviceSettings.meshPublicLocation);
+  gPrefs.putBool("mesh_snd", gDeviceSettings.meshSounds);
   gPrefs.putUChar("units", gDeviceSettings.units);
   gPrefs.end();
 }

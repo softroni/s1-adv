@@ -88,6 +88,7 @@ jobs:
       - run: python scripts/test_radio_scan.py
       - run: python scripts/test_mesh_private_channel.py
       - run: python scripts/test_mesh_private_ui.py
+      - run: python scripts/test_mesh_sounds.py
       - run: python scripts/test_chess_demo.py
       - run: python scripts/test_chess_mind.py
       - run: python scripts/test_chess_mind_ui.py

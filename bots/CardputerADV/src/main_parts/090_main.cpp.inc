@@ -1,5 +1,5 @@
 // Mesh's hardware beyond the radio: the Cap's GPS, the Cardputer's own flash for its name, its
-// contacts and its history, a chime, and the screen going dark while Mesh waits. It comes after the
+// contacts and its history, its sounds, and the screen going dark while Mesh waits. It comes after the
 // Lab, which owns the GPS's parser, and after the screensaver, whose screen-off it uses.
 namespace {
 // Internal flash, not the SD card, which the radio shares a bus with.
@@ -122,8 +122,31 @@ bool meshWriteHistory(const s1_mesh::State& state) {
   return LittleFS.rename(kMeshHistoryTemp, kMeshHistoryPath);
 }
 
-// A message for this Cardputer, or from a contact. Talk on the public channel stays quiet.
-void meshChime(bool important) { focusTone(important ? 1760 : 1320, important ? 220 : 90); }
+// Mesh's sounds (mesh_sounds.h), played from the buffer the update chime and the activity cues
+// use. Only when the speaker is free for them: never over voice, the radio, a podcast or the synth,
+// and not while TLS has the memory. One cuts off a lower-ranked Mesh sound still playing; anything
+// else playing, or a Mesh sound that matters as much, wins, and the new one is dropped.
+uint8_t gMeshSoundRank = 0;
+uint32_t gMeshSoundEndsMs = 0;
+void meshSoundPlay(s1_mesh::Sound sound, int16_t dbm) {
+  if (!gDeviceSettings.meshSounds) return;
+  if (!gCanvasSpriteActive || !focusToneAllowed() || gVoiceCapturePreparing || gVoiceDialBusy || gRealtimeDialBusy ||
+      gVoiceReplySpeechBusy) return;
+  const s1_mesh::SoundShape shape = s1_mesh::soundShape(sound);
+  const uint32_t now = millis();
+  if (M5Cardputer.Speaker.isPlaying()) {
+    const bool ours = int32_t(gMeshSoundEndsMs - now) > 0;
+    if (!ours || shape.priority <= gMeshSoundRank) return;
+    M5Cardputer.Speaker.stop(0);
+  }
+  const size_t samples = s1_mesh::renderSound(sound, gUpdateChime, release_delivery::kChimeSamples,
+                                              release_delivery::kChimeRate, dbm);
+  if (!M5Cardputer.Speaker.playRaw(gUpdateChime, samples, release_delivery::kChimeRate, false, 1, 0)) return;
+  gMeshSoundRank = shape.priority;
+  gMeshSoundEndsMs = now + shape.ms + 20;
+}
+void meshSound(s1_mesh::Sound sound) { meshSoundPlay(sound, -90); }
+void meshPacketTick(int16_t dbm) { meshSoundPlay(s1_mesh::Sound::Packet, dbm); }
 
 // Mesh skips the screensaver, so it turns the screen off itself: after the device's own screen-off
 // time if that's on, and after 30 seconds while Help repeats, whatever the setting. A key brings it

@@ -321,6 +321,8 @@ String settingLabel(uint8_t index) {
       return "Mesh region";
     case kMeshLocationSetting:
       return "Public location";
+    case kMeshSoundsSetting:
+      return "Mesh sounds";
     case kUnitsSetting:
       return "Units";
     default:

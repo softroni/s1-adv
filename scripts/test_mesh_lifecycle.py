@@ -20,6 +20,7 @@ code=r'''
 #include "mesh_leaf_state.h"
 #include "mesh_outbox.h"
 #include "mesh_private_channel.h"
+#include "mesh_sounds.h"
 #include <cassert>
 #include <cctype>
 using std::max;using std::min;
@@ -175,7 +176,8 @@ bool meshChannelKey(char,const Keyboard_Class::KeysState&){return true;}
 bool meshSaveContacts(const s1_mesh::Contacts&){++contactSaves;return true;}
 void meshLoadHistory(s1_mesh::State&){++historyLoads;}
 bool meshWriteHistory(const s1_mesh::State&){++historyWrites;return true;}
-void meshChime(bool){++chimes;}
+std::vector<s1_mesh::Sound> sounds;void meshSound(s1_mesh::Sound s){sounds.push_back(s);if(s==s1_mesh::Sound::HelpAnswered)++chimes;}
+bool heard(s1_mesh::Sound s){for(auto q:sounds)if(q==s)return true;return false;}
 void meshScreenService(uint32_t,bool){++screenServices;}
 void meshWakeScreen(){}
 void setUiMode(UiMode);
@@ -206,6 +208,7 @@ void reset() {
 void completeWorker();
 void active();
 void restored();
+void mesh_sounds();
 // Contacts, direct messages, Help, the name and sharing a location, through the keys.
 void mesh_features() {
  Keyboard_Class::KeysState plain,ctrl,enter,del;ctrl.ctrl=true;enter.enter=true;del.del=true;
@@ -384,6 +387,83 @@ void mesh_features() {
  }
  restored();fakeWhere=s1_mesh::Where{};gDeviceSettings.meshPublicLocation=0;
 }
+// What Mesh sounds like, event by event, through the same keys and service loop.
+void mesh_sounds() {
+ using S=s1_mesh::Sound;
+ Keyboard_Class::KeysState plain,ctrl,enter,del;ctrl.ctrl=true;enter.enter=true;del.del=true;
+ uint8_t key[32];memset(key,7,32);
+ const auto only=[](S want){return sounds.size()==1&&sounds[0]==want;};
+ // A start that's refused knocks, and the radio never says it came up.
+ reset();sounds.clear();gRecording=true;startMeshMode();gRecording=false;assert(only(S::Nope));
+ // An init that fails says so, without a ready or an off.
+ sounds.clear();initError=-19;startMeshMode();completeWorker();serviceMeshMode();restored();assert(only(S::Failed));
+ // Coming up climbs once, however many passes follow.
+ reset();sounds.clear();active();serviceMeshMode();serviceMeshMode();assert(only(S::Ready));
+ auto& s=*gMeshSession;
+ // Enter with nothing typed is quiet; a message going out ticks up.
+ sounds.clear();assert(handleMeshKey('\n',enter)&&sounds.empty());
+ assert(handleMeshKey('h',plain)&&handleMeshKey('\n',enter)&&only(S::Sent));
+ // How each turned out, once per change: a channel message repeated nearby gets the small bell...
+ MeshSink sink{s};
+ const uint32_t pub=s.state.messages[s.state.messageCount-1].seq;
+ sounds.clear();sink.status(pub,s1_mesh::Delivery::Heard,0,0);sink.status(pub,s1_mesh::Delivery::Heard,0,0);assert(only(S::Heard));
+ // ...a direct message is quiet when only repeated, and rings when their radio has it...
+ s.contacts.add(77,"Alex",key);s.state.target=1;
+ sounds.clear();assert(handleMeshKey('y',plain)&&handleMeshKey('\n',enter)&&only(S::Sent));
+ const uint32_t dm=s.state.messages[s.state.messageCount-1].seq;
+ sounds.clear();sink.status(dm,s1_mesh::Delivery::Heard,0,0);assert(sounds.empty());
+ sink.status(dm,s1_mesh::Delivery::Delivered,0,0);assert(only(S::Delivered));
+ // ...and one that never got there goes down.
+ assert(handleMeshKey('z',plain)&&handleMeshKey('\n',enter));
+ const uint32_t lost=s.state.messages[s.state.messageCount-1].seq;
+ sounds.clear();sink.status(lost,s1_mesh::Delivery::Sending,0,0);sink.status(lost,s1_mesh::Delivery::NoAnswer,0,0);assert(only(S::Failed));
+ s.state.target=0;
+ for(int i=0;i<200&&!s.outbox.idle();++i){s.mesh.pendingAck=false;s.mesh.tx=false;clockMs+=40000;serviceMeshMode();}
+ // Ctrl+L refused knocks.
+ gDeviceSettings.meshPublicLocation=0;sounds.clear();assert(handleMeshKey('l',ctrl)&&only(S::Nope));
+ // A fix found blips once; holding it stays quiet; found again after two minutes without, it blips again.
+ sounds.clear();fakeWhere.known=true;fakeWhere.atMs=clockMs;serviceMeshMode();assert(only(S::GpsFix));
+ for(int i=0;i<5;++i){clockMs+=1000;fakeWhere.atMs=clockMs;serviceMeshMode();}assert(only(S::GpsFix));
+ clockMs+=s1_mesh::kFixFreshMs+1000;serviceMeshMode();assert(only(S::GpsFix));
+ fakeWhere.atMs=clockMs;serviceMeshMode();assert(sounds.size()==2&&sounds[1]==S::GpsFix);
+ // The public channel asks before it gets your spot.
+ gDeviceSettings.meshPublicLocation=1;sounds.clear();assert(handleMeshKey('l',ctrl)&&only(S::Ask));
+ assert(handleMeshKey('l',ctrl)&&sounds.back()==S::Sent);gDeviceSettings.meshPublicLocation=0;
+ for(int i=0;i<200&&!s.outbox.idle();++i){s.mesh.pendingAck=false;s.mesh.tx=false;clockMs+=40000;fakeWhere.atMs=clockMs;serviceMeshMode();}
+ // Help: P and C click in and out, 1 beeps three times, the first round is quiet, repeats tick softly.
+ assert(handleMeshKey('h',ctrl)&&s.state.helpView);
+ sounds.clear();assert(handleMeshKey('p',plain)&&handleMeshKey('p',plain));assert(sounds.size()==2&&sounds[0]==S::Saved&&sounds[1]==S::Removed);
+ sounds.clear();assert(handleMeshKey('c',plain)&&only(S::Nope));  // No private channel to switch.
+ sounds.clear();assert(handleMeshKey('1',plain)&&only(S::HelpStart));
+ serviceMeshMode();assert(s.help.rounds==1&&only(S::HelpStart));
+ // Help's own messages don't get the per-message sounds.
+ sounds.clear();sink.status(s.help.seq[0],s1_mesh::Delivery::Heard,0,0);sink.status(s.help.seq[0],s1_mesh::Delivery::NoAnswer,0,0);assert(sounds.empty());
+ for(int i=0;i<200&&!s.outbox.idle();++i){s.mesh.pendingAck=false;s.mesh.tx=false;clockMs+=40000;serviceMeshMode();}
+ clockMs+=s1_mesh::kHelpRepeatMs;serviceMeshMode();assert(s.help.rounds>=2&&heard(S::HelpRound));
+ // Esc while it repeats asks first; then their radio has it, and it climbs.
+ assert(handleMeshEscape()&&handleMeshEscape()&&sounds.back()==S::Ask&&gMeshBusOwned);
+ sounds.clear();sink.status(s.help.seq[0],s1_mesh::Delivery::Delivered,0,0);assert(only(S::HelpAnswered)&&!s.help.repeating());
+ // Off says so on the way out.
+ sounds.clear();assert(handleMeshEscape());restored();assert(only(S::Off));
+ fakeWhere=s1_mesh::Where{};
+ // People: saving and removing a contact click up and down, and one that can't be saved knocks.
+ active();{
+  auto& t=*gMeshSession;
+  auto* n=t.state.hear(55,clockMs,-80);strcpy(n->name,"Jo");
+  assert(handleMeshKey('n',ctrl)&&t.state.nodeView);
+  sounds.clear();assert(handleMeshKey('\n',enter)&&only(S::Nope));  // No key heard yet.
+  n->hasKey=true;memcpy(n->key,key,32);
+  sounds.clear();assert(handleMeshKey('\n',enter)&&t.contacts.count==1&&only(S::Saved));
+  // Just saved, so it doesn't ping as if it had come in range; a contact heard later pings once.
+  assert(!meshFirstPing(55)&&meshFirstPing(66)&&!meshFirstPing(66));
+  sounds.clear();assert(handleMeshKey('\n',enter)&&only(S::Nope));  // Already one.
+  sounds.clear();assert(handleMeshKey('\b',del)&&!t.contacts.count&&only(S::Removed));
+  assert(handleMeshEscape()&&handleMeshEscape());restored();
+ }
+ // The name saved clicks up.
+ reset();assert(handleMeshKey('n',plain));handleMeshKey('A',plain);sounds.clear();assert(handleMeshKey('\n',enter)&&only(S::Saved));
+ savedName.clear();
+}
 void completeWorker(){assert(workerPending);workerFunction(workerArg);assert(!workerPending);}
 void active(){reset();startMeshMode();assert(gMeshBusOwned&&!gSdReady&&!gStorageReady&&workerPending);completeWorker();serviceMeshMode();assert(updates==1);}
 void restored(){assert(!gMeshBusOwned&&gSdReady&&gStorageReady&&live==0&&sdBegins==1);assert(m5::In_I2C.reg[3]==0xaa&&m5::In_I2C.reg[5]==0x54&&m5::In_I2C.reg[7]==0xff);}
@@ -448,6 +528,7 @@ int main() {
  clockMs+=1000;serviceMeshMode();assert(historyWrites==writes+2);
  assert(sdBegins==0);stopMeshMode(false);restored();
  mesh_features();
+ mesh_sounds();
  active();sdSucceeds=false;stopMeshMode(false);assert(!gMeshBusOwned&&!gSdReady&&gStorageReady&&!live);assert(activeVoiceFs()==&LittleFS);assert(activeNotesFs()==&LittleFS);
  // Scan: S on the start screen. Same bus handoff and guards, no identity written, no mesh run,
  // no sending, and Esc stops it the same way.

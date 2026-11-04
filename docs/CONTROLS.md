@@ -516,6 +516,8 @@ changed. Left and Right step through the list in [Mesh](MESH.md#region).
 Device Settings → Public location says how much of where you are Mesh puts on the public
 channel: off (the default), rough (within about 3 km) or exact. Contacts and the private
 channel always get it exactly. [Mesh](MESH.md#public-location) explains.
+Device Settings → Mesh sounds turns off Mesh's sounds: messages arriving, deliveries,
+Help, and Radio Scan's tick for each packet. It's on by default. [Mesh](MESH.md#sounds) lists them.
 Display Settings → Text size switches chat and voice replies between Small, Medium
 and Large.
 Ordinary voice keeps the original REC graphics during capture and THINK until the

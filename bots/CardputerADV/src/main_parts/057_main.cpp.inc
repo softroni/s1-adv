@@ -74,6 +74,8 @@ String settingValue(uint8_t index) {
       return s1_mesh::regionName(gDeviceSettings.meshRegion);
     case kMeshLocationSetting:
       return s1_mesh::sharingName(s1_mesh::sharingOrDefault(gDeviceSettings.meshPublicLocation));
+    case kMeshSoundsSetting:
+      return gDeviceSettings.meshSounds ? "on" : "off";
     case kUnitsSetting:
       return units::name(displayUnits());
     default:

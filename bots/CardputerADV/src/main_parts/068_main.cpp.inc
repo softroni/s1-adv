@@ -6,6 +6,17 @@ char gMeshNameInput[s1_mesh::kNameBytes + 1] = {};
 enum class MeshStartRow : uint8_t { Chat, Help, Scan, Name, Private };
 constexpr uint8_t kMeshStartRows = 5;
 uint8_t gMeshStartRow = 0;
+// For Mesh's sounds: whether this radio has come up (so stopping it says so), and when the GPS last
+// had a fix (so finding one says so, but a fix lost under a tree for a moment doesn't).
+bool gMeshRadioUp = false, gMeshFixHeard = false;
+uint32_t gMeshFixLastMs = 0;
+// The contacts whose radios have pinged since Mesh started, so each pings once.
+uint32_t gMeshPinged[s1_mesh::kContacts] = {};
+bool meshFirstPing(uint32_t id) {
+  for(const uint32_t p:gMeshPinged)if(p==id)return false;
+  for(uint32_t& p:gMeshPinged)if(!p) {p=id;return true;}
+  return false;
+}
 // Help is still repeating, so the first Esc only warns: the radio going off would end it.
 constexpr uint32_t kMeshStopConfirmMs = 4000;
 // Ctrl+L on the public channel asks once more, since everyone hears it.
@@ -23,6 +34,7 @@ bool handleMeshEscape() {
     if(s.help.repeating() && (!s.stopAskedMs || millis()-s.stopAskedMs>=kMeshStopConfirmMs)) {
       s.stopAskedMs=max<uint32_t>(millis(),1);
       gMeshNotice="Help is on. Esc again ends it";gMeshNoticeUntilMs=millis()+kMeshStopConfirmMs;
+      meshSound(s1_mesh::Sound::Ask);
       return true;
     }
   }
@@ -129,6 +141,8 @@ bool stopMeshMode(bool goHome) {
   gSdReady=mountSdCardOnSharedSpi();
   gStorageReady=gLittleFsReady || gSdReady;
   gMeshNotice=gSdReady ? "Radio off / SD ready" : "Radio off / SD unavailable";gMeshNoticeUntilMs=0;
+  if(gMeshRadioUp)meshSound(s1_mesh::Sound::Off);
+  gMeshRadioUp=false;
   logf("[MESH] stopped sd=%d heap=%u",gSdReady,unsigned(ESP.getFreeHeap()));
   return true;
 }
@@ -136,18 +150,21 @@ bool stopMeshMode(bool goHome) {
 void startMeshMode(s1_mesh::Use use) {
   const bool openHelp=gMeshOpenHelp;gMeshOpenHelp=false;
   if(gMeshBusOwned)return;
-  if(meshStartIsBusy()) {gMeshNotice="Finish current task first";return;}
-  if(!gCanvasSpriteActive) {gMeshNotice="Display buffer recovering";return;}
+  // Each way it can't start says why, with the same knock.
+  const auto refuse=[](const char* why){gMeshNotice=why;meshSound(s1_mesh::Sound::Nope);};
+  if(meshStartIsBusy()) {refuse("Finish current task first");return;}
+  if(!gCanvasSpriteActive) {refuse("Display buffer recovering");return;}
   if(ESP.getFreeHeap()<65536 || heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)<24576) {
-    gMeshNotice="Not enough free RAM";return;
+    refuse("Not enough free RAM");return;
   }
   // Busy/heap failures leave SD and radio untouched.
   gMeshSession.reset(new(std::nothrow) s1_mesh::RadioSession(gSdSpi,gDeviceSettings.meshRegion,use));
-  if(!gMeshSession) {gMeshNotice="Not enough free RAM";return;}
+  if(!gMeshSession) {refuse("Not enough free RAM");return;}
+  gMeshRadioUp=false;gMeshFixHeard=false;memset(gMeshPinged,0,sizeof(gMeshPinged));
   gMeshNotice="Preparing radio...";render();
   // Scan never sends, so it needs no identity and writes nothing to NVS.
   if(use==s1_mesh::Use::Chat && !loadMeshIdentity(*gMeshSession)) {
-    gMeshSession.reset();gMeshNotice="Identity storage failed";return;
+    gMeshSession.reset();refuse("Identity storage failed");return;
   }
   if(use==s1_mesh::Use::Chat) {
     // The name it announces, who it can message, and what was said before it last stopped.
@@ -159,7 +176,7 @@ void startMeshMode(s1_mesh::Use use) {
     gMeshSession->state.helpView=openHelp;
   }
   if(!meshEnableCap()) {
-    gMeshSession.reset();gMeshNotice="Cap-1262 not detected";return;
+    gMeshSession.reset();refuse("Cap-1262 not detected");return;
   }
   gMeshBusOwned=true;gMeshCancelStart=false;gMeshExitAfterStop=false;gMeshNoticeUntilMs=0;
   gSdReady=false;gStorageReady=false;
@@ -170,7 +187,7 @@ void startMeshMode(s1_mesh::Use use) {
   gMeshNotice="Starting / SD paused";
   if(xTaskCreate(meshRadioInitTask,"mesh-init",8192,gMeshSession.get(),1,nullptr)!=pdPASS) {
     gMeshSession->initResult.store(RADIOLIB_ERR_UNKNOWN,std::memory_order_release);
-    stopMeshMode(false);gMeshNotice="Radio task allocation failed";
+    stopMeshMode(false);refuse("Radio task allocation failed");
   }
 }
 
@@ -178,10 +195,21 @@ void startMeshMode(s1_mesh::Use use) {
 struct MeshSink {
   s1_mesh::RadioSession& s;
   void status(uint32_t seq,s1_mesh::Delivery d,uint8_t reason,uint32_t id) {
-    if(auto* m=s.state.bySeq(seq)) {if(id)m->id=id;m->status=d;m->reason=reason;s.historyDirty=true;}
+    auto* m=s.state.bySeq(seq);
+    const bool changed=m && m->status!=d;
+    if(m) {if(id)m->id=id;m->status=d;m->reason=reason;s.historyDirty=true;}
+    bool help=false;
+    for(const uint32_t q:s.help.seq)help=help||(q && q==seq);
     if(d==s1_mesh::Delivery::Delivered) {
       const bool wasOn=s.help.repeating();s.help.delivered(seq);
-      if(wasOn && !s.help.repeating()) {meshWakeScreen();meshChime(false);}
+      if(wasOn && !s.help.repeating()) {meshWakeScreen();meshSound(s1_mesh::Sound::HelpAnswered);return;}
+    }
+    // How each message turned out, by ear. Help's own messages have Help's sounds instead.
+    if(changed && !help && m->outgoing) {
+      if(d==s1_mesh::Delivery::Delivered)meshSound(s1_mesh::Sound::Delivered);
+      else if(d==s1_mesh::Delivery::Heard && !m->direct)meshSound(s1_mesh::Sound::Heard);
+      else if(d==s1_mesh::Delivery::Failed || d==s1_mesh::Delivery::NoAnswer || d==s1_mesh::Delivery::NotConfirmed)
+        meshSound(s1_mesh::Sound::Failed);
     }
     if(d==s1_mesh::Delivery::Failed && reason==35)s.announce=true;  // PKI_UNKNOWN_PUBKEY
   }
@@ -255,6 +283,7 @@ void meshHelpRound(s1_mesh::RadioSession& s,uint32_t now) {
     s1_mesh::composeHelp(text,sizeof(text),s.help.choice,s.where,now,sharing);
     uint32_t seq=0;if(meshQueueText(s,0,text,&seq))s.help.seq[s1_mesh::kHelpPublicSlot]=seq;
   }
+  if(s.help.rounds)meshSound(s1_mesh::Sound::HelpRound);  // The first went out with Help's own beeps.
   s.help.roundSent(now);
   logf("[MESH] help round=%u choice=%u contacts=%u private=%d public=%d public_location=%s fix=%d",unsigned(s.help.rounds),
     unsigned(s.help.choice),unsigned(s.contacts.count),s.help.seq[s1_mesh::kHelpPrivateSlot]!=0,
@@ -265,6 +294,11 @@ void meshHelpRound(s1_mesh::RadioSession& s,uint32_t now) {
 void meshServiceMessaging(s1_mesh::RadioSession& s,uint32_t now) {
   meshGps(true);
   meshReadGps(now,s.where);
+  // A fix found, or found again after two minutes without one.
+  if(s.where.known && now-s.where.atMs<5000) {
+    if(!gMeshFixHeard || now-gMeshFixLastMs>=s1_mesh::kFixFreshMs)meshSound(s1_mesh::Sound::GpsFix);
+    gMeshFixHeard=true;gMeshFixLastMs=now;
+  }
   if(s.help.due(now,s.outbox.idle()))meshHelpRound(s,now);
   MeshRadioPort port{s.mesh};MeshSink sink{s};
   s.outbox.service(now,port,sink);
@@ -288,6 +322,8 @@ void meshHandlePacket(const libmeshtastic_leaf::MeshPacket& packet) {
   auto& s=*gMeshSession;
   auto& state=s.state;
   const uint32_t me=s.mesh.getNodeNum(),now=millis();
+  // A contact's radio, heard for the first time since Mesh started, pings.
+  if(s.contacts.find(packet.header.from) && meshFirstPing(packet.header.from))meshSound(s1_mesh::Sound::Nearby);
   auto* node=state.hear(packet.header.from,now,packet.rxRssi);
   if(packet.portNum==meshtastic_PortNum_NODEINFO_APP && node) {
     meshtastic_User user=meshtastic_User_init_zero;
@@ -326,9 +362,15 @@ void meshHandlePacket(const libmeshtastic_leaf::MeshPacket& packet) {
       m->to=packet.header.to;m->direct=packet.isPKI;s.historyDirty=true;
       m->privateChannel=!packet.isPKI && packet.channelIndex==1;
       const bool toMe=packet.header.to==me,contact=s.contacts.find(packet.header.from)!=nullptr;
+      const bool helpWasOn=s.help.repeating();
       s.help.replied(contact || m->privateChannel,toMe,now);
-      // The private channel is only the people who share its key, so it's worth a chime too.
-      if(toMe || contact || m->privateChannel) {meshWakeScreen();meshChime(true);}
+      // The private channel is only the people who share its key, so it's worth a sound too. Talk on
+      // the public channel stays quiet.
+      if(toMe || contact || m->privateChannel) {
+        meshWakeScreen();
+        meshSound(helpWasOn && !s.help.repeating()?s1_mesh::Sound::HelpAnswered:
+          m->privateChannel && !toMe?s1_mesh::Sound::Group:s1_mesh::Sound::Message);
+      }
     }
   }
 }
@@ -340,10 +382,11 @@ void serviceMeshMode() {
   if(result || gMeshCancelStart) {
     const bool home=gMeshExitAfterStop;
     stopMeshMode(false);
-    if(result)gMeshNotice="Radio init failed: "+String(result);
+    if(result) {gMeshNotice="Radio init failed: "+String(result);meshSound(s1_mesh::Sound::Failed);}
     if(home)setUiMode(UiMode::Home);
     return;
   }
+  if(!gMeshRadioUp) {gMeshRadioUp=true;meshSound(s1_mesh::Sound::Ready);}
   auto& session=*gMeshSession;
   session.lowHeap=std::min(session.lowHeap,uint32_t(ESP.getFreeHeap()));
   session.lowLargest=std::min(session.lowLargest,uint32_t(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
@@ -371,8 +414,11 @@ bool meshSendInput() {
   auto& s=*gMeshSession;
   if(s.use!=s1_mesh::Use::Chat)return false;  // Scan only listens.
   if(!s.state.input[0])return true;
-  if(!meshQueueText(s,s.state.target,s.state.input)) {gMeshNotice="Outbox full; wait a moment";gMeshNoticeUntilMs=millis()+2000;return false;}
+  if(!meshQueueText(s,s.state.target,s.state.input)) {
+    gMeshNotice="Outbox full; wait a moment";gMeshNoticeUntilMs=millis()+2000;meshSound(s1_mesh::Sound::Nope);return false;
+  }
   s.state.input[0]=0;s.state.historyOffset=0;s.state.detailView=false;s.state.nodeView=false;
+  meshSound(s1_mesh::Sound::Sent);
   return true;
 }
 
@@ -383,17 +429,19 @@ void meshShareLocation() {
   if(!meshReady())return;
   auto& s=*gMeshSession;const uint32_t now=millis();
   const uint8_t target=s.state.target;
-  if(target==s1_mesh::kTargetPrivate && !s.privateChannel.set()) {gMeshNotice="No private channel";gMeshNoticeUntilMs=now+2000;return;}
+  // Every refusal knocks; the question before going public asks; a pin on its way sounds like a send.
+  const auto refuse=[now](const char* why,uint32_t ms){gMeshNotice=why;gMeshNoticeUntilMs=now+ms;meshSound(s1_mesh::Sound::Nope);};
+  if(target==s1_mesh::kTargetPrivate && !s.privateChannel.set()) {refuse("No private channel",2000);return;}
   const bool privateChannel=target==s1_mesh::kTargetPrivate;
   const auto* contact=privateChannel?nullptr:meshTargetContact(s,target);
   const bool publicChannel=!privateChannel && !contact;
   const auto sharing=publicChannel?s1_mesh::sharingOrDefault(gDeviceSettings.meshPublicLocation):s1_mesh::Sharing::Exact;
-  if(sharing==s1_mesh::Sharing::Off) {gMeshNotice="Public location off: Settings";gMeshNoticeUntilMs=now+2500;return;}
-  if(!s1_mesh::usable(s.where,now)) {gMeshNotice="No GPS fix yet: needs open sky";gMeshNoticeUntilMs=now+2500;return;}
+  if(sharing==s1_mesh::Sharing::Off) {refuse("Public location off: Settings",2500);return;}
+  if(!s1_mesh::usable(s.where,now)) {refuse("No GPS fix yet: needs open sky",2500);return;}
   if(publicChannel && (!s.publicLocationMs || now-s.publicLocationMs>=kMeshPublicLocationMs)) {
     s.publicLocationMs=max<uint32_t>(now,1);
     gMeshNotice=sharing==s1_mesh::Sharing::Rough?"Public, within 3 km: C-L again":"Public, exact spot: C-L again";
-    gMeshNoticeUntilMs=now+kMeshPublicLocationMs;return;
+    gMeshNoticeUntilMs=now+kMeshPublicLocationMs;meshSound(s1_mesh::Sound::Ask);return;
   }
   s.publicLocationMs=0;
   s1_mesh::Outgoing pin;pin.to=contact?contact->id:s1_mesh::kBroadcast;pin.pki=contact!=nullptr;pin.reliable=false;
@@ -402,9 +450,9 @@ void meshShareLocation() {
     sharing==s1_mesh::Sharing::Rough?s1_mesh::kRoughBits:s1_mesh::kExactBits));
   char text[s1_mesh::kTextBytes+1];s1_mesh::composeLocation(text,sizeof(text),s.where,now,sharing);
   if(s.outbox.queued()+2>s1_mesh::kOutbox || !s.outbox.push(pin) || !meshQueueText(s,target,text)) {
-    gMeshNotice="Outbox full; wait a moment";gMeshNoticeUntilMs=now+2000;return;
+    refuse("Outbox full; wait a moment",2000);return;
   }
-  gMeshNotice="Location queued";gMeshNoticeUntilMs=now+2000;
+  gMeshNotice="Location queued";gMeshNoticeUntilMs=now+2000;meshSound(s1_mesh::Sound::Sent);
 }
 
 // The people list: contacts first, heard or not, then every other radio heard.
@@ -431,11 +479,13 @@ void meshSaveContact() {
   auto& s=*gMeshSession;MeshPerson p;
   if(!meshPersonAt(s,s.state.nodeSel,p))return;
   const uint32_t now=millis();
-  if(p.contact) {gMeshNotice="Already a contact. Del removes";gMeshNoticeUntilMs=now+2000;return;}
-  if(!p.node || !p.node->hasKey) {gMeshNotice="No key heard yet: restart theirs";gMeshNoticeUntilMs=now+2500;return;}
+  if(p.contact) {gMeshNotice="Already a contact. Del removes";gMeshNoticeUntilMs=now+2000;meshSound(s1_mesh::Sound::Nope);return;}
+  if(!p.node || !p.node->hasKey) {gMeshNotice="No key heard yet: restart theirs";gMeshNoticeUntilMs=now+2500;meshSound(s1_mesh::Sound::Nope);return;}
   const auto added=s.contacts.add(p.id,p.node->name[0]?p.node->name:"",p.node->key);
-  if(added==s1_mesh::Contacts::Add::Full) {gMeshNotice="Four contacts is the most";gMeshNoticeUntilMs=now+2000;return;}
+  if(added==s1_mesh::Contacts::Add::Full) {gMeshNotice="Four contacts is the most";gMeshNoticeUntilMs=now+2000;meshSound(s1_mesh::Sound::Nope);return;}
   gMeshNotice=meshSaveContacts(s.contacts)?"Saved as a contact":"Saved until Mesh closes";gMeshNoticeUntilMs=now+2000;
+  meshSound(s1_mesh::Sound::Saved);
+  meshFirstPing(p.id);  // Just heard, so its next packet doesn't ping as if it had just come in range.
   s.state.nodeSel=s.contacts.indexOf(p.id)<0?0:size_t(s.contacts.indexOf(p.id));
 }
 void meshRemoveContact() {
@@ -448,7 +498,7 @@ void meshRemoveContact() {
   else if(index>=0 && s.state.target>uint8_t(index+1))--s.state.target;
   const size_t people=meshPeopleCount(s);
   if(s.state.nodeSel>=people)s.state.nodeSel=people?people-1:0;
-  gMeshNotice="Contact removed";gMeshNoticeUntilMs=millis()+2000;
+  gMeshNotice="Contact removed";gMeshNoticeUntilMs=millis()+2000;meshSound(s1_mesh::Sound::Removed);
 }
 
 bool meshHelpKey(char key,const Keyboard_Class::KeysState& keys) {
@@ -456,15 +506,22 @@ bool meshHelpKey(char key,const Keyboard_Class::KeysState& keys) {
   const char lower=char(tolower(static_cast<unsigned char>(key)));
   if(keys.ctrl && lower=='h') {s.state.helpView=false;return true;}
   if(key>='1' && key<='0'+char(s1_mesh::kHelpChoices)) {
-    if(!meshReady()) {gMeshNotice="Radio still starting";gMeshNoticeUntilMs=millis()+1500;return true;}
+    if(!meshReady()) {gMeshNotice="Radio still starting";gMeshNoticeUntilMs=millis()+1500;meshSound(s1_mesh::Sound::Nope);return true;}
     s.help.start(uint8_t(key-'1'),millis());s.stopAskedMs=0;
+    meshSound(s1_mesh::Sound::HelpStart);
     logf("[MESH] help start choice=%u contacts=%u",unsigned(key-'1'),unsigned(s.contacts.count));
     return true;
   }
-  if(lower=='p') {s.help.alsoPublic=!s.help.alsoPublic;return true;}
+  // P and C switch a channel in or out of the next round: two clicks up for in, down for out.
+  if(lower=='p') {
+    s.help.alsoPublic=!s.help.alsoPublic;
+    meshSound(s.help.alsoPublic?s1_mesh::Sound::Saved:s1_mesh::Sound::Removed);return true;
+  }
   if(lower=='c') {
-    if(s.privateChannel.set())s.help.alsoPrivate=!s.help.alsoPrivate;
-    else {gMeshNotice="No private channel yet";gMeshNoticeUntilMs=millis()+2000;}
+    if(s.privateChannel.set()) {
+      s.help.alsoPrivate=!s.help.alsoPrivate;
+      meshSound(s.help.alsoPrivate?s1_mesh::Sound::Saved:s1_mesh::Sound::Removed);
+    } else {gMeshNotice="No private channel yet";gMeshNoticeUntilMs=millis()+2000;meshSound(s1_mesh::Sound::Nope);}
     return true;
   }
   return true;
@@ -474,7 +531,9 @@ bool meshNameKey(char key,const Keyboard_Class::KeysState& keys) {
   if(keys.ctrl)return true;
   if(keys.enter || key=='\r' || key=='\n') {
     char clean[s1_mesh::kNameBytes+1];s1_mesh::cleanName(clean,sizeof(clean),gMeshNameInput);
-    gMeshNotice=meshSaveName(clean)?"Name saved":"Couldn't save the name";gMeshNoticeUntilMs=millis()+2000;
+    const bool saved=meshSaveName(clean);
+    gMeshNotice=saved?"Name saved":"Couldn't save the name";gMeshNoticeUntilMs=millis()+2000;
+    meshSound(saved?s1_mesh::Sound::Saved:s1_mesh::Sound::Nope);
     gMeshNaming=false;return true;
   }
   if(keys.del || key=='\b') {

@@ -20,7 +20,9 @@ uint8_t scanPublicHash(uint8_t preset) {
 }
 
 void scanCounted(s1_scan::Scanner& scan, bool ok) {
+  const bool gaveUp = scan.failures >= kScanGiveUp;
   scan.failures = ok ? 0 : uint16_t(std::min<uint32_t>(scan.failures + 1U, kScanGiveUp));
+  if (!gaveUp && scan.failures >= kScanGiveUp) meshSound(s1_mesh::Sound::Failed);
 }
 
 // begin() calibrated the chip for the region's channel, and a sweep stays in that band, so every
@@ -87,6 +89,7 @@ void scanReadPacket(s1_mesh::RadioSession& s, uint32_t now) {
     heard.hops = s1_scan::hopsTaken(header);
     heard.publicChannel = header.channel == s.scan.publicHash;
     listen.heard(heard);
+    meshPacketTick(heard.rssi);  // A tick a packet, higher the stronger it came in.
     // Heard packets are counted and shown, never read as an instruction.
   } else if (e == RADIOLIB_ERR_NONE || e == RADIOLIB_ERR_CRC_MISMATCH) {
     listen.damagedPacket(now);  // Too short for Meshtastic, or broken on the way.

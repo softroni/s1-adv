@@ -15,9 +15,11 @@ String gMeshChannelNote;
 uint32_t gMeshChannelNoteUntilMs = 0;
 constexpr const char* kMeshChannelKey = "privch";
 
-void meshChannelSay(const char* note) {
+// A note, and the sound that goes with it: kept, refused, or asked again.
+void meshChannelSay(const char* note, s1_mesh::Sound sound) {
   gMeshChannelNote = note;
   gMeshChannelNoteUntilMs = millis() + 2500;
+  meshSound(sound);
 }
 const s1_mesh::PrivateChannel& meshChannelSaved() {
   if (gMeshChannelLoaded) return gMeshChannel;
@@ -57,26 +59,26 @@ void meshChannelClearInput() {
 void meshChannelFinishEdit() {
   if (gMeshChannelEdit == MeshChannelEdit::Name) {
     if (!s1_mesh::validChannelName(gMeshChannelInput)) {
-      meshChannelSay("Letters, digits, - and _, up to 11");
+      meshChannelSay("Letters, digits, - and _, up to 11", s1_mesh::Sound::Nope);
       return;
     }
     strncpy(gMeshChannel.name, gMeshChannelInput, s1_mesh::kChannelNameMax);
     gMeshChannel.name[s1_mesh::kChannelNameMax] = 0;
     meshChannelClearInput();
     if (!gMeshChannel.keyLength) {
-      meshChannelSay("Now G for a new key, or K to type one");
+      meshChannelSay("Now G for a new key, or K to type one", s1_mesh::Sound::Saved);
       return;
     }
   } else if (gMeshChannelEdit == MeshChannelEdit::Key) {
     uint8_t key[s1_mesh::kChannelKeyMax];
     uint8_t length = 0;
     if (!s1_mesh::keyFromBase64(gMeshChannelInput, key, length)) {
-      meshChannelSay("That isn't a 16 or 32 byte key");
+      meshChannelSay("That isn't a 16 or 32 byte key", s1_mesh::Sound::Nope);
       return;
     }
     if (s1_mesh::wellKnownKey(key, length)) {
       memset(key, 0, sizeof(key));
-      meshChannelSay("That's Meshtastic's public key");
+      meshChannelSay("That's Meshtastic's public key", s1_mesh::Sound::Nope);
       return;
     }
     memcpy(gMeshChannel.key, key, length);
@@ -84,11 +86,14 @@ void meshChannelFinishEdit() {
     memset(key, 0, sizeof(key));
     meshChannelClearInput();
     if (!gMeshChannel.name[0]) {
-      meshChannelSay("Now N to give it a name");
+      meshChannelSay("Now N to give it a name", s1_mesh::Sound::Saved);
       return;
     }
   }
-  if (gMeshChannel.set()) meshChannelSay(meshChannelStore() ? "Saved. Mesh hears it from now on" : "Couldn't save it");
+  if (gMeshChannel.set()) {
+    const bool saved = meshChannelStore();
+    meshChannelSay(saved ? "Saved. Mesh hears it from now on" : "Couldn't save it", saved ? s1_mesh::Sound::Saved : s1_mesh::Sound::Nope);
+  }
 }
 
 void meshLoadPrivateChannel(s1_mesh::RadioSession& session) {
@@ -151,30 +156,32 @@ bool meshChannelKey(char key, const Keyboard_Class::KeysState& keys) {
     // A key already shared is what everyone else has, so replacing it takes a second press.
     if (gMeshChannel.keyLength && !gMeshChannelReplacing) {
       gMeshChannelReplacing = true;
-      meshChannelSay("G again replaces the shared key");
+      meshChannelSay("G again replaces the shared key", s1_mesh::Sound::Ask);
       return true;
     }
     gMeshChannelReplacing = false;
     uint8_t made[s1_mesh::kChannelKeyMax];
     uint8_t length = 0;
-    if (!s1_mesh::newKey(meshChannelRandom, made, length)) { meshChannelSay("Couldn't make a key"); return true; }
+    if (!s1_mesh::newKey(meshChannelRandom, made, length)) { meshChannelSay("Couldn't make a key", s1_mesh::Sound::Nope); return true; }
     memcpy(gMeshChannel.key, made, length);
     gMeshChannel.keyLength = length;
     memset(made, 0, sizeof(made));
     if (!gMeshChannel.name[0]) strcpy(gMeshChannel.name, "Private");
     gMeshChannelShowKey = true;  // A new key is only any use once it's been shared.
-    meshChannelSay(meshChannelStore() ? "New key saved" : "Couldn't save it");
+    const bool saved = meshChannelStore();
+    meshChannelSay(saved ? "New key saved" : "Couldn't save it", saved ? s1_mesh::Sound::Saved : s1_mesh::Sound::Nope);
   } else if (lower == 'v') {
     if (gMeshChannel.keyLength) gMeshChannelShowKey = !gMeshChannelShowKey;
   } else if (lower == 'x' && gMeshChannel.set()) {
     if (!gMeshChannelRemoving) {
       gMeshChannelRemoving = true;
-      meshChannelSay("X again removes it");
+      meshChannelSay("X again removes it", s1_mesh::Sound::Ask);
     } else {
       gMeshChannelRemoving = false;
       gMeshChannelShowKey = false;
       gMeshChannel = s1_mesh::PrivateChannel{};
-      meshChannelSay(meshChannelStore() ? "Removed" : "Couldn't remove it");
+      const bool removed = meshChannelStore();
+      meshChannelSay(removed ? "Removed" : "Couldn't remove it", removed ? s1_mesh::Sound::Removed : s1_mesh::Sound::Nope);
     }
   }
   return true;

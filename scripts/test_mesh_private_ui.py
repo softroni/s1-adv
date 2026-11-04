@@ -21,6 +21,7 @@ typed_text = base64.b64encode(typed_key).decode()
 CODE = r'''
 #include "launcher_icons.h"
 #include "mesh_private_channel.h"
+#include "mesh_sounds.h"
 #include <cassert>
 #include <cctype>
 #include <cstdarg>
@@ -76,6 +77,7 @@ struct Canvas{int font=0,x=0,y=0;std::set<std::string> printed;std::vector<std::
 namespace libmeshtastic_leaf{struct Fake{int calls=0;bool ok=true;uint8_t key[32]={};size_t len=0;std::string name;
  bool setSecondaryChannel(const uint8_t*k,size_t n,const char*nm){++calls;memcpy(key,k,n);len=n;name=nm;return ok;}};}
 namespace s1_mesh{struct RadioSession{libmeshtastic_leaf::Fake mesh;PrivateChannel privateChannel;};}
+std::vector<s1_mesh::Sound> sounds;void meshSound(s1_mesh::Sound s){sounds.push_back(s);}
 ''' + drawing + r'''
 ''' + part + r'''
 using namespace s1_mesh;
@@ -93,12 +95,14 @@ int main(){
  assert(meshChannelLabel()=="none");
  meshChannelOpen();assert(gMeshChannelSetup&&shows("none yet")&&shows("N name K key G new V show X del"));
  // A name first: refused when it isn't one, then taken. With no key, nothing is saved yet.
- key('n');type("Fam!ly");enter();assert(shows("Letters, digits, - and _, up to 11")&&shows("Enter save  Esc cancel"));
+ key('n');type("Fam!ly");sounds.clear();enter();assert(shows("Letters, digits, - and _, up to 11")&&shows("Enter save  Esc cancel"));
+ assert(sounds.size()==1&&sounds[0]==Sound::Nope);
  for(int i=0;i<6;++i)assert(meshChannelKey('\b',delKey));type("Family");enter();
  assert(std::string(gMeshChannel.name)=="Family"&&gNvs.empty()&&shows("Now G for a new key, or K to type one"));
  // G makes a key, saves at once and shows it, because it's no use until it's shared: as text in three
  // lines, and as a QR code holding exactly the key.
- key('g');assert(gNvs.count("privch")&&gNvs["privch"].size()==kChannelSavedBytes&&gMeshChannel.keyLength==32);
+ sounds.clear();key('g');assert(gNvs.count("privch")&&gNvs["privch"].size()==kChannelSavedBytes&&gMeshChannel.keyLength==32);
+ assert(sounds.size()==1&&sounds[0]==Sound::Saved);
  char made[kChannelKeyText];keyToBase64(gMeshChannel.key,32,made,sizeof(made));
  {const std::string all=joined();std::string flat;for(char c:all)if(c!='\n')flat+=c;assert(flat.find(made)!=std::string::npos);}
  assert(gCanvas.qr==made&&shows("New key saved")&&shows("V hide  Esc back"));
@@ -107,7 +111,7 @@ int main(){
  // V hides it again; G on a shared key asks first, then replaces it.
  key('v');{const std::string all=joined();assert(all.find(std::string(made).substr(0,22))==std::string::npos);}
  uint8_t before[32];memcpy(before,gMeshChannel.key,32);
- key('g');assert(!memcmp(before,gMeshChannel.key,32)&&shows("G again replaces the shared key"));
+ sounds.clear();key('g');assert(!memcmp(before,gMeshChannel.key,32)&&shows("G again replaces the shared key")&&sounds.back()==Sound::Ask);
  key('g');assert(memcmp(before,gMeshChannel.key,32)!=0);
  // Another key between the two presses cancels the question, so G only asks again.
  memcpy(before,gMeshChannel.key,32);key('g');key('v');key('g');assert(!memcmp(before,gMeshChannel.key,32)&&shows("G again replaces the shared key"));
@@ -131,14 +135,16 @@ int main(){
  meshChannelOpen();key('x');assert(shows("X again removes it"));key('n');meshChannelEscape();
  assert(gNvs.count("privch"));
  // X twice removes it from the screen and from NVS.
- key('x');key('x');assert(!gNvs.count("privch")&&!gMeshChannel.set()&&shows("Removed"));
+ sounds.clear();key('x');key('x');assert(!gNvs.count("privch")&&!gMeshChannel.set()&&shows("Removed"));
+ assert(sounds.size()==2&&sounds[0]==Sound::Ask&&sounds[1]==Sound::Removed);
  assert(meshChannelLabel()=="none");
  RadioSession none;meshLoadPrivateChannel(none);assert(!none.mesh.calls&&!none.privateChannel.set());
  // A key typed first, then the name, saves once both are there.
  key('k');type(typedKey.c_str());enter();assert(shows("Now N to give it a name")&&!gNvs.count("privch"));
  key('n');type("Club");enter();assert(gNvs.count("privch"));
  // Storage that won't take it says so.
- gNvsWritable=false;key('n');for(int i=0;i<4;++i)meshChannelKey('\b',delKey);type("Club2");enter();assert(shows("Couldn't save it"));gNvsWritable=true;
+ gNvsWritable=false;key('n');for(int i=0;i<4;++i)meshChannelKey('\b',delKey);type("Club2");sounds.clear();enter();assert(shows("Couldn't save it"));gNvsWritable=true;
+ assert(sounds.size()==1&&sounds[0]==Sound::Nope);
  // Ctrl keys do nothing here; notes fade.
  Keyboard_Class::KeysState ctrl;ctrl.ctrl=true;assert(meshChannelKey('n',ctrl)&&gMeshChannelEdit==MeshChannelEdit::None);
  gNow+=3000;render();

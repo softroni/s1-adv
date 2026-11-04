@@ -341,11 +341,51 @@ preset starts counting afresh, and Enter goes back to the sweep.
 
 If the radio stops answering, the screen says so and Radio Scan stops using it.
 
+## Sounds
+
+Since 0.2.301 Mesh says what happened by ear, so it can stay in a pocket. Each
+sound is a few short notes, a quarter of a second at most, told apart by rhythm
+as much as pitch because the speaker is small. Talk on the public channel stays
+quiet, as before.
+
+| Sound | When |
+| --- | --- |
+| Three notes up | The radio is on and listening (chat or Radio Scan) |
+| Three notes down | The radio went off |
+| A quick run of ticks up | A message or your location is on its way |
+| One small bell | A message on a channel was repeated by another radio, which is all a channel can tell |
+| Two bells up | A direct message reached their radio |
+| Two low notes down | A message didn't get there, or the radio wouldn't start or stopped answering |
+| A high note twice, like a doorbell | A message for you, or from a contact |
+| High, lower, high | A message on the private channel |
+| Three even beeps, the loudest | Help is going out |
+| One soft tick | Help went out again |
+| Four notes climbing | Someone has your Help: their radio confirmed it, or they wrote back |
+| A ping and its echo | A contact's radio is heard for the first time since Mesh started |
+| Two quick high blips | The GPS has a fix, or has one again after two minutes without |
+| A rising question | Press again to be sure: Esc while Help repeats, the public channel's location, a new key or removing the channel |
+| Two dull knocks | That can't be done, such as Ctrl+L with no GPS fix or a full outbox |
+| Two clicks up, or down | Saved or switched on, removed or switched off |
+
+In Radio Scan's listening mode every packet heard ticks, higher the stronger it
+came in: from 500 Hz at -125 dBm to 2 kHz at -55 dBm. Walking toward a radio,
+the ticks rise.
+
+Settings → Device → **Mesh sounds** turns them all off; it's on unless you
+change it. Their loudness is Settings → Device → Notify volume, like the rest of
+the device's sounds. They only play while nothing else has the speaker, so
+they never cut into the radio, a podcast or voice, and a sound that matters more
+cuts off a Mesh sound that matters less. Before 0.2.301 Mesh only beeped, once,
+for a message for you and for Help answered.
+
 ## Checks
 
 `scripts/test_mesh_leaf_state.py`, `test_mesh_lifecycle.py`, `test_mesh_radio.py`
 and `test_mesh_ui.py` exercise the production state, lifecycle, radio setup and
-240×135 renderer. `test_mesh_messaging.py` checks contacts, the outbox's
+240×135 renderer. `test_mesh_sounds.py` renders every sound with the firmware's
+own code and checks its length, level, ends and notes; `MESH_SOUNDS_WAV=<folder>`
+writes them as WAV files to listen to. The lifecycle test checks which sound each
+key and delivery state makes. `test_mesh_messaging.py` checks contacts, the outbox's
 delivery states, the history kept across a restart, Help's text and when it
 repeats, and the position message, whose bytes were checked against
 Meshtastic's own `mesh.proto` with `protoc`. `test_radio_scan.py` runs Radio Scan's sums, service loop, keys
