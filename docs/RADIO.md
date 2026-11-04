@@ -11,7 +11,7 @@ stations live in a text file on the SD card, and Find adds new ones from a publi
 | **A / D** or Left / Right | Change station |
 | **Enter** or **Space** | Play or pause |
 | **L** | Show all stations, only EN/INT, or only RU |
-| **+ / -** | Volume |
+| **-** and **+** | Volume down and up. The **=** key works for +, so Shift isn't needed |
 | **F** | Find stations |
 | **Del** | Remove this station from your list |
 | **Esc** | Stop and go Home |
@@ -19,7 +19,7 @@ stations live in a text file on the SD card, and Find adds new ones from a publi
 Pausing leaves the live stream, so playing again joins the broadcast where it is now.
 
 The screen shows the station, its genre and its place there ("Chill · 1 of 3"), and the
-station's bitrate when it gives one. When the station sends the song's name, it shows below,
+station's bitrate when it gives one. The volume is the number beside the speaker. When the station sends the song's name, it shows below,
 over two lines if it needs them. The bars beside the station's name follow how loud the music is,
 measured from the sound itself, so they move with the beat and drop in a quiet passage. While it
 connects, one bar runs along them, and stopped, they're a play mark. The language filter shows

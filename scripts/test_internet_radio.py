@@ -198,6 +198,7 @@ int main(){
  key('l');service();assert(internet_radio::starts==n);render();assert(gCanvas.printed[1].rfind("EN/INT  ",0)==0);
  key('l');render();assert(gCanvas.printed[1].rfind("RU  ",0)==0);key('l');render();assert(gCanvas.printed[1].find("  ")==std::string::npos);
  for(int i=0;i<40;++i)key('+');assert(gSpeakerVolume==255);for(int i=0;i<40;++i)key('-');assert(gSpeakerVolume==0);
+ key('=');assert(gSpeakerVolume==16);render();assert(shows("6%"));key('_');assert(gSpeakerVolume==0);render();assert(shows("0%"));  // No Shift needed.
  // Every audio/network owner blocks a new radio worker, without touching it.
  for(bool*p:{&gBootBackgroundActive,&gRecording,&gSubmitting,&gThinking,&gPlaybackActive,&gTransferUiActive,&gOtaApplyInProgress,&gInboxHttpBusy,&gVoiceDialBusy,&gVoiceReplySpeechBusy,&gRealtimeActive,&gRealtimeDialBusy,&gRealtimeExclusiveMode,&gPendingRealtimeStart,&gMeshBusOwned,&gG0VoicePending,&gVoiceCapturePreparing}){
   *p=true;key('\n');serviceInternetRadio();assert(!radioBusy()&&!gRadioWantPlaying);*p=false;

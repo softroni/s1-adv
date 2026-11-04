@@ -665,16 +665,13 @@ void renderRadioPlayer() {
     d.setCursor(kBigLeft, top);
     d.print(radioFit(status, 222));
   }
-  // Volume: a speaker, a thin bar and the number.
+  // Volume: a speaker and the number. - lowers it; + or = raises it, so Shift isn't needed.
   d.fillRect(8, 101, 3, 5, muted);
   d.fillTriangle(10, 103, 15, 98, 15, 108, muted);
-  const int16_t barX = 20, barW = 176;
-  d.fillRect(barX, 102, barW, 4, dim);
-  const int16_t filled = int16_t(int32_t(barW) * gSpeakerVolume / 255);
-  if (filled > 0) d.fillRect(barX, 102, filled, 4, accent);
+  d.setFont(&fonts::Font2);
+  d.setTextColor(muted); d.setCursor(20, 96);
+  d.print(String((int(gSpeakerVolume) * 100 + 127) / 255) + "%");
   d.setFont(&fonts::Font0);
-  const String volume = String((int(gSpeakerVolume) * 100 + 127) / 255) + "%";
-  d.setTextColor(muted); d.setCursor(kBigRight - d.textWidth(volume), 100); d.print(volume);
   d.setCursor(8,112); d.print("A/D station  W/S genre  Enter play");
   d.setCursor(8,123); d.print("F find  L EN/RU  Del remove  +/- vol");
   d.setFont(&fonts::Font2);
