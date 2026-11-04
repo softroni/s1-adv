@@ -129,20 +129,54 @@ constexpr LauncherGroup kLauncherGroups[kLauncherGroupCount] = {
 };
 static_assert(launcher_favorites::kMax == kLauncherMaxSubItems, "a favorite needs a row and a number key");
 
-// What's on the Favorites tab, saved as "favs", and the tab itself, rebuilt from it after every
-// change so the menu's code can treat it like any other tab.
+// What's on the Favorites tab, saved as "favs". A favorite names an app by its place in
+// kLauncherGroups, so moving apps around their tabs leaves it alone.
 launcher_favorites::List gFavorites;
-LauncherGroup gFavoritesTab = kLauncherGroups[kFavoritesGroup];
+// The order of every other tab, saved as "menu_order": row r of tab g is app
+// gLauncherOrder[g][r] of kLauncherGroups[g]. Favorites keeps its order in gFavorites.
+uint8_t gLauncherOrder[kLauncherGroupCount][kLauncherMaxSubItems];
+// What the menu shows: each tab with its rows in that order, rebuilt after every change, so the
+// menu's code reads rows the way they're on screen.
+LauncherGroup gLauncherTabs[kLauncherGroupCount];
+LauncherGroup& gFavoritesTab = gLauncherTabs[kFavoritesGroup];
 
 const LauncherGroup& launcherGroup(int group) {
-  return group == kFavoritesGroup ? gFavoritesTab : kLauncherGroups[group];
+  return gLauncherTabs[group];
+}
+
+// The app a row of a tab other than Favorites shows, as its place in kLauncherGroups[group].
+uint8_t launcherTableItem(int group, int row) {
+  return gLauncherOrder[group][row];
 }
 
 void rebuildFavoritesTab() {
+  gFavoritesTab = kLauncherGroups[kFavoritesGroup];
   gFavoritesTab.count = gFavorites.count;
   for (uint8_t i = 0; i < gFavorites.count; ++i)
     gFavoritesTab.items[i] = kLauncherGroups[gFavorites.refs[i].group].items[gFavorites.refs[i].item];
 }
+
+void rebuildLauncherTab(int group) {
+  if (group == kFavoritesGroup) {
+    rebuildFavoritesTab();
+    return;
+  }
+  LauncherGroup& tab = gLauncherTabs[group];
+  tab = kLauncherGroups[group];
+  for (uint8_t r = 0; r < tab.count; ++r) tab.items[r] = kLauncherGroups[group].items[gLauncherOrder[group][r]];
+}
+
+void rebuildLauncherTabs() {
+  for (uint8_t g = 0; g < kLauncherGroupCount; ++g) rebuildLauncherTab(g);
+}
+
+// Until the settings load, every tab is in the table's order.
+struct LauncherTabsAtStart {
+  LauncherTabsAtStart() {
+    launcher_order::reset(gLauncherOrder, kLauncherGroups, kLauncherGroupCount);
+    rebuildLauncherTabs();
+  }
+} gLauncherTabsAtStart;
 
 Preferences gPrefs;
 WebSocketsClient gWs;

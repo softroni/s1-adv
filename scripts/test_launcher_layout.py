@@ -25,8 +25,7 @@ def function(text, marker):
 render = (parts / '052_main.cpp.inc').read_text()
 render = render[render.index('const uint8_t* launcherItemIcon('):render.index('String batteryEtaText()')]
 table = (parts / '004_main.cpp.inc').read_text()
-favorites = table[table.index('static_assert(launcher_favorites::kMax'):table.index('void rebuildFavoritesTab()')] + \
-    function(table, 'void rebuildFavoritesTab()')
+favorites = table[table.index('static_assert(launcher_favorites::kMax'):table.index('Preferences gPrefs;')]
 keys = (parts / '044_main.cpp.inc').read_text()
 keys = keys[keys.index('void launcherNotice('):keys.index('void handleLauncherKey(char key')] + \
     function(keys, 'void handleLauncherKey(char key')
@@ -54,6 +53,7 @@ code = r'''
 #include <string>
 #include <vector>
 #include "launcher_favorites.h"
+#include "launcher_order.h"
 #include "launcher_icons.h"
 #include "launcher_shortcuts.h"
 using std::min; using std::max;
@@ -131,6 +131,8 @@ void moveLauncherSelection(int d) { groupMove += d; }
 void moveLauncherSubSelection(int d) { rowMove += d; }
 void applyLauncherSelection() { ++opened; openedGroup = gLauncherSelection; openedRow = gLauncherSubSelection; }
 void saveFavorites() { ++saves; }
+int orderSaves = 0;
+void saveLauncherOrder() { ++orderSaves; }
 ''' + rows + keys + r'''
 void press(char key, int group, int row) {
   groupMove = rowMove = 0;
@@ -144,8 +146,14 @@ int at(const char* tab, const char* label) {
     for (int i = 0; i < kLauncherGroups[g].count; ++i) if (!std::strcmp(kLauncherGroups[g].items[i].label, label)) return g * 16 + i;
   assert(false); return -1;
 }
+// Where an app is on screen, which is its place in the table until the tab's order changes.
+int rowOf(const char* tab, const char* label) {
+  for (int g = 0; g < kLauncherGroupCount; ++g) if (g != kFavoritesGroup && !std::strcmp(launcherGroup(g).title, tab))
+    for (int i = 0; i < launcherGroup(g).count; ++i) if (!std::strcmp(launcherGroup(g).items[i].label, label)) return g * 16 + i;
+  assert(false); return -1;
+}
 // Picks an app in its own tab and presses Space on it.
-void star(const char* tab, const char* label) { const int a = at(tab, label); gLauncherSelection = a / 16; gLauncherSubSelection = a % 16; press(' ', 0, 0); }
+void star(const char* tab, const char* label) { const int a = rowOf(tab, label); gLauncherSelection = a / 16; gLauncherSubSelection = a % 16; press(' ', 0, 0); }
 std::string notice() { return nowMs < gLauncherNoticeUntilMs ? std::string(gLauncherNotice) : std::string(); }
 const char* favorite(int i) { return gFavoritesTab.items[i].label; }
 
@@ -212,7 +220,7 @@ void checkFrame(int g, int sel) {
     auto icon = std::find_if(gCanvas.bitmaps.begin(), gCanvas.bitmaps.end(), [&](const Bitmap& b) { return b.y == label->y - 1 && b.x == 7; });
     assert(icon != gCanvas.bitmaps.end() && icon->color == (selected ? TFT_BLACK : kLauncherGroups[home].accent));
     auto mark = std::find_if(gCanvas.bitmaps.begin(), gCanvas.bitmaps.end(), [&](const Bitmap& b) { return b.w == 8 && b.y == label->y + 3; });
-    const bool marked = g != kFavoritesGroup && gFavorites.find(g, i) >= 0;
+    const bool marked = g != kFavoritesGroup && gFavorites.find(g, launcherTableItem(g, i)) >= 0;
     assert((mark != gCanvas.bitmaps.end()) == marked);
     if (marked) assert(mark->x + 8 < 223 && label->x + gCanvas.textWidth(label->value) < mark->x &&
                        mark->color == (selected ? TFT_BLACK : kLauncherGroups[kFavoritesGroup].accent));
@@ -347,8 +355,6 @@ int main() {
   assert(gLauncherSubSelection == 8 && !std::strcmp(favorite(8), "Internet Radio") && !std::strcmp(favorite(7), "Realtime"));
   assert(saves == before + 8 && gLauncherLastSub[kFavoritesGroup] == 8);
   handleLauncherKey(';', withFn()); assert(gLauncherSubSelection == 7 && !std::strcmp(favorite(7), "Internet Radio"));
-  // Fn moves nothing in other tabs: there, up and down still just move the bar.
-  gLauncherSelection = 3; groupMove = rowMove = 0; handleLauncherKey('.', withFn()); assert(rowMove == 1 && saves == before + 9);
   // Plain up and down on Favorites move the bar, as anywhere.
   gLauncherSelection = kFavoritesGroup; rowMove = 0; press('.', 0, 1);
 
@@ -373,6 +379,43 @@ int main() {
   while (gFavorites.count > 3) { gLauncherSelection = kFavoritesGroup; gLauncherSubSelection = 0; press(' ', 0, 0); }
   checkEveryFrame();
   show(kFavoritesGroup, 0); assert(gCanvas.find("Fn+up/down moves  Space removes"));
+
+  // Fn with up or down moves an app in every other tab too, and its number goes with it.
+  {
+    const int before = orderSaves, favoriteSaves = saves;
+    gLauncherSelection = 5; gLauncherSubSelection = 4;  // Games, Snake
+    groupMove = rowMove = 0; handleLauncherKey('.', withFn());
+    assert(orderSaves == before && gLauncherSubSelection == 4 && rowMove == 0);  // Already last: nothing.
+    for (int i = 0; i < 4; ++i) handleLauncherKey(';', withFn());
+    assert(gLauncherSubSelection == 0 && gLauncherLastSub[5] == 0 && orderSaves == before + 4 && saves == favoriteSaves && rowMove == 0);
+    const char* games[] = {"Snake", "Tetris", "NES", "Checkers", "Minesweeper"};
+    for (int r = 0; r < 5; ++r) assert(!std::strcmp(launcherGroup(5).items[r].label, games[r]));
+    handleLauncherKey(';', withFn()); assert(orderSaves == before + 4);  // Already first.
+    handleLauncherKey('.', withFn()); handleLauncherKey(';', withFn());
+    assert(orderSaves == before + 6 && !std::strcmp(launcherGroup(5).items[0].label, "Snake"));
+    // The menu's table stays as it was, and so do the other tabs.
+    assert(!std::strcmp(kLauncherGroups[5].items[0].label, "Tetris") && launcherTableItem(5, 0) == 4);
+    assert(!std::strcmp(launcherGroup(6).items[0].label, "Air Music") && launcherTableItem(6, 0) == 0);
+    // Ctrl with a number opens the row as it is now.
+    Keyboard_Class::KeysState chord; chord.ctrl = true; chord.hid_keys = {0x1e};  // the 1 key
+    opened = 0; handleLauncherKey('!', chord);
+    assert(opened == 1 && openedGroup == 5 && openedRow == 0 && launcherGroup(5).items[0].mode == UiMode::Snake);
+    // Space makes the app on the row a favorite, wherever it moved, and its star follows it.
+    const launcher_favorites::Ref snake{5, 4};
+    if (gFavorites.find(snake.group, snake.item) >= 0) { gLauncherSelection = 5; gLauncherSubSelection = 0; press(' ', 0, 0); }
+    assert(gFavorites.find(snake.group, snake.item) < 0);
+    gLauncherSelection = 5; gLauncherSubSelection = 0; press(' ', 0, 0);
+    assert(gFavorites.find(snake.group, snake.item) == gFavorites.count - 1 && !std::strcmp(favorite(gFavorites.count - 1), "Snake"));
+    assert(notice() == "Snake is favorite " + std::to_string(gFavorites.count));
+    for (int sel = 0; sel < 5; ++sel) { show(5, sel); checkFrame(5, sel); }
+    show(5, 1);
+    assert(std::any_of(gCanvas.bitmaps.begin(), gCanvas.bitmaps.end(), [](const Bitmap& b) { return b.w == 8 && b.y == 30; }));
+    // Moving a favorite's app in its own tab leaves Favorites as it was.
+    const int was = gFavorites.find(snake.group, snake.item);
+    gLauncherSelection = 5; gLauncherSubSelection = 0; handleLauncherKey('.', withFn());
+    assert(gFavorites.find(snake.group, snake.item) == was && !std::strcmp(favorite(was), "Snake") && !std::strcmp(launcherGroup(5).items[1].label, "Snake"));
+    checkEveryFrame();
+  }
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-launcher-') as d:
@@ -382,4 +425,4 @@ with tempfile.TemporaryDirectory(prefix='s1-launcher-') as d:
                     '-I', str(root / 'bots/CardputerADV/src'), str(p / 'test.cpp'), '-o', str(p / 'test')], check=True)
     subprocess.run([str(p / 'test')], check=True)
 print('PASS actual launcher: every tab and row on screen, an icon per app, Favorites added, opened by number, '
-      'reordered and removed, and each group has its letter')
+      'reordered and removed, apps moved in every tab, and each group has its letter')

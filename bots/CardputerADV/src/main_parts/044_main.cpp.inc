@@ -462,13 +462,14 @@ void toggleLauncherFavorite() {
   }
   const LauncherGroup& group = launcherGroup(gLauncherSelection);
   if (gLauncherSubSelection < 0 || gLauncherSubSelection >= group.count) return;
-  const uint8_t tab = static_cast<uint8_t>(gLauncherSelection), row = static_cast<uint8_t>(gLauncherSubSelection);
-  const String label = group.items[row].label;
-  const int at = gFavorites.find(tab, row);
+  const uint8_t tab = static_cast<uint8_t>(gLauncherSelection);
+  const uint8_t item = launcherTableItem(tab, gLauncherSubSelection);
+  const String label = group.items[gLauncherSubSelection].label;
+  const int at = gFavorites.find(tab, item);
   if (at >= 0) {
     gFavorites.removeAt(static_cast<uint8_t>(at));
     launcherNotice(label + " left Favorites");
-  } else if (gFavorites.add(tab, row)) {
+  } else if (gFavorites.add(tab, item)) {
     launcherNotice(label + " is favorite " + String(gFavorites.count));
   } else {
     launcherNotice("Favorites is full at 9");
@@ -477,14 +478,22 @@ void toggleLauncherFavorite() {
   favoritesChanged();
 }
 
-// Fn with up or down on the Favorites tab. The app swaps places with its neighbour, and so
-// numbers with it, and stays selected. Nothing happens past either end.
-void moveLauncherFavorite(int delta) {
-  const int row = gLauncherSubSelection;
-  if (row < 0 || !gFavorites.move(static_cast<uint8_t>(row), delta)) return;
-  favoritesChanged();
+// Fn with up or down, on any tab. The app swaps places with its neighbour, and so numbers with
+// it, and stays selected. Nothing happens past either end. Favorites keeps its own order, and
+// the other tabs' orders are saved together.
+void moveLauncherRow(int delta) {
+  const int group = gLauncherSelection, row = gLauncherSubSelection;
+  if (row < 0) return;
+  if (group == kFavoritesGroup) {
+    if (!gFavorites.move(static_cast<uint8_t>(row), delta)) return;
+    favoritesChanged();
+  } else {
+    if (!launcher_order::move(gLauncherOrder[group], launcherGroup(group).count, static_cast<uint8_t>(row), delta)) return;
+    rebuildLauncherTab(group);
+    saveLauncherOrder();
+  }
   gLauncherSubSelection = row + delta;
-  gLauncherLastSub[kFavoritesGroup] = gLauncherSubSelection;
+  gLauncherLastSub[group] = gLauncherSubSelection;
 }
 
 void handleLauncherKey(char key, const Keyboard_Class::KeysState& keys) {
@@ -534,16 +543,14 @@ void handleLauncherKey(char key, const Keyboard_Class::KeysState& keys) {
     toggleLauncherFavorite();
     return;
   }
-  if (gLauncherSelection == kFavoritesGroup) {
-    if (keys.del || key == '\b') {
-      removeLauncherFavorite();
-      return;
-    }
-    // Fn leaves the arrow keys' characters as they are, so it's seen here.
-    if (keys.fn && (key == ';' || key == '.')) {
-      moveLauncherFavorite(key == ';' ? -1 : 1);
-      return;
-    }
+  if (gLauncherSelection == kFavoritesGroup && (keys.del || key == '\b')) {
+    removeLauncherFavorite();
+    return;
+  }
+  // Fn leaves the arrow keys' characters as they are, so it's seen here.
+  if (keys.fn && (key == ';' || key == '.')) {
+    moveLauncherRow(key == ';' ? -1 : 1);
+    return;
   }
   // Letters jump to a group, so only the arrow keys move.
   if (key == ';') {

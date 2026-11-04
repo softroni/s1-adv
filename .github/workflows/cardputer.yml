@@ -138,6 +138,7 @@ jobs:
       - run: python scripts/test_keyrush_layout.py
       - run: python scripts/test_launcher_layout.py
       - run: python scripts/test_launcher_favorites.py
+      - run: python scripts/test_launcher_order.py
       - run: python scripts/test_settings_layout.py
       - run: python scripts/test_big_screens.py
       - run: g++ -std=c++17 -Wall -Wextra -pedantic bots/CardputerADV/tests/launcher_shortcuts_test.cpp -o /tmp/launcher-shortcuts-test && /tmp/launcher-shortcuts-test

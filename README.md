@@ -218,6 +218,7 @@ First, the keys. On the Cardputer, the arrows are the `;` `.` `,` `/` keys, and 
 | **Tab** | Open the app menu |
 | **A letter** in the menu | Jump to a tab: **G** Games, **R** Arcade, **L** Lab and so on |
 | **Space**, then **1-9**, in the menu | Make an app a favorite, then open it by its number from any tab |
+| **Fn** with up or down, in the menu | Move the selected app one place in its tab |
 | **Enter** / **Esc** | Open / go back |
 | **Alt** | Tap to talk, tap again to send |
 | **G0 button** | Hold to talk, release to send |

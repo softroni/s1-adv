@@ -203,7 +203,8 @@ void loadDeviceSettings() {
   gDeviceSettings.meshPublicLocation = static_cast<uint8_t>(s1_mesh::sharingOrDefault(gPrefs.getUChar("mesh_loc", 0)));
   gDeviceSettings.units = static_cast<uint8_t>(units::fromSaved(gPrefs.getUChar("units", static_cast<uint8_t>(units::kDefault))));
   launcher_favorites::read(gFavorites, kLauncherGroups, kLauncherGroupCount, gPrefs.getString("favs", "").c_str());
-  rebuildFavoritesTab();
+  launcher_order::read(gLauncherOrder, kLauncherGroups, kLauncherGroupCount, gPrefs.getString("menu_order", "").c_str());
+  rebuildLauncherTabs();
   // The menu can change between firmware versions, so what's saved is only a suggestion. Before
   // Favorites was the first tab, menu_group counted from AI Agent.
   uint8_t savedTab = gPrefs.getUChar("menu_tab", 0xff);
@@ -269,6 +270,16 @@ void saveLauncherSelection() {
   gPrefs.begin(kPrefsDeviceNs, false);
   gPrefs.putUChar("menu_tab", static_cast<uint8_t>(savedGroup));
   gPrefs.putUChar("menu_item", static_cast<uint8_t>(savedItem));
+  gPrefs.end();
+}
+
+// Every tab whose order was changed, about 1.2 KB at most, so it's on the heap only while it's written.
+void saveLauncherOrder() {
+  constexpr size_t kCap = 1600;
+  std::unique_ptr<char[]> text(new (std::nothrow) char[kCap]);
+  if (!text || !launcher_order::write(gLauncherOrder, kLauncherGroups, kLauncherGroupCount, text.get(), kCap)) return;
+  gPrefs.begin(kPrefsDeviceNs, false);
+  gPrefs.putString("menu_order", text.get());
   gPrefs.end();
 }
 

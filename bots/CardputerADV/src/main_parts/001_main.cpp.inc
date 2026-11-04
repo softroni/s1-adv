@@ -45,6 +45,7 @@
 #include "launcher_icons.h"
 #include "launcher_shortcuts.h"
 #include "launcher_favorites.h"
+#include "launcher_order.h"
 #include "mic_input_meter.h"
 #include "release_delivery.h"
 #include "smartlamp_gl2_protocol.h"
@@ -123,7 +124,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.296-dev"
+#define APP_VERSION "0.2.297-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"

@@ -208,7 +208,7 @@ void renderLauncherOverlay() {
     const uint8_t* icon = launcherItemIcon(item);
     // A favorite keeps its own tab's colour, so the list reads like the tabs it came from.
     const int home = favorites ? gFavorites.refs[i].group : gLauncherSelection;
-    const bool marked = !favorites && gFavorites.find(gLauncherSelection, i) >= 0;
+    const bool marked = !favorites && gFavorites.find(gLauncherSelection, launcherTableItem(gLauncherSelection, i)) >= 0;
     if (selected) {
       d.fillRoundRect(1, y, 233, kRowH - 1, 6, group.accent);
     }

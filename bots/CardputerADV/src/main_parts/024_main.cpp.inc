@@ -232,10 +232,14 @@ void servicePendingOtaAction() {
   }
 }
 
+// The tab and row an app is on, as the menu shows them. Favorites is passed over: every app on it
+// is in its own tab too, which is where an app opened some other way belongs.
 bool findLauncherEntryForMode(UiMode mode, int& groupIndex, int& subIndex) {
   for (uint8_t g = 0; g < kLauncherGroupCount; ++g) {
-    for (uint8_t s = 0; s < kLauncherGroups[g].count; ++s) {
-      const LauncherSubItem& item = kLauncherGroups[g].items[s];
+    if (g == kFavoritesGroup) continue;
+    const LauncherGroup& tab = launcherGroup(g);
+    for (uint8_t s = 0; s < tab.count; ++s) {
+      const LauncherSubItem& item = tab.items[s];
       if (item.mode == mode && (mode != UiMode::Home || item.startRealtime == gRealtimeActive)) {
         groupIndex = g;
         subIndex = s;

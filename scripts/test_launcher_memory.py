@@ -36,8 +36,7 @@ table = (parts / '004_main.cpp.inc').read_text()
 setui = function('void setUiMode(')
 tail = setui[setui.index('if (gLauncherSelection >= 0 && gLauncherSelection < kLauncherGroupCount'):setui.index('setStatus(String("Mode: ")')]
 load = function('void loadDeviceSettings()')
-favorites = table[table.index('static_assert(launcher_favorites::kMax'):table.index('void rebuildFavoritesTab()')] + \
-    function('void rebuildFavoritesTab()')
+favorites = table[table.index('static_assert(launcher_favorites::kMax'):table.index('Preferences gPrefs;')]
 restore = load[load.index('launcher_favorites::read(gFavorites'):load.index('gLauncherLastSub[gLauncherSelection] = gLauncherSubSelection;') + len('gLauncherLastSub[gLauncherSelection] = gLauncherSubSelection;')]
 
 code = r'''
@@ -48,7 +47,10 @@ code = r'''
 #include <iostream>
 #include <map>
 #include <string>
+#include <memory>
+#include <new>
 #include "launcher_favorites.h"
+#include "launcher_order.h"
 using std::min;using std::max;
 constexpr uint16_t rgb565_local(int,int,int){return 0;}
 constexpr uint8_t kLauncherGroupCount=10,kLauncherMaxSubItems=9,kFavoritesGroup=0;
@@ -60,15 +62,17 @@ int gLauncherSelection=0,gLauncherSubSelection=0;uint8_t gLauncherLastSub[kLaunc
 bool gRealtimeActive=false,gRecording=false,gMeshBusOwned=false,gPendingRealtimeStart=false,gRealtimeScreenVisible=false,gRealtimeExclusiveMode=false;
 UiMode gUiMode=UiMode::Home;std::map<std::string,int> flash;std::map<std::string,std::string> texts;int writes=0;
 struct{void begin(const char*,bool){}void end(){}void putUChar(const char*k,uint8_t v){++writes;flash[k]=v;}
+ void putString(const char*k,const char*v){++writes;texts[k]=v;}
  uint8_t getUChar(const char*k,uint8_t d){return flash.count(k)?flash[k]:d;}
  std::string getString(const char*k,const char*d){return texts.count(k)?texts[k]:d;}}gPrefs;
 constexpr const char* kPrefsDeviceNs="device_cfg";
 void setStatus(const char*,int){}void closeRealtimeSession(const char*){}void cancelRecordingDiscard(){}void startRealtimeSession(bool){gRealtimeActive=true;}
 ''' + function('bool findLauncherEntryForMode(') + function('bool launcherKeepsPlaceFor(') + function('void syncLauncherToMode(') + \
-    function('void saveLauncherSelection()') + r'''
+    function('void saveLauncherSelection()') + function('void saveLauncherOrder()') + r'''
 void setUiMode(UiMode mode){gUiMode=mode;
 ''' + tail + r'''}
 ''' + function('void applyLauncherSelection()') + r'''
+void moveRow(int g,int row,int d){assert(launcher_order::move(gLauncherOrder[g],launcherGroup(g).count,row,d));rebuildLauncherTab(g);saveLauncherOrder();}
 void pick(int group,int item){gLauncherSelection=group;gLauncherSubSelection=item;applyLauncherSelection();}
 const char* chosen(){return launcherGroup(gLauncherSelection).items[gLauncherSubSelection].label;}
 bool on(const char*label){return !std::strcmp(chosen(),label);}
@@ -121,7 +125,27 @@ int main(){
  flash["menu_tab"]=0;flash["menu_item"]=7;reboot();assert(gLauncherSelection==0&&gLauncherSubSelection==3);
  texts.clear();reboot();assert(gLauncherSelection==0&&gLauncherSubSelection==0&&gFavoritesTab.count==0);
  const UiMode was=gUiMode;applyLauncherSelection();assert(gUiMode==was);
- std::cout<<"PASS menu memory: survives Pulse, chat and restarts, Favorites too, without wearing flash\n";
+
+ // A tab's new order comes back after a restart, and the menu reopens on the same app.
+ texts.clear();flash.clear();reboot();
+ moveRow(5,4,-1);moveRow(5,3,-1);  // Snake up two, to third in Games
+ assert(texts["menu_order"]=="Games/Tetris\nGames/NES\nGames/Snake\nGames/Checkers\nGames/Minesweeper\n");
+ pick(5,2);assert(gUiMode==UiMode::Snake&&on("Snake"));
+ reboot();assert(gLauncherSelection==5&&gLauncherSubSelection==2&&on("Snake"));
+ assert(!std::strcmp(launcherGroup(5).items[3].label,"Checkers")&&!std::strcmp(kLauncherGroups[5].items[2].label,"Checkers"));
+ // An app opened some other way finds its row as it is now.
+ pick(1,0);gRealtimeActive=false;setUiMode(UiMode::Minesweeper);assert(gLauncherSelection==5&&gLauncherSubSelection==4&&on("Minesweeper"));
+ setUiMode(UiMode::Checkers);assert(gLauncherSubSelection==3&&on("Checkers"));
+ // Favorites name apps by the table, so moving one in its tab changes nothing there.
+ texts["favs"]="Games/Checkers\n";reboot();assert(gFavorites.count==1&&!std::strcmp(gFavoritesTab.items[0].label,"Checkers"));
+ moveRow(5,3,-1);assert(!std::strcmp(gFavoritesTab.items[0].label,"Checkers")&&!std::strcmp(launcherGroup(5).items[2].label,"Checkers"));
+ // Back in the table's order, nothing is kept for that tab.
+ moveRow(5,2,1);moveRow(5,2,1);moveRow(5,3,1);assert(texts["menu_order"]=="");
+ // Two tabs at once, each its own lines.
+ moveRow(6,0,1);moveRow(9,2,-1);reboot();
+ assert(!std::strcmp(launcherGroup(6).items[0].label,"Flappy Bird")&&!std::strcmp(launcherGroup(9).items[1].label,"Sequences"));
+ assert(!std::strcmp(launcherGroup(5).items[0].label,"Tetris"));
+ std::cout<<"PASS menu memory: survives Pulse, chat and restarts, Favorites and tab orders too, without wearing flash\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-launcher-memory-') as directory:
