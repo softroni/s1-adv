@@ -31,9 +31,29 @@ Use `/help` for current controls, `/status` for diagnostics and `/setup` for
 network and bridge provisioning. Realtime voice is separately configured and
 experimental. Camera and hands-free wake-word features are not supported here.
 
-## HC-SR04 Sonar wiring
+## Sonar
 
-Sonar uses the Cardputer ADV EXT 2.54 mm header and samples at about 10 Hz:
+Sonar measures distance with either of two sensors, and finds whichever is plugged in:
+
+- **The M5Stack I2C ultrasonic unit** (RCWL-9620, address 0x57) on the Grove port, the same
+  unit Air Music uses. It reads up to 4.5 m. Each reading takes it 120 ms, so it gives up to
+  eight a second.
+- **An HC-SR04** wired to the EXT header, read ten times a second up to 4 m. Wiring is below.
+
+When Sonar opens, it checks the Grove port first. If the unit answers, Sonar uses it and leaves
+the EXT pins alone. Otherwise it listens for the HC-SR04, and while that gets no echo it checks
+Grove again every second, so you can plug the unit in with Sonar open. If the unit stops
+answering, Sonar goes back to the HC-SR04. With both plugged in, the unit wins. The name next to
+the title, `M5 UNIT` or `HC-SR04`, says which one Sonar is using, and `R` checks Grove again
+straight away.
+
+If the Lab has relays saved on the Grove wires, Sonar doesn't touch the port, because the I2C
+bus would switch them on. It uses the HC-SR04 only. Mesh keeps Sonar closed, because the
+HC-SR04's pins are the Cap's.
+
+### HC-SR04 wiring
+
+The HC-SR04 uses the Cardputer ADV EXT 2.54 mm header:
 
 - `VCC` → `5VOUT` (third contact on the lower row)
 - `GND` → `GND` (second contact on the lower row)
@@ -46,15 +66,14 @@ Use `ECHO → 1 kOhm → G6`, with `2 kOhm` from the G6 node to GND.
 
 On the Sonar screen, press `M` to switch between the large Proximity view and
 the animated Radar view. Radar plots the measured range on the fixed forward
-bearing; a single stationary HC-SR04 cannot determine left/right angle.
+bearing; a single stationary sensor cannot determine left/right angle.
 
 ## Air Music
 
 **Air Music** works with the M5Stack I2C ultrasonic unit (RCWL-9620, address 0x57), plugged
-into the Grove port. Open it from Arcade in the launcher, or type `/music` in chat. It is a
-different sensor from the HC-SR04 that Sonar uses, and only one app can use the Grove port
-at a time. Air Music, Flappy Bird, Hot Air Balloon and NFC Notes each release it when they
-close.
+into the Grove port. Open it from Arcade in the launcher, or type `/music` in chat. Only one
+app can use the Grove port at a time. Air Music, Flappy Bird, Hot Air Balloon, NFC Notes and
+Sonar each release it when they close.
 
 **Flappy Bird** uses the same unit: a hand 6 to 30 cm above it steers the bird. Any key
 flaps instead, so it also plays without the sensor. Open it from Arcade, or type `/flappy`.

@@ -515,6 +515,7 @@ void serviceAlarm();
 bool handleAlarmKey(char key, const Keyboard_Class::KeysState& keys);
 void renderAlarmUi();
 void serviceSonar();
+void stopSonar();
 bool handleSonarKey(char key, const Keyboard_Class::KeysState& keys);
 void renderSonarUi();
 void initRfidLab(bool force = false);

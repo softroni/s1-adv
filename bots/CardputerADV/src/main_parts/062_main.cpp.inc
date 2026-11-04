@@ -1,5 +1,7 @@
 namespace {
 
+// Sonar reads whichever sensor is plugged in: the M5 ultrasonic unit on Grove (its side is in
+// part 088) or an HC-SR04 on the EXT header, which is timed here. sonar.h picks between them.
 constexpr uint8_t kSonarTrigPin = 4;
 constexpr uint8_t kSonarEchoPin = 6;
 constexpr uint32_t kSonarSampleIntervalUs = 100000;
@@ -9,10 +11,15 @@ constexpr uint32_t kSonarTooCloseBeepIntervalMs = 1200;
 constexpr uint8_t kSonarFilterCapacity = 5;
 constexpr float kSonarMinimumCm = 2.0f;
 constexpr float kSonarMaximumCm = 400.0f;
+constexpr float kSonarUnitMaximumCm = sonar::kUnitFarthestMm / 10.0f;
 constexpr float kSonarTooCloseCm = 15.0f;
 constexpr float kSonarObjectCm = 80.0f;
 constexpr float kSonarDisplayFarCm = 200.0f;
 constexpr float kSonarDegreesToRadians = 0.017453292519943295f;
+
+bool sonarGroveAllowed();
+sonar::Step sonarGroveStep(sonar::Picker& pick, uint32_t nowMs, bool echoFresh, uint32_t& mm);
+void sonarGroveClose();
 
 enum class SonarViewMode : uint8_t {
   Proximity,
@@ -27,7 +34,10 @@ enum class SonarProximityState : uint8_t {
 };
 
 struct SonarRuntime {
-  bool active = false;
+  bool active = false;        // Sonar is open.
+  bool echoOn = false;        // The HC-SR04's pins and interrupt are set up.
+  bool groveAllowed = false;  // Sonar may look for the M5 unit on Grove.
+  sonar::Picker pick;
   bool waitingEcho = false;
   bool hasFilteredDistance = false;
   bool beepEnabled = false;
@@ -76,22 +86,38 @@ void clearSonarEchoCapture() {
   portEXIT_CRITICAL(&gSonarEchoMux);
 }
 
-void stopSonar() {
-  if (!gSonar.active) {
+// A new sensor, a fresh start or R: the readings start over. The view and the beep stay.
+void clearSonarReadings() {
+  gSonar.waitingEcho = false;
+  gSonar.hasFilteredDistance = false;
+  gSonar.filteredCm = 0.0f;
+  gSonar.sampleCount = 0;
+  gSonar.sampleHead = 0;
+  gSonar.consecutiveTimeouts = 0;
+  gSonar.lastTriggerUs = micros() - kSonarSampleIntervalUs;
+  gSonar.lastPulseUs = 0;
+  gSonar.lastValidMs = 0;
+  gSonar.state = SonarProximityState::NoEcho;
+  gSonar.lastBeepState = SonarProximityState::NoEcho;
+  clearSonarEchoCapture();
+}
+
+void sonarEchoOff() {
+  if (!gSonar.echoOn) {
     return;
   }
   detachInterrupt(digitalPinToInterrupt(kSonarEchoPin));
   digitalWrite(kSonarTrigPin, LOW);
   pinMode(kSonarTrigPin, INPUT);
   pinMode(kSonarEchoPin, INPUT);
-  gSonar.active = false;
+  gSonar.echoOn = false;
   gSonar.waitingEcho = false;
   clearSonarEchoCapture();
-  appendRuntimeLog("SONAR", "stopped; released G4/G6", false);
+  appendRuntimeLog("SONAR", "released G4/G6", false);
 }
 
-void initSonar() {
-  if (gSonar.active) {
+void sonarEchoOn() {
+  if (gSonar.echoOn) {
     return;
   }
   pinMode(kSonarTrigPin, OUTPUT);
@@ -99,20 +125,36 @@ void initSonar() {
   pinMode(kSonarEchoPin, INPUT);
   clearSonarEchoCapture();
   attachInterrupt(digitalPinToInterrupt(kSonarEchoPin), sonarEchoEdgeIsr, CHANGE);
-  gSonar.active = true;
+  gSonar.echoOn = true;
   gSonar.waitingEcho = false;
   gSonar.lastTriggerUs = micros() - kSonarSampleIntervalUs;
   appendRuntimeLog("SONAR", "HC-SR04 ready TRIG=G4 ECHO=G6", true);
 }
 
-void resetSonar(bool preserveSettings) {
-  bool beepEnabled = preserveSettings && gSonar.beepEnabled;
-  SonarViewMode viewMode = preserveSettings ? gSonar.viewMode : SonarViewMode::Proximity;
-  stopSonar();
-  gSonar = SonarRuntime{};
-  gSonar.beepEnabled = beepEnabled;
-  gSonar.viewMode = viewMode;
-  initSonar();
+void stopSonar() {
+  if (!gSonar.active) {
+    return;
+  }
+  sonarEchoOff();
+  sonarGroveClose();
+  gSonar.active = false;
+  gSonar.pick = sonar::Picker{};
+  appendRuntimeLog("SONAR", "stopped", false);
+}
+
+// Nothing is set up here: the first service looks at Grove before the HC-SR04's pins are used.
+void initSonar() {
+  if (gSonar.active) {
+    return;
+  }
+  gSonar.active = true;
+  gSonar.pick = sonar::Picker{};
+  gSonar.groveAllowed = sonarGroveAllowed();
+  clearSonarReadings();
+  appendRuntimeLog("SONAR",
+                   gSonar.groveAllowed ? "open; M5 unit on Grove or HC-SR04 on EXT"
+                                       : "open; HC-SR04 only, the Lab's relays are on Grove",
+                   true);
 }
 
 float sonarMedianSample() {
@@ -136,10 +178,9 @@ float sonarMedianSample() {
   return (sorted[middle - 1] + sorted[middle]) * 0.5f;
 }
 
-void acceptSonarPulse(uint32_t pulseUs) {
-  float distanceCm = static_cast<float>(pulseUs) / 58.0f;
-  if (!isfinite(distanceCm) || distanceCm < kSonarMinimumCm || distanceCm > kSonarMaximumCm) {
-    return;
+bool acceptSonarDistance(float distanceCm, float maximumCm) {
+  if (!isfinite(distanceCm) || distanceCm < kSonarMinimumCm || distanceCm > maximumCm) {
+    return false;
   }
   gSonar.samples[gSonar.sampleHead] = distanceCm;
   gSonar.sampleHead = (gSonar.sampleHead + 1) % kSonarFilterCapacity;
@@ -153,10 +194,24 @@ void acceptSonarPulse(uint32_t pulseUs) {
   } else {
     gSonar.filteredCm += (medianCm - gSonar.filteredCm) * 0.42f;
   }
-  gSonar.lastPulseUs = pulseUs;
   gSonar.lastValidMs = millis();
   gSonar.consecutiveTimeouts = 0;
+  return true;
 }
+
+void acceptSonarPulse(uint32_t pulseUs) {
+  if (acceptSonarDistance(static_cast<float>(pulseUs) / 58.0f, kSonarMaximumCm)) {
+    gSonar.lastPulseUs = pulseUs;
+  }
+}
+
+void countSonarMiss() {
+  if (gSonar.consecutiveTimeouts < UINT8_MAX) {
+    ++gSonar.consecutiveTimeouts;
+  }
+}
+
+bool sonarOnUnit() { return gSonar.pick.source == sonar::Source::Unit; }
 
 bool sonarEchoFresh(uint32_t nowMs) {
   return gSonar.hasFilteredDistance && nowMs - gSonar.lastValidMs <= kSonarFreshEchoMs;
@@ -207,13 +262,37 @@ void serviceSonarBeep(uint32_t nowMs, SonarProximityState previousState) {
   gSonar.lastBeepState = gSonar.state;
 }
 
-void serviceSonar() {
-  if (gUiMode != UiMode::Sonar) {
-    stopSonar();
+// The M5 unit, while the HC-SR04 is quiet: looking for it, reading it, and noticing it's gone.
+void serviceSonarGrove(uint32_t nowMs) {
+  if (!gSonar.groveAllowed) {
     return;
   }
-  initSonar();
+  uint32_t mm = 0;
+  switch (sonarGroveStep(gSonar.pick, nowMs, sonarEchoFresh(nowMs), mm)) {
+    case sonar::Step::Found:
+      sonarEchoOff();
+      clearSonarReadings();
+      appendRuntimeLog("SONAR", "M5 ultrasonic unit found on Grove", true);
+      setStatus("Sonar: M5 unit on Grove", 1500);
+      break;
+    case sonar::Step::Lost:
+      clearSonarReadings();
+      appendRuntimeLog("SONAR", "M5 unit gone; listening on EXT", true);
+      setStatus("Sonar: unit gone, trying HC-SR04", 1500);
+      break;
+    case sonar::Step::Reading:
+      acceptSonarDistance(static_cast<float>(mm) / 10.0f, kSonarUnitMaximumCm);
+      break;
+    case sonar::Step::Empty:
+      countSonarMiss();
+      break;
+    case sonar::Step::Nothing:
+      break;
+  }
+}
 
+void serviceSonarEcho() {
+  sonarEchoOn();
   uint32_t pulseUs = 0;
   bool pulseReady = false;
   portENTER_CRITICAL(&gSonarEchoMux);
@@ -233,9 +312,7 @@ void serviceSonar() {
   uint32_t nowUs = micros();
   if (gSonar.waitingEcho && nowUs - gSonar.lastTriggerUs > kSonarEchoTimeoutUs) {
     gSonar.waitingEcho = false;
-    if (gSonar.consecutiveTimeouts < UINT8_MAX) {
-      ++gSonar.consecutiveTimeouts;
-    }
+    countSonarMiss();
     clearSonarEchoCapture();
   }
 
@@ -248,6 +325,18 @@ void serviceSonar() {
     digitalWrite(kSonarTrigPin, HIGH);
     delayMicroseconds(10);
     digitalWrite(kSonarTrigPin, LOW);
+  }
+}
+
+void serviceSonar() {
+  if (gUiMode != UiMode::Sonar) {
+    stopSonar();
+    return;
+  }
+  initSonar();
+  serviceSonarGrove(millis());
+  if (!sonarOnUnit()) {
+    serviceSonarEcho();
   }
 
   uint32_t nowMs = millis();
@@ -276,7 +365,9 @@ bool handleSonarKey(char key, const Keyboard_Class::KeysState& keys) {
     return true;
   }
   if (lowerKey == 'r') {
-    resetSonar(true);
+    // Also looks at Grove again straight away, for a unit plugged in a moment ago.
+    clearSonarReadings();
+    gSonar.pick.lookNow();
     setStatus("Sonar reset", 900);
     return true;
   }
@@ -295,6 +386,17 @@ uint16_t sonarStateColor(SonarProximityState state) {
     default:
       return rgb565_local(126, 143, 157);
   }
+}
+
+// After the title: the sensor Sonar is using, or listening for.
+void drawSonarSourceTag(const char* title, uint16_t bg) {
+  auto& d = gCanvas;
+  d.setFont(&fonts::Font2);
+  int x = 14 + d.textWidth(title) + 6;
+  d.setFont(&fonts::Font0);
+  d.setTextColor(rgb565_local(130, 145, 155), bg);
+  d.setCursor(x, 15);
+  d.print(sonarOnUnit() ? "M5 UNIT" : "HC-SR04");
 }
 
 void renderSonarRadarView(uint32_t nowMs, bool fresh, uint16_t accent) {
@@ -316,7 +418,9 @@ void renderSonarRadarView(uint32_t nowMs, bool fresh, uint16_t accent) {
   d.setFont(&fonts::Font2);
   d.setTextColor(cyan, panel);
   d.setCursor(14, 11);
-  d.print("SONAR / RADAR");
+  // No slash, so the sensor's name clears the widest state, TOO CLOSE.
+  d.print("SONAR RADAR");
+  drawSonarSourceTag("SONAR RADAR", panel);
 
   String stateText = sonarStateLabel(gSonar.state);
   d.setFont(&fonts::Font0);
@@ -395,31 +499,31 @@ void renderSonarRadarView(uint32_t nowMs, bool fresh, uint16_t accent) {
   d.drawString("cm", 205, 64);
   d.setTextDatum(top_left);
 
+  // The panel holds 16 characters a line, so each line has one long item.
   d.setFont(&fonts::Font0);
   d.setTextColor(muted, panel2);
-  d.setCursor(129, 76);
+  d.setCursor(125, 76);
   d.print("RANGE ONLY");
-  d.setTextColor(cyan, panel2);
-  String coneLabel = "FWD +/-15";
-  d.setCursor(215 - d.textWidth(coneLabel), 76);
-  d.print(coneLabel);
-  d.setTextColor(accent, panel2);
-  d.setCursor(129, 90);
-  if (fresh) {
-    d.print("echo " + String(static_cast<float>(gSonar.lastPulseUs) / 1000.0f, 2) + "ms");
-  } else {
-    d.print("waiting");
+  if (!sonarOnUnit()) {
+    d.setTextColor(teal, panel2);
+    d.setCursor(219 - d.textWidth("10 Hz"), 76);
+    d.print("10 Hz");
   }
-  d.setTextColor(teal, panel2);
-  d.setCursor(215 - d.textWidth("10 Hz"), 90);
-  d.print("10 Hz");
+  d.setTextColor(accent, panel2);
+  d.setCursor(125, 90);
+  if (!fresh) {
+    d.print("waiting");
+  } else if (sonarOnUnit()) {
+    d.print("on Grove");
+  } else {
+    d.print("echo " + String(static_cast<float>(gSonar.lastPulseUs) / 1000.0f, 2) + "ms");
+  }
 
-  drawTinyFooter(panel, muted, "M proximity   B beep   R reset   Esc", 15, 121, 210);
+  drawTinyFooter(panel, muted, "M proximity  B beep  R reset  Esc", 15, 121, 210);
   d.setFont(&fonts::Font2);
 }
 
 void renderSonarUi() {
-  initSonar();
   auto& d = gCanvas;
   const uint16_t bg = rgb565_local(2, 7, 10);
   const uint16_t panel = rgb565_local(7, 18, 25);
@@ -447,6 +551,7 @@ void renderSonarUi() {
   d.setTextColor(cyan, panel);
   d.setCursor(14, 11);
   d.print("SONAR");
+  drawSonarSourceTag("SONAR", panel);
 
   String stateText = sonarStateLabel(gSonar.state);
   d.setFont(&fonts::Font0);
@@ -512,18 +617,22 @@ void renderSonarUi() {
   }
 
   String echoInfo;
-  if (fresh) {
+  // Listening on EXT with nothing heard yet, either sensor could still be plugged in.
+  const char* where = sonarOnUnit() ? "M5 unit on Grove" : (gSonar.groveAllowed ? "EXT or Grove" : "G4 -> G6");
+  if (fresh && sonarOnUnit()) {
+    echoInfo = "M5 ultrasonic unit on Grove";
+  } else if (fresh) {
     echoInfo = "echo " + String(static_cast<float>(gSonar.lastPulseUs) / 1000.0f, 2) + "ms  |  10 Hz";
   } else if (gSonar.consecutiveTimeouts > 0) {
-    echoInfo = "no echo x" + String(gSonar.consecutiveTimeouts) + "  |  G4 -> G6";
+    echoInfo = "no echo x" + String(gSonar.consecutiveTimeouts) + "  |  " + where;
   } else {
-    echoInfo = "waiting for echo  |  G4 -> G6";
+    echoInfo = String(sonarOnUnit() ? "waiting" : "waiting for echo") + "  |  " + where;
   }
   d.setTextColor(muted, panel);
   d.setCursor(15, 109);
   d.print(fitCurrentFontToWidth(echoInfo, 210));
-  String footer = String("M radar   B beep ") + (gSonar.beepEnabled ? "on" : "off") +
-                  "   R reset   Esc";
+  String footer = String("M radar  B beep ") + (gSonar.beepEnabled ? "on" : "off") +
+                  "  R reset  Esc";
   drawTinyFooter(panel, muted, footer, 15, 121, 210);
   d.setFont(&fonts::Font2);
 

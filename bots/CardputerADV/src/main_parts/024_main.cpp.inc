@@ -316,6 +316,7 @@ void setUiMode(UiMode mode) {
   if (modeChanged && gUiMode == UiMode::Flappy) stopFlappy();
   if (modeChanged && gUiMode == UiMode::Balloon) stopBalloon();
   if (modeChanged && gUiMode == UiMode::BallCatch) stopBallCatch();
+  if (modeChanged && gUiMode == UiMode::Sonar) stopSonar();
   if (modeChanged && labMode(gUiMode)) stopLab();
   if (modeChanged && gUiMode == UiMode::WifiSettings) stopWifiSettings();
   gUiMode = mode;

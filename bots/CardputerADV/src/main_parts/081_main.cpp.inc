@@ -1196,7 +1196,7 @@ char gLabOnceText[lab::kOnceTextChars] = "";  // What it last found, which also 
 bool labOnceInLab() { return labMode(gUiMode) && gLabOpen; }
 bool labHoldsGrove(UiMode mode) {
   return mode == UiMode::AirMusic || mode == UiMode::Flappy || mode == UiMode::Balloon || mode == UiMode::BallCatch ||
-         mode == UiMode::NfcNotes;
+         mode == UiMode::NfcNotes || mode == UiMode::Sonar;
 }
 // Whatever has the mic, the speaker or the whole loop for now, so a check waits rather than poll.
 bool labOnceHeld() {

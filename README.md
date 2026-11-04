@@ -113,7 +113,7 @@ S1-ADV gives you a working device on day one. Then you go as deep as you like: p
 
 | Part | What it unlocks |
 | --- | --- |
-| **Ultrasonic unit** (Unit Sonic I2C, RCWL-9620) | Air Music, hand-flown Flappy Bird, distance rules. **The best first buy** |
+| **Ultrasonic unit** (Unit Sonic I2C, RCWL-9620) | Air Music, hand-flown Flappy Bird, Sonar, distance rules. **The best first buy** |
 | **ENV III** | Blowing on the sensor in Hot Air Balloon, temperature and humidity rules |
 | **Joystick 2** | Steering in Hot Air Balloon and Ball Catch |
 | **NFC Universal unit** (ST25R3916) | NFC Notes: read tags and save notes on them |
@@ -122,7 +122,7 @@ S1-ADV gives you a working device on day one. Then you go as deep as you like: p
 | **Cap LoRa-1262** (about $15) | Mesh text, a radio scanner and GPS. Read the [Mesh note](#good-to-know) first. M5Stack also sells it with the Cardputer as a Mesh Kit |
 | **Grove IR receiver** | Teaching the IR Remote new buttons. Sending needs nothing extra |
 
-RFID Lab (an RC522 reader) and Sonar (a trigger-and-echo ultrasonic sensor) use parts wired to the EXT header instead of the Grove port, and they can't share it with the Cap.
+RFID Lab (an RC522 reader) uses a part wired to the EXT header instead of the Grove port, and it can't share that header with the Cap. Sonar works with the Ultrasonic unit on Grove or with an HC-SR04 wired to the EXT header, and finds whichever is plugged in. Mesh keeps it closed either way, because of the HC-SR04's pins.
 
 ## Set it up
 
