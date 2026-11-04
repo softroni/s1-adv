@@ -130,6 +130,27 @@ void testGps(){
   char text[80];uint8_t sum=0;const char* inner="GNGGA,1,,,,,1,12,,,,,,,";for(const char* c=inner;*c;++c)sum^=uint8_t(*c);
   std::snprintf(text,sizeof(text),"$%s*%02X\n",inner,sum);for(const char* c=text;*c;++c)s.feed(*c,7);
   assert(s.fix.satellites==12);
+  // Direction of travel, which only counts while really moving.
+  auto rmc=[](lab_gps::Parser& g,const char* inner){char line[96];uint8_t x=0;for(const char* c=inner;*c;++c)x^=uint8_t(*c);
+    std::snprintf(line,sizeof(line),"$%s*%02X\n",inner,x);for(const char* c=line;*c;++c)g.feed(*c,9);};
+  lab_gps::Parser h;rmc(h,"GNRMC,1,A,4230.5000,N,07054.0000,W,10.0,359.6,1,,,A");
+  assert(h.fix.courseDeg==0&&h.fix.moving()&&h.fix.speedKmhE1==185);
+  rmc(h,"GNRMC,1,A,4230.5000,N,07054.0000,W,1.0,123.0,1,,,A");assert(h.fix.courseDeg==123&&!h.fix.moving());
+  rmc(h,"GNRMC,1,A,4230.5000,N,07054.0000,W,10.0,,1,,,A");assert(h.fix.courseDeg==-1&&!h.fix.moving());
+  rmc(h,"GNRMC,1,A,4230.5000,N,07054.0000,W,10.0,400,1,,,A");assert(h.fix.courseDeg==-1);
+  rmc(h,"GNRMC,1,A,4230.5000,N,07054.0000,W,-3,90,1,,,A");assert(h.fix.speedKmhE1==0&&!h.fix.moving());
+  rmc(h,"GNRMC,1,A,4230.5000,N,07054.0000,W,10.0,90.0,1,,,A");rmc(h,"GNRMC,1,V,,,,,,,1,,,N");assert(!h.fix.valid&&!h.fix.moving());
+  // Distances: a thousandth of a degree is 111 m north, and less east, the further from the equator.
+  assert(lab_gps::metersBetween(4250833,-7090000,4250833,-7090000)==0);
+  assert(lab_gps::metersBetween(4250833,-7090000,4250933,-7090000)==111);
+  assert(lab_gps::metersBetween(4250833,-7090000,4250833,-7089900)==82);
+  assert(lab_gps::metersBetween(0,0,0,100)==111&&lab_gps::metersBetween(0,0,300,400)==556);
+  assert(lab_gps::metersBetween(0,17999950,0,-17999950)==111);  // The short way, across the date line.
+  assert(lab_gps::metersBetween(4250833,-7090000,4300000,-7090000)==lab_gps::kFarMeters);
+  assert(lab_gps::metersBetween(-9000000,-18000000,9000000,18000000)==lab_gps::kFarMeters);
+  // Every new reading is the GPS's, and needs no port.
+  for(Sig g:{Sig::Satellites,Sig::Speed,Sig::Heading,Sig::SpotDistance})assert(fromGps(g)&&onCardputer(g));
+  assert(!fromGps(Sig::Tilt)&&onCardputer(Sig::Tilt)&&!fromGps(Sig::Spoken)&&!onCardputer(Sig::Distance));
 }
 
 void testRanges(){

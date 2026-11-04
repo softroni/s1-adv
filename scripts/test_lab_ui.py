@@ -259,6 +259,15 @@ struct SerialClass { std::string data; size_t at = 0; bool open = false; int buf
   void setRxBufferSize(int n) { buffer = n; }
   void begin(int b, int, int r, int t) { baud = b; rx = r; tx = t; open = true; }
   void end() { open = false; } int available() { return int(data.size() - at); } int read() { return data[at++]; } } Serial1;
+// NVS, kept in memory: what the Lab keeps on the device rather than on the SD card.
+std::map<std::string, std::map<std::string, int32_t>> gNvs; bool gNvsWritable = true;
+struct Preferences { std::string ns; bool ro = true;
+  bool begin(const char* n, bool readOnly) { if (readOnly && !gNvs.count(n)) return false; ns = n; ro = readOnly; return true; }
+  void end() {}
+  int32_t getInt(const char* k, int32_t d) { auto& m = gNvs[ns]; return m.count(k) ? m[k] : d; }
+  bool getBool(const char* k, bool d) { return getInt(k, d) != 0; }
+  size_t putInt(const char* k, int32_t v) { if (ro || !gNvsWritable) return 0; gNvs[ns][k] = v; return 4; }
+  size_t putBool(const char* k, bool v) { if (ro || !gNvsWritable) return 0; gNvs[ns][k] = v; return 1; } };
 void gpsLine(const std::string& body) {
   uint8_t sum = 0; for (char c : body) sum ^= uint8_t(c);
   char tail[8]; std::snprintf(tail, sizeof(tail), "*%02X\r\n", sum); Serial1.data += "$" + body + tail;
@@ -801,7 +810,7 @@ void testPractice() {
 
 void testRecipes() {
   const int count = gLabBook.count;
-  goToRow(count + 2); show("rules-recipes"); assert(gCanvas.shows("10 ready to go"));
+  goToRow(count + 2); show("rules-recipes"); assert(gCanvas.shows(std::to_string(lab::kRecipeCount) + " ready to go"));
   key(ENTER); assert(gLabUi.view == LabView::Recipes); show("recipes"); assert(gCanvas.shows("Knob to servo") && gCanvas.shows("Turn the knob"));
   for (int i = 0; i < lab::kRecipeCount; ++i) { char name[16]; std::snprintf(name, 16, "recipe-%d", i); show(name); assert(gCanvas.shows(lab::kRecipes[gLabUi.recipeRow].about)); key(DOWN); }
   assert(gLabUi.recipeRow == 0);
@@ -972,7 +981,14 @@ void testSay() {
     esc(); assert(!gLabPlaying && gLabNamed == 0); gLabBook.count = count; gLabUi.view = LabView::Rules; goToRow(gLabBook.count + 1);
     // The steps put it in words.
     labWizardStart(-1, nullptr); gLabWizard.rule.cond[0].sig = Sig::Spoken; gLabWizard.step = LabStep::Op; assert(labWizardRowCount() == 2 && std::string(labWizardRow(0)) == "is said");
-    gLabWizard.step = LabStep::Sig; assert(labWizardRowCount() == lab::kSigCount); gLabWizard.step = LabStep::Source; assert(labWizardRowCount() == lab::kSigCount - 1); gLabWizard = LabWizard{}; gLabUi.view = LabView::Rules;
+    gLabWizard.step = LabStep::Sig; assert(labWizardRowCount() == lab::kSigCount); gLabWizard.step = LabStep::Source; assert(labWizardRowCount() == lab::kSigCount - 1);
+    // Follow lists every sensor but a rule's name, which isn't last any more, and maps both ways.
+    for (int row = 0; row < labWizardRowCount(); ++row) {
+      const Sig sig = labWizardSourceAt(row);
+      assert(sig != Sig::Spoken && sig < Sig::Count && labWizardSourceRow(sig) == row && std::string(labWizardRow(row)) == lab::info(sig).name);
+    }
+    assert(labWizardSourceAt(labWizardRowCount() - 1) == Sig::SpotDistance && std::string(labWizardRow(labWizardRowCount() - 1)) == "From spot");
+    gLabWizard = LabWizard{}; gLabUi.view = LabView::Rules;
   }
   // The diary: a line an hour while rules play, kept for questions, and nowhere else.
   {
@@ -1823,12 +1839,56 @@ void testStickLearn() {
   gUnits.present = plugged; gHubUnit.here = hub;
 }
 
+// The GPS's readings beyond satellites. They run last, so the time they take moves no other scene.
+void testGpsReadings() {
+  setUiMode(UiMode::LabDevices); run(1500); gLabUi.devRow = 0; pickDevice(Dev::Gps);
+  gpsLine("GNGGA,123519,4230.5000,N,07054.0000,W,1,08,0.9,180.0,M,0,M,,");
+  gpsLine("GNRMC,123519,A,4230.5000,N,07054.0000,W,10.0,084.4,230394,,,A"); run(30); renderLabUi();
+  // Moving, so a heading; no spot yet, so From spot has no reading rather than a made-up one.
+  assert(gCanvas.shows("84` E") && gCanvas.shows("not saved") && gCanvas.shows("S save spot  M Mesh  ESC back"));
+  assert(gLabInputs.get(Sig::Speed).value == 19 && gLabInputs.get(Sig::Heading).value == 84 && !gLabInputs.get(Sig::SpotDistance).live);
+  // S saves where it is now, on the device, and the distance starts at nothing.
+  key('s'); show("gps-spot-saved"); assert(gCanvas.shows("Spot saved") && gNvs["labspot"]["set"] == 1);
+  assert(gNvs["labspot"]["lat"] == 4250833 && gNvs["labspot"]["lon"] == -7090000);
+  run(30); assert(gLabInputs.get(Sig::SpotDistance).live && gLabInputs.get(Sig::SpotDistance).value == 0);
+  // A thousandth of a degree north is 111 m.
+  gpsLine("GNRMC,123520,A,4230.5600,N,07054.0000,W,10.0,000.0,230394,,,A"); run(2100); show("gps");
+  assert(gLabInputs.get(Sig::SpotDistance).value == 111 && gCanvas.shows("111 m") && gCanvas.shows("0` N"));
+  // Standing still, a GPS still names a direction, and it wanders, so there's no heading.
+  gpsLine("GNRMC,123521,A,4230.5600,N,07054.0000,W,0.5,211.0,230394,,,A"); run(30); renderLabUi();
+  assert(!gLabInputs.get(Sig::Heading).live && gLabInputs.get(Sig::Speed).value == 1 && gCanvas.shows("still"));
+  gpsLine("GNRMC,123521,A,4230.5600,N,07054.0000,W,20.0,,230394,,,A"); run(30); assert(!gLabInputs.get(Sig::Heading).live);
+  // Far away reads as the most a reading can hold.
+  gpsLine("GNRMC,123522,A,4300.0000,N,07054.0000,W,0.0,,230394,,,A"); run(30); renderLabUi();
+  assert(gLabInputs.get(Sig::SpotDistance).value == lab_gps::kFarMeters && gCanvas.shows("32+ km"));
+  gpsLine("GNRMC,123522,A,4231.5000,N,07054.0000,W,0.0,,230394,,,A"); run(30); renderLabUi(); assert(gCanvas.shows("1.8 km"));
+  // The saved spot comes back after a restart.
+  gLabSpot = LabSpot{}; gLabSpotLoaded = false; run(30); assert(gLabSpot.set && gLabSpot.latE5 == 4250833);
+  // Losing the fix loses every reading that needs one, and S says why it can't save.
+  gpsLine("GNRMC,123523,V,,,,,,,230394,,,N"); run(30);
+  assert(gLabInputs.get(Sig::Satellites).live && !gLabInputs.get(Sig::Speed).live && !gLabInputs.get(Sig::Heading).live && !gLabInputs.get(Sig::SpotDistance).live);
+  key('s'); show("gps-no-fix"); assert(gCanvas.shows("No fix yet") && gNvs["labspot"]["lat"] == 4250833);
+  run(2100); renderLabUi(); assert(gCanvas.shows("First fix can take minutes outdoors"));
+  gpsLine("GNRMC,123524,A,4230.5000,N,07054.0000,W,0.0,,230394,,,A"); run(30);
+  gNvsWritable = false; key('s'); renderLabUi(); assert(gCanvas.shows("Couldn't save") && gLabSpot.latE5 == 4250833); gNvsWritable = true;
+  // The guide's picture: moving north, 111 m from the spot.
+  gpsLine("GNRMC,123525,A,4230.5000,N,07054.0000,W,10.0,000.0,230394,,,A"); key('s'); run(2100);
+  gpsLine("GNGGA,123526,4230.5600,N,07054.0000,W,1,08,0.9,180.0,M,0,M,,");
+  gpsLine("GNRMC,123526,A,4230.5600,N,07054.0000,W,10.0,000.0,230394,,,A"); run(30); show("doc-gps");
+  assert(gCanvas.shows("111 m") && gCanvas.shows("0` N") && gCanvas.shows("18.5 km/h"));
+  esc();
+  // Speed from another screen opens the GPS for it, and like tilt leaves the port alone.
+  { onceOnGrove(); const int opens = gAirSensor.opens, bus = gUnits.commands; Serial1.open = false;
+    gpsLine("GNRMC,123519,A,4230.5000,N,07054.0000,W,10.0,084.4,230394,,,A");
+    assert(onceAsk(onceRead(Sig::Speed)) == "Speed 19 km/h."); assert(gAirSensor.opens == opens && gUnits.commands == bus && gGrove.frames == 0);
+    assert(!Serial1.open); }
+}
 int main(int argc, char** argv) {
   if (argc > 1) gDump = std::fopen(argv[1], "w");
   for (bool& live : gLabHistoryLive) live = false;
-  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testGuidePictures(); testSequences(); testChat(); testOnce(); testPlayFromChat(); setUiMode(UiMode::LabRules); run(1500); testGuards(); testLedPower(); testStickLearn();
+  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testGuidePictures(); testSequences(); testChat(); testOnce(); testPlayFromChat(); setUiMode(UiMode::LabRules); run(1500); testGuards(); testLedPower(); testStickLearn(); testGpsReadings();
   if (gDump) std::fclose(gDump);
-  std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, sequences on their own and from a rule, what the chat can see and offer, one check from the chat, a sequence played from the chat, the lamp and AC guards, units leaving and returning, saving and damage, the LED waiting for full screen light, learning which way the joystick is held, and every screen stays on the display");
+  std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, sequences on their own and from a rule, what the chat can see and offer, one check from the chat, a sequence played from the chat, the lamp and AC guards, units leaving and returning, saving and damage, the LED waiting for full screen light, learning which way the joystick is held, GPS speed, heading and distance from a saved spot, and every screen stays on the display");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-lab-ui-') as directory:

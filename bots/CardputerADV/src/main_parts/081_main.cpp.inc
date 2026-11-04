@@ -117,6 +117,12 @@ uint32_t gLabDiaryMs = 0;
 uint16_t gLabDiaryMotions = 0, gLabDiaryFires = 0;  // What's already been counted.
 lab::Drive gLabDrive[lab::kOutCount];
 lab_gps::Parser gLabGps;
+// The spot From spot measures to. It stays on the device, in NVS: never in the Lab's file on the
+// SD card, and never in anything sent to Claude, which only ever sees the distance.
+struct LabSpot { bool set = false; int32_t latE5 = 0, lonE5 = 0; };
+LabSpot gLabSpot;
+bool gLabSpotLoaded = false;
+constexpr const char* kLabSpotNs = "labspot";
 bool gLabFound[lab::kUnitCount] = {};
 uint8_t gLabProbe = 0;
 uint8_t gLabHubFirmware = 0;       // 0 until the hub says.
@@ -410,12 +416,50 @@ void labReadTilt(uint32_t now) {
   gLabInputs.set(lab::Sig::Tilt, static_cast<int16_t>(asinf(clampValue(ay, -1.0f, 1.0f)) * 57.3f), now);
   gLabTiltSide = static_cast<int16_t>(asinf(clampValue(ax, -1.0f, 1.0f)) * 57.3f);
 }
+void labLoadSpot() {
+  if (gLabSpotLoaded) return;
+  gLabSpotLoaded = true;
+  Preferences prefs;
+  if (!prefs.begin(kLabSpotNs, true)) return;  // Nothing saved yet.
+  const int32_t lat = prefs.getInt("lat", 0), lon = prefs.getInt("lon", 0);
+  gLabSpot.set = prefs.getBool("set", false) && lat >= -9000000 && lat <= 9000000 && lon >= -18000000 && lon <= 18000000;
+  gLabSpot.latE5 = lat;
+  gLabSpot.lonE5 = lon;
+  prefs.end();
+}
+// Saves where the GPS is now as the spot, and says whether it could.
+bool labSaveSpot() {
+  if (!gLabGps.hearing(millis()) || !gLabGps.fix.valid) return false;
+  Preferences prefs;
+  if (!prefs.begin(kLabSpotNs, false)) return false;
+  const int32_t lat = gLabGps.fix.latE5, lon = gLabGps.fix.lonE5;
+  const bool saved = prefs.putInt("lat", lat) && prefs.putInt("lon", lon) && prefs.putBool("set", true);
+  prefs.end();
+  if (saved) gLabSpot = LabSpot{true, lat, lon};
+  gLabSpotLoaded = true;
+  return saved;
+}
 void labReadGps(uint32_t now) {
   for (int i = 0; i < kLabGpsBytesPerPass && Serial1.available() > 0; ++i) {
     gLabGps.feed(static_cast<char>(Serial1.read()), now);
   }
-  if (gLabGps.hearing(now)) gLabInputs.set(lab::Sig::Satellites, gLabGps.fix.satellites, now);
+  const bool hearing = gLabGps.hearing(now);
+  const lab_gps::Fix& fix = gLabGps.fix;
+  if (hearing) gLabInputs.set(lab::Sig::Satellites, fix.satellites, now);
   else gLabInputs.lose(lab::Sig::Satellites);
+  // The rest need a fix: with none, a rule sees no reading, never a stale one.
+  const bool fixed = hearing && fix.valid;
+  if (fixed) gLabInputs.set(lab::Sig::Speed, static_cast<int16_t>((fix.speedKmhE1 + 5) / 10), now);
+  else gLabInputs.lose(lab::Sig::Speed);
+  if (fixed && fix.moving()) gLabInputs.set(lab::Sig::Heading, fix.courseDeg, now);
+  else gLabInputs.lose(lab::Sig::Heading);
+  labLoadSpot();
+  if (fixed && gLabSpot.set) {
+    gLabInputs.set(lab::Sig::SpotDistance,
+                   static_cast<int16_t>(lab_gps::metersBetween(gLabSpot.latE5, gLabSpot.lonE5, fix.latE5, fix.lonE5)), now);
+  } else {
+    gLabInputs.lose(lab::Sig::SpotDistance);
+  }
 }
 
 // --- Parts on the Grove wires -------------------------------------------------------------------
@@ -1284,7 +1328,10 @@ void labOnceOpen() {
   gLabOnceBorrowed = true;
   gLabOncePort = gLabOnce.needsPort();
   if (gLabOncePort) labPartsFresh();
-  gLabOnceGps = gLabOnce.asksFor(lab::Sig::Satellites);
+  gLabOnceGps = false;
+  for (uint8_t i = 0; i < lab::kSigCount; ++i) {
+    if (lab::fromGps(static_cast<lab::Sig>(i)) && gLabOnce.asksFor(static_cast<lab::Sig>(i))) gLabOnceGps = true;
+  }
   if (gLabOnceGps) labGpsOn();
 }
 // A wire with nothing on it still reads as something, so a part there needs a clean look first.

@@ -2,6 +2,7 @@
 // Reads the position lines from the GPS in the Cap LoRa-1262. Characters go in one at a time, so
 // the main loop never waits for a sentence. A line with a bad checksum is dropped, because a
 // wrong position looks just like a right one.
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,13 +10,32 @@
 namespace lab_gps {
 constexpr int kLineChars = 96;
 constexpr uint32_t kSilentMs = 3000;
+// Standing still, a GPS still reports a direction, and it wanders, so heading counts from here up.
+constexpr uint16_t kHeadingMinKmhE1 = 30;
+constexpr int32_t kFarMeters = 32000;  // Readings are 16-bit, so anything further reads as this.
 
 struct Fix {
   bool valid = false;
   uint8_t satellites = 0;
   int32_t latE5 = 0, lonE5 = 0;   // Degrees times 100000.
   uint16_t speedKmhE1 = 0;        // Km/h times 10.
+  int16_t courseDeg = -1;         // Direction of travel, 0 north to 359, or -1 when the GPS gives none.
+  bool moving() const { return valid && speedKmhE1 >= kHeadingMinKmhE1 && courseDeg >= 0; }
 };
+
+// Metres between two points, flat-earth, which is well inside a metre over the distances that
+// matter here, and capped at kFarMeters.
+inline int32_t metersBetween(int32_t latE5a, int32_t lonE5a, int32_t latE5b, int32_t lonE5b) {
+  const double kMetersPerE5 = 1.11195;  // 1e-5 of a degree along a meridian.
+  const double midLat = (latE5a + latE5b) / 2.0 / 100000.0 * 3.14159265358979 / 180.0;
+  double dLon = static_cast<double>(lonE5b) - lonE5a;
+  if (dLon > 18000000) dLon -= 36000000;  // The short way round, across the date line.
+  else if (dLon < -18000000) dLon += 36000000;
+  const double north = (static_cast<double>(latE5b) - latE5a) * kMetersPerE5;
+  const double east = dLon * kMetersPerE5 * cos(midLat);
+  const double meters = sqrt(north * north + east * east);
+  return meters >= kFarMeters ? kFarMeters : static_cast<int32_t>(meters + 0.5);
+}
 
 // "4230.5000" is 42 degrees and 30.5 minutes, and the degrees end two digits before the dot.
 inline bool parseCoordinate(const char* text, char hemisphere, int32_t& out) {
@@ -96,7 +116,10 @@ class Parser {
     fix.valid = true;
     fix.latE5 = lat;
     fix.lonE5 = lon;
-    fix.speedKmhE1 = static_cast<uint16_t>(atof(fields[7]) * 18.52 + 0.5);  // From knots.
+    const double knots = atof(fields[7]);
+    fix.speedKmhE1 = knots > 0 && knots < 3000 ? static_cast<uint16_t>(knots * 18.52 + 0.5) : 0;  // From knots.
+    const double course = fields[8] && fields[8][0] ? atof(fields[8]) : -1;
+    fix.courseDeg = course >= 0 && course < 360 ? static_cast<int16_t>(static_cast<int>(course + 0.5) % 360) : -1;
   }
   char mLine[kLineChars] = {};
   int mLength = 0;

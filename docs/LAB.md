@@ -53,7 +53,7 @@ More that needs nothing plugged in:
 | Servo | An angle you can set | Yellow wire |
 | LED strip | Color, brightness and how many LEDs are lit | Yellow wire |
 | 2 relays | Two switches | Both wires |
-| Cap LoRa-1262 | GPS position, speed and satellites | Fits on the Cardputer, not on Grove |
+| Cap LoRa-1262 | GPS position, speed, heading, distance from a saved spot, and satellites | Fits on the Cardputer, not on Grove |
 
 The Lab can also reach a smartLamp over Wi-Fi, and a TCL or Daikin air conditioner by infrared.
 
@@ -118,7 +118,7 @@ The dot beside each device tells you what the Lab knows:
 <tr>
 <td><img src="assets/lab/hub.png" alt="I/O hub screen listing what's on each port" width="100%"><br><sub><b>I/O hub.</b> What's on each port, and its firmware.</sub></td>
 <td><img src="assets/lab/tilt.png" alt="Tilt screen showing 30 degrees" width="100%"><br><sub><b>Tilt.</b> Built in. Tip the Cardputer to see it move.</sub></td>
-<td><img src="assets/lab/gps.png" alt="GPS screen with satellites, speed, latitude and longitude" width="100%"><br><sub><b>LoRa Cap GPS.</b> Satellites, position and speed. M opens Mesh.</sub></td>
+<td><img src="assets/lab/gps.png" alt="GPS screen with satellites, speed, position, heading north and 111 m from the saved spot" width="100%"><br><sub><b>LoRa Cap GPS.</b> Satellites, position, speed, heading, and how far you are from your spot. S saves the spot, M opens Mesh.</sub></td>
 </tr>
 <tr>
 <td><img src="assets/lab/led.png" alt="Cardputer LED screen, on and green" width="100%"><br><sub><b>Cardputer LED.</b> Built in. Left and right change the color, and Space turns it off or on. The screen goes to full brightness while it's lit.</sub></td>
@@ -217,12 +217,22 @@ Relays, lamp power and the air conditioners are simply on or off, so they can on
 | Knob, Light, Motion | Strip color, Strip bright, Strip length |
 | Stick X, Stick Y, Stick button | Relay 1, Relay 2 |
 | Tilt, Satellites | Built-in LED, Speaker |
-| Its name, said aloud | Lamp power, Lamp bright |
-| | TCL AC, Daikin AC |
+| Speed, Heading, From spot ([GPS](#gps-readings)) | Lamp power, Lamp bright |
+| Its name, said aloud | TCL AC, Daikin AC |
 | | Say a phrase |
 | | Play a [sequence](#sequences) |
 
 You can save up to 8 rules.
+
+### GPS readings
+
+With the Cap LoRa-1262 fitted and a fix, which needs the sky, rules can use three more readings besides **Satellites**:
+
+- **Speed**, in km/h.
+- **Heading**, the way you're moving: 0 is north, 90 east, 180 south and 270 west. A GPS standing still still names a direction, and it wanders, so Heading only reads above 3 km/h.
+- **From spot**, how many metres you are from a spot you saved. Stand where you want it, open **LoRa Cap GPS** in Devices and press **S**. Pressing S again somewhere else moves it. Beyond 32 km it reads 32000.
+
+With no fix, none of the three reads, so a rule waits rather than acting on an old position. The spot stays on the Cardputer: it isn't in the Lab's file on the SD card, and Claude only ever sees the distance. Rules only run while the Lab is open, so take the Cardputer along with rules playing.
 
 ### Recipes
 
@@ -242,6 +252,8 @@ Open **Recipes** from the Rules list. Enter adds one, and it's then a rule like 
 | Tilt to servo | Tip the Cardputer to turn the servo | Servo |
 | Dark lamp | Dark room turns the smartLamp on | Light, smartLamp |
 | Hot room | Over 28 °C turns the TCL AC on | ENV III, TCL air conditioner |
+| Speed beep | Over 25 km/h, the speaker beeps | Cap LoRa-1262 |
+| Near the spot | Near your saved spot: green LED | Cap LoRa-1262, with a [spot saved](#gps-readings) |
 
 **Air theremin** is the cheapest place to start, because it needs one sensor and uses the Cardputer's own speaker.
 

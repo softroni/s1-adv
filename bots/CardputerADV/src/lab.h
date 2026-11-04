@@ -11,7 +11,7 @@ namespace lab {
 // --- What can be read -----------------------------------------------------------------------
 // New signals go at the end, because saved rules store these numbers.
 enum class Sig : uint8_t { Distance, Temperature, Humidity, Knob, Light, Motion, StickX, StickY, StickPress, Tilt,
-                           Satellites, Spoken, Count };
+                           Satellites, Spoken, Speed, Heading, SpotDistance, Count };
 constexpr uint8_t kSigCount = static_cast<uint8_t>(Sig::Count);
 
 // lo to hi is what a follow spreads across its output. A reading can go past it. `step` is how
@@ -31,7 +31,14 @@ constexpr SigInfo kSigs[kSigCount] = {
     {"tilt", "Tilt", "deg", -90, 90, 5, false},
     {"satellites", "Satellites", "", 0, 32, 1, false},
     {"spoken", "Its name", "", 0, 1, 1, true},  // On once the rule's name is said, off when said again.
+    {"speed", "Speed", "km/h", 0, 100, 2, false},
+    {"heading", "Heading", "deg", 0, 359, 10, false},  // Only while moving: 0 north, 90 east.
+    {"spot_distance", "From spot", "m", 0, 1000, 5, false},  // From the spot saved on the GPS screen.
 };
+// The ones the Cap's GPS gives. They need no Grove port, and nothing reads them without the Cap.
+constexpr bool fromGps(Sig sig) {
+  return sig == Sig::Satellites || sig == Sig::Speed || sig == Sig::Heading || sig == Sig::SpotDistance;
+}
 constexpr const SigInfo& info(Sig sig) { return kSigs[static_cast<uint8_t>(sig)]; }
 
 // --- What can be driven ---------------------------------------------------------------------
@@ -552,7 +559,7 @@ struct Recipe {
 constexpr Action setTo(Out out, int16_t value) { return Action{out, How::Set, value, Sig::Knob}; }
 constexpr Action follow(Out out, Sig source) { return Action{out, How::Follow, 0, source}; }
 constexpr Action oppose(Out out, Sig source) { return Action{out, How::FollowBack, 0, source}; }
-constexpr int kRecipeCount = 10;
+constexpr int kRecipeCount = 12;
 constexpr Recipe kRecipes[kRecipeCount] = {
     {"Knob to servo", "Turn the knob and the servo follows", 2000, {Sig::Knob, Op::Changes, 0},
      follow(Out::Servo, Sig::Knob), false, {}},
@@ -574,6 +581,10 @@ constexpr Recipe kRecipes[kRecipeCount] = {
      setTo(Out::LampPower, 1), false, {}},
     {"Hot room", "Over 28 C turns the TCL AC on", 30000, {Sig::Temperature, Op::Above, 28},
      setTo(Out::AcTcl, 1), false, {}},
+    {"Speed beep", "Over 25 km/h, the speaker beeps", 1000, {Sig::Speed, Op::Above, 25},
+     setTo(Out::Tone, 1200), false, {}},
+    {"Near the spot", "Near your saved spot: green LED", 2000, {Sig::SpotDistance, Op::Below, 30},
+     setTo(Out::Led, 120), false, {}},
 };
 inline Rule recipeRule(int index) {
   const Recipe& recipe = kRecipes[index];
@@ -1367,7 +1378,7 @@ inline bool decodeSequences(const uint8_t* bytes, size_t length, Sequence* seqs,
 constexpr uint8_t kOnceReads = 3;
 constexpr size_t kOnceTextChars = 240;  // The longest report: six readings and three things done.
 constexpr bool onceCanDrive(Out out) { return out == Out::Servo || isStrip(out) || out == Out::Led || out == Out::Tone; }
-constexpr bool onCardputer(Sig sig) { return sig == Sig::Tilt || sig == Sig::Satellites; }
+constexpr bool onCardputer(Sig sig) { return sig == Sig::Tilt || fromGps(sig); }
 constexpr Part partOf(Out out) { return out == Out::Servo ? Part::Servo : isStrip(out) ? Part::Strip : Part::None; }
 
 struct Once {

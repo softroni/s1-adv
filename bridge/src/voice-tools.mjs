@@ -9,6 +9,8 @@ export const LAB_RULE_POLICY =
   "\"do\":[{\"output\":\"strip_color\",\"set\":0},{\"output\":\"servo\",\"follow\":\"knob\"}]}]]] " +
   "Sensors: distance (cm), temperature (C), humidity (%), knob (%), light (%), tilt (degrees), satellites, " +
   "stick_x and stick_y (-100 to 100), and motion and stick_button, which are on or off. " +
+  "From the GPS, with a fix: speed (km/h), heading (degrees, 0 north and 90 east, only while moving), and " +
+  "spot_distance (meters from the spot the owner saved on the GPS screen, so near means under, like 30). " +
   "There is also spoken, which is on or off: saying the rule's name while rules play turns it on, and saying it " +
   "again turns it off, so for something like \"when I say movie time\" name the rule Movie time. " +
   "A test is under or over with a value, on or off for the on or off sensors, or changes. " +

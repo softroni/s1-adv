@@ -46,6 +46,8 @@ struct LabUi {
   int practiceCond = 0;
   String playNote;              // What came of a spoken command, for a moment.
   uint32_t playNoteUntilMs = 0;
+  String spotNote;              // What came of saving the GPS spot, for a moment.
+  uint32_t spotNoteUntilMs = 0;
   LabVoice voice = LabVoice::NewRule;
   LabView sayBack = LabView::Rules;  // Where Esc goes from the Say screen.
   bool sayFailed = false;            // There's an answer to show, or a reason there isn't one.
@@ -706,8 +708,23 @@ void renderLabGps() {
   };
   labStat(6, 58, "LATITUDE", fix.valid ? coordinate(fix.latE5) : String("--"));
   labStat(120, 58, "LONGITUDE", fix.valid ? coordinate(fix.lonE5) : String("--"));
-  if (!fix.valid) labTextAt(&fonts::Font0, 6, 96, "First fix can take minutes outdoors", kLabAmber);
-  labKeys("M open Mesh  ESC back");
+  const bool noting = !gLabUi.spotNote.isEmpty() && int32_t(now - gLabUi.spotNoteUntilMs) < 0;
+  if (!fix.valid) {
+    labTextAt(&fonts::Font0, 6, 96, noting ? gLabUi.spotNote : String("First fix can take minutes outdoors"), kLabAmber);
+  } else {
+    static constexpr const char* kCompass[8] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+    labStat(6, 92, "HEADING", fix.moving() ? String(fix.courseDeg) + "` " + kCompass[((fix.courseDeg + 22) % 360) / 45]
+                                           : String("still"));
+    String away = "not saved";
+    labLoadSpot();
+    if (gLabSpot.set) {
+      const int32_t m = lab_gps::metersBetween(gLabSpot.latE5, gLabSpot.lonE5, fix.latE5, fix.lonE5);
+      away = m >= lab_gps::kFarMeters ? String("32+ km") : m >= 1000 ? String(m / 1000) + "." + String(m % 1000 / 100) + " km"
+                                                                    : String(m) + " m";
+    }
+    labStat(120, 92, "FROM SPOT", noting ? gLabUi.spotNote : away, noting ? kLabAmber : TFT_WHITE);
+  }
+  labKeys("S save spot  M Mesh  ESC back");
 }
 void renderLabLed() {
   auto& d = gCanvas;
@@ -972,11 +989,22 @@ int labWizardOutRow(Out out) {
   for (uint8_t i = 0; i < static_cast<uint8_t>(out); ++i) row += labWizardOffers(static_cast<Out>(i)) ? 1 : 0;
   return row < labWizardOutRows() ? row : 0;
 }
+// A rule's name has no value to follow, so the follow list skips it, wherever it sits in the list.
+Sig labWizardSourceAt(int row) {
+  const int spoken = static_cast<int>(Sig::Spoken);
+  return static_cast<Sig>(row < spoken ? row : row + 1);
+}
+int labWizardSourceRow(Sig sig) {
+  const int i = static_cast<int>(sig), spoken = static_cast<int>(Sig::Spoken);
+  return i < spoken ? i : i > spoken ? i - 1 : 0;
+}
+// Which sensor a row of the What or Follow step stands for.
+Sig labWizardSigAt(int row) { return gLabWizard.step == LabStep::Source ? labWizardSourceAt(row) : static_cast<Sig>(row); }
 int labWizardRowCount() {
   const LabWizard& w = gLabWizard;
   switch (w.step) {
     case LabStep::Sig: return lab::kSigCount;
-    case LabStep::Source: return lab::kSigCount - 1;  // A rule's name has no value to follow.
+    case LabStep::Source: return lab::kSigCount - 1;  // All but a rule's name: see labWizardSourceAt.
     case LabStep::Op: return lab::info(w.rule.cond[w.cond].sig).onOff ? 2 : 3;
     case LabStep::Out: return labWizardOutRows();
     case LabStep::PickSeq: return gLabSeqCount;
@@ -988,7 +1016,7 @@ int labWizardRowCount() {
 String labWizardRow(int i) {
   const LabWizard& w = gLabWizard;
   switch (w.step) {
-    case LabStep::Sig: case LabStep::Source: return lab::kSigs[i].name;
+    case LabStep::Sig: case LabStep::Source: return lab::info(labWizardSigAt(i)).name;
     case LabStep::Op: {
       if (w.rule.cond[w.cond].sig == Sig::Spoken) return i == 0 ? "is said" : "hasn't been said";
       if (lab::info(w.rule.cond[w.cond].sig).onOff) return i == 0 ? "turns on" : "turns off";
@@ -1026,7 +1054,7 @@ void labWizardPreselect() {
       if (lab::info(action.out).onOff) w.row = action.value ? 0 : 1;
       else w.row = static_cast<int>(action.how);
       break;
-    case LabStep::Source: w.row = static_cast<int>(action.source); break;
+    case LabStep::Source: w.row = labWizardSourceRow(action.source); break;
     case LabStep::MoreConds: w.row = w.cond + 1 < w.rule.conds ? 1 : 0; break;
     case LabStep::MoreActions: w.row = w.action + 1 < w.rule.actions ? 1 : 0; break;
     case LabStep::Join: w.row = w.rule.any ? 0 : 1; break;
@@ -1183,7 +1211,7 @@ void labWizardPick() {
       labWizardActionLine();
       break;
     case LabStep::Source:
-      action.source = static_cast<Sig>(pick);
+      action.source = labWizardSourceAt(pick);
       labWizardActionLine();
       break;
     case LabStep::MoreActions:
@@ -1292,7 +1320,7 @@ void renderLabWizard() {
     gCanvas.setFont(&fonts::FreeSansBold9pt7b);
     labTextAt(&fonts::FreeSansBold9pt7b, 8, y + 2, fitCurrentFontToWidth(labWizardRow(i), w.step == LabStep::Sig || w.step == LabStep::Source ? 150 : 218), chosen ? TFT_BLACK : TFT_WHITE);
     if (w.step == LabStep::Sig || w.step == LabStep::Source) {
-      const Sig sig = static_cast<Sig>(i);
+      const Sig sig = labWizardSigAt(i);
       const lab::Reading& reading = gLabInputs.get(sig);
       labTextRight(&fonts::Font2, 228, y + 2, reading.live ? labValueText(sig, reading.value) : String("--"), chosen ? TFT_BLACK : reading.live ? kLabGreen : kLabMuted);
     }
@@ -1544,6 +1572,11 @@ void labDeviceKey(char key, char lower, bool left, bool right, bool up, bool dow
       return;
     case Dev::Gps:
       if (lower == 'm') setUiMode(UiMode::Mesh);
+      else if (lower == 's') {
+        // Where the Cardputer is now becomes the spot, for From spot and the Near the spot recipe.
+        gLabUi.spotNote = labSaveSpot() ? "Spot saved" : gLabGps.fix.valid ? "Couldn't save" : "No fix yet";
+        gLabUi.spotNoteUntilMs = millis() + 2000;
+      }
       return;
     case Dev::Lamp:
       if (enter) setUiMode(UiMode::SmartLamp);

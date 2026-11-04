@@ -289,7 +289,8 @@ off when you leave a test screen.
 - **2 relays:** 1 and 2 switch them. Both open when you leave.
 - **I/O hub:** what's on each port, and its firmware.
 - **NFC:** Enter opens NFC Notes, which is the full test for that unit.
-- **LoRa Cap GPS:** satellites, position and speed, with the Cap fitted. M opens Mesh.
+- **LoRa Cap GPS:** satellites, position, speed, heading and distance from your spot, with the Cap
+  fitted. S saves where you are as the spot. M opens Mesh.
 - **Cardputer LED and Speaker:** the built-in ones. They work with nothing plugged in.
 - **smartLamp and IR for AC:** Enter opens their own apps.
 

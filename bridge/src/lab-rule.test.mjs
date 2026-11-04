@@ -15,7 +15,7 @@ test("the prompt names exactly the sensors and outputs the firmware accepts", as
   };
   const sensors = table("SigInfo kSigs");
   const outputs = table("OutInfo kOuts");
-  assert.equal(sensors.length, 12);
+  assert.equal(sensors.length, 15);
   assert.equal(outputs.length, 14);
   for (const key of [...sensors, ...outputs]) {
     assert.match(LAB_RULE_POLICY, new RegExp(`\\b${key}\\b`, "u"), key);
