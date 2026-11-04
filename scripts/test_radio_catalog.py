@@ -8,8 +8,10 @@ src = root / 'bots/CardputerADV/src'
 code = r'''
 #include "radio_catalog.h"
 #include "radio_countries.h"
+#include "radio_image.h"
 #include <cassert>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 using namespace radio_catalog;
@@ -170,7 +172,32 @@ int main() {
   assert(std::string(radio_countries::name("US")) == "United States" && std::string(radio_countries::name("RU")) == "Russia");
   for (const char* bad : {"gb", "ZZ", "UK", "G", "GBR", ""}) assert(!radio_countries::name(bad));
   assert(!radio_countries::name(nullptr) && std::string(radio_countries::alias("UK")) == "GB" && std::string(radio_countries::alias("US")) == "US");
-  puts("PASS radio station list: the built-in file, typed files, limits, safe saved lines, genre choice, line removal, selection and the country table");
+  // Dithering to the canvas's 8-bit colours: exact colours stay exact and clean, and a colour
+  // between two levels comes out averaging to itself, not rounded to one of them.
+  {
+    using namespace radio_image;
+    uint8_t out[96 * 96];
+    for (const int c : {0, 255}) { dither332(96, [&](int, int, int& r, int& g, int& b) { r = g = b = c; }, out); for (uint8_t v : out) assert(v == to332(c, c, c)); }
+    dither332(40, [](int, int, int& r, int& g, int& b) { r = 255; g = 0; b = 0; }, out); for (int i = 0; i < 1600; ++i) assert(out[i] == 0xE0);
+    dither332(64, [](int, int, int& r, int& g, int& b) { r = 140; g = 140; b = 140; }, out);
+    long sr = 0, sg = 0, sb = 0; bool mixed = false;
+    for (int i = 0; i < 64 * 64; ++i) { int r, g, b; from332(out[i], r, g, b); sr += r; sg += g; sb += b; mixed = mixed || out[i] != out[0]; }
+    assert(mixed && std::abs(sr / 4096 - 140) <= 3 && std::abs(sg / 4096 - 140) <= 3 && std::abs(sb / 4096 - 140) <= 4);
+    // A gradient: every value's a real 332 one, and the row averages follow the gradient.
+    dither332(96, [](int x, int, int& r, int& g, int& b) { r = g = b = x * 255 / 95; }, out);
+    for (int x = 0; x < 96; x += 19) { long sum = 0; for (int y = 0; y < 96; ++y) { int r, g, b; from332(out[y * 96 + x], r, g, b); sum += g; } assert(std::abs(int(sum / 96) - x * 255 / 95) <= 22); }
+    dither332(0, [](int, int, int&, int&, int&) { assert(false); }, out);
+    dither332(97, [](int, int, int&, int&, int&) { assert(false); }, out);
+    // A JPEG's size, read past the headers before it; only baseline counts.
+    const unsigned char jpg[] = {0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x04, 0x4A, 0x46, 0xFF, 0xC0, 0x00, 0x11, 0x08, 0x00, 0x30, 0x00, 0x40, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1};
+    uint16_t w = 0, h = 0; assert(jpegSize(jpg, sizeof(jpg), w, h) && w == 64 && h == 48);
+    unsigned char progressive[sizeof(jpg)]; memcpy(progressive, jpg, sizeof(jpg)); progressive[9] = 0xC2; assert(!jpegSize(progressive, sizeof(jpg), w, h));
+    assert(!jpegSize(jpg, 12, w, h) && !jpegSize(jpg + 2, sizeof(jpg) - 2, w, h) && !jpegSize(nullptr, 0, w, h));
+    unsigned char lying[sizeof(jpg)]; memcpy(lying, jpg, sizeof(jpg)); lying[5] = 0xFF; assert(!jpegSize(lying, sizeof(jpg), w, h));
+    uint32_t random = 5; unsigned char junk[64];
+    for (int i = 0; i < 20000; ++i) { for (auto& b : junk) { random = random * 1664525u + 1013904223u; b = uint8_t(random >> 24); } junk[0] = 0xFF; junk[1] = 0xD8; jpegSize(junk, sizeof(junk), w, h); }
+  }
+  puts("PASS radio station list: the built-in file, typed files, limits, safe saved lines, genre choice, line removal, selection, the country table, dithering and JPEG sizes");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-radio-catalog-') as d:

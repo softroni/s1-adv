@@ -188,7 +188,7 @@ int main(int argc,char**argv){
   assert(k.count()==2&&std::string(f[0].logo)=="https://a.example/logo.png"&&std::string(f[1].logo)=="http://c.example/c.ico"&&std::string(f[1].url)=="https://c.example/live");
   char u[kUrlSize];Url p;
   assert(logoImageUrl(u,sizeof(u),"https://radioparadise.com/apple-touch-icon.png")&&
-         std::string(u)=="http://wsrv.nl/?url=https://radioparadise.com/apple-touch-icon.png&w=96&h=96&fit=cover&output=jpg&q=85"&&parseUrl(u,p)&&std::string(p.host)=="wsrv.nl");
+         std::string(u)=="http://wsrv.nl/?url=https://radioparadise.com/apple-touch-icon.png&w=96&h=96&fit=cover&we&output=jpg&q=85"&&parseUrl(u,p)&&std::string(p.host)=="wsrv.nl");
   assert(logoImageUrl(u,sizeof(u),"http://a.example/x.png?s=1&t=2#z")&&std::string(u).find("url=http://a.example/x.png%3Fs%3D1%26t%3D2%23z&w=96")!=std::string::npos&&parseUrl(u,p));
   for(const char* bad:{"","ftp://a.example/x.png","data:image/png;base64,AAAA","https://a.example/a b.png","https://a.example/\xD0\x96.png"})assert(!logoImageUrl(u,sizeof(u),bad));
   assert(!logoImageUrl(u,sizeof(u),("https://a.example/"+std::string(500,'x')).c_str()));

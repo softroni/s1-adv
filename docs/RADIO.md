@@ -43,16 +43,18 @@ While the station plays, the bars sit in a dark strip along the logo's bottom.
   your list, the radio asks the directory, first by the stream's address and then by the
   station's name. A name only counts on the stream's own website, because names like Rock FM
   aren't unique.
-- [wsrv.nl](https://wsrv.nl), a free image service, shrinks the logo to the tile's size and
-  sends it as a 96×96 JPEG over plain HTTP, whatever format the logo was in. The radio decodes
-  it once at that size for the visuals and at the tile's size, and keeps both on the card in
-  `/radio/logos/`, ready to draw. A logo fetched by 0.2.288 or earlier is only the tile's size,
-  so it's fetched once more; the tile shows it until then.
+- [wsrv.nl](https://wsrv.nl), a free image service, sends the logo as a JPEG of up to 96×96
+  over plain HTTP, whatever format it was in, and never enlarges it. A logo under 60 pixels,
+  like most websites' little icons, would only be a blur, so that station keeps its initials.
+- The radio decodes the logo once at each size it's drawn (the tile's, and the visuals' three)
+  and dithers it to the screen's 256 colours, so shading and greys don't band. It keeps them on
+  the card in `/radio/art/`, ready to draw. `/radio/logos/`, from versions before dithering, is
+  no longer read and can be deleted; those stations' logos are fetched again.
 - It only fetches while nothing is playing, after you've rested on a station for a second on
   the play screen, so browsing doesn't fetch one per station and a stream never waits for one.
   Pressing Enter stops a fetch at once.
 - A station with no logo is noted, so it isn't asked about again. If the network fails, it
-  tries again the next time the Cardputer starts. Delete `/radio/logos/` to fetch them all
+  tries again the next time the Cardputer starts. Delete `/radio/art/` to fetch them all
   afresh.
 - The logo addresses go to wsrv.nl, so like the search words they're not private. With no SD
   card there's nowhere to keep logos, so the tiles show initials.
@@ -61,8 +63,10 @@ While the station plays, the bars sit in a dark strip along the logo's bottom.
 
 Press **V** while it plays for a full-screen picture of the music, with the station above and
 the song below. **V** again changes the look, and its name shows next to the clock for a moment.
-**I** shows the station's logo large on the left, with the look beside it, or hides it to give
-the look the whole width; a station with no logo shows its tile large instead. **Esc** goes back.
+**I** shows the station's logo with the look, and **I** again hides it; it starts hidden. Each
+look gives the logo its own place: framed beside Bars and Wave, in the middle of Mirror's
+spectrum with the low notes either side of it, and as the round label of Rings' record. A
+station with no logo shows its tile there instead, initials and all. **Esc** goes back.
 The first time you open them, a card shows these keys. The look and the logo setting are kept
 on the card in `/radio/visuals.txt`. Enter, the station keys and
 the volume keys work there as they do on the play screen.
@@ -164,7 +168,7 @@ other line stay exactly as you typed them.
 - A line it can't read is skipped, and the radio tells you how many it skipped.
 - Only `http://` addresses play. `https://`, AAC, HLS (`.m3u8`) and playlist files (`.pls`,
   `.m3u`) don't.
-- `/radio/logos/` holds the stations' logos.
+- `/radio/art/` holds the stations' logos.
 - `/radio/last.txt` holds the last station you played, and `/radio/country.txt` the country
   you last searched in.
 

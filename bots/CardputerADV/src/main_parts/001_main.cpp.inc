@@ -82,6 +82,7 @@
 #include "weather_gps.h"
 #include "units.h"
 #include "radio_catalog.h"
+#include "radio_image.h"
 #include "radio_countries.h"
 #include "internet_radio_transport.h"
 #include "podcast_catalog.h"
@@ -121,7 +122,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.291-dev"
+#define APP_VERSION "0.2.292-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"

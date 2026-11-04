@@ -1,4 +1,5 @@
 #include "internet_radio_transport.h"
+#include "radio_image.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -239,7 +240,9 @@ bool logoImageUrl(char* out, size_t room, const char* logo) {
   for (const char* p = logo; *p; ++p) if (static_cast<unsigned char>(*p) <= ' ' || static_cast<unsigned char>(*p) >= 127) return false;
   // Square and cropped, at the visuals' size; the tile's is drawn from it here. A JPEG, which
   // needs only a small decoder.
-  return composed(out, room, "http://wsrv.nl/?url=", logo, "&w=96&h=96&fit=cover&output=jpg&q=85");
+  // we: never enlarged, so a 16-pixel website icon comes back small and is turned down, rather
+  // than blown up into a blur.
+  return composed(out, room, "http://wsrv.nl/?url=", logo, "&w=96&h=96&fit=cover&we&output=jpg&q=85");
 }
 bool logoByStreamUrl(char* out, size_t room, const char* stream) {
   return stream && *stream && composed(out, room, "http://all.api.radio-browser.info/json/stations/byurl?url=", stream, "");
@@ -750,6 +753,10 @@ Error logo(WiFiClient& tcp) {
   // The service answers 404 or 400 for a logo it can't fetch, so there's nothing to get.
   if(e==Error::Http && logoStatus>=400 && logoStatus<500) { free(jpeg); logoOutcome.store(LogoResult::Missing); return Error::None; }
   if(e!=Error::None || cancel.load() || size<4) { free(jpeg); return e!=Error::None ? e : cancel.load() ? Error::None : Error::Malformed; }
+  // A logo under 60 pixels would only be a blur at the sizes drawn, and the decoder reads only
+  // baseline JPEGs, so either is as good as no logo: the station keeps its initials.
+  uint16_t width=0, height=0;
+  if(!radio_image::jpegSize(jpeg,size,width,height) || width<60 || height<60) { free(jpeg); logoOutcome.store(LogoResult::Missing); return Error::None; }
   // Only what it needs is kept: the service's JPEGs are about 2 KB of the 16 KB allowed.
   if(auto* fit=static_cast<uint8_t*>(realloc(jpeg,size))) jpeg=fit;
   logoData=jpeg; logoLength.store(size); logoOutcome.store(LogoResult::Found);

@@ -49,20 +49,24 @@ uint32_t gRadioLookShownMs = 0, gRadioVisualAtMs = 0;
 // The card with the keys shows once, the first time the visuals open on this Cardputer.
 bool gRadioVisualsKnown = false;
 uint32_t gRadioCardUntilMs = 0;
-// I shows the station's logo large beside the look, or hides it. What changed last is named
-// beside the clock for a moment: a look, or the logo going on or off.
-bool gRadioVisualLogo = true;
+// I shows the station's logo with the look, or hides it; it starts hidden. What changed last
+// is named beside the clock for a moment: a look, or the logo going on or off.
+bool gRadioVisualLogo = false;
 const char* gRadioNamed = "";
 uint8_t gRadioShown[internet_radio::kBands] = {}, gRadioPeaks[internet_radio::kBands] = {};
-// Logos, kept on the card as the canvas's own 8-bit colours, ready to draw: 60x60, 3600 bytes.
-constexpr const char* kRadioLogoDir = "/radio/logos";
-// The tile's 60x60, and the visuals' 96x96, 9216 bytes, held only while they show it.
-constexpr int16_t kRadioLogoSide = 60, kRadioBigSide = 96;
-constexpr size_t kRadioLogoBytes = size_t(kRadioLogoSide) * kRadioLogoSide, kRadioBigBytes = size_t(kRadioBigSide) * kRadioBigSide;
+// Station art, kept on the card in the canvas's own 8-bit colours, dithered, at each size it's
+// drawn: the tile's 60, and the visuals' 80 beside Bars and Wave, 64 amid Mirror and a 48 label
+// in Rings. /radio/logos, from before dithering, is no longer read.
+constexpr const char* kRadioLogoDir = "/radio/art";
+constexpr int16_t kRadioLogoSide = 60;
+constexpr int16_t kRadioArtSides[] = {60, 80, 64, 48};
+constexpr size_t kRadioLogoBytes = size_t(kRadioLogoSide) * kRadioLogoSide, kRadioBigBytes = 80 * 80;
+int16_t radioArtSide(uint8_t look) { return look == 1 ? 64 : look == 3 ? 48 : 80; }
 enum class RadioLogoFile : uint8_t { Unknown, Have, None, Absent };  // Absent: no file, so ask.
 uint8_t* gRadioLogo = nullptr;           // The shown station's, when the card has it.
-uint8_t* gRadioBigLogo = nullptr;        // Its large one, while the visuals show it.
+uint8_t* gRadioBigLogo = nullptr;        // The visuals' size for the look, while they show it.
 uint32_t gRadioBigLogoFor = 0;
+int16_t gRadioBigLogoSide = 0;
 uint32_t gRadioLogoFor = 0;              // Whose: its stream address's hash.
 RadioLogoFile gRadioLogoFile = RadioLogoFile::Unknown;
 uint32_t gRadioLogoAsked = 0;            // The station a logo job is for.
@@ -293,6 +297,7 @@ void radioRelease() {
   free(gRadioBigLogo);
   gRadioBigLogo = nullptr;
   gRadioBigLogoFor = 0;
+  gRadioBigLogoSide = 0;
   gRadioLogoFor = gRadioLogoAsked = 0;
   gRadioLogoFile = RadioLogoFile::Unknown;
   gRadioLogoQueuedUrl = "";
@@ -311,13 +316,15 @@ void radioReadVisuals() {
   file.read(reinterpret_cast<uint8_t*>(text), sizeof(text) - 1);
   file.close();
   if (text[0] >= '0' && text[0] < char('0' + kRadioLookCount)) gRadioLook = uint8_t(text[0] - '0');
-  if (text[1] == ' ' && (text[2] == '0' || text[2] == '1')) gRadioVisualLogo = text[2] == '1';
+  // The logo setting counts only from a file written since logos start hidden: one from before
+  // has it on because that was the default then, not because anyone chose it.
+  gRadioVisualLogo = text[1] == ' ' && text[2] == '1' && text[3] == ' ' && text[4] == '2';
 }
 void radioWriteVisuals() {
   if (!gRadioListOnCard) return;
   File file = SD.open(kRadioVisualsPath, FILE_WRITE);
   if (!file) return;
-  const char text[4] = {char('0' + gRadioLook), ' ', gRadioVisualLogo ? '1' : '0', '\n'};
+  const char text[6] = {char('0' + gRadioLook), ' ', gRadioVisualLogo ? '1' : '0', ' ', '2', '\n'};
   file.write(reinterpret_cast<const uint8_t*>(text), sizeof(text));
   file.close();
 }
@@ -681,17 +688,17 @@ String radioLogoPath(uint32_t hash, const char* kind) {
   return String(path);
 }
 #ifndef RADIO_HOST_TEST
-// The service's JPEG, decoded once into the canvas's 8-bit colours at a side and a scale: the
-// 96x96 as it is for the visuals, and scaled to 60 for the tile, which looks as good as the
-// service's own 60x60.
+// The service's JPEG, decoded once at a side and a scale into 16-bit colour, then dithered
+// down to the canvas's 8 bits so shading and greys don't band.
 bool radioDecodeLogo(const uint8_t* jpeg, size_t size, uint8_t* out, int16_t side, float scale) {
   M5Canvas logo(&M5Cardputer.Display);
-  logo.setColorDepth(8);
+  logo.setColorDepth(16);
   logo.setPsram(false);
   if (!logo.createSprite(side, side)) return false;
   logo.fillSprite(TFT_BLACK);
   const bool ok = logo.drawJpg(jpeg, size, 0, 0, side, side, 0, 0, scale, scale);
-  if (ok) memcpy(out, logo.getBuffer(), size_t(side) * side);
+  if (ok) radio_image::dither332(side, [&](int x, int y, int& r, int& g, int& b) {
+    const auto c = logo.readPixelRGB(x, y); r = c.r; g = c.g; b = c.b; }, out);
   logo.deleteSprite();
   return ok;
 }
@@ -712,7 +719,7 @@ void radioShowLogoFor(const radio_catalog::Station* station) {
   gRadioRestSinceMs = millis();
   gRadioLogoFile = RadioLogoFile::Unknown;
   if (!hash || !gRadioListOnCard) { free(gRadioLogo); gRadioLogo = nullptr; return; }
-  File file = SD.open(radioLogoPath(hash, "332").c_str(), "r");
+  File file = SD.open(radioLogoPath(hash, "60").c_str(), "r");
   if (file && file.size() == kRadioLogoBytes) {
     if (!gRadioLogo) gRadioLogo = static_cast<uint8_t*>(malloc(kRadioLogoBytes));
     if (gRadioLogo && file.read(gRadioLogo, kRadioLogoBytes) == kRadioLogoBytes) gRadioLogoFile = RadioLogoFile::Have;
@@ -722,9 +729,6 @@ void radioShowLogoFor(const radio_catalog::Station* station) {
     free(gRadioLogo);
     gRadioLogo = nullptr;
   }
-  // Have means both sizes: a logo fetched before the visuals had one large is fetched again,
-  // and the tile shows the old one meanwhile.
-  if (gRadioLogoFile == RadioLogoFile::Have && !SD.exists(radioLogoPath(hash, "96").c_str())) gRadioLogoFile = RadioLogoFile::Unknown;
   if (gRadioLogoFile != RadioLogoFile::Have)
     gRadioLogoFile = SD.exists(radioLogoPath(hash, "no").c_str()) ? RadioLogoFile::None : RadioLogoFile::Absent;
 }
@@ -734,15 +738,18 @@ void serviceRadioBigLogo() {
   const auto* station = gRadioSelection.station();
   const bool want = gRadioView == RadioView::Visual && gRadioVisualLogo && station && gRadioListOnCard;
   const uint32_t hash = want ? radioHash(station->url) : 0;
-  if (hash == gRadioBigLogoFor) return;
+  const int16_t side = want ? radioArtSide(gRadioLook) : 0;
+  if (hash == gRadioBigLogoFor && side == gRadioBigLogoSide) return;
   gRadioBigLogoFor = hash;
+  gRadioBigLogoSide = side;
   free(gRadioBigLogo);
   gRadioBigLogo = nullptr;
   if (!hash) return;
-  File file = SD.open(radioLogoPath(hash, "96").c_str(), "r");
-  if (file && file.size() == kRadioBigBytes) {
-    gRadioBigLogo = static_cast<uint8_t*>(malloc(kRadioBigBytes));
-    if (gRadioBigLogo && file.read(gRadioBigLogo, kRadioBigBytes) != kRadioBigBytes) { free(gRadioBigLogo); gRadioBigLogo = nullptr; }
+  const size_t bytes = size_t(side) * side;
+  File file = SD.open(radioLogoPath(hash, String(side).c_str()).c_str(), "r");
+  if (file && file.size() == bytes) {
+    gRadioBigLogo = static_cast<uint8_t*>(malloc(bytes));
+    if (gRadioBigLogo && file.read(gRadioBigLogo, bytes) != bytes) { free(gRadioBigLogo); gRadioBigLogo = nullptr; }
   }
   if (file) file.close();
 }
@@ -762,13 +769,18 @@ void serviceRadioLogos() {
       const uint8_t* jpeg = internet_radio::logoJpeg(size);
       uint8_t* pixels = static_cast<uint8_t*>(malloc(kRadioLogoBytes));
       uint8_t* big = static_cast<uint8_t*>(malloc(kRadioBigBytes));
-      const bool decoded = pixels && big && jpeg && radioDecodeLogo(jpeg, size, big, kRadioBigSide, 1.0f) &&
-                           radioDecodeLogo(jpeg, size, pixels, kRadioLogoSide, float(kRadioLogoSide) / kRadioBigSide);
+      uint16_t width = 0, height = 0;
       const bool room = pixels && big;  // Out of memory isn't the logo's fault: try again later.
-      if (decoded) radioWriteLogoFile(hash, "96", big, kRadioBigBytes);
+      bool decoded = room && jpeg && radio_image::jpegSize(jpeg, size, width, height);
+      // The larger sizes first; the tile's last, so a part-written set is never taken for whole.
+      for (size_t i = 1; decoded && i <= sizeof(kRadioArtSides) / sizeof(kRadioArtSides[0]); ++i) {
+        const int16_t side = kRadioArtSides[i % (sizeof(kRadioArtSides) / sizeof(kRadioArtSides[0]))];
+        uint8_t* into = side == kRadioLogoSide ? pixels : big;
+        decoded = radioDecodeLogo(jpeg, size, into, side, float(side) / float(min(width, height))) &&
+                  radioWriteLogoFile(hash, String(side).c_str(), into, size_t(side) * side);
+      }
       free(big);
       if (decoded) {
-        radioWriteLogoFile(hash, "332", pixels, kRadioLogoBytes);
         if (hash == gRadioLogoFor) { free(gRadioLogo); gRadioLogo = pixels; pixels = nullptr; gRadioLogoFile = RadioLogoFile::Have; radioInvalidate(); }
       } else if (room) {
         radioWriteLogoFile(hash, "no", nullptr, 0);  // A JPEG that won't decode won't next time.
@@ -789,7 +801,7 @@ void serviceRadioLogos() {
       gRadioSearchPending || gRadioSearching || !gRadioListOnCard || !radioStartAllowed()) return;
   if (!gRadioLogoQueuedUrl.isEmpty()) {
     const uint32_t hash = radioHash(gRadioLogoQueuedUrl.c_str());
-    if (!SD.exists(radioLogoPath(hash, "96").c_str()) &&
+    if (!SD.exists(radioLogoPath(hash, "60").c_str()) &&
         internet_radio::startLogo(gRadioLogoQueuedUrl.c_str(), gRadioLogoQueuedName.c_str(), gRadioLogoQueuedLogo.c_str())) gRadioLogoAsked = hash;
     gRadioLogoQueuedUrl = "";
     return;
@@ -1371,31 +1383,42 @@ void renderRadioRemove() {
   d.print("From stations.txt on the card");
   drawBigNotice("Y remove   any other key keeps", amber);
 }
-// The visuals' logo, its corners rounded like the tile's. With no logo, a large tile.
-void drawRadioBigLogo(int16_t x, int16_t y, const char* name, const char* genre, const uint8_t* logo) {
+// Station art in the visuals: the logo, framed in its genre's colour, square with rounded
+// corners or round as a record's label. With no logo, its tile at that size, initials and all.
+void drawRadioArt(int16_t x, int16_t y, int16_t side, bool round, const char* name, const char* genre, const uint8_t* art) {
   auto& d = gCanvas;
-  if (logo) {
-    d.pushImage(x, y, kRadioBigSide, kRadioBigSide, reinterpret_cast<const lgfx::rgb332_t*>(logo));
-    static const uint8_t kCorner[12] = {8, 6, 5, 4, 3, 2, 2, 1, 1, 1, 0, 0};
-    for (int i = 0; i < 12; ++i) {
-      if (!kCorner[i]) continue;
-      d.fillRect(x, y + i, kCorner[i], 1, TFT_BLACK); d.fillRect(x + kRadioBigSide - kCorner[i], y + i, kCorner[i], 1, TFT_BLACK);
-      d.fillRect(x, y + kRadioBigSide - 1 - i, kCorner[i], 1, TFT_BLACK); d.fillRect(x + kRadioBigSide - kCorner[i], y + kRadioBigSide - 1 - i, kCorner[i], 1, TFT_BLACK);
+  const uint16_t ink = radioGenreInk(genre);
+  const float r = side / 2.0f;
+  if (art) {
+    d.pushImage(x, y, side, side, reinterpret_cast<const lgfx::rgb332_t*>(art));
+    // Black outside the shape, then a frame: the corners' curve, or the whole circle.
+    const float corner = round ? r : side / 8.0f;
+    for (int i = 0; i < int(corner + 0.5f); ++i) {
+      const float dy = corner - i - 0.5f;
+      const int16_t cut = int16_t(corner - sqrtf(max(0.0f, corner * corner - dy * dy)) + 0.5f);
+      if (cut <= 0) continue;
+      d.fillRect(x, y + i, cut, 1, TFT_BLACK); d.fillRect(x + side - cut, y + i, cut, 1, TFT_BLACK);
+      d.fillRect(x, y + side - 1 - i, cut, 1, TFT_BLACK); d.fillRect(x + side - cut, y + side - 1 - i, cut, 1, TFT_BLACK);
     }
+    if (round) d.drawCircle(x + side / 2, y + side / 2, side / 2, ink);
+    else d.drawRoundRect(x, y, side, side, side / 8, ink);
     return;
   }
-  d.fillRoundRect(x, y, kRadioBigSide, kRadioBigSide, 12, radioGenreInk(genre));
+  if (round) d.fillCircle(x + side / 2, y + side / 2, side / 2, ink);
+  else d.fillRoundRect(x, y, side, side, side / 8, ink);
   const String initials = radioInitials(name);
-  if (initials.isEmpty()) {  // A note, as on the tile, twice the size.
-    d.fillCircle(x + 40, y + 62, 11, TFT_BLACK);
-    d.fillRect(x + 47, y + 26, 5, 36, TFT_BLACK);
-    d.fillRect(x + 47, y + 26, 18, 6, TFT_BLACK);
+  d.setTextColor(TFT_BLACK);
+  if (initials.isEmpty()) {  // A note, as on the tile.
+    const int16_t u = side / 16;
+    d.fillCircle(x + side * 5 / 12, y + side * 2 / 3, max<int16_t>(3, u * 2), TFT_BLACK);
+    d.fillRect(x + side * 5 / 12 + u * 2 - 1, y + side / 4, max<int16_t>(2, u), side * 5 / 12, TFT_BLACK);
     return;
   }
+  // Font4 at whatever size fills about half the art.
+  const float size = side >= 80 ? 2.0f : side >= 64 ? 1.5f : 1.0f;
   d.setFont(&fonts::Font4);
-  d.setTextSize(2);
-  d.setTextColor(TFT_BLACK);
-  d.setCursor(x + (kRadioBigSide - d.textWidth(initials)) / 2, y + (kRadioBigSide - 52) / 2);
+  d.setTextSize(size);
+  d.setCursor(x + (side - d.textWidth(initials)) / 2, y + int16_t((side - 26 * size) / 2));
   d.print(initials);
   d.setTextSize(1);
   d.setFont(&fonts::Font2);
@@ -1421,11 +1444,15 @@ void renderRadioVisual() {
     gRadioShown[i] = uint8_t(max(target, fallen));
     gRadioPeaks[i] = uint8_t(max<int>(gRadioShown[i], int(gRadioPeaks[i]) - 2 * int(ticks)));
   }
-  // With the logo on, it takes the left and the look plays in what's left.
+  // With the logo on, each look gives it a place of its own: framed beside Bars and Wave, in
+  // the middle of Mirror's spectrum, and as the label of Rings' record.
   const auto* station = gRadioSelection.station();
   const bool logo = gRadioVisualLogo && station;
-  const int16_t x0 = logo ? 112 : 8, w = logo ? 120 : 224;
-  if (logo) drawRadioBigLogo(8, 18, station->name, gRadioSelection.genreName(), gRadioBigLogo && gRadioBigLogoFor == radioHash(station->url) ? gRadioBigLogo : nullptr);
+  const uint8_t* art = logo && gRadioBigLogo && gRadioBigLogoFor == radioHash(station->url) && gRadioBigLogoSide == radioArtSide(gRadioLook) ? gRadioBigLogo : nullptr;
+  const char* genre = station ? gRadioSelection.genreName() : "";
+  const bool beside = logo && (gRadioLook == 0 || gRadioLook == 2);
+  const int16_t x0 = beside ? 100 : 8, w = beside ? 132 : 224;
+  if (beside) drawRadioArt(10, 26, 80, false, station->name, genre, art);
   const int16_t bottom = 114, mid = 66, height = 94;
   switch (gRadioLook) {
     case 0: {  // A spectrum, low notes on the left, with caps on the bars' recent highs.
@@ -1439,15 +1466,26 @@ void renderRadioVisual() {
       }
       break;
     }
-    case 1: {  // The same mirrored about the middle, twice as fine when it has the whole width.
-      const int n = w >= 200 ? 32 : 16;
-      const int16_t gap = w >= 200 ? 2 : 1, bar = (w - (n - 1) * gap) / n, left = x0 + (w - (n * bar + (n - 1) * gap)) / 2;
-      d.drawFastHLine(x0, mid, w, dim);
-      for (int j = 0; j < n; ++j) {
-        const int band = n == 32 ? j / 2 : j;
-        const int a = gRadioShown[band], b = gRadioShown[min(15, band + 1)];
-        const int16_t half = int16_t(((n == 32 && (j & 1)) ? (a + b) / 2 : a) * 46 / 255);
-        if (half > 0) d.fillRect(left + j * (bar + gap), mid - half, bar, half * 2 + 1, rgb565_local(88 - 41 * j / (n - 1), 240 - 13 * j / (n - 1), 141 + 114 * j / (n - 1)));
+    case 1: {  // The spectrum mirrored about the middle line.
+      const auto ink = [&](int j, int n) { return rgb565_local(88 - 41 * j / (n - 1), 240 - 13 * j / (n - 1), 141 + 114 * j / (n - 1)); };
+      if (logo) {
+        // The logo in the middle, the low notes beside it and the high ones outward either side.
+        d.drawFastHLine(8, mid, 76, dim);
+        d.drawFastHLine(156, mid, 76, dim);
+        for (int i = 0; i < int(internet_radio::kBands); ++i) {
+          const int16_t half = int16_t(gRadioShown[i] * 46 / 255);
+          if (half <= 0) continue;
+          d.fillRect(162 + i * 4, mid - half, 3, half * 2 + 1, ink(i, 16));
+          d.fillRect(75 - i * 4, mid - half, 3, half * 2 + 1, ink(i, 16));
+        }
+        drawRadioArt(88, 34, 64, false, station->name, genre, art);
+        break;
+      }
+      d.drawFastHLine(8, mid, 224, dim);
+      for (int j = 0; j < 32; ++j) {
+        const int a = gRadioShown[j / 2], b = gRadioShown[min(15, j / 2 + 1)];
+        const int16_t half = int16_t(((j & 1) ? (a + b) / 2 : a) * 46 / 255);
+        if (half > 0) d.fillRect(9 + j * 7, mid - half, 5, half * 2 + 1, ink(j, 32));
       }
       break;
     }
@@ -1467,18 +1505,22 @@ void renderRadioVisual() {
       }
       break;
     }
-    default: {  // Bass, middle and treble as rings in the Pulse colours, a dot for the level.
+    default: {  // Bass, middle and treble as rings in the Pulse colours.
       int bass = 0, mids = 0, highs = 0;
       for (int i = 0; i < 4; ++i) bass += gRadioShown[i];
       for (int i = 4; i < 10; ++i) mids += gRadioShown[i];
       for (int i = 10; i < 16; ++i) highs += gRadioShown[i];
-      const int16_t cx = x0 + w / 2;
-      const int16_t rb = int16_t(8 + bass / 4 * 38 / 255), rm = int16_t(6 + mids / 6 * 30 / 255), rh = int16_t(4 + highs / 6 * 22 / 255);
-      d.drawCircle(cx, mid, 46, dim);
-      d.drawCircle(cx, mid, rb, cyan); d.drawCircle(cx, mid, rb - 1, cyan);
-      d.drawCircle(cx, mid, rm, violet); d.drawCircle(cx, mid, rm - 1, violet);
-      d.drawCircle(cx, mid, rh, amber); d.drawCircle(cx, mid, rh - 1, amber);
-      d.fillCircle(cx, mid, 2, live ? white : dim);
+      bass /= 4; mids /= 6; highs /= 6;
+      // Round the logo as its label, they spin out from it; without one, from a dot.
+      const int16_t rb = logo ? int16_t(36 + bass * 10 / 255) : int16_t(8 + bass * 38 / 255);
+      const int16_t rm = logo ? int16_t(31 + mids * 8 / 255) : int16_t(6 + mids * 30 / 255);
+      const int16_t rh = logo ? int16_t(27 + highs * 6 / 255) : int16_t(4 + highs * 22 / 255);
+      d.drawCircle(120, mid, 46, dim);
+      d.drawCircle(120, mid, rb, cyan); d.drawCircle(120, mid, rb - 1, cyan);
+      d.drawCircle(120, mid, rm, violet); d.drawCircle(120, mid, rm - 1, violet);
+      d.drawCircle(120, mid, rh, amber); d.drawCircle(120, mid, rh - 1, amber);
+      if (logo) drawRadioArt(96, 42, 48, true, station->name, genre, art);
+      else d.fillCircle(120, mid, 2, live ? white : dim);
       break;
     }
   }
@@ -1507,7 +1549,7 @@ void renderRadioVisual() {
   d.setCursor(kBigLeft, wide ? 120 : 118);
   d.print(song ? radioMarquee(status, 222) : radioFit(status, 222));
   // The first time only: what the look is called and the keys, for a few seconds.
-  // Over the look, beside the logo when it shows.
+  // Over the look, beside the logo when it's beside it.
   if (int32_t(gRadioCardUntilMs - now) > 0) {
     const int16_t cx = x0 + w / 2;
     d.fillRoundRect(cx - 58, 40, 116, 52, 6, TFT_BLACK);

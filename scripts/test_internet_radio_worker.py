@@ -147,14 +147,17 @@ int main(int argc,char**argv){
  assert(internet_radio::startSearch(true,"jazz"));execute();assert(internet_radio::foundCount()==2);internet_radio::clearFound();
  // Logos. Given an address, it asks the image service for a small JPEG of it.
  using internet_radio::LogoResult;
- const std::string jpeg(1700,'\xAB');
+ // A JPEG as far as the size check reads it: its start-of-frame says 96x96.
+ auto jpegOf=[](int side){std::string j="\xFF\xD8\xFF\xC0";const unsigned char sof[]={0x00,0x11,0x08,0,uint8_t(side),0,uint8_t(side),3,1,0x22,0,2,0x11,1,3,0x11,1};
+  j.append(reinterpret_cast<const char*>(sof),sizeof(sof));j.resize(1700,'\xAB');return j;};
+ const std::string jpeg=jpegOf(96);
  const std::string image="HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: 1700\r\n\r\n"+jpeg;
  auto jsonReply=[](const std::string&b){return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"+b;};
  const char* stream="http://ice2.somafm.com/groovesalad-128-mp3";
  requests.clear();replies={image};assert(internet_radio::startLogo(stream,"Groove Salad","https://radioparadise.com/apple-touch-icon.png"));
  assert(internet_radio::fetchingLogo()&&internet_radio::logoResult()==LogoResult::None&&!internet_radio::start("http://radio.example/stream"));
- execute();{size_t n=0;const uint8_t*p=internet_radio::logoJpeg(n);assert(internet_radio::logoResult()==LogoResult::Found&&p&&n==1700&&p[0]==0xAB);}
- assert(requests.size()==1&&requests[0].rfind("GET /?url=https://radioparadise.com/apple-touch-icon.png&w=96&h=96&fit=cover&output=jpg&q=85 ",0)==0);
+ execute();{size_t n=0;const uint8_t*p=internet_radio::logoJpeg(n);assert(internet_radio::logoResult()==LogoResult::Found&&p&&n==1700&&p[0]==0xFF&&p[1699]==0xAB);}
+ assert(requests.size()==1&&requests[0].rfind("GET /?url=https://radioparadise.com/apple-touch-icon.png&w=96&h=96&fit=cover&we&output=jpg&q=85 ",0)==0);
  assert(requests[0].find("Host: wsrv.nl:80\r\n")!=npos&&requests[0].find("Accept: image/jpeg\r\n")!=npos&&requests[0].find("Icy-MetaData")==npos);
  internet_radio::clearLogo();{size_t n=1;assert(!internet_radio::logoJpeg(n)&&!n&&internet_radio::logoResult()==LogoResult::None);}
  // Not given: by the stream's address first.
@@ -171,6 +174,12 @@ int main(int argc,char**argv){
  assert(internet_radio::startLogo("http://nashe1.hostingradio.ru/rock-128.mp3","Rock FM",""));execute();assert(internet_radio::logoResult()==LogoResult::Missing);
  replies={"HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n\r\n{}"};
  assert(internet_radio::startLogo(stream,"G","https://dead.example/x.png"));execute();assert(internet_radio::logoResult()==LogoResult::Missing);
+ // A logo too small to look right, or not a JPEG the device can decode: Missing, so the
+ // station keeps its initials rather than show a blur.
+ for(const std::string&body:{jpegOf(32),std::string(1700,'\xAB'),std::string("\xFF\xD8\xFF\xC2\x00\x11\x08\x00\x60\x00\x60",11)+std::string(1689,'\x01')}){
+  replies={"HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: "+std::to_string(body.size())+"\r\n\r\n"+body};
+  assert(internet_radio::startLogo(stream,"G","https://a.example/x.png"));execute();assert(internet_radio::logoResult()==LogoResult::Missing);
+ }
  // A busy service, a lost connection, an answer too big or not a JPEG: Failed, to try later.
  for(const std::string&wire:{std::string("HTTP/1.1 503 Busy\r\n\r\n"),std::string("HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: 20000\r\n\r\n")+std::string(20000,'x'),
    std::string("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html>"),std::string("HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: 1700\r\n\r\nshort")}){
