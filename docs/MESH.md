@@ -273,12 +273,13 @@ with libmeshtastic-leaf is distributed under GPL-3.0-only; this does not
 relicense the separately distributed bridge/plugin or remove existing notices.
 The GPL text is included in `third_party/libmeshtastic-leaf/LICENSE`.
 
-Complete S1 source and build instructions are in this repository. Dependencies
-are fetched by `bots/CardputerADV/platformio.ini`: libmeshtastic-leaf commit
-`bd542d6e77aa7b9507dcc8d153f6dad0c35a8c17`, RadioLib 7.7.1, Nanopb 0.4.92,
-and the leaf dependency's Crypto commit
-`591ff9a690e8168ccb7a36abde8d7783e448d395`. The leaf repository includes its
-pinned protobuf submodule and generated sources. Source links and notices:
+Complete S1 source and build instructions are in this repository.
+libmeshtastic-leaf commit `bd542d6e77aa7b9507dcc8d153f6dad0c35a8c17`, with its
+protobuf submodule and generated sources, is in
+`bots/CardputerADV/lib/libmeshtastic-leaf`, changed to add a secondary channel;
+`S1-ADV-PATCHES.md` there lists every change. The other dependencies are fetched
+by `bots/CardputerADV/platformio.ini`: RadioLib 7.7.1, Nanopb 0.4.92, and
+Crypto commit `591ff9a690e8168ccb7a36abde8d7783e448d395`. Source links and notices:
 
 - https://github.com/Meshtastic-Solutions/libmeshtastic-leaf/tree/bd542d6e77aa7b9507dcc8d153f6dad0c35a8c17
 - https://github.com/jgromes/RadioLib/tree/7.7.1

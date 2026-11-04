@@ -31,8 +31,9 @@ The original `Copyright (c) 2026 Omnibot contributors` notice remains in
 - The firmware's `third_party/` directory retains applicable protocol notices.
 - [libmeshtastic-leaf](https://github.com/Meshtastic-Solutions/libmeshtastic-leaf),
   Thomas Göttgens / Meshtastic Solutions, GPL-3.0-only, supplies the optional
-  foreground Meshtastic leaf client. The dependency is pinned to
-  `bd542d6e77aa7b9507dcc8d153f6dad0c35a8c17`.
+  foreground Meshtastic leaf client. A copy of commit
+  `bd542d6e77aa7b9507dcc8d153f6dad0c35a8c17` is in `bots/CardputerADV/lib/libmeshtastic-leaf`,
+  changed to add a secondary channel, as its `S1-ADV-PATCHES.md` describes.
   RadioLib (MIT), Nanopb (zlib) and Meshtastic Crypto retain their own notices.
   See [Mesh source and licensing](docs/MESH.md#source-and-licensing).
 

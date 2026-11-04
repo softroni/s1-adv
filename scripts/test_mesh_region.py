@@ -10,11 +10,12 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-deps = sorted((ROOT / 'bots/CardputerADV/.pio/libdeps').glob('*/libmeshtastic-leaf/src'))
+# The library is in the repository (patched), and Nanopb comes with the firmware build.
+leaf = ROOT / 'bots/CardputerADV/lib/libmeshtastic-leaf/src'
+deps = sorted((ROOT / 'bots/CardputerADV/.pio/libdeps').glob('*/Nanopb'))
 if not deps:
-    sys.exit('libmeshtastic-leaf not found: build the firmware first (python scripts/cardputer.py build)')
-leaf = deps[0]
-nanopb = leaf.parents[1] / 'Nanopb'
+    sys.exit('Nanopb not found: build the firmware first (python scripts/cardputer.py build)')
+nanopb = deps[0]
 
 CODE = r'''
 #include "mesh_region.h"
