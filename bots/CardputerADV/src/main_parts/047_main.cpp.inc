@@ -1365,6 +1365,14 @@ void triggerAlarm(const String& reason) {
     stopPlaybackStream();
     gPlaybackActive = false;
   }
+  // The radio may be playing behind the screen: it gives way, or the alarm couldn't sound.
+  if (radioBusy() || radioOn()) stopInternetRadio();
+  // And a screen dimmed or off while it played lights, so the first key isn't spent waking it.
+  if (!gScreensaverActive && (gScreensaverDimmed || gScreenOffActive)) {
+    gScreensaverDimmed = gScreenOffActive = false;
+    markUserActivity();
+    applyDisplayBrightness();
+  }
   gAlarmRinging = true;
   gAlarmTriggeredAtMs = millis();
   gAlarmNextBeepMs = 0;
@@ -2146,7 +2154,7 @@ bool handleGlobalEscape() {
   gPendingOtaCheckAction = gPendingOtaApplyAction = false;
   if (gInboxHttpBusy) gInboxCancelRequested = true;
   if(handleVoiceRequestEscape()) return true;
-  if (radioBusy()) { stopInternetRadio(); setUiMode(UiMode::Home); return true; }
+  if (radioStopsOnEscape()) { stopInternetRadio(); setUiMode(UiMode::Home); return true; }
   if(returnToSettingsHub()) return true;
   if (gChatCommandsVisible) { gChatCommandsVisible=false; return true; }
   if (gVoiceReplySpeechBusy || !gQueuedVoiceReplySpeech.isEmpty()) dismissVoiceNotice();

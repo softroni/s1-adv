@@ -26,7 +26,7 @@ assert loop.index('servicePodcasts();') < loop.index('if (radioBusy())'), 'it mu
 assert 'bool radioBusy() { return internet_radio::busy() || podcast_player::busy(); }' in radio
 harness = (root / 'scripts/test_internet_radio.py').read_text()
 prefix = harness.split("code=r'''", 1)[1].split("'''+app+r'''", 1)[0]
-for old, new in [('enum class UiMode{Home,Radio,Voice,Mesh,Podcasts};UiMode gUiMode=UiMode::Radio;', 'enum class UiMode{Home,Radio,Voice,Mesh,Podcasts};UiMode gUiMode=UiMode::Podcasts;'),
+for old, new in [('enum class UiMode{Home,Radio,Voice,Mesh,Podcasts,Clock,Battery,Focus,Notes,Calculator,Alarm,Stopwatch,Calendar,Chess};UiMode gUiMode=UiMode::Radio;', 'enum class UiMode{Home,Radio,Voice,Mesh,Podcasts,Clock,Battery,Focus,Notes,Calculator,Alarm,Stopwatch,Calendar,Chess};UiMode gUiMode=UiMode::Podcasts;'),
                  ('namespace podcast_player{bool fakeBusy=false;bool busy(){return fakeBusy;}}\nint podcastStops=0;void stopPodcasts(){++podcastStops;}\n', 'namespace { void stopPodcasts(); }\n'),
                  ('void useBigTextFont(const String&s){bool wide=false;for(unsigned char c:s)wide=wide||c>=0x80;gCanvas.setFont(wide?&fonts::efontCN_12:&fonts::FreeSansBold9pt7b);}',
                   'int16_t useBigTextFont(const String&s){bool wide=false;for(unsigned char c:s)wide=wide||c>=0x80;gCanvas.setFont(wide?&fonts::efontCN_12:&fonts::FreeSansBold9pt7b);return wide?4:3;}'),

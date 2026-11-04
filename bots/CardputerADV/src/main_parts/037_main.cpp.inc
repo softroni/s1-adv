@@ -353,6 +353,9 @@ void textTurnTask(void* arg) {
 
 void maybeStartNextTextTurn() {
   if (gInboxHttpBusy || gVoiceDialBusy || gVoiceReplySpeechBusy || gRealtimeDialBusy || gRealtimeExclusiveMode || gUiMode == UiMode::Nes) return;
+  // A message typed on Home while the radio plays behind it waits for the radio to let go of the
+  // network and the heap. The main loop sends it once the radio has stopped.
+  if (radioBusy()) return;
   if (gTextTurnTaskHandle != nullptr || gCompletedTextTurn != nullptr || !gActiveTextTurn.isEmpty()) {
     return;
   }

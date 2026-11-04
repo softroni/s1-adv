@@ -17,6 +17,8 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
     setUiMode(UiMode::WifiSettings);
     return;
   }
+  // Ctrl+M stops the radio from any screen, or plays it again where it may play.
+  if (keys.ctrl && lowerKey == 'm' && !keys.alt && !keys.fn && radioMusicKey()) return;
   // Ahead of the diagnostics and the shortcuts: these keys are a password, and any of them
   // can be text. Tab stays free, so the menu is still a way out.
   if (wifiSettingsTakesAllKeys() && !gLauncherVisible && !keys.tab) {

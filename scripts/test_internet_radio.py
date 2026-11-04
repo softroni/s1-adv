@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Production radio controller and screens: the station file on a fake card, Find and its
-results, saving and removing, reconnecting, the last station, and resource boundaries."""
+results, saving and removing, reconnecting, the last station, playing on behind other screens,
+and resource boundaries."""
 from pathlib import Path
 import os, subprocess, tempfile
 root=Path(__file__).resolve().parents[1];src=root/'bots/CardputerADV/src';parts=src/'main_parts'
 app=(parts/'070_main.cpp.inc').read_text()
-for f,s in [('004_main.cpp.inc','{"Internet Radio", UiMode::Radio}'),('024_main.cpp.inc','if (deferInternetRadioMode(mode)) return;'),('033_main.cpp.inc','if (radioBusy())'),('042_main.cpp.inc','if (radioBusy())'),('017_main.cpp.inc','if (radioBusy())'),('022_main.cpp.inc','if (radioBusy())'),('010_main.cpp.inc','gInboxHttpBusy || radioBusy()'),('063_main.cpp.inc','if (radioBusy()) return false;'),('061_main.cpp.inc','serviceInternetRadio();'),('048_main.cpp.inc','handleInternetRadioKey(key, keys)')]:
+for f,s in [('004_main.cpp.inc','{"Internet Radio", UiMode::Radio}'),('024_main.cpp.inc','if (deferInternetRadioMode(mode)) return;'),('033_main.cpp.inc','if (radioBusy())'),('042_main.cpp.inc','if (radioBusy())'),('017_main.cpp.inc','if (radioBusy())'),('022_main.cpp.inc','if (radioBusy())'),('010_main.cpp.inc','gInboxHttpBusy || radioBusy()'),('063_main.cpp.inc','if (radioBusy() || radioOn()) return false;'),('061_main.cpp.inc','serviceInternetRadio();'),('048_main.cpp.inc','handleInternetRadioKey(key, keys)')]:
  assert s in (parts/f).read_text(),(f,s)
 loop=(parts/'061_main.cpp.inc').read_text().split('void loop() {',1)[1]
 assert loop.index('if (radioBusy())')<loop.index('serviceVoiceReplySpeech')
@@ -18,7 +19,21 @@ arrows=(parts/'049_main.cpp.inc').read_text()
 assert arrows.index('(radioTakesArrows() || podcastTakesArrows()) && (upDown')<arrows.index('gUiMode == UiMode::Radio || gUiMode == UiMode::VlcRemote')
 # Escape steps back inside the radio before it stops the stream and leaves.
 escape=(parts/'047_main.cpp.inc').read_text()
-assert escape.index('gUiMode == UiMode::Radio && !gLauncherVisible && radioEscape()')<escape.index('if (radioBusy()) { stopInternetRadio(); setUiMode(UiMode::Home); return true; }')
+assert escape.index('gUiMode == UiMode::Radio && !gLauncherVisible && radioEscape()')<escape.index('if (radioStopsOnEscape()) { stopInternetRadio(); setUiMode(UiMode::Home); return true; }')
+# An alarm stops the radio playing behind its screen, and lights a screen dimmed for it.
+alarm=escape.split('void triggerAlarm(',1)[1].split('\n}\n',1)[0]
+assert alarm.index('if (radioBusy() || radioOn()) stopInternetRadio();')<alarm.index('gAlarmRinging = true;')<alarm.index('setUiMode(UiMode::Alarm);')
+assert alarm.index('gScreensaverDimmed = gScreenOffActive = false;')<alarm.index('gAlarmRinging = true;')
+# Ctrl+M goes ahead of the text boxes, which take every other key.
+assert typing.index("if (keys.ctrl && lowerKey == 'm' && !keys.alt && !keys.fn && radioMusicKey()) return;")<typing.index('if (wifiSettingsTakesAllKeys()')
+# The player branch of the loop lets the screen dim; Home draws the card in place of its bars.
+assert 'serviceAlarm(); serviceIdleScreensaver();' in loop[loop.index('if (radioBusy())'):loop.index('servicePocketSynth();')]
+home=(parts/'059_main.cpp.inc').read_text()
+assert home.index('radioHomeCardShows()')<home.index('homeFirmwareUpdateAvailable() && !gOtaManifest.notes.isEmpty()')
+assert 'if (radioBusy() || radioOn()) return false;' in (parts/'063_main.cpp.inc').read_text()
+# A message typed on Home while the radio plays waits for it to stop before it's sent.
+send=(parts/'037_main.cpp.inc').read_text().split('void maybeStartNextTextTurn() {',1)[1]
+assert send.index('if (radioBusy()) return;')<send.index('new TextTurnTaskPayload()')
 code=r'''
 #include "radio_catalog.h"
 #include "radio_image.h"
@@ -39,7 +54,7 @@ code=r'''
 using std::min;using std::max;
 struct String:std::string {using std::string::string;String()=default;String(const std::string&s):std::string(s){}
  template<class T,typename=std::enable_if_t<std::is_integral_v<T>>>String(T n):std::string(std::to_string(n)){}
- bool isEmpty()const{return empty();}
+ bool isEmpty()const{return empty();}bool startsWith(const char*p)const{return rfind(p,0)==0;}
  void remove(size_t i){if(i<size())erase(i);}void remove(size_t i,size_t n){if(i<size())erase(i,n);}
  String substring(size_t i)const{return i<size()?String(substr(i)):String();}
  String substring(size_t i,size_t j)const{return i<size()?String(substr(i,j>i?j-i:0)):String();}
@@ -95,7 +110,7 @@ void drawBigScrollbar(int,int,uint16_t){}
 void drawBigNotice(const String&t,uint16_t){gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,114);gCanvas.print(fitCurrentFontToWidth(t,220));}
 void renderLauncherOverlay(){}void renderDebugOverlay(){}
 struct Keyboard_Class{struct KeysState{bool ctrl=false,alt=false,opt=false,enter=false,fn=false;};};
-enum class UiMode{Home,Radio,Voice,Mesh,Podcasts};UiMode gUiMode=UiMode::Radio;
+enum class UiMode{Home,Radio,Voice,Mesh,Podcasts,Clock,Battery,Focus,Notes,Calculator,Alarm,Stopwatch,Calendar,Chess};UiMode gUiMode=UiMode::Radio;
 struct{bool clockTwelveHour=false;}gDeviceSettings;
 uint8_t gSpeakerVolume=128;uint32_t gLastRenderMs=0,tick=1000;
 uint32_t millis(){return tick;}
@@ -108,7 +123,7 @@ void*gTextTurnTaskHandle=nullptr;void*gCompletedTextTurn=nullptr;std::deque<Stri
 String gActiveTextTurn,gQueuedVoiceReplySpeech;
 struct{struct{bool occupied=false;bool isPlaying(){return occupied;}}Speaker;}M5Cardputer;
 void initSpeaker(){assert(!internet_radio::busy());}
-void setStatus(const String&,int){}
+String lastStatus;void setStatus(const String&s,int){lastStatus=s;}
 void adjustSpeakerVolume(int n){gSpeakerVolume=std::clamp(int(gSpeakerVolume)+n,0,255);}
 // A card as FAT behaves: rename won't replace a file, and a card can stop answering.
 bool gSdReady=true,cardAnswers=true,writeFails=false;
@@ -179,7 +194,7 @@ void setUiMode(UiMode m){if(deferInternetRadioMode(m))return;gUiMode=m;}
 void key(char c){Keyboard_Class::KeysState k;handleInternetRadioKey(c,k);}
 void type(const char*s){for(;*s;++s)key(*s);}
 void service(int n=1){for(int i=0;i<n;++i)serviceInternetRadio();}
-void reopen(){if(radioBusy()){stopInternetRadio();internet_radio::finish();}gUiMode=UiMode::Home;service();assert(!gRadioList);gUiMode=UiMode::Radio;beginInternetRadio();}
+void reopen(){if(radioBusy()||radioOn()){stopInternetRadio();if(internet_radio::running)internet_radio::finish();}gUiMode=UiMode::Home;service();assert(!gRadioList);gUiMode=UiMode::Radio;beginInternetRadio();}
 void render(){selectedRow=-1;renderInternetRadioUi();}
 internet_radio::Found make(const char*name,const char*url,const char*tags,const char*country,uint16_t bitrate,const char*logo=""){
  internet_radio::Found f{};snprintf(f.logo,sizeof(f.logo),"%s",logo);snprintf(f.name,sizeof(f.name),"%s",name);snprintf(f.url,sizeof(f.url),"%s",url);snprintf(f.tags,sizeof(f.tags),"%s",tags);
@@ -253,12 +268,12 @@ int main(){
  internet_radio::song="Robert Glasper Experiment featuring Erykah Badu - Afro Blue (Live at the Blue Note)";render();
  { bool cut=false;for(auto&t:gCanvas.printed)cut=cut||(t.size()>2&&t.compare(t.size()-2,2,"..")==0&&t.find("Robert")==std::string::npos);
    assert(showsPart("Robert Glasper")&&cut&&!shows(internet_radio::song)); }  // Whole words, two lines, the rest cut.
- internet_radio::loud=8000;for(int i=0;i<6;++i){tick+=100;render();}assert(gRadioMeter[4]==10&&gRadioMeter[0]==10);
- internet_radio::loud=0;tick+=100;render();assert(gRadioMeter[4]==1&&gRadioMeter[3]==10);
- internet_radio::loud=3000;tick+=100;render();assert(gRadioMeter[4]==6);internet_radio::loud=699;tick+=100;render();assert(gRadioMeter[4]==1);
- internet_radio::loud=32767;tick+=100;render();assert(gRadioMeter[4]==14);internet_radio::loud=0;internet_radio::kbps=0;internet_radio::song="Artist - Song";
+ internet_radio::loud=8000;for(int i=0;i<6;++i){tick+=100;render();}assert(gRadioMeter[14]==10&&gRadioMeter[10]==10);
+ internet_radio::loud=0;tick+=100;render();assert(gRadioMeter[14]==1&&gRadioMeter[13]==10);
+ internet_radio::loud=3000;tick+=100;render();assert(gRadioMeter[14]==6);internet_radio::loud=699;tick+=100;render();assert(gRadioMeter[14]==1);
+ internet_radio::loud=32767;tick+=100;render();assert(gRadioMeter[14]==14);internet_radio::loud=0;internet_radio::kbps=0;internet_radio::song="Artist - Song";
  internet_radio::finish(State::Error,Error::Timeout);service();assert(gRadioWantPlaying&&gRadioRetryWaiting);
- render();assert(shows("Reconnecting in 3s")&&!gRadioMeter[4]);n=internet_radio::starts;
+ render();assert(shows("Reconnecting in 3s")&&!gRadioMeter[14]);n=internet_radio::starts;
  tick+=2999;service();assert(internet_radio::starts==n);tick+=1;service();assert(internet_radio::starts==n+1&&radioBusy());
  internet_radio::finish(State::Error,Error::Connect);service();assert(gRadioRetryWaiting);tick+=10000;service();assert(internet_radio::starts==n+2);
  internet_radio::finish(State::Error,Error::Dns);service();assert(gRadioRetryWaiting);tick+=30000;service();assert(internet_radio::starts==n+3);
@@ -270,9 +285,10 @@ int main(){
  render();assert(shows("Waiting for Wi-Fi..."));gWifiReady=true;tick+=1000;service();assert(internet_radio::starts==n+1);
  internet_radio::playing(100000);internet_radio::finish();service();gWifiReady=false;tick+=61000;service();service();
  assert(!gRadioRetryWaiting&&!gRadioWantPlaying&&gRadioNotice=="Wi-Fi required");gWifiReady=true;
- // Leaving while it waits to reconnect ends the wait, so opening the radio again stays quiet.
+ // Leaving for a screen it can't play behind, while it waits to reconnect, ends the wait, so
+ // opening the radio again stays quiet.
  key('\n');service();internet_radio::playing(100000);internet_radio::finish(State::Error,Error::Timeout);service();assert(gRadioRetryWaiting);
- n=internet_radio::starts;setUiMode(UiMode::Home);service();assert(!gRadioRetryWaiting&&!gRadioWantPlaying);service();assert(!gRadioList);
+ n=internet_radio::starts;setUiMode(UiMode::Voice);service();assert(!gRadioRetryWaiting&&!gRadioWantPlaying);service();assert(!gRadioList);
  gUiMode=UiMode::Radio;beginInternetRadio();tick+=60000;service(3);assert(internet_radio::starts==n&&!radioBusy());
  // Enter during the wait stops it for good. A lasting error never retries, even after playing.
  key('\n');service();internet_radio::playing(100000);internet_radio::finish(State::Error,Error::Timeout);service();assert(gRadioRetryWaiting);
@@ -311,7 +327,7 @@ int main(){
  key('\n');service();internet_radio::playing(100000);internet_radio::vis.frames=0;for(uint8_t look=0;look<4;++look){gRadioLook=look;for(int t=0;t<12;++t){tick+=240;render();}}
  internet_radio::song="Artist - Song";gRadioLook=0;
  assert(radioEscape()&&gRadioView==RadioView::Player);service();assert(!internet_radio::wantV);
- key('v');service();assert(internet_radio::wantV);setUiMode(UiMode::Home);service();assert(!internet_radio::wantV);internet_radio::finish();service();service();
+ key('v');service();assert(internet_radio::wantV);setUiMode(UiMode::Voice);service();assert(!internet_radio::wantV);internet_radio::finish();service();service();
  gUiMode=UiMode::Radio;beginInternetRadio();assert(gRadioView==RadioView::Player);
  // The list opens on the last station played, and doesn't play it.
  gRadioSelection.select(12);key('\n');service();const std::string twelve=gRadioList->at(12).url;assert(disk["/radio/last.txt"]==twelve+"\n");
@@ -320,6 +336,70 @@ int main(){
  key('\n');service();setUiMode(UiMode::Voice);assert(gUiMode==UiMode::Radio&&gRadioModePending&&radioBusy());
  service();assert(gUiMode==UiMode::Radio);internet_radio::finish();service();assert(gUiMode==UiMode::Voice&&!gRadioModePending);
  service();assert(!gRadioList&&!gRadioSelection.list);gUiMode=UiMode::Radio;beginInternetRadio();
+
+ // Behind the light screens the radio plays on. Leaving the player for Home, which is where Esc
+ // goes, doesn't stop it; the list and its logos go back to the heap; and Home shows the station
+ // over a meter of what it plays, with Ctrl+M's hint first.
+ { auto homeCard=[]{gCanvas.fillScreen(0);if(radioHomeCardShows())drawHomeRadioCard();};
+   gRadioSelection.select(0);key('\n');service();internet_radio::playing(100000);
+   const std::string zero=gRadioList->at(0).url,zeroName=gRadioList->at(0).name;
+   assert(!radioStopsOnEscape()&&radioHomeCardShows());
+   setUiMode(UiMode::Home);assert(gUiMode==UiMode::Home&&!gRadioModePending&&gRadioList);service();
+   assert(!gRadioList&&!gRadioSelection.list&&radioBusy()&&gRadioWantPlaying&&gRadioResumeUrl==zero&&gRadioResumeName==zeroName&&gRadioResumeInk);
+   assert(!internet_radio::wantV&&!internet_radio::logoStarts);
+   homeCard();assert(showsPart(zeroName.substr(0,6))&&shows("Ctrl+M stops it"));
+   tick+=4000;internet_radio::loud=8000;for(int i=0;i<16;++i){tick+=100;homeCard();}
+   assert(!shows("Ctrl+M stops it")&&gRadioMeter[0]==10&&gRadioMeter[14]==10);internet_radio::loud=0;
+   // Every light screen keeps it playing. Nothing it did but play goes on there.
+   for(UiMode m:{UiMode::Clock,UiMode::Battery,UiMode::Focus,UiMode::Notes,UiMode::Calculator,UiMode::Alarm,UiMode::Stopwatch,UiMode::Calendar,UiMode::Home}){
+    setUiMode(m);service();assert(gUiMode==m&&!gRadioModePending&&radioBusy()&&gRadioWantPlaying&&!gRadioList);}
+   // A drop behind a screen reconnects as it would on the radio's own, and Home says so.
+   internet_radio::finish(State::Error,Error::Timeout);service();assert(gRadioRetryWaiting&&radioOn()&&!radioBusy());
+   homeCard();assert(shows("Reconnecting 3s")&&radioHomeCardShows());gWifiReady=false;homeCard();assert(shows("Waiting for Wi-Fi"));gWifiReady=true;
+   n=internet_radio::starts;tick+=3000;service();assert(internet_radio::starts==n+1&&internet_radio::url==zero&&!gRadioList);
+   internet_radio::playing(100000);homeCard();assert(!showsPart("Reconnecting"));
+   // Ctrl+M stops it from there, and plays it again.
+   assert(radioMusicKey()&&!gRadioWantPlaying&&lastStatus=="Radio stopped");internet_radio::finish();service();assert(!radioBusy()&&!radioHomeCardShows());
+   assert(radioMusicKey()&&gRadioWantPlaying&&gRadioStartPending&&lastStatus=="Radio: "+zeroName);n=internet_radio::starts;
+   service();assert(internet_radio::starts==n+1&&internet_radio::url==zero);internet_radio::playing(100000);homeCard();assert(shows("Ctrl+M stops it"));
+   // Without Wi-Fi it says so and doesn't try.
+   assert(radioMusicKey()&&!gRadioWantPlaying);internet_radio::finish();service();
+   gWifiReady=false;assert(radioMusicKey()&&!gRadioWantPlaying&&lastStatus=="Radio: Wi-Fi required");gWifiReady=true;
+   assert(radioMusicKey());service();internet_radio::playing(100000);
+   // The radio's screen opens on the station playing, not the last one the card has.
+   disk["/radio/last.txt"]="http://not.playing.example/\n";
+   setUiMode(UiMode::Radio);assert(gUiMode==UiMode::Radio&&!gRadioModePending);beginInternetRadio();
+   assert(gRadioSelection.stationIndex()==0&&gRadioNotice.isEmpty()&&gRadioBehindSinceMs==0&&radioBusy());
+   render();assert(showsPart(zeroName.substr(0,6)));
+   // On the player, Ctrl+M is Enter: it pauses and plays the station shown.
+   assert(radioMusicKey()&&!gRadioWantPlaying);internet_radio::finish();service();
+   gRadioSelection.select(1);assert(radioMusicKey()&&gRadioWantPlaying);service();assert(internet_radio::url==gRadioList->at(1).url);internet_radio::playing(100000);
+   // A screen that needs the speaker, the mic or the network still waits for it to stop.
+   setUiMode(UiMode::Home);service();setUiMode(UiMode::Voice);assert(gUiMode==UiMode::Home&&gRadioModePending&&!gRadioWantPlaying);
+   internet_radio::finish();service();assert(gUiMode==UiMode::Voice&&!radioOn());service();assert(!gRadioList);
+   // And there Ctrl+M is left to the screen: the radio can't play on it.
+   assert(!radioMusicKey()&&!gRadioWantPlaying);
+   // A station found but not saved stops on leaving, as leaving its results does, since the
+   // radio's screen shows only the list's.
+   gUiMode=UiMode::Radio;beginInternetRadio();radioPlay("http://found.example/","Found");service();internet_radio::playing(100000);
+   setUiMode(UiMode::Home);service();assert(!gRadioWantPlaying&&lastStatus=="Radio stopped: not on your list"&&gRadioResumeUrl==gRadioList->at(1).url);
+   internet_radio::finish();service();assert(!gRadioList&&!radioHomeCardShows());
+   // It stopping by itself behind a screen says why, on Home for a while.
+   assert(radioMusicKey());service();internet_radio::playing(100000);internet_radio::finish(State::Error,Error::Unsupported);service();
+   assert(!gRadioWantPlaying&&lastStatus=="Radio timed out"&&radioHomeCardShows());homeCard();assert(shows("Radio stopped")&&shows("Timed out"));
+   tick+=8000;assert(!radioHomeCardShows());
+   gWifiReady=false;radioPlay(gRadioResumeUrl,gRadioResumeName);service();assert(!gRadioWantPlaying&&lastStatus=="Radio: Wi-Fi required");gWifiReady=true;
+   M5Cardputer.Speaker.occupied=true;radioPlay(gRadioResumeUrl,gRadioResumeName);service();assert(lastStatus=="Radio: Busy: try Ctrl+M");M5Cardputer.Speaker.occupied=false;
+   homeCard();assert(shows("Busy: try Ctrl+M"));tick+=8000;
+   // Esc stops the radio only when it's not its stream playing: a search, or podcasts.
+   assert(!radioStopsOnEscape());internet_radio::startSearch(true,"x","");assert(radioStopsOnEscape());internet_radio::finish();internet_radio::clearFound();internet_radio::searches=0;
+   podcast_player::fakeBusy=true;assert(radioStopsOnEscape()&&!radioMusicKey());podcast_player::fakeBusy=false;
+   // With nothing played from the list, Ctrl+M says where to choose one.
+   gRadioResumeUrl="";assert(radioMusicKey()&&!gRadioWantPlaying&&lastStatus=="Open Internet Radio to pick a station");
+   // Removing the station Ctrl+M would play takes it off that key.
+   gUiMode=UiMode::Radio;beginInternetRadio();gRadioSelection.select(2);key('\n');service();assert(gRadioResumeUrl==gRadioList->at(2).url);
+   key('\n');internet_radio::finish();service();key('\b');key('y');assert(gRadioResumeUrl.isEmpty());
+   disk[kList]=kStarter;reopen(); }
 
  // Find: the player's letter keys type, and the arrows move instead of acting on the player.
  gRadioSelection.select(0);key('\n');service();assert(radioBusy());const int volume=gSpeakerVolume;
@@ -604,7 +684,7 @@ int main(){
  setUiMode(UiMode::Radio);assert(gUiMode==UiMode::Podcasts&&podcastStops==1&&gRadioModePending);
  service();assert(gUiMode==UiMode::Podcasts);podcast_player::fakeBusy=false;service();assert(gUiMode==UiMode::Radio&&!gRadioModePending);
  podcast_player::fakeBusy=true;assert(radioBusy());stopInternetRadio();assert(podcastStops==2);podcast_player::fakeBusy=false;
- puts("PASS radio: stations file on the card (made, kept, recovered, limits), Find by genre or name, results that scroll, saving under the right genre, removing a line, reconnecting after a drop, the last station, resource guards and screens that fit");
+ puts("PASS radio: stations file on the card (made, kept, recovered, limits), playing on behind light screens with Home's card and Ctrl+M, Find by genre or name, results that scroll, saving under the right genre, removing a line, reconnecting after a drop, the last station, resource guards and screens that fit");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-radio-ui-') as d:

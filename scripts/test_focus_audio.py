@@ -9,7 +9,7 @@ def fn(file,name):
  return s[a:i]
 code=r'''
 #include <cassert>
-bool radioBusy(){return false;}
+bool radioBusy(){return false;}bool radioOnNow=false;bool radioOn(){return radioOnNow;}
 bool synthOwned=false;bool synthAudioBusy(){return synthOwned;}
 void stopInternetRadio(){}
 template<class T>bool deferInternetRadioMode(T){return false;}
@@ -43,7 +43,7 @@ const char* focusStateName(FocusState){return "focus";}
 '''
 for name in ['String normalizedPomodoroAudioLanguage(', 'String pomodoroMeditationAssetPath(', 'bool isPomodoroMeditationAssetPath(', 'bool pomodoroMeditationAssetsPresent()']:
  code+=fn('016_main.cpp.inc',name)+'\n'
-code+=fn('027_main.cpp.inc','void focusTone(')+'\n'+fn('027_main.cpp.inc','bool playFocusCue(')+'\n'+fn('028_main.cpp.inc','void toggleFocusGuidedAudio()')
+code+=fn('027_main.cpp.inc','bool focusToneAllowed()')+'\n'+fn('027_main.cpp.inc','void focusTone(')+'\n'+fn('027_main.cpp.inc','bool playFocusCue(')+'\n'+fn('028_main.cpp.inc','void toggleFocusGuidedAudio()')
 code+=r'''
 int main(){
  assert(!pomodoroMeditationAssetsPresent());
@@ -77,6 +77,8 @@ int main(){
  gPlaybackActive=false;synthOwned=true;int before=plays;
  assert(!playFocusCue(FocusState::Focus)&&plays==before);focusTone(440,20);assert(tones==0);
  synthOwned=false;focusTone(440,20);assert(tones==1);
+ // Between the radio's reconnects too: a tone then could hold the speaker as the stream restarts.
+ radioOnNow=true;before=plays;assert(!playFocusCue(FocusState::Focus)&&plays==before);focusTone(440,20);assert(tones==1);radioOnNow=false;
  files.erase(pomodoroMeditationAssetPath("ru","start"));assert(!pomodoroMeditationAssetsPresent());
  mounted=false;assert(!pomodoroMeditationAssetsPresent());
 }

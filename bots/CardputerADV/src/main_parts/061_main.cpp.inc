@@ -405,7 +405,7 @@ void loop() {
     // Streaming owns one audio channel and its heap. Keep navigation alive,
     // but never let background TLS/capture/OTA borrow or reinitialize it.
     updateBatterySnapshot();
-    serviceSmartLamp(); serviceFocusLamp(); serviceAlarm();
+    serviceSmartLamp(); serviceFocusLamp(); serviceAlarm(); serviceIdleScreensaver();
     if (millis()-gLastRenderMs>=kRenderIntervalMs) { render(); gLastRenderMs=millis(); }
     delay(1); return;
   }

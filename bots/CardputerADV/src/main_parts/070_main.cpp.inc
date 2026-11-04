@@ -29,6 +29,14 @@ bool gRadioNoticeGood = false;  // Saved or paused: green on the results list, n
 // What Enter asked for, and what is playing: a found station needn't be on the list.
 String gRadioWantUrl, gRadioWantName, gRadioPlayingUrl;
 String gRadioLastUrl;  // What last.txt holds, so it's only written when it changes.
+// Playing on behind another screen: since when, for Home's hint, and its genre's colour there.
+// Ctrl+M plays again the last station that played from the list.
+uint32_t gRadioBehindSinceMs = 0;
+String gRadioResumeUrl, gRadioResumeName;
+uint16_t gRadioResumeInk = 0;
+// Why it stopped by itself behind a screen, which Home says for a while.
+String gRadioBehindNote;
+uint32_t gRadioBehindNoteUntilMs = 0;
 // Reconnecting after a stream that was playing drops.
 uint8_t gRadioRetries = 0;
 bool gRadioRetryWaiting = false;
@@ -121,9 +129,24 @@ void stopInternetRadio() {
   stopRadioStream();
   stopPodcasts();
 }
+// The radio wants to play: it is, it's tuning, or it's between reconnects.
+bool radioOn() { return gRadioWantPlaying; }
+// Screens the radio plays on behind. None of them needs the network, the mic, the speaker or
+// much memory; every other screen stops it, as before.
+bool radioMayPlayIn(UiMode mode) {
+  switch (mode) {
+    case UiMode::Radio: case UiMode::Home: case UiMode::Clock: case UiMode::Battery: case UiMode::Focus:
+    case UiMode::Notes: case UiMode::Calculator: case UiMode::Alarm: case UiMode::Stopwatch: case UiMode::Calendar:
+      return true;
+    default:
+      return false;
+  }
+}
 bool deferInternetRadioMode(UiMode mode) {
-  // Each player may keep going on its own screen, but never into the other's.
-  const bool keeps = (mode == UiMode::Radio && !podcast_player::busy()) || (mode == UiMode::Podcasts && !internet_radio::busy());
+  // Each player may keep going on its own screen, but never into the other's. The radio's
+  // stream also plays on behind the light screens; anything else the radio's doing stops.
+  const bool keeps = (mode == UiMode::Radio && !podcast_player::busy()) || (mode == UiMode::Podcasts && !internet_radio::busy()) ||
+                     (radioMayPlayIn(mode) && radioOn() && !podcast_player::busy());
   if (!radioBusy() || keeps) return false;
   const bool podcast = podcast_player::busy();
   stopInternetRadio(); gRadioModePending = true; gRadioNextMode = mode;
@@ -337,6 +360,13 @@ void beginInternetRadio() {
   radioReadVisuals();
   gRadioOnCountry = false;
   gRadioNotice = gRadioListNote.isEmpty() ? "Enter to listen" : gRadioListNote;
+  // Back from a screen it played on behind: the station playing is the one shown.
+  gRadioBehindSinceMs = 0;
+  if (radioOn() && gRadioList) {
+    const int on = gRadioList->find(gRadioWantUrl.c_str());
+    if (on >= 0) gRadioSelection.select(on);
+    if (gRadioListNote.isEmpty()) gRadioNotice = "";
+  }
   radioInvalidate();
 }
 
@@ -636,6 +666,7 @@ void radioRemove() {
   if (radioPlayingUrl(gRadioRemoveUrl.c_str())) stopInternetRadio();
   if (!radioRewriteLine(gRadioRemoveLine)) { gRadioNotice = "Couldn't change the SD card"; radioInvalidate(); return; }
   radioLoadList();
+  if (gRadioResumeUrl == gRadioRemoveUrl) gRadioResumeUrl = "";  // Ctrl+M won't bring it back.
   gRadioNotice = "Removed " + gRadioRemoveName;
   radioInvalidate();
 }
@@ -812,6 +843,37 @@ void serviceRadioLogos() {
   if (internet_radio::startLogo(station->url, station->name, "")) gRadioLogoAsked = gRadioLogoFor;
   else if (gRadioLogoTriedCount < 16) gRadioLogoTried[gRadioLogoTriedCount++] = gRadioLogoFor;  // A name too long, say.
 }
+// --- Behind other screens -----------------------------------------------------------------
+uint16_t radioGenreInk(const char* genre);
+// The station Ctrl+M plays again, and its genre's colour for Home: list index `on`, which plays.
+void radioKeepForResume(int on) {
+  if (!gRadioList || on < 0) return;
+  gRadioResumeUrl = gRadioWantUrl;
+  gRadioResumeName = gRadioWantName;
+  gRadioResumeInk = radioGenreInk(gRadioList->genre(gRadioList->at(size_t(on)).genre));
+}
+// Off the radio's screen. True while the stream plays on behind this one: the list, results and
+// logos go back to the heap once the worker has finished any logo, and the stream, its
+// reconnects and nothing else carry on. False when the radio should stop.
+bool radioBehind() {
+  if (gRadioModePending || !radioOn() || podcast_player::busy() || !radioMayPlayIn(gUiMode)) return false;
+  if (gRadioList && !internet_radio::fetchingLogo()) {
+    // Only a station from the list: the radio's screen shows no other when it opens again.
+    const int on = gRadioList->find(gRadioWantUrl.c_str());
+    if (on < 0) { setStatus("Radio stopped: not on your list", 1800); return false; }
+    radioKeepForResume(on);
+    gRadioBehindSinceMs = max<uint32_t>(millis(), 1);
+    gRadioBehindNoteUntilMs = 0;
+    radioRelease();
+  }
+  return true;
+}
+// It stopped by itself behind a screen, which says why. Home says so for a while.
+void radioStoppedBehind(const String& why) {
+  gRadioBehindNote = why == "Idle" ? String("The stream ended") : why;  // A clean end, out of tries.
+  gRadioBehindNoteUntilMs = max<uint32_t>(millis() + 8000, 1);
+  setStatus(gRadioBehindNote.startsWith("Radio") ? gRadioBehindNote : "Radio: " + gRadioBehindNote, 3000);
+}
 void serviceInternetRadio() {
   if (gRadioModePending && !radioBusy()) {
     gRadioModePending = false; const UiMode next = gRadioNextMode;
@@ -819,15 +881,16 @@ void serviceInternetRadio() {
   }
   // The worker only analyses frames while the visuals are on screen.
   internet_radio::wantVisuals(gUiMode == UiMode::Radio && gRadioView == RadioView::Visual && !gRadioModePending);
-  if (gUiMode != UiMode::Radio) {
+  const bool here = gUiMode == UiMode::Radio;
+  if (!here && !radioBehind()) {
     // A reconnect or search still waiting would otherwise start when the radio opens again.
     // Only the radio's own worker: the podcast player looks after itself.
     if (internet_radio::busy() || gRadioWantPlaying || gRadioStartPending || gRadioRetryWaiting || gRadioSearchPending || gRadioSearching) stopRadioStream();
     else if (gRadioList) radioRelease();
     return;
   }
-  if (gRadioSearching && !radioBusy()) { gRadioSearching = false; radioSearchDone(); }
-  if (gRadioSearchPending && !radioBusy()) { gRadioSearchPending = false; radioStartSearch(); return; }
+  if (here && gRadioSearching && !radioBusy()) { gRadioSearching = false; radioSearchDone(); }
+  if (here && gRadioSearchPending && !radioBusy()) { gRadioSearchPending = false; radioStartSearch(); return; }
   if (gRadioRetryWaiting && !radioBusy() && int32_t(millis() - gRadioRetryAtMs) >= 0) {
     // A dropped stream is often Wi-Fi going, so wait a while for it to come back.
     if (!gWifiReady && millis() - gRadioDroppedAtMs < kRadioWifiWaitMs) gRadioRetryAtMs = millis() + 1000;
@@ -839,21 +902,30 @@ void serviceInternetRadio() {
     if (gRadioWantUrl.isEmpty() || !radioStartAllowed()) {
       gRadioWantPlaying = false; gRadioRetries = 0;
       gRadioNotice = !gWifiReady ? "Wi-Fi required" : "Busy: retry Enter";
+      if (!here) radioStoppedBehind(!gWifiReady ? "Wi-Fi required" : "Busy: try Ctrl+M");
     } else {
       initSpeaker();
       if (!internet_radio::start(gRadioWantUrl.c_str())) {
         gRadioWantPlaying = false; gRadioRetries = 0; gRadioNotice = internet_radio::status();
+        if (!here) radioStoppedBehind(gRadioNotice);
       } else {
         gRadioNotice = "";
         gRadioPlayingUrl = gRadioWantUrl;
-        if (gRadioList && gRadioList->find(gRadioWantUrl.c_str()) >= 0) radioRememberLast(gRadioWantUrl);
+        if (gRadioList && gRadioList->find(gRadioWantUrl.c_str()) >= 0) {
+          radioRememberLast(gRadioWantUrl);
+          radioKeepForResume(gRadioList->find(gRadioWantUrl.c_str()));
+        }
       }
     }
     radioInvalidate();
   } else if (!radioBusy() && gRadioWantPlaying && !gRadioRetryWaiting) {
-    if (!radioScheduleRetry()) { gRadioWantPlaying = false; gRadioRetries = 0; gRadioNotice = internet_radio::status(); }
+    if (!radioScheduleRetry()) {
+      gRadioWantPlaying = false; gRadioRetries = 0; gRadioNotice = internet_radio::status();
+      if (!here) radioStoppedBehind(gRadioNotice);
+    }
     radioInvalidate();
   }
+  if (!here) return;
   serviceRadioLogos();
   serviceRadioBigLogo();
 }
@@ -955,6 +1027,34 @@ bool handleInternetRadioKey(char key, const Keyboard_Class::KeysState& keys) {
   return true;
 }
 
+// Ctrl+M, from any screen, stops the radio. Stopped, it plays the last station from the list
+// again on a screen the radio may play behind, or on the radio's own player the one shown.
+// False leaves the key to the screen: podcasts playing, or a screen the radio can't play on.
+bool radioMusicKey() {
+  if (radioOn()) {
+    stopRadioStream();
+    gRadioNotice = "Paused";
+    gRadioBehindNoteUntilMs = 0;
+    setStatus("Radio stopped", 1200);
+    return true;
+  }
+  if (podcast_player::busy() || !radioMayPlayIn(gUiMode)) return false;
+  if (gUiMode == UiMode::Radio) {
+    if (gRadioView == RadioView::Player || gRadioView == RadioView::Visual) radioPlaySelected();
+    return true;
+  }
+  if (gRadioResumeUrl.isEmpty()) { setStatus("Open Internet Radio to pick a station", 2000); return true; }
+  if (!gWifiReady) { setStatus("Radio: Wi-Fi required", 1500); return true; }
+  radioPlay(gRadioResumeUrl, gRadioResumeName);
+  gRadioBehindSinceMs = max<uint32_t>(millis(), 1);
+  gRadioBehindNoteUntilMs = 0;
+  setStatus("Radio: " + gRadioResumeName, 1500);
+  return true;
+}
+// Esc past the radio's own views with a player busy: true when it stops, as it always did. The
+// radio's stream instead plays on at Home, where Esc goes.
+bool radioStopsOnEscape() { return radioBusy() && (!radioOn() || podcast_player::busy()); }
+
 // --- Drawing ------------------------------------------------------------------------------
 // Font2 has ASCII only. A name or song in another script needs the font with its letters,
 // which sits 2 pixels lower. True when it picked that one.
@@ -991,12 +1091,15 @@ String radioFit(String text, int32_t pixelLimit) {
   while (text.length() > 1 && gCanvas.textWidth(text + "..") > pixelLimit) radioDropLastLetter(text);
   return text + "..";
 }
+uint32_t radioRetrySecondsLeft() {
+  const uint32_t left = int32_t(gRadioRetryAtMs - millis()) > 0 ? gRadioRetryAtMs - millis() : 0;
+  return (left + 999) / 1000;
+}
 String radioStatusText(bool* song = nullptr) {
   if (song) *song = false;
   if (gRadioRetryWaiting) {
     if (!gWifiReady) return "Waiting for Wi-Fi...";
-    const uint32_t left = int32_t(gRadioRetryAtMs - millis()) > 0 ? gRadioRetryAtMs - millis() : 0;
-    return "Reconnecting in " + String((left + 999) / 1000) + "s";
+    return "Reconnecting in " + String(radioRetrySecondsLeft()) + "s";
   }
   if (gRadioStartPending) return "Tuning...";
   if (radioStreaming()) {
@@ -1028,8 +1131,10 @@ int radioWrap(const String& text, int32_t width, String* out, int lines) {
   }
   return n;
 }
-// The meter's last five readings, about a tenth of a second apart, newest on the right.
-uint8_t gRadioMeter[5] = {};
+// The meter's last fifteen readings, about a tenth of a second apart, newest on the right. The
+// tile draws the last five, and Home all of them.
+constexpr int kRadioMeterLen = 15;
+uint8_t gRadioMeter[kRadioMeterLen] = {};
 uint32_t gRadioMeterAtMs = 0;
 // Reads the decoded audio's loudness, on a log scale as a VU meter reads, so the bars move with
 // the music and settle in a quiet passage.
@@ -1042,7 +1147,7 @@ void radioMeterTick(bool playing) {
   // Music sits between about 700 and 23000, some 30 dB, so that's what the 14 steps cover.
   // Spread wider, every song would fill the bars and they'd stop looking alive.
   const int h = level < 700 ? 1 : int((log2f(float(level)) - 9.5f) * 14.0f / 5.0f + 0.5f);
-  gRadioMeter[4] = uint8_t(h < 1 ? 1 : h > 14 ? 14 : h);
+  gRadioMeter[kRadioMeterLen - 1] = uint8_t(h < 1 ? 1 : h > 14 ? 14 : h);
 }
 // Each genre keeps a colour, from its name, so a genre you add gets one too. Twelve colours
 // keep the built-in seven apart, and these are in the order that suits them.
@@ -1087,7 +1192,7 @@ void drawRadioTile(int16_t x, int16_t y, const char* name, const char* genre, bo
     if (!playing && !waiting) return;
     d.fillRoundRect(x + 8, y + 41, 44, 15, 4, TFT_BLACK);
     for (int i = 0; i < 5; ++i) {
-      const int16_t h = playing ? int16_t(max<int>(1, gRadioMeter[i] * 10 / 14)) : (i == lit ? 6 : 2);
+      const int16_t h = playing ? int16_t(max<int>(1, gRadioMeter[kRadioMeterLen - 5 + i] * 10 / 14)) : (i == lit ? 6 : 2);
       d.fillRect(x + 12 + i * 8, y + 53 - h, 5, h, TFT_WHITE);
     }
     return;
@@ -1109,7 +1214,8 @@ void drawRadioTile(int16_t x, int16_t y, const char* name, const char* genre, bo
   if (!meter) return;
   const int16_t left = x + (kSize - 37) / 2, bottom = y + kSize - 6;
   for (int i = 0; i < 5; ++i) {
-    const int16_t h = playing ? (gRadioMeter[i] ? gRadioMeter[i] : 1) : (i == lit ? 6 : 2);
+    const uint8_t m = gRadioMeter[kRadioMeterLen - 5 + i];
+    const int16_t h = playing ? (m ? m : 1) : (i == lit ? 6 : 2);
     d.fillRect(left + i * 8, bottom - h, 5, h, TFT_BLACK);
   }
 }
@@ -1564,6 +1670,52 @@ void renderRadioVisual() {
       d.setCursor(cx - d.textWidth(line.first) / 2, line.second); d.print(line.first);
     }
     d.setFont(&fonts::Font2);
+  }
+}
+// Home, while the radio plays behind it: the station in its genre's colour, over a meter of what
+// it's playing, in place of Home's idle bars. Ctrl+M's hint shows first; while it tunes or
+// reconnects, that; and if it stops by itself, why, for a few seconds.
+bool radioHomeCardShows() {
+  return radioOn() || (gRadioBehindNoteUntilMs && int32_t(gRadioBehindNoteUntilMs - millis()) > 0);
+}
+void drawHomeRadioCard() {
+  auto& d = gCanvas;
+  constexpr int16_t kLeft = 121, kRight = 229, kBase = 101;
+  const uint16_t amber = rgb565_local(255,136,64), quiet = rgb565_local(150,165,175);
+  const bool on = radioOn();
+  const uint16_t ink = !on ? amber : gRadioResumeInk ? gRadioResumeInk : rgb565_local(88,240,141);
+  // A note: its head, and its stem with the flag.
+  d.fillCircle(kLeft + 3, 84, 3, ink);
+  d.fillRect(kLeft + 5, 74, 2, 10, ink);
+  d.fillRect(kLeft + 5, 74, 6, 2, ink);
+  const String name = on ? gRadioWantName : String("Radio stopped");
+  const bool wide = radioTextFont(name);
+  d.setTextColor(on ? TFT_WHITE : amber);
+  d.setCursor(kLeft + 15, wide ? 74 : 72);
+  d.print(radioFit(name, kRight - kLeft - 15));
+  const bool playing = on && internet_radio::state() == internet_radio::State::Playing && !internet_radio::searching();
+  radioMeterTick(playing);
+  String line;
+  if (!on) {
+    // Under "Radio stopped" the reason needn't say radio again: "Timed out", "Connection failed".
+    line = gRadioBehindNote;
+    if (line.startsWith("Radio ") && line.length() > 6) { line = line.substring(6); line[0] = char(toupper(static_cast<unsigned char>(line[0]))); }
+  }
+  else if (gRadioBehindSinceMs && millis() - gRadioBehindSinceMs < 4000) line = "Ctrl+M stops it";
+  // The player's words for a wait, shorter, to fit the line.
+  else if (gRadioRetryWaiting) line = !gWifiReady ? String("Waiting for Wi-Fi") : "Reconnecting " + String(radioRetrySecondsLeft()) + "s";
+  else if (!playing) line = radioStatusText();
+  if (!line.isEmpty() || !playing) {
+    d.setFont(&fonts::Font0);
+    d.setTextColor(quiet);
+    d.setCursor(kLeft, 93);
+    d.print(radioFit(line, kRight - kLeft));
+    d.setFont(&fonts::Font2);
+    return;
+  }
+  for (int i = 0; i < kRadioMeterLen; ++i) {
+    const int16_t h = int16_t(max<int>(2, gRadioMeter[i] * 13 / 14));
+    d.fillRoundRect(kLeft - 1 + i * 7, kBase - h, 3, h, 1, ink);
   }
 }
 void renderInternetRadioUi() {

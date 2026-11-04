@@ -223,7 +223,8 @@ bool playActivityCue(activity_cue::Cue cue) {
 }
 
 bool focusToneAllowed() {
-  return !(radioBusy() || synthAudioBusy() || gRecording || gSubmitting || gThinking || gPlaybackActive ||
+  // radioOn: between the radio's reconnects too, or a tone could hold the speaker as it restarts.
+  return !(radioBusy() || radioOn() || synthAudioBusy() || gRecording || gSubmitting || gThinking || gPlaybackActive ||
            gRealtimeActive || gRealtimeExclusiveMode);
 }
 
@@ -236,7 +237,7 @@ void focusTone(uint16_t freq, uint16_t durationMs) {
 
 bool playFocusCue(FocusState state) {
   if (!gFocusSettings.guidedAudio) return false;
-  if (radioBusy() || synthAudioBusy() || gRecording || gSubmitting || gThinking || gPlaybackActive || gRealtimeActive || gRealtimeExclusiveMode) {
+  if (radioBusy() || radioOn() || synthAudioBusy() || gRecording || gSubmitting || gThinking || gPlaybackActive || gRealtimeActive || gRealtimeExclusiveMode) {
     return false;
   }
   const char* cue = nullptr;

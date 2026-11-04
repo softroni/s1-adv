@@ -16,7 +16,8 @@ stations live in a text file on the SD card, and Find adds new ones from a publi
 | **F** | Find stations |
 | **M** | Move this station to another genre or a new one, change its place in its genre, or remove it |
 | **Del** | Remove this station from your list |
-| **Esc** | Stop and go Home |
+| **Esc** | Go Home. The radio keeps playing there |
+| **Ctrl+M** | Stop the radio from any screen. Press it again to play the last station again |
 
 Pausing leaves the live stream, so playing again joins the broadcast where it is now.
 
@@ -33,6 +34,32 @@ went, it waits up to a minute for it first. A station that never started isn't t
 because it's more likely broken than dropped. Press Enter to try it yourself.
 
 The radio opens on the last station you played. It doesn't start playing until you press Enter.
+
+## Playing behind other screens
+
+Esc goes Home and the music keeps going. It also keeps playing on Pomodoro, Alarm, Stopwatch,
+Calendar, Calculator and Notes, and on the clock and battery screens. None of them needs the
+speaker, the mic, the network or much memory. Home shows the station in its genre's colour, over
+bars that follow the music where Home's own bars usually are. For the first few seconds it says
+**Ctrl+M stops it**, and while the radio reconnects it says that instead.
+
+**Ctrl+M** stops the radio from any screen. On one of the screens above, Ctrl+M again plays the
+last station from your list. Open Internet Radio and it shows the station that's playing, with
+every key working as usual.
+
+Anything else stops the radio first, the same as before: AI Chat and voice, the Lab, Podcasts,
+games, the NES, Mesh, Wi-Fi settings and updates. The alarm stops it too, so it can ring. A
+station you found and played without saving stops when you leave, because the radio's own screen
+only shows the stations in your list.
+
+The radio needs the network to itself, so while it plays the Cardputer doesn't fetch chat
+messages, check the bridge or look for updates, and Pomodoro's sounds stay quiet. All of that
+comes back when it stops.
+
+While it plays, the screen dims when the screensaver would start, and if **Screen off** is on in
+Settings it goes dark when it would have. The animated screensaver doesn't run, because it would
+take over the screen and stop the music. Any key brings the screen back. If the radio stops by
+itself behind another screen, after its reconnects run out, Home says why for a few seconds.
 
 ## Logos
 
@@ -177,4 +204,4 @@ With no card, the built-in stations play, and nothing can be saved or removed.
 ## Not yet
 
 - HTTPS, AAC and HLS streams.
-- Playing on while you use another screen.
+- Playing on behind the screens that need the network or the speaker, such as AI Chat.

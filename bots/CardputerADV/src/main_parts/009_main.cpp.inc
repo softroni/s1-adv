@@ -272,8 +272,26 @@ void serviceIdleScreensaver() {
   uint32_t saverTimeoutMs = static_cast<uint32_t>(max<uint8_t>(1, gDeviceSettings.screensaverTimeoutMin)) * 60000UL;
   uint32_t offTimeoutMs = static_cast<uint32_t>(max<uint8_t>(5, gDeviceSettings.screenOffAfterMin)) * 60000UL;
 
+  // A player keeps its screen, or the radio the one it plays behind: the saver would take it
+  // and stop the music. So the screen dims when the saver would start, and goes off when it would
+  // have, and a key brings it back as it was.
+  if (!gScreensaverActive && (radioBusy() || radioOn())) {
+    const uint32_t offAfterMs = (gDeviceSettings.screensaverEnabled ? saverTimeoutMs : 0) + offTimeoutMs;
+    if (gDeviceSettings.screensaverEnabled && !gScreensaverDimmed && !gScreenOffActive && idleMs >= saverTimeoutMs) {
+      gScreensaverPreviousMode = gUiMode;
+      gScreensaverDimmed = true;
+      applyDisplayBrightness();
+    }
+    if (gDeviceSettings.screenAutoOffEnabled && !gScreenOffActive && idleMs >= offAfterMs) {
+      gScreensaverPreviousMode = gUiMode;
+      gScreenOffActive = true;
+      applyDisplayBrightness();
+    }
+    return;
+  }
   if (!gScreensaverActive) {
-    if (gDeviceSettings.screensaverEnabled && idleMs >= saverTimeoutMs) {
+    // Not over a screen gone off while music played and then stopped: it stays off.
+    if (gDeviceSettings.screensaverEnabled && !gScreenOffActive && idleMs >= saverTimeoutMs) {
       enterScreensaver();
       return;
     }

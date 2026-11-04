@@ -12,7 +12,9 @@ bool gBrainStartSoundPending = false;
 uint32_t gBrainStartSoundAtMs = 0;
 
 bool appAllowsBackgroundNetwork() {
-  if (radioBusy()) return false;
+  // Between the radio's reconnects too, wherever it plays: a request then could take the heap
+  // its stream needs to start again.
+  if (radioBusy() || radioOn()) return false;
   switch(gUiMode) {
     case UiMode::Files: // Keep background SD writes out of file-management transactions.
     case UiMode::Chess: // Offline demo: keep the keyboard/UI responsive.

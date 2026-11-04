@@ -56,6 +56,7 @@ struct{struct{int brightness=-1;void setBrightness(int n){assert(n>=0&&n<=255);b
 template<class T>T clampValue(T n,T lo,T hi){return std::min(hi,std::max(lo,n));}
 uint8_t percentToByte(uint8_t p){return (unsigned(p)*255+50)/100;}
 void setStatus(const String&,int){}int eyesReset=0;void resetUncannyEyesRenderer(){++eyesReset;}
+bool fakeRadio=false,fakeRadioOn=false;bool radioBusy(){return fakeRadio;}bool radioOn(){return fakeRadioOn;}
 void setUiMode(UiMode mode);void applyDisplayBrightness();
 time_t shownTime=0;time_t fakeTime(time_t*){return shownTime;}
 '''
@@ -83,6 +84,25 @@ int main(){
   reset();*p=true;tick+=60000;serviceIdleScreensaver();assert(!gScreensaverActive);*p=false;
  }
  reset();gUiMode=UiMode::Ota;tick+=60000;serviceIdleScreensaver();assert(!gScreensaverActive);
+ // A player keeps its screen, playing or between reconnects: no saver, which would take the
+ // screen and stop the music. It dims when the saver would start and goes off when it would
+ // have, and a key wakes it to the same screen.
+ for(bool*p:{&fakeRadio,&fakeRadioOn}){
+  reset();*p=true;tick+=60000;serviceIdleScreensaver();
+  assert(!gScreensaverActive&&gScreensaverDimmed&&!gScreenOffActive&&gUiMode==UiMode::ChatFull&&M5Cardputer.Display.brightness==percentToByte(10));
+  tick+=240000;serviceIdleScreensaver();assert(!gScreenOffActive);
+  tick+=60000;serviceIdleScreensaver();assert(gScreenOffActive&&!gScreensaverActive&&M5Cardputer.Display.brightness==0&&gUiMode==UiMode::ChatFull);
+  assert(handleScreensaverWake()&&!gScreensaverDimmed&&!gScreenOffActive&&gUiMode==UiMode::ChatFull&&M5Cardputer.Display.brightness==percentToByte(70));
+  // Without the saver it only goes off, at its own time.
+  reset();gDeviceSettings.screensaverEnabled=false;tick+=60000;serviceIdleScreensaver();assert(!gScreensaverDimmed&&!gScreenOffActive);
+  tick+=240000;serviceIdleScreensaver();assert(gScreenOffActive&&!gScreensaverDimmed);
+  // Gone off while it played, the screen stays off when the music stops: no saver lights it.
+  reset();tick+=360000;serviceIdleScreensaver();assert(gScreenOffActive);*p=false;tick+=1000;serviceIdleScreensaver();
+  assert(gScreenOffActive&&!gScreensaverActive&&gUiMode==UiMode::ChatFull);
+  // Only dimmed, the saver takes over as usual once the music stops.
+  reset();gDeviceSettings.screensaverStyle=0;*p=true;tick+=60000;serviceIdleScreensaver();assert(gScreensaverDimmed);*p=false;tick+=1000;serviceIdleScreensaver();
+  assert(gScreensaverActive&&gUiMode==UiMode::CMatrix);
+ }
  // Moving from the saver to another app must restore the brightness state.
  reset();gDeviceSettings.screensaverStyle=2;enterScreensaver();gScreensaverDimmed=true;setUiMode(UiMode::Home);assert(!gScreensaverActive&&!gScreensaverDimmed);
  // Preview input is optional; the actual saver keeps first-key wake semantics.

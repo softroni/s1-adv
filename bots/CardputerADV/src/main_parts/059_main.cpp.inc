@@ -192,7 +192,9 @@
   int16_t waveY = state == AssistantPulseState::Ready ? 88 : 86;
   int bars = state == AssistantPulseState::Ready ? 15 : 16;
   const bool micRecording = gRecording || gRealtimeRecording;
-  if (state == AssistantPulseState::Ready && !working && homeFirmwareUpdateAvailable() && !gOtaManifest.notes.isEmpty()) {
+  if (state == AssistantPulseState::Ready && !working && radioHomeCardShows()) {
+    drawHomeRadioCard();
+  } else if (state == AssistantPulseState::Ready && !working && homeFirmwareUpdateAvailable() && !gOtaManifest.notes.isEmpty()) {
     drawHomeUpdateNote();
   } else if (working && (micRecording || realtime)) {
     mic_input_meter::draw(d, 121, 77, 96, gMicInputMeter.visibleLevel(micRecording, nowMs),

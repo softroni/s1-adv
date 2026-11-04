@@ -79,7 +79,7 @@ enum class NotesMode{List,Edit};NotesMode gNotesMode=NotesMode::List;
 int gChatScrollOffset=0,gLogScrollOffset=0,gNoteScrollOffset=0,gNoteListScrollOffset=0;
 bool returnToSettingsHub(){return false;}
 bool wifiSettingsEscape(){return false;}
-bool radioEscape(){return false;}bool podcastEscape(){return false;}
+bool radioEscape(){return false;}bool radioStopsOnEscape(){return radioBusy();}bool podcastEscape(){return false;}
 bool handleVoiceRequestEscape(){return false;}void dismissVoiceNotice(){gVoiceNoticeVisible=false;}
 void dismissAlarm(const char*){gAlarmRinging=false;}void stopPlaybackStream(){}
 enum class FaceMode{Idle};void setFaceMode(FaceMode){}void setKeyDiag(const char*){}

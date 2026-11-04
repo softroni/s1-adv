@@ -226,7 +226,7 @@ First, the keys. On the Cardputer, the arrows are the `;` `.` `,` `/` keys, and 
 Then work your way down this list. Each step needs a little more than the last.
 
 1. **Play something.** Tab, G, Tetris. Then Tab, R, Flappy Bird, where Space flaps.
-2. **Turn on the radio.** Tab, M, Internet Radio, then pick a genre. Press F to find more stations and S to keep one.
+2. **Turn on the radio.** Tab, M, Internet Radio, then pick a genre. Press F to find more stations and S to keep one. Esc goes Home and leaves it playing, and Ctrl+M stops it.
 3. **Say hello to Claude.** Open AI Chat, ask anything, then try it with your voice.
 4. **Plug in a sensor.** Connect the ultrasonic unit, then Tab, L, Devices. Move your hand and watch the number change. Now open Air Music and play it like a theremin.
 5. **Make your first rule.** Tab, L, Rules, then Recipes. Add **Air theremin** and press P to play it. When that works, try **+ New rule**, or **Say a rule** with Claude connected. The [Lab guide](docs/LAB.md) walks through every step.
