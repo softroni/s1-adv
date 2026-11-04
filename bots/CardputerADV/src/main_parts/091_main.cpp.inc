@@ -180,57 +180,52 @@ bool meshChannelKey(char key, const Keyboard_Class::KeysState& keys) {
   return true;
 }
 
-String meshChannelStartLine() {
+// The private channel as Mesh's first screen lists it.
+String meshChannelLabel() {
   const auto& channel = meshChannelSaved();
-  return channel.set() ? String("C private channel: #") + channel.name : String("C sets up a private channel");
+  return channel.set() ? String("#") + channel.name : String("none");
 }
 
 void renderMeshChannelUi() {
   auto& d = gCanvas;
-  const uint16_t bg = rgb565_local(3, 8, 14), muted = rgb565_local(130, 145, 155), cyan = rgb565_local(47, 227, 255),
-                 amber = rgb565_local(255, 200, 64);
-  d.setFont(&fonts::Font2); d.setTextColor(TFT_WHITE, bg); d.setCursor(8, 40); d.print("Private channel");
-  d.setFont(&fonts::Font0);
+  MeshInk ink;
+  meshHead("Private channel", ink.amber);
   const bool noting = !gMeshChannelNote.isEmpty() && int32_t(millis() - gMeshChannelNoteUntilMs) < 0;
   if (gMeshChannelShowKey && gMeshChannel.keyLength && gMeshChannelEdit == MeshChannelEdit::None) {
     // To share: the key as text, and as a QR code a phone reads, since I and l look alike here.
     char text[s1_mesh::kChannelKeyText];
     s1_mesh::keyToBase64(gMeshChannel.key, gMeshChannel.keyLength, text, sizeof(text));
-    d.setTextColor(muted, bg); d.setCursor(8, 60); d.print("Name");
-    d.setTextColor(TFT_WHITE, bg); d.setCursor(40, 60); d.print(gMeshChannel.name);
+    meshText(8, kMeshTop, "Name", ink.muted);
+    meshText(48, kMeshTop, meshFit(gMeshChannel.name, 68), ink.white);
+    // Four lines of 11, so even Font2's widest letters stay clear of the code.
     const String key(text);
-    d.setTextColor(amber, bg);
-    for (int line = 0; line < 3; ++line) { d.setCursor(8, 74 + line * 10); d.print(key.substring(line * 15, min<int>(int(key.length()), line * 15 + 15))); }
-    // A note can be long, so it's cut to the space beside the code.
-    String note = noting ? gMeshChannelNote : String("Scan or type it");
-    while (d.textWidth(note) > 112) note.remove(note.length() - 1, 1);
-    d.setTextColor(noting ? amber : muted, bg); d.setCursor(8, 108); d.print(note);
+    for (int line = 0; line < 4 && line * 11 < int(key.length()); ++line)
+      meshText(8, 40 + line * 16, key.substring(line * 11, min<int>(int(key.length()), line * 11 + 11)), ink.amber);
+    // A note can be long, so it's fitted to the space beside the code.
+    meshTextFit(8, 104, noting ? gMeshChannelNote : String("Scan or type it"), 112, noting ? ink.amber : ink.muted);
     d.qrcode(text, 124, 23, 112, 1, true);
     memset(text, 0, sizeof(text));
-    d.setTextColor(cyan, bg); d.setCursor(8, 127); d.print("V hide  Esc back");
+    meshKeys("V hide  Esc back", ink.muted);
     return;
   }
   if (gMeshChannelEdit != MeshChannelEdit::None) {
     const bool naming = gMeshChannelEdit == MeshChannelEdit::Name;
-    d.setTextColor(muted, bg); d.setCursor(8, 62);
-    d.print(naming ? "Its name, the same on every radio" : "Its key, as base64 from the app");
-    d.drawRect(5, 74, 230, 17, rgb565_local(52, 64, 74));
-    String typed = gMeshChannelInput[0] ? String(gMeshChannelInput) : String(naming ? "Family" : "...");
-    while (!typed.isEmpty() && d.textWidth(typed) > 220) typed.remove(0, 1);  // The end of a long key stays in view.
-    d.setTextColor(gMeshChannelInput[0] ? TFT_WHITE : muted, bg); d.setCursor(10, 79); d.print(typed);
+    meshTextFit(8, kMeshTop + 3, naming ? "Its name, the same on every radio" : "Its key, as base64 from the app", 224, ink.muted);
+    d.drawRoundRect(2, 44, 236, 22, 6, ink.frame);
+    // The end of a long key stays in view.
+    const String typed = gMeshChannelInput[0] ? meshTail(String(gMeshChannelInput), 222) : String(naming ? "Family" : "...");
+    meshText(8, 47, typed, gMeshChannelInput[0] ? ink.white : ink.muted);
   } else {
     const auto& c = gMeshChannel;
-    d.setTextColor(muted, bg); d.setCursor(8, 60); d.print("Name");
-    d.setTextColor(c.name[0] ? TFT_WHITE : muted, bg); d.setCursor(44, 60); d.print(c.name[0] ? c.name : "none yet");
-    d.setTextColor(muted, bg); d.setCursor(8, 72); d.print("Key");
-    d.setTextColor(c.keyLength ? TFT_WHITE : muted, bg); d.setCursor(44, 72);
-    d.print(c.keyLength == 32 ? "AES-256, set" : c.keyLength == 16 ? "AES-128, set" : "none yet");
-    d.setTextColor(muted, bg);
-    d.setCursor(8, 86); d.print("Others add the same name and key");
-    d.setCursor(8, 96); d.print("in Meshtastic: Channels, add one.");
+    meshText(8, kMeshTop + 3, "Name", ink.muted);
+    meshText(52, kMeshTop + 3, c.name[0] ? c.name : "none yet", c.name[0] ? ink.white : ink.muted);
+    meshText(8, kMeshTop + 21, "Key", ink.muted);
+    meshText(52, kMeshTop + 21, c.keyLength == 32 ? "AES-256, set" : c.keyLength == 16 ? "AES-128, set" : "none yet",
+             c.keyLength ? ink.white : ink.muted);
+    meshTextFit(8, 64, "Others add the same name and key", 224, ink.muted);
+    meshTextFit(8, 80, "in Meshtastic: Channels, add one.", 224, ink.muted);
   }
-  if (noting) { d.setTextColor(amber, bg); d.setCursor(8, 110); d.print(gMeshChannelNote); }
-  d.setTextColor(cyan, bg); d.setCursor(8, 127);
-  d.print(gMeshChannelEdit != MeshChannelEdit::None ? "Enter save  Esc cancel" : "N name K key G new V show X del");
+  if (noting) meshTextFit(8, 98, gMeshChannelNote, 224, ink.amber);
+  meshKeys(gMeshChannelEdit != MeshChannelEdit::None ? "Enter save  Esc cancel" : "N name K key G new V show X del", ink.muted);
 }
 }  // namespace

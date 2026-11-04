@@ -520,7 +520,7 @@ void meshChannelOpen();
 bool meshChannelEscape();
 bool meshChannelKey(char key, const Keyboard_Class::KeysState& keys);
 void renderMeshChannelUi();
-String meshChannelStartLine();
+String meshChannelLabel();
 bool meshSaveName(const char* name);
 void meshLoadProfile(s1_mesh::RadioSession& session);
 bool meshSaveContacts(const s1_mesh::Contacts& contacts);

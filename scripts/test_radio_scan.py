@@ -10,8 +10,12 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 part = (ROOT / 'bots/CardputerADV/src/main_parts/087_main.cpp.inc').read_text()
+# Mesh's drawing helpers, which Radio Scan's screen shares.
+mesh = (ROOT / 'bots/CardputerADV/src/main_parts/068_main.cpp.inc').read_text()
+drawing = mesh[mesh.index('// --- Mesh drawing'):mesh.index('// --- end of Mesh drawing')]
 
 code = r'''
+#include "launcher_icons.h"
 #include "radio_scan.h"
 #include <cassert>
 #include <cmath>
@@ -27,8 +31,11 @@ code = r'''
 struct String:std::string {
  using std::string::string;
  String(const std::string&s):std::string(s){}
+ bool isEmpty()const{return empty();}
+ void remove(size_t p,size_t n){erase(p,n);}
+ String substring(size_t a,size_t b)const{return substr(a,b-a);}
 };
-namespace fonts {int Font0=0,Font2=2;}
+namespace fonts {int Font0=0,Font2=2,FreeSansBold9pt7b=9,efontCN_12=12;}
 constexpr int TFT_WHITE=65535,HIGH=1,LOW=0;
 constexpr int RADIOLIB_ERR_NONE=0,RADIOLIB_ERR_CRC_MISMATCH=-7,RADIOLIB_ERR_SPI=-16;
 int rgb565_local(int,int,int){return 1;}
@@ -44,12 +51,17 @@ struct Canvas {
  static void check(int a,int b,int w,int h){assert(a>=0&&b>=0&&w>=0&&h>=0&&a+w<=240&&b+h<=135);}
  void fillScreen(int){printed.clear();}
  void setTextSize(int n){assert(n==1);}void setFont(int*p){font=*p;}
- void setTextColor(int,int){}void setCursor(int a,int b){x=a;y=b;}
- int textWidth(const String&s)const{return int(s.size())*(font==0?6:9);}  // Font2 is proportional; 9 is wider than most
+ void setTextColor(int,int=0){}void setCursor(int a,int b){x=a;y=b;}
+ // Font2 is proportional, and 9 is wider than most of it; the bold one is wider still.
+ int textWidth(const String&s)const{return int(s.size())*(font==0||font==12?6:font==9?12:9);}
  template<class T>void print(T value){String s(value);if(s.empty())return;const int w=textWidth(s);
-  check(x,y,w,font==0?8:16);if(font==0)assert(x+w<=232);printed.insert(s);x+=w;++calls;}
+  check(x,y,w,font==0?8:font==9?18:font==12?12:16);if(font==0)assert(x+w<=232);printed.insert(s);x+=w;++calls;}
  void fillRect(int a,int b,int w,int h,int){check(a,b,w,h);++calls;}
  void drawFastHLine(int a,int b,int w,int){check(a,b,w,1);++calls;}
+ void drawFastVLine(int a,int b,int h,int){check(a,b,1,h);++calls;}
+ void drawRoundRect(int a,int b,int w,int h,int,int){check(a,b,w,h);++calls;}
+ void fillRoundRect(int a,int b,int w,int h,int,int){check(a,b,w,h);++calls;}
+ void drawBitmap(int a,int b,const uint8_t*,int w,int h,int){check(a,b,w,h);++calls;}
 }gCanvas;
 
 namespace libmeshtastic_leaf {
@@ -107,6 +119,7 @@ bool handleRadioScanKey(char key, const Keyboard_Class::KeysState& keys);
 void renderRadioScanUi(s1_mesh::RadioSession& session);
 void logRadioScanStatus(s1_mesh::RadioSession& session);
 }
+''' + drawing + r'''
 ''' + part + r'''
 using namespace s1_scan;
 static Packet packet(uint32_t from,uint8_t flags,uint8_t channel,size_t extra=10){
@@ -114,6 +127,7 @@ static Packet packet(uint32_t from,uint8_t flags,uint8_t channel,size_t extra=10
  p.bytes.resize(16+extra,0x55);return p;
 }
 static void render(){renderRadioScanUi(*gMeshSession);}
+static bool printedStarting(const std::string& p){for(const auto& t:gCanvas.printed)if(t.rfind(p,0)==0)return true;return false;}
 static void enter(){Keyboard_Class::KeysState k;k.enter=true;assert(handleRadioScanKey('\n',k));}
 static void key(char c){Keyboard_Class::KeysState k;assert(handleRadioScanKey(c,k));}
 static void sweepOnce(){auto&s=*gMeshSession;const uint32_t passes=s.scan.sweep.passes;
@@ -143,7 +157,7 @@ int main(){
  for(uint8_t i=0;i<104;++i)assert(std::fabs(s.radio.tunes[i]-us.frequency(i))<1e-3);
  const uint8_t busy=us.pointAt(915.125f);
  assert(s.scan.sweep.now[busy]==-72&&s.scan.sweep.floor(s.scan.plan)==-119&&s.scan.sweep.strongest(s.scan.plan)==busy);
- render();assert(gCanvas.printed.count("Floor -119 dBm  Top -72 at 915.125"));
+ render();assert(printedStarting("Floor -119")&&gCanvas.printed.count("Top -72 at 915.125"));
  // The burst goes; its peak stays, then fades 1 dB each half second, never below the reading.
  s.radio.signalAt=0;sweepOnce();assert(s.scan.sweep.now[busy]==-119&&s.scan.sweep.peak[busy]==-72);
  gNow+=500;serviceRadioScan(s);assert(s.scan.sweep.peak[busy]==-73);
@@ -186,7 +200,7 @@ int main(){
  // A narrow region's sweep still fits, and the region's name is shown.
  gMeshSession=std::make_unique<s1_mesh::RadioSession>();gMeshSession->region=15;
  serviceRadioScan(*gMeshSession);assert(gMeshSession->scan.plan.points==32);sweepOnce();render();
- assert(gCanvas.printed.count("UA_868 / sweep")&&gCanvas.printed.count("865.5-873.5 MHz"));
+ assert(printedStarting("UA_868")&&gCanvas.printed.count("865.5-873.5 MHz"));
 
  // A radio that stops answering: say so after a run of failures, then leave it alone.
  gMeshSession=std::make_unique<s1_mesh::RadioSession>();auto& b=*gMeshSession;b.radio.broken=true;

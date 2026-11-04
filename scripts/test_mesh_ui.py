@@ -6,13 +6,14 @@ import subprocess
 import tempfile
 ROOT=Path(__file__).resolve().parents[1]
 source=(ROOT/'bots/CardputerADV/src/main_parts/068_main.cpp.inc').read_text()
-render=source[source.index('String meshClip('):source.rindex('} // namespace')]
+render=source[source.index('// --- Mesh drawing'):source.rindex('} // namespace')]
 # The globals at the top, and the pure helpers the screens use: who a target is, and the People list.
 globals_=source[source.index('namespace {')+len('namespace {'):source.index('bool handleMeshEscape(')]
 target=source[source.index('const s1_mesh::Contact* meshTargetContact('):source.index('// Puts a text in the outbox')]
 people=source[source.index('struct MeshPerson'):source.index('void meshSaveContact(')]
 plan=source[source.index('struct MeshHelpPlan'):source.index('// One Help round.')]
 code=r'''
+#include "launcher_icons.h"
 #include "mesh_contacts.h"
 #include "mesh_help.h"
 #include "mesh_leaf_state.h"
@@ -37,25 +38,31 @@ struct String:std::string {
  String substring(size_t p,size_t n)const{return substr(p,n-p);}
 };
 void removeLastUtf8Char(String&s){if(s.empty())return;size_t n=s.size()-1;while(n&&(uint8_t(s[n])&0xc0)==0x80)--n;s.erase(n);}
-namespace fonts {int Font0=0,Font2=2,efontCN_12=12;}
+namespace fonts {int Font0=0,Font2=2,FreeSansBold9pt7b=9,efontCN_12=12;}
 constexpr int TFT_WHITE=65535;int rgb565_local(int,int,int){return 0;}
 struct Canvas {
  int font=0,x=0,y=0,calls=0;bool clipped=false;
  void fillScreen(int){++calls;}
  void setTextSize(int n){assert(n==1);}void setFont(int*p){font=*p;}
- void setTextColor(int,int){}void setCursor(int a,int b){x=a;y=b;}
+ void setTextColor(int,int=0){}void setCursor(int a,int b){x=a;y=b;}
+ // Wider than the real fonts mostly are, so what fits here fits there.
  int textWidth(const String&s)const {
-  int w=0;for(size_t i=0;i<s.size();++i)if((uint8_t(s[i])&0xc0)!=0x80)w+=font==0?6:font==2?8:uint8_t(s[i])<128?6:12;
+  int w=0;for(size_t i=0;i<s.size();++i)if((uint8_t(s[i])&0xc0)!=0x80)w+=font==0?6:font==2?8:font==9?12:uint8_t(s[i])<128?6:12;
   return w;
  }
  std::set<std::string> printed;
- template<class T>void print(T value){String s(value);printed.insert(s);int w=textWidth(s),h=font==0?8:font==2?16:12;
+ template<class T>void print(T value){String s(value);printed.insert(s);int w=textWidth(s),h=font==0?8:font==2?16:font==9?18:12;
   if(w){assert(x>=0&&x+w<=240&&y>=0&&y+h<=135);if(clipped)assert(x>=8&&x+w<=232&&y>=54&&y+h<=126);}
   x+=w;++calls;
  }
  void printf(const char*f,...){char b[128];va_list a;va_start(a,f);vsnprintf(b,sizeof(b),f,a);va_end(a);print(b);}
  void drawRect(int a,int b,int w,int h,int){assert(a>=0&&b>=0&&a+w<=240&&b+h<=135);++calls;}
  void drawFastHLine(int a,int b,int w,int){assert(a>=0&&b>=0&&a+w<=240&&b<135);++calls;}
+ void drawFastVLine(int a,int b,int h,int){assert(a>=0&&b>=0&&a<240&&b+h<=135);++calls;}
+ void fillRect(int a,int b,int w,int h,int){assert(a>=0&&b>=0&&a+w<=240&&b+h<=135);++calls;}
+ void drawRoundRect(int a,int b,int w,int h,int r,int){assert(a>=0&&b>=0&&a+w<=240&&b+h<=135&&r*2<=h);++calls;}
+ void fillRoundRect(int a,int b,int w,int h,int r,int){assert(a>=0&&b>=0&&a+w<=240&&b+h<=135&&r*2<=h);++calls;}
+ void drawBitmap(int a,int b,const uint8_t*bits,int w,int h,int){assert(bits&&a>=0&&b>=0&&a+w<=240&&b+h<=135);++calls;}
  void setClipRect(int a,int b,int w,int h){assert(a==8&&b==54&&w==224&&h==72);clipped=true;}
  void clearClipRect(){clipped=false;}
 }gCanvas;
@@ -75,7 +82,7 @@ void renderRadioScanUi(s1_mesh::RadioSession&){++scanRenders;}
 // The private channel's own screen is part 091, tested on its own; here only that Mesh hands over.
 bool gMeshChannelSetup=false;int channelRenders=0;
 void renderMeshChannelUi(){++channelRenders;}
-String meshChannelStartLine(){return String("C private channel: #ElevenChars");}  // As long as it gets.
+String meshChannelLabel(){return String("#ElevenChars");}  // As long as it gets.
 
 std::unique_ptr<s1_mesh::RadioSession>gMeshSession;
 bool gMeshBusOwned=false,gSdReady=true;String gMeshNotice;
@@ -85,11 +92,23 @@ bool gpsHeard=false;bool meshGpsHearing(uint32_t){return gpsHeard;}
 void meshSavedName(char* l,char* s){strcpy(l,"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW");strcpy(s,"WWWW");}
 uint32_t gMeshNoticeUntilMs=0;
 '''+globals_+target+plan+people+render+r'''
+bool printedStarting(const std::string& p){for(const auto& t:gCanvas.printed)if(t.rfind(p,0)==0)return true;return false;}
+bool printedEnding(const std::string& e){for(const auto& t:gCanvas.printed)if(t.size()>=e.size()&&t.compare(t.size()-e.size(),e.size(),e)==0)return true;return false;}
 int main() {
  using namespace s1_mesh;
  (void)kMeshStopConfirmMs;(void)kMeshPublicLocationMs;  // The keys' timers, not the screens'.
  for(uint8_t region:{1,15})for(bool sd:{false,true}){gDeviceSettings.meshRegion=region;gSdReady=sd;renderMeshUi();assert(!gCanvas.clipped);}
- assert(gCanvas.printed.count("C private channel: #ElevenChars"));
+ // The first screen lists the private channel, cut with two dots when it's too long for its room.
+ assert(printedStarting("#Elev"));
+ // Each row picked says what it does underneath, and the row picked is what Enter opens.
+ gCanvas.printed.clear();for(uint8_t row=1;row<kMeshStartRows;++row){gMeshStartRow=row;renderMeshUi();}
+ assert(gCanvas.printed.count("Region: Settings > Device")==0&&gCanvas.printed.count("Only your group can read it"));
+ gMeshStartRow=0;renderMeshUi();assert(gCanvas.printed.count("Region: Settings > Device"));
+ // A notice takes the place of that line until its time is up.
+ gMeshNotice="Cap-1262 not detected";gMeshNoticeUntilMs=0;renderMeshUi();assert(gCanvas.printed.count("Cap-1262 not detected"));
+ gCanvas.printed.clear();gMeshNotice="Name saved";gMeshNoticeUntilMs=clockMs-1;renderMeshUi();
+ assert(!gCanvas.printed.count("Name saved")&&gCanvas.printed.count("Region: Settings > Device"));
+ gMeshNotice="";gMeshNoticeUntilMs=0;
  // C's setup screen takes over the first screen while it's open.
  gMeshChannelSetup=true;renderMeshUi();assert(channelRenders==1);gMeshChannelSetup=false;
  // A running radio shows the region it started with, not one picked since.
@@ -99,7 +118,7 @@ int main() {
  // A scan session: its start screen while the radio starts, then the scanner's own screen.
  gMeshSession->use=s1_mesh::Use::Scan;gCanvas.printed.clear();
  for(int init:{s1_mesh::kInitPending,-19}){gMeshSession->initResult=init;renderMeshUi();assert(!gCanvas.clipped&&!scanRenders);}
- assert(gCanvas.printed.count("Radio Scan")&&gCanvas.printed.count("Listening only, nothing sent")&&!gCanvas.printed.count("Meshtastic leaf"));
+ assert(gCanvas.printed.count("Radio Scan")&&gCanvas.printed.count("Listening only, nothing sent")&&gCanvas.printed.count("Starting the radio"));
  gMeshSession->initResult=0;renderMeshUi();assert(scanRenders==1);
  gMeshSession->use=s1_mesh::Use::Chat;gMeshSession->initResult=0;
  gMeshSession->initResult=0;auto& s=gMeshSession->state;
@@ -123,7 +142,9 @@ int main() {
  // A direct message received, and every send target, at the longest a name gets.
  s.message(3,9999,false,reinterpret_cast<const uint8_t*>("hi"),2)->to=42;s.detailView=false;
  for(uint8_t t=0;t<=kContacts;++t){s.target=t;for(uint32_t ms:{0u,4000u}){clockMs=ms;renderMeshUi();}}
- assert(gCanvas.printed.count(std::string(12,'W')+">")&&gCanvas.printed.count("Public>"));
+ assert(printedStarting("WWWWW")&&printedEnding("..>")&&gCanvas.printed.count("Public>"));
+ // Both lines of keys, the arrows drawn rather than printed.
+ assert(gCanvas.printed.count("Enter send  Fn")&&gCanvas.printed.count(" who  C-H help")&&gCanvas.printed.count("C-N people  C-O read  C-L location"));
  // The private channel at the longest a name gets: as the target, heard, and sent in every state.
  strcpy(gMeshSession->privateChannel.name,"ElevenChars");gMeshSession->privateChannel.keyLength=32;
  s.target=kTargetPrivate;renderMeshUi();assert(gCanvas.printed.count("#ElevenChars>"));
@@ -153,7 +174,7 @@ int main() {
  assert(gCanvas.printed.count("Help")&&gCanvas.printed.count("GPS: not heard"));
  assert(gCanvas.printed.count("To: public (no location)")&&gCanvas.printed.count("To: #ElevenChars"));
  assert(gCanvas.printed.count("To: #ElevenChars, public (rough)")&&gCanvas.printed.count("To: public (exact)"));
- assert(gCanvas.printed.count("1-4 send P public C channel Esc chat"));
+ assert(gCanvas.printed.count("1-4 send  P public  C channel"));
  {const auto keep=gMeshSession->privateChannel;gMeshSession->privateChannel=PrivateChannel{};gMeshSession->help=Help{};renderMeshUi();
   assert(gCanvas.printed.count("1-4 send  P public  Esc chat"));gMeshSession->privateChannel=keep;}
  for(uint32_t c=1;c<=kContacts;++c){std::string name(39,'W');gMeshSession->contacts.add(c,name.c_str(),key);}
@@ -164,8 +185,13 @@ int main() {
   // All six: four contacts, the private channel and the public one, so the last row counts.
   for(size_t i=0;i<kHelpSlots;++i){h.seq[i]=uint32_t(i+1);}
   renderMeshUi();assert(!gCanvas.clipped);
-  if(stop==0)assert(gCanvas.printed.count("+2 more")&&gCanvas.printed.count("1-4 change P public C channel Esc"));
-  h.seq[2]=0;h.seq[0]=777;renderMeshUi();assert(!gCanvas.printed.count("+1 more")&&gCanvas.printed.count("#ElevenChars"));
+  {auto keep=gCanvas.printed;gCanvas.printed.clear();renderMeshUi();
+   // I'm OK goes once, so it has nothing to change.
+   if(stop==0)assert(gCanvas.printed.count("+3 more")&&gCanvas.printed.count(h.repeating()?"1-4 change  P public  C channel":"1-4 send again  Esc chat"));
+   h.seq[2]=0;h.seq[0]=777;gCanvas.printed.clear();renderMeshUi();assert(gCanvas.printed.count("+2 more"));
+   // Four fit whole: two contacts and both channels.
+   h.seq[1]=0;gCanvas.printed.clear();renderMeshUi();assert(!gCanvas.printed.count("+1 more")&&!gCanvas.printed.count("+2 more")&&gCanvas.printed.count("#ElevenChars"));
+   gCanvas.printed.insert(keep.begin(),keep.end());}
  }
  assert(gCanvas.printed.count("Arrived. Stopped repeating")&&gCanvas.printed.count("Again in 5:00"));
  // While Help repeats, the chat's top line says so.

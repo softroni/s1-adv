@@ -206,14 +206,16 @@ NFC Notes is under Tab, Tools, and `/nfc` opens it. It needs the M5Stack NFC uni
 
 ## Mesh and Radio Scan
 
-Mesh is under Tab, Tools, and needs the Cap LoRa-1262 with its antenna fitted. On its first
-screen, Enter starts the Meshtastic chat, H starts it on Help, N sets the name other radios
+Mesh is under Tab, Tools, and needs the Cap LoRa-1262 with its antenna fitted. Its first
+screen is a list: `;` and `.` pick a row and Enter opens it, or each row's own key does. Enter
+starts the Meshtastic chat, H starts it on Help, N sets the name other radios
 see, C sets up a [private channel](MESH.md#private-channel) and its key, and S starts Radio Scan, which only listens: a sweep of signal strength across your
 region's band, and with Enter, a count of the Meshtastic packets heard on a preset's channel
 (Up and Down change the preset).
 
-In the chat, Enter sends to whoever the box at the bottom names. Left and Right change who:
-the public channel, the private channel or a contact. Ctrl+N lists people (Enter saves a radio as a contact, Del
+In the chat, Enter sends to whoever the box at the bottom names. Fn with `,` or `/` changes who:
+the public channel, the private channel or a contact. Without Fn those keys type, and Fn with
+`;` or `.` moves through the messages. Ctrl+N lists people (`;` and `.` pick one, Enter saves a radio as a contact, Del
 removes one), Ctrl+O reads a message, Ctrl+L shares your location and Ctrl+H opens Help,
 where 1 to 4 send a ready message with your location to every contact and the private
 channel (C leaves it out) until one of their radios has it. Esc closes what's open, then

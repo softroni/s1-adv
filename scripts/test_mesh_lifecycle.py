@@ -150,7 +150,7 @@ void vTaskDelete(void*p){assert(p==nullptr);workerPending=false;}
 void render(){++renders;}
 template<class...T>void logf(const char*,T...){ }
 void setStatus(const String&,int){}
-struct Keyboard_Class {struct KeysState {bool ctrl=false,enter=false,del=false;};};
+struct Keyboard_Class {struct KeysState {bool ctrl=false,enter=false,del=false,fn=false;};};
 int scanServices=0,scanKeys=0;
 void serviceRadioScan(s1_mesh::RadioSession& s){assert(gMeshBusOwned&&!gSdReady&&s.use==s1_mesh::Use::Scan);++scanServices;}
 bool handleRadioScanKey(char,const Keyboard_Class::KeysState&){++scanKeys;return true;}
@@ -187,7 +187,7 @@ for signature in ['bool mountSdCardOnSharedSpi()','fs::FS* activeVoiceFs()','fs:
 code+='bool stopMeshMode(bool goHome);\n'
 # Every part of Mesh's logic but the packet decoder (faked above) and the screens.
 mesh=(PARTS/'068_main.cpp.inc').read_text()
-body=mesh[mesh.index('namespace {')+len('namespace {'):mesh.index('String meshClip(')]
+body=mesh[mesh.index('namespace {')+len('namespace {'):mesh.index('// --- Mesh drawing')]
 code+=body[:body.index('void meshHandlePacket(')]+body[body.index('void serviceMeshMode('):body.index('bool handleMeshHostCommand(')]+'\n'
 actual=function('024_main.cpp.inc','void setUiMode(')
 code+=actual[:actual.index('  if (mode != UiMode::Face)')]+ 'gUiMode=mode;\n}\n'
@@ -213,6 +213,14 @@ void mesh_features() {
  // C on the first screen opens the private channel's setup, and Esc closes that before anything else.
  reset();assert(handleMeshKey('c',plain)&&channelOpens==1&&gMeshChannelSetup&&!gMeshSession);
  assert(handleMeshEscape()&&!gMeshChannelSetup&&gUiMode==UiMode::Mesh&&!gMeshBusOwned);
+ // The first screen is a list: up and down wrap around it, and Enter opens the row picked.
+ gMeshStartRow=0;assert(handleMeshKey(';',plain)&&gMeshStartRow==kMeshStartRows-1&&handleMeshKey('.',plain)&&gMeshStartRow==0);
+ assert(handleMeshKey(char(2),plain)&&handleMeshKey(char(2),plain)&&handleMeshKey(char(2),plain)&&handleMeshKey(char(2),plain)&&
+   gMeshStartRow==uint8_t(MeshStartRow::Private));
+ assert(handleMeshKey('\n',enter)&&channelOpens==2&&gMeshChannelSetup&&!gMeshSession&&handleMeshEscape());
+ // A letter opens its row directly and leaves the list pointing at it.
+ assert(handleMeshKey('n',plain)&&gMeshNaming&&gMeshStartRow==uint8_t(MeshStartRow::Name)&&handleMeshEscape()&&!gMeshNaming);
+ gMeshStartRow=0;
  const int loads=channelLoads;
  // The People list: contacts first, then radios heard. Only one with a key can be saved.
  active();auto& s=*gMeshSession;assert(channelLoads==loads+1);
@@ -224,10 +232,22 @@ void mesh_features() {
  const int saves=contactSaves;assert(handleMeshKey('\n',enter)&&s.contacts.count==1&&contactSaves==saves+1);
  assert(s.contacts.list[0].id==77&&std::string(s.contacts.list[0].name)=="Alex");
  assert(handleMeshKey(char(2),plain)&&s.state.nodeSel==1&&handleMeshKey(char(2),plain)&&s.state.nodeSel==0);
+ // The built-in keyboard's arrows are ; and . themselves, and People has no text box, so they move.
+ assert(handleMeshKey('.',plain)&&s.state.nodeSel==1&&s.state.nodeView&&handleMeshKey(';',plain)&&s.state.nodeSel==0);
+ assert(!s.state.input[0]);
+ // Left and Right there need Fn, since who the box sends to can't be seen from People.
+ {const uint8_t was=s.state.target;Keyboard_Class::KeysState fn;fn.fn=true;
+  assert(handleMeshKey('/',fn)&&s.state.target!=was&&s.state.nodeView&&handleMeshKey(',',fn)&&s.state.target==was);}
  // Left and Right pick who Enter sends to: Public, then each contact.
  assert(handleMeshEscape()&&!s.state.nodeView&&gMeshBusOwned);
  assert(handleMeshKey(char(4),plain)&&s.state.target==1&&handleMeshKey(char(4),plain)&&s.state.target==0);
  assert(handleMeshKey(char(3),plain)&&s.state.target==1);
+ // In the chat , and / type, as ; and . do; with Fn they pick who.
+ {Keyboard_Class::KeysState fn;fn.fn=true;
+  assert(handleMeshKey('/',fn)&&s.state.target==0&&handleMeshKey(',',fn)&&s.state.target==1&&!s.state.input[0]);
+  assert(handleMeshKey(',',plain)&&handleMeshKey('.',plain)&&handleMeshKey('/',plain)&&handleMeshKey(';',plain)&&
+    std::string(s.state.input)==",./;"&&s.state.target==1);
+  for(int i=0;i<4;++i)handleMeshKey('\b',del);assert(!s.state.input[0]);}
  assert(handleMeshKey('h',plain)&&handleMeshKey('i',plain)&&handleMeshKey('\n',enter));
  for(int i=0;i<3;++i)serviceMeshMode();
  // A direct message: encrypted to Alex's key, asking for an answer.

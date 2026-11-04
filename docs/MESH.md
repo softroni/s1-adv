@@ -13,14 +13,32 @@ sends it again every five minutes until one of their radios has it. It's meant
 for when your phone is dead or has no signal and someone you know has a
 Meshtastic radio.
 
-Attach the antenna before powering the Cap. The first screen's keys:
+Attach the antenna before powering the Cap. The first screen is a list, like
+the menu's: Up and Down pick a row, Enter opens it, and the line at the bottom
+says what the row picked does. Each row also has its own key, which opens it
+straight away:
 
-| Key | What it does |
-| --- | --- |
-| Enter | Starts the radio and opens the chat |
-| H | Starts the radio and opens [Help](#help) |
-| S | [Radio Scan](#radio-scan), which only listens |
-| N | [Your name](#your-name) on the mesh |
+| Row | Key | What it does |
+| --- | --- | --- |
+| Chat | Enter | Starts the radio and opens the chat. The row shows the channel's frequency |
+| Help | H | Starts the radio and opens [Help](#help) |
+| Radio Scan | S | [Radio Scan](#radio-scan), which only listens |
+| Your name | N | [Your name](#your-name) on the mesh, shown in the row |
+| Private channel | C | Sets up the [private channel](#private-channel), shown in the row |
+
+The Cardputer's own arrow keys are `;` `.` `,` and `/`, and they send those
+characters, not arrows. Where Mesh has nothing to type into (the first screen,
+People, a message opened with Ctrl+O, Radio Scan), Up and Down (`;` and `.`)
+move without Fn. In the chat all four type, and Fn with them moves. Left and
+Right (`,` and `/`) change who a message goes to, so they always need Fn. A USB
+keyboard's arrows work everywhere. Before 0.2.300 these keys always typed, so
+only a USB keyboard could change who a message went to or move through People.
+
+Every Mesh screen has the bar along the top that the menu and the Lab have,
+and the text is in the 16-pixel font rather than the 8-pixel one. Names and
+messages in other scripts, and emoji, are drawn in the 12-pixel font, as they
+were before. A notice, such as "Location queued" or "Outbox full", shows on
+orange at the bottom in place of the keys until it's done.
 
 Esc closes whatever is open (a message, People or Help) and then stops the
 radio and returns Home. While Help is repeating, the first Esc only warns, and
@@ -85,11 +103,18 @@ The chat runs on the region's LongFast public channel, the one every Meshtastic
 radio uses out of the box.
 
 - Type, and Enter sends up to 200 UTF-8 bytes. The box at the bottom starts with
-  who it goes to: `Public>` or a contact's name. Left and Right change who.
+  who it goes to: `Public>` or a contact's name. Fn with Left or Right (`,` or
+  `/`) changes who.
+- The last two messages show as bubbles: what you sent on violet, to the right,
+  and what you heard on navy. A long one is cut with two dots; Ctrl+O shows it
+  whole, in the bigger font if it fits in five lines and the smaller one if not.
 - Ctrl+N opens [People](#people-and-direct-messages), Ctrl+O opens the selected
   message, Ctrl+L [shares your location](#sharing-a-location) and Ctrl+H opens
-  [Help](#help). Up and Down move through the messages. The bottom line shows
-  these keys in two halves, taking turns.
+  [Help](#help). Fn with Up or Down (`;` or `.`) moves through the messages, and
+  the chip at the top right then says which one, such as `7 of 8`. In a message
+  opened with Ctrl+O, Up and Down work without Fn. The bottom line shows these
+  keys in two halves, taking turns, and while Help repeats, it says when the
+  next round goes, on red.
 - A message for you is labelled `Sam > you`. One on the public channel shows
   only who sent it. Public messages are public: anyone with a Meshtastic radio
   in range can read them, and radios with an internet link upload what they
@@ -133,8 +158,8 @@ only chime and wake the screen.
 ## People and direct messages
 
 Ctrl+N lists your contacts first, heard lately or not, then every other radio
-heard this session, with its signal and how long ago it was heard. Up and Down
-pick one.
+heard this session, with its signal and how long ago it was heard, three to a
+page. Up and Down pick one, without Fn, since People has nothing to type into.
 
 - **Enter** saves the selected radio as a contact. It needs that radio's public
   key, which comes in its NodeInfo. A radio announces itself when it starts and
@@ -261,7 +286,7 @@ name and paste the key. Leave the phone's first channel as LongFast: Mesh's
 public channel is always the region's LongFast default, and making the private
 channel a phone's first channel would move that phone to another frequency.
 
-In the chat, Left and Right step through Public, then `#Name`, then each contact.
+In the chat, Fn with Left and Right steps through Public, then `#Name`, then each contact.
 Messages on it are labelled `#Family Sam` and `You > #Family`, and like a direct
 message, one arriving chimes and wakes the screen. Delivery reads as for the
 public channel: "heard nearby" once another radio repeats it.

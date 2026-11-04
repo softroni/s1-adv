@@ -2,6 +2,10 @@
 namespace {
 bool gMeshNaming = false, gMeshOpenHelp = false;
 char gMeshNameInput[s1_mesh::kNameBytes + 1] = {};
+// The first screen is a list, so Enter opens the row picked; the letters still open theirs directly.
+enum class MeshStartRow : uint8_t { Chat, Help, Scan, Name, Private };
+constexpr uint8_t kMeshStartRows = 5;
+uint8_t gMeshStartRow = 0;
 // Help is still repeating, so the first Esc only warns: the radio going off would end it.
 constexpr uint32_t kMeshStopConfirmMs = 4000;
 // Ctrl+L on the public channel asks once more, since everyone hears it.
@@ -124,7 +128,7 @@ bool stopMeshMode(bool goHome) {
   gMeshBusOwned=false;gMeshCancelStart=false;gMeshExitAfterStop=false;
   gSdReady=mountSdCardOnSharedSpi();
   gStorageReady=gLittleFsReady || gSdReady;
-  gMeshNotice=gSdReady ? "Radio off / SD ready" : "Radio off / SD unavailable";
+  gMeshNotice=gSdReady ? "Radio off / SD ready" : "Radio off / SD unavailable";gMeshNoticeUntilMs=0;
   logf("[MESH] stopped sd=%d heap=%u",gSdReady,unsigned(ESP.getFreeHeap()));
   return true;
 }
@@ -485,6 +489,32 @@ bool meshNameKey(char key,const Keyboard_Class::KeysState& keys) {
   return true;
 }
 
+// The built-in keyboard sends no arrow codes: its arrows are ; . , / and Fn leaves them the same.
+// A USB keyboard's arrows arrive as 1 to 4. Where there's a text box, the plain keys type, so only
+// Fn with them moves; elsewhere they move either way. Gives 1 to 4, or 0 for any other key.
+char meshArrow(char key,const Keyboard_Class::KeysState& keys,bool typing) {
+  if(key>=1 && key<=4)return key;
+  if(typing && !keys.fn)return 0;
+  return key==';'?1:key=='.'?2:key==','?3:key=='/'?4:0;
+}
+
+void meshOpenName() {
+  gMeshNaming=true;
+  char shortName[5];meshSavedName(gMeshNameInput,shortName);
+  if(!strcmp(gMeshNameInput,s1_mesh::kDefaultLongName))gMeshNameInput[0]=0;
+}
+
+void meshOpenStartRow(MeshStartRow row) {
+  gMeshStartRow=uint8_t(row);
+  switch(row) {
+    case MeshStartRow::Chat: startMeshMode(s1_mesh::Use::Chat);break;
+    case MeshStartRow::Help: gMeshOpenHelp=true;startMeshMode(s1_mesh::Use::Chat);break;
+    case MeshStartRow::Scan: startMeshMode(s1_mesh::Use::Scan);break;
+    case MeshStartRow::Name: meshOpenName();break;
+    case MeshStartRow::Private: meshChannelOpen();break;
+  }
+}
+
 bool handleMeshKey(char key,const Keyboard_Class::KeysState& keys) {
   if(keys.ctrl && (key=='r'||key=='R'||key=='v'||key=='V')) {setStatus("Esc exits Mesh for voice",1600);return true;}
   const char lower=char(tolower(static_cast<unsigned char>(key)));
@@ -493,15 +523,18 @@ bool handleMeshKey(char key,const Keyboard_Class::KeysState& keys) {
   if(gMeshChannelSetup && !gMeshSession)return meshChannelKey(key,keys);
   if(!gMeshSession) {
     if(keys.ctrl)return true;
-    if(keys.enter || key=='\r' || key=='\n')startMeshMode(s1_mesh::Use::Chat);
-    else if(lower=='s')startMeshMode(s1_mesh::Use::Scan);
-    else if(lower=='h') {gMeshOpenHelp=true;startMeshMode(s1_mesh::Use::Chat);}
-    else if(lower=='c')meshChannelOpen();
-    else if(lower=='n') {
-      gMeshNaming=true;
-      char shortName[5];meshSavedName(gMeshNameInput,shortName);
-      if(!strcmp(gMeshNameInput,s1_mesh::kDefaultLongName))gMeshNameInput[0]=0;
+    const char arrow=meshArrow(key,keys,false);
+    if(arrow==1 || arrow==2) {
+      gMeshStartRow=uint8_t((gMeshStartRow+(arrow==1?kMeshStartRows-1:1))%kMeshStartRows);
+      // A notice from before gives way to what the row picked does.
+      if(gMeshNotice!="Radio off / SD unavailable")gMeshNotice="";
+      return true;
     }
+    if(keys.enter || key=='\r' || key=='\n')meshOpenStartRow(MeshStartRow(gMeshStartRow%kMeshStartRows));
+    else if(lower=='s')meshOpenStartRow(MeshStartRow::Scan);
+    else if(lower=='h')meshOpenStartRow(MeshStartRow::Help);
+    else if(lower=='c')meshOpenStartRow(MeshStartRow::Private);
+    else if(lower=='n')meshOpenStartRow(MeshStartRow::Name);
     return true;
   }
   if(gMeshSession->use==s1_mesh::Use::Scan) {
@@ -515,13 +548,17 @@ bool handleMeshKey(char key,const Keyboard_Class::KeysState& keys) {
   if(keys.ctrl && lower=='n') {state.nodeView=!state.nodeView;state.detailView=false;return true;}
   if(keys.ctrl && lower=='o') {state.detailView=!state.detailView;state.nodeView=false;return true;}
   if(keys.ctrl && lower=='l') {meshShareLocation();return true;}
-  if(key==3 || key==4) {state.target=meshNextTarget(s,state.target,key==3);return true;}
-  if(key==1 || key==2) {
+  // The chat has a text box, so its arrows need Fn. People and a message opened have none, so Up and
+  // Down move there without it; Left and Right, which change who the box sends to, always need it.
+  const char arrow=meshArrow(key,keys,true);
+  const char upDown=state.nodeView || state.detailView?meshArrow(key,keys,false):arrow;
+  if(arrow==3 || arrow==4) {state.target=meshNextTarget(s,state.target,arrow==3);return true;}
+  if(upDown==1 || upDown==2) {
     if(state.nodeView) {
       const size_t people=meshPeopleCount(s);
-      if(people)state.nodeSel=(state.nodeSel+(key==1?people-1:1))%people;
+      if(people)state.nodeSel=(state.nodeSel+(upDown==1?people-1:1))%people;
     } else if(state.messageCount) {
-      state.historyOffset=(state.historyOffset+(key==1?1:state.messageCount-1))%state.messageCount;
+      state.historyOffset=(state.historyOffset+(upDown==1?1:state.messageCount-1))%state.messageCount;
     }
     return true;
   }
@@ -558,11 +595,152 @@ bool handleMeshHostCommand(const String& line) {
   return true;
 }
 
-String meshClip(const String& source,int width) {
-  String text=source;
-  while(!text.isEmpty() && gCanvas.textWidth(text)>width)removeLastUtf8Char(text);
-  return text;
+// --- Mesh drawing, shared with Radio Scan (part 087) and the private channel (part 091) ---------
+// Font2 is twice Font0's height, so it carries every line. It has only ASCII, and a name or a message
+// can be in any script, so anything else is drawn in efontCN_12, 2 px down to sit on the same line.
+// "Small" is efontCN_12 throughout, for text that Font2 can't fit.
+constexpr int kMeshTop=21,kMeshKeysY=119;
+struct MeshInk {
+  uint16_t bg=uint16_t(rgb565_local(3,8,14)),muted=uint16_t(rgb565_local(130,145,155)),white=uint16_t(TFT_WHITE);
+  uint16_t cyan=uint16_t(rgb565_local(47,227,255)),green=uint16_t(rgb565_local(88,240,141));
+  uint16_t purple=uint16_t(rgb565_local(157,102,255)),amber=uint16_t(rgb565_local(255,200,64));
+  uint16_t orange=uint16_t(rgb565_local(255,136,64)),red=uint16_t(rgb565_local(255,96,80));
+  // Meshtastic's green, for Mesh's title bar and the row picked; frame for boxes.
+  uint16_t accent=uint16_t(rgb565_local(103,234,148)),frame=uint16_t(rgb565_local(52,64,74));
+  // Bubbles, navy for what's heard and violet for what's sent, and Help's buttons. Each is picked to
+  // survive the canvas's 3-3-2 colour, which turns most dark tints black.
+  uint16_t heard=uint16_t(rgb565_local(16,40,90)),sent=uint16_t(rgb565_local(40,10,100));
+  uint16_t helpFill=uint16_t(rgb565_local(80,12,16));
+  uint16_t ink=0;  // Text on a filled bar.
+};
+size_t meshGlyphEnd(const String& s,size_t i) {
+  size_t e=i+1;
+  while(e<s.length() && (uint8_t(s[e])&0xc0)==0x80)++e;
+  return e;
 }
+void meshUseFont(bool ascii,bool big) {
+  if(big && ascii)gCanvas.setFont(&fonts::Font2);
+  else gCanvas.setFont(&fonts::efontCN_12);
+}
+// Each stretch of ASCII, or of anything else, with its font already set.
+template<class F> void meshRuns(const String& s,bool big,F each) {
+  for(size_t i=0;i<s.length();) {
+    const bool ascii=uint8_t(s[i])<0x80;
+    size_t e=i;
+    while(e<s.length() && (uint8_t(s[e])<0x80)==ascii)++e;
+    meshUseFont(ascii,big);each(s.substring(i,e),ascii);i=e;
+  }
+}
+int meshWidth(const String& s,bool big=true) {
+  int w=0;meshRuns(s,big,[&](const String& run,bool){w+=gCanvas.textWidth(run);});
+  return w;
+}
+void meshText(int x,int y,const String& s,uint16_t color,bool big=true) {
+  auto& d=gCanvas;d.setTextColor(color);
+  meshRuns(s,big,[&](const String& run,bool ascii){d.setCursor(x,big && !ascii?y+2:y);d.print(run);x+=d.textWidth(run);});
+}
+// Cut to a width, ending in two dots when it had to be cut.
+String meshFit(const String& s,int width,bool big=true) {
+  if(meshWidth(s,big)<=width)return s;
+  const int room=width-meshWidth(String(".."),big);
+  int w=0;size_t i=0;
+  while(i<s.length()) {
+    const size_t e=meshGlyphEnd(s,i);const int g=meshWidth(s.substring(i,e),big);
+    if(w+g>room)break;
+    w+=g;i=e;
+  }
+  return s.substring(0,i)+"..";
+}
+// The end that fits, for a box being typed into.
+String meshTail(const String& s,int width,bool big=true) {
+  if(meshWidth(s,big)<=width)return s;
+  int w=0;size_t start=s.length();
+  while(start>0) {
+    size_t g=start-1;
+    while(g>0 && (uint8_t(s[g])&0xc0)==0x80)--g;
+    const int gw=meshWidth(s.substring(g,start),big);
+    if(w+gw>width)break;
+    w+=gw;start=g;
+  }
+  return s.substring(start,s.length());
+}
+// Font2 when it fits, else the small font, cut if even that's too long.
+void meshTextFit(int x,int y,const String& s,int width,uint16_t color) {
+  if(meshWidth(s)<=width) {meshText(x,y,s,color);return;}
+  meshText(x,y+2,meshFit(s,width,false),color,false);
+}
+void meshTextRight(int right,int y,const String& s,uint16_t color) {meshText(right-meshWidth(s),y,s,color);}
+void meshTextCenter(int y,const String& s,uint16_t color) {
+  const String fit=meshFit(s,232);meshText(120-meshWidth(fit)/2,y,fit,color);
+}
+// The bold font, for titles and what matters most on a screen. ASCII only.
+void meshBold(int x,int y,const String& s,uint16_t color,int width=232) {
+  auto& d=gCanvas;d.setFont(&fonts::FreeSansBold9pt7b);
+  String text=s;
+  while(!text.isEmpty() && d.textWidth(text)>width)text.remove(text.length()-1,1);
+  d.setTextColor(color);d.setCursor(x,y);d.print(text);
+}
+int meshBoldWidth(const String& s) {gCanvas.setFont(&fonts::FreeSansBold9pt7b);return gCanvas.textWidth(s);}
+void meshBoldCenter(int y,const String& s,uint16_t color) {meshBold(120-std::min(232,meshBoldWidth(s))/2,y,s,color);}
+// Bold when it fits, else Font2, else small.
+void meshBoldFit(int x,int y,const String& s,int width,uint16_t color) {
+  if(meshBoldWidth(s)<=width)meshBold(x,y,s,color,width);
+  else meshTextFit(x,y+1,s,width,color);
+}
+// The bar along the top of every Mesh screen, as the Lab and the menu have it: the app's icon, a
+// bold title, a chip on the right for what changes, and a rule in the screen's colour. The title
+// keeps its room; the chip gets what's left.
+void meshHead(const char* title,uint16_t accent,const String& chip=String(),uint16_t chipColor=0) {
+  auto& d=gCanvas;MeshInk ink;
+  d.fillScreen(ink.bg);d.setTextSize(1);
+  d.drawBitmap(3,1,launcher_icons::kMesh,launcher_icons::kSize,launcher_icons::kSize,accent);
+  const int titleW=std::min(238-23,meshBoldWidth(title));
+  meshBold(23,1,title,ink.white,titleW);
+  const int room=std::min(140,238-(23+titleW+4)-10);
+  if(!chip.isEmpty() && room>=24) {
+    const String text=meshFit(chip,room);
+    const int chipW=meshWidth(text)+10;
+    d.drawRoundRect(238-chipW,1,chipW,17,7,chipColor);
+    meshText(243-chipW,1,text,chipColor);
+  }
+  d.drawFastHLine(0,18,240,accent);
+}
+// Font2 has no arrows, so \x18 \x19 \x1b \x1a (up, down, left, right) are drawn by hand.
+void meshArrowGlyph(int x,int y,char kind,uint16_t color) {
+  auto& d=gCanvas;
+  for(int i=0;i<4;++i) {
+    if(kind=='\x18')d.drawFastHLine(x+3-i,y+2+i,i*2+1,color);
+    else if(kind=='\x19')d.drawFastHLine(x+3-i,y+5-i,i*2+1,color);
+    else if(kind=='\x1b')d.drawFastVLine(x+2+i,y+3-i,i*2+1,color);
+    else d.drawFastVLine(x+5-i,y+3-i,i*2+1,color);
+  }
+}
+// The keys, along the bottom, in the small font if Font2 can't fit them.
+void meshKeys(const String& text,uint16_t color) {
+  int arrows=0;
+  for(size_t i=0;i<text.length();++i)if(text[i]>='\x18' && text[i]<='\x1b')++arrows;
+  String plain;
+  for(size_t i=0;i<text.length();++i)if(text[i]<'\x18' || text[i]>'\x1b')plain+=text[i];
+  const bool big=meshWidth(plain)+arrows*9<=228;
+  int x=6;String words;
+  const auto flush=[&]() {
+    if(words.isEmpty())return;
+    const String shown=meshFit(words,234-x,big);
+    meshText(x,big?kMeshKeysY:kMeshKeysY+2,shown,color,big);x+=meshWidth(shown,big);words="";
+  };
+  for(size_t i=0;i<text.length();++i) {
+    const char c=text[i];
+    if(c>='\x18' && c<='\x1b') {flush();meshArrowGlyph(x,kMeshKeysY+4,c,color);x+=9;}
+    else words+=c;
+  }
+  flush();
+}
+// A notice where the keys go, on its own colour so it isn't missed.
+void meshBanner(const String& text,uint16_t fill) {
+  MeshInk ink;gCanvas.fillRoundRect(2,117,236,18,6,fill);meshTextFit(8,118,text,224,ink.ink);
+}
+// --- end of Mesh drawing -------------------------------------------------------------------------
+
 String meshNodeName(uint32_t id) {
   if(gMeshSession) {
     if(const auto* c=gMeshSession->contacts.find(id)) if(c->name[0])return String(c->name);
@@ -620,176 +798,266 @@ String meshHelpTo(const s1_mesh::RadioSession& s) {
   return to;
 }
 
-void renderMeshHelpUi() {
-  auto& d=gCanvas;auto& s=*gMeshSession;const uint32_t now=millis();
-  const uint16_t bg=rgb565_local(3,8,14),muted=rgb565_local(130,145,155),cyan=rgb565_local(47,227,255);
-  const uint16_t red=rgb565_local(255,96,80),green=rgb565_local(88,240,141);
-  d.setFont(&fonts::Font0);d.setTextColor(s1_mesh::usable(s.where,now)?green:rgb565_local(255,136,64),bg);
-  d.setCursor(8,44);d.print(meshClip(meshGpsLine(now),224));
-  if(!s.help.on) {
-    d.setTextColor(muted,bg);d.setCursor(8,56);d.print(meshClip(meshHelpTo(s),224));
-    d.setFont(&fonts::Font2);d.setTextColor(TFT_WHITE,bg);
-    for(uint8_t c=0;c<s1_mesh::kHelpChoices;++c) {
-      d.setCursor(c%2?124:8,70+int(c/2)*18);d.print(String(int(c+1))+" ");d.print(meshClip(s1_mesh::helpLabel(c),96));
+// A notice shows until its time runs out; one with no time stays until the next.
+bool meshNoticeShowing() {
+  if(gMeshNotice.isEmpty() || gMeshNotice=="Listening / SD paused" || gMeshNotice=="Radio off / SD ready")return false;
+  return !gMeshNoticeUntilMs || int32_t(millis()-gMeshNoticeUntilMs)<0;
+}
+// The bottom line: a notice while there is one, else the keys.
+void meshFoot(const String& keys) {
+  MeshInk ink;
+  if(meshNoticeShowing())meshBanner(gMeshNotice,ink.orange);
+  else meshKeys(keys,ink.muted);
+}
+// "40s ago", "12 min ago", "3 h ago", "2 days ago".
+String meshAgo(uint32_t ms) {
+  const uint32_t s=ms/1000;
+  if(s<60)return String(int(s))+"s ago";
+  if(s<3600)return String(int(s/60))+" min ago";
+  if(s<86400)return String(int(s/3600))+" h ago";
+  return String(int(s/86400))+(s<172800?" day ago":" days ago");
+}
+uint16_t meshLabelColor(const s1_mesh::Message& m,const MeshInk& ink) {
+  if(m.outgoing)return ink.purple;
+  if(m.privateChannel)return ink.amber;
+  const uint32_t me=gMeshSession?gMeshSession->mesh.getNodeNum():0;
+  return m.to==me && m.to!=s1_mesh::kBroadcast?ink.green:ink.cyan;
+}
+// Word-wraps into lines no wider than width, breaking at a space where one fits, and calls
+// line(text, index) for each. Returns how many there are.
+template<class F> int meshWrap(const String& text,int width,bool big,F line) {
+  String now;int nowW=0,lines=0,space=-1;
+  for(size_t i=0;i<text.length();) {
+    const size_t e=meshGlyphEnd(text,i);const String glyph=text.substring(i,e);i=e;
+    const int w=meshWidth(glyph,big);
+    if(nowW+w>width && !now.isEmpty()) {
+      const String rest=space>0?now.substring(size_t(space)+1,now.length()):String();
+      if(space>0 && meshWidth(rest,big)+w<=width) {line(now.substring(0,size_t(space)),lines++);now=rest;}
+      else {line(now,lines++);now=String();}
+      nowW=meshWidth(now,big);space=-1;
+      if(glyph==" " && now.isEmpty())continue;  // No line starts with a space.
     }
-    d.setFont(&fonts::Font0);d.setTextColor(cyan,bg);d.setCursor(8,127);
-    d.print(s.privateChannel.set()?"1-4 send P public C channel Esc chat":"1-4 send  P public  Esc chat");return;
+    if(glyph==" ")space=int(now.length());
+    now+=glyph;nowW+=w;
+  }
+  if(!now.isEmpty())line(now,lines++);
+  return lines;
+}
+
+void renderMeshHelpUi() {
+  MeshInk ink;auto& d=gCanvas;auto& s=*gMeshSession;const uint32_t now=millis();
+  const String battery=gBatterySnapshot.level>=0?String("Battery ")+String(int(gBatterySnapshot.level))+"%":String("Battery ?");
+  meshHead("Help",ink.red,battery,gBatterySnapshot.level>=0 && gBatterySnapshot.level<20?ink.red:ink.muted);
+  const bool fix=s1_mesh::usable(s.where,now);
+  if(!s.help.on) {
+    meshTextFit(8,kMeshTop,meshGpsLine(now),224,fix?ink.green:ink.orange);
+    meshTextFit(8,kMeshTop+17,meshHelpTo(s),224,ink.muted);
+    // The four messages as buttons, their number on red.
+    for(uint8_t c=0;c<s1_mesh::kHelpChoices;++c) {
+      const int x=c%2?121:2,y=58+int(c/2)*27;
+      const String number(int(c+1));
+      d.fillRoundRect(x,y,117,24,6,ink.helpFill);
+      d.fillRoundRect(x+4,y+4,16,16,4,ink.red);
+      meshText(x+12-meshWidth(number)/2,y+4,number,ink.ink);
+      meshText(x+25,y+4,meshFit(s1_mesh::helpLabel(c),88),ink.white);
+    }
+    meshFoot(s.privateChannel.set()?"1-4 send  P public  C channel":"1-4 send  P public  Esc chat");
+    return;
   }
   String head=s1_mesh::helpLabel(s.help.choice);
   if(s.help.rounds>1)head+=String(", try ")+String(int(s.help.rounds));
-  d.setFont(&fonts::Font2);d.setTextColor(TFT_WHITE,bg);d.setCursor(8,55);d.print(meshClip(head,224));
-  d.setFont(&fonts::Font0);
-  String state;uint16_t stateColor=muted;
+  meshBold(8,kMeshTop,head,ink.white);
+  String state;uint16_t stateColor=ink.muted;
   switch(s.help.stop) {
-    case s1_mesh::HelpStop::Confirmed: state="Arrived. Stopped repeating";stateColor=green;break;
-    case s1_mesh::HelpStop::Replied: state="Someone wrote back. Stopped";stateColor=green;break;
+    case s1_mesh::HelpStop::Confirmed: state="Arrived. Stopped repeating";stateColor=ink.green;break;
+    case s1_mesh::HelpStop::Replied: state="Someone wrote back. Stopped";stateColor=ink.green;break;
     case s1_mesh::HelpStop::Ok: state="Sent once";break;
     case s1_mesh::HelpStop::None:
       state=s.help.rounds && s.outbox.idle()?String("Again in ")+meshClock(s.help.nextInMs(now)):String("Sending...");
-      stateColor=red;break;
+      stateColor=ink.red;break;
   }
-  d.setTextColor(stateColor,bg);d.setCursor(8,72);d.print(meshClip(state,224));
-  // A row for each message this round: contacts, then the channels. Five fit; past that, a count.
+  meshText(8,kMeshTop+20,meshFit(state,224),stateColor);
+  // While it's still going out, whether the next one carries a position.
+  if(s.help.stop==s1_mesh::HelpStop::None) {
+    const String gps=fix?"GPS fix":meshGpsHearing(now)?"No GPS fix":"No GPS";
+    if(meshWidth(state)+meshWidth(gps)+12<=224)meshTextRight(232,kMeshTop+20,gps,fix?ink.green:ink.orange);
+  }
+  // A row for each message this round: contacts, then the channels. Four fit; past that, a count.
   size_t total=0,shown=0;
   for(const uint32_t seq:s.help.seq)if(seq)++total;
-  int y=83;
+  int y=58;
   for(size_t i=0;i<s1_mesh::kHelpSlots;++i) {
     if(!s.help.seq[i])continue;
-    if(shown==4 && total>5) {d.setTextColor(muted,bg);d.setCursor(8,y);d.print(String("+")+String(int(total-4))+" more");break;}
+    if(shown==3 && total>4) {meshText(8,y,String("+")+String(int(total-3))+" more",ink.muted);break;}
     const auto* m=s.state.bySeq(s.help.seq[i]);
     const String who=i<s1_mesh::kContacts?meshNodeName(s.contacts.list[i].id):
       i==s1_mesh::kHelpPrivateSlot?meshPrivateName():String("Public");
     String what=m?String(s1_mesh::deliveryLabel(m->status,m->direct)):String("-");
     if(m && m->status==s1_mesh::Delivery::Failed)what=String("failed: ")+s1_mesh::failureLabel(m->reason);
-    d.setTextColor(TFT_WHITE,bg);d.setCursor(8,y);d.print(meshClip(who,96));
-    d.setTextColor(m && m->status==s1_mesh::Delivery::Delivered?green:muted,bg);
-    d.setCursor(108,y);d.print(meshClip(what,124));y+=9;++shown;
+    meshText(8,y,meshFit(who,98),ink.white);
+    meshText(112,y,meshFit(what,120),m && m->status==s1_mesh::Delivery::Delivered?ink.green:ink.muted);
+    y+=15;++shown;
   }
-  d.setTextColor(cyan,bg);d.setCursor(8,127);
-  d.print(!s.help.repeating()?"1-4 send again  Esc chat":s.privateChannel.set()?"1-4 change P public C channel Esc":
+  meshFoot(!s.help.repeating()?"1-4 send again  Esc chat":s.privateChannel.set()?"1-4 change  P public  C channel":
     "1-4 change  P public  Esc chat");
 }
 
-void renderMeshUi() {
-  auto& d=gCanvas;
-  const uint16_t bg=rgb565_local(3,8,14),muted=rgb565_local(130,145,155),cyan=rgb565_local(47,227,255);
-  const bool helpScreen=gMeshSession && gMeshSession->use==s1_mesh::Use::Chat && gMeshSession->state.helpView &&
-    gMeshSession->initResult.load(std::memory_order_acquire)==0;
-  d.fillScreen(bg);d.setTextSize(1);d.setFont(&fonts::Font2);
-  d.setTextColor(helpScreen?rgb565_local(255,96,80):TFT_WHITE,bg);d.setCursor(8,5);d.print(helpScreen?"Help":"Mesh");
-  // A running radio keeps the region it started with, so show that one.
-  const uint8_t region=gMeshSession?uint8_t(gMeshSession->region):gDeviceSettings.meshRegion;
-  String band=String(s1_mesh::regionName(region))+" / LongFast";
-  if(helpScreen)band=gBatterySnapshot.level>=0?String("Battery ")+String(int(gBatterySnapshot.level))+"%":String("Battery ?");
-  d.setFont(&fonts::Font0);d.setTextColor(muted,bg);d.setCursor(232-d.textWidth(band),12);d.print(band);
-  d.drawFastHLine(6,23,228,rgb565_local(48,54,61));
-  String notice=gMeshNotice.isEmpty()?String(gSdReady?"Radio off / SD ready":"Radio off / SD unavailable"):gMeshNotice;
-  uint16_t noticeColor=gMeshBusOwned?rgb565_local(255,136,64):muted;
-  // While Help repeats, the chat says so where it says the radio is listening.
-  if(gMeshSession && !helpScreen && gMeshSession->help.repeating() && notice=="Listening / SD paused") {
-    notice=String("Help on, again in ")+meshClock(gMeshSession->help.nextInMs(millis()));noticeColor=rgb565_local(255,96,80);
-  }
-  d.setTextColor(noticeColor,bg);d.setCursor(8,29);d.print(meshClip(notice,224));
-  const bool scanning=gMeshSession && gMeshSession->use==s1_mesh::Use::Scan;
-  if(scanning && gMeshSession->initResult.load(std::memory_order_acquire)==0) {renderRadioScanUi(*gMeshSession);return;}
-  if(helpScreen) {renderMeshHelpUi();return;}
-  if(!gMeshSession || gMeshSession->initResult.load(std::memory_order_acquire)!=0) {
-    if(gMeshChannelSetup && !gMeshSession) {renderMeshChannelUi();return;}
-    if(gMeshNaming && !gMeshSession) {
-      d.setFont(&fonts::Font2);d.setTextColor(TFT_WHITE,bg);d.setCursor(8,46);d.print("Your name on the mesh");
-      d.drawRect(5,70,230,17,rgb565_local(52,64,74));d.setFont(&fonts::efontCN_12);d.setCursor(10,72);
-      String typed=gMeshNameInput[0]?String(gMeshNameInput):String("> S1-ADV");
-      while(!typed.isEmpty() && d.textWidth(typed)>220) {size_t n=1;while(n<typed.length() && (uint8_t(typed[n])&0xc0)==0x80)++n;typed.remove(0,n);}
-      d.print(typed);
-      char shortName[5];s1_mesh::shortNameFor(gMeshNameInput[0]?gMeshNameInput:"",shortName);
-      if(!gMeshNameInput[0])strcpy(shortName,s1_mesh::kDefaultShortName);
-      d.setFont(&fonts::Font0);d.setTextColor(muted,bg);d.setCursor(8,94);d.print(String("Short name: ")+shortName);
-      d.setCursor(8,106);d.print("Others see it. Empty is S1-ADV");
-      d.setTextColor(cyan,bg);d.setCursor(8,127);d.print("Enter save  Esc cancel");return;
+String meshBand(uint8_t region) {return String(s1_mesh::regionName(region))+" / LongFast";}
+
+// The first screen: what Mesh can do, as a list like the menu's, each row with its own key.
+void meshRenderStart(uint8_t region) {
+  MeshInk ink;auto& d=gCanvas;
+  meshHead("Mesh",ink.accent,meshBand(region),ink.muted);
+  char longName[s1_mesh::kNameBytes+1],shortName[5];meshSavedName(longName,shortName);
+  char frequency[16];snprintf(frequency,sizeof(frequency),"%.3f MHz",double(s1_mesh::regionFrequency(region)));
+  struct Row {const char* label;String value;const char* key;const char* about;};
+  const Row rows[kMeshStartRows]={
+    {"Chat",String(frequency),"","Region: Settings > Device"},
+    {"Help",String(),"H","Ready messages with where you are"},
+    {"Radio Scan",String(),"S","Listens for radios, sends nothing"},
+    {"Your name",String(longName),"N","What others see on the mesh"},
+    {"Private channel",meshChannelLabel(),"C","Only your group can read it"},
+  };
+  const uint8_t picked=gMeshStartRow%kMeshStartRows;
+  for(uint8_t i=0;i<kMeshStartRows;++i) {
+    const int y=kMeshTop+int(i)*19;const bool chosen=i==picked;
+    if(chosen)d.fillRoundRect(1,y,238,18,6,ink.accent);
+    meshText(8,y+1,rows[i].label,chosen?ink.ink:ink.white);
+    if(rows[i].key[0])meshTextRight(232,y+1,rows[i].key,chosen?ink.ink:ink.muted);
+    if(!rows[i].value.isEmpty()) {
+      const int right=rows[i].key[0]?214:232,left=8+meshWidth(rows[i].label)+12;
+      meshTextRight(right,y+1,meshFit(rows[i].value,right-left),chosen?ink.ink:ink.muted);
     }
-    d.setFont(&fonts::Font2);d.setTextColor(TFT_WHITE,bg);
-    const char* title=scanning?"Radio Scan":"Meshtastic leaf";d.setCursor(120-d.textWidth(title)/2,52);d.print(title);
-    char channel[40];
-    if(scanning)snprintf(channel,sizeof(channel),"Listening only, nothing sent");
-    else snprintf(channel,sizeof(channel),"Public channel, %.3f MHz",double(s1_mesh::regionFrequency(region)));
-    d.setFont(&fonts::Font0);d.setTextColor(muted,bg);d.setCursor(120-d.textWidth(channel)/2,74);d.print(channel);
-    if(!gMeshBusOwned) {
-      char longName[s1_mesh::kNameBytes+1],shortName[5];meshSavedName(longName,shortName);
-      const String name=meshClip(String("Name: ")+longName,224);
-      d.setCursor(120-d.textWidth(name)/2,88);d.print(name);
-      const String where="Region: Settings > Device";
-      d.setCursor(120-d.textWidth(where)/2,100);d.print(where);
-      const String privateLine=meshChannelStartLine();
-      d.setTextColor(rgb565_local(255,200,64),bg);d.setCursor(120-d.textWidth(privateLine)/2,112);d.print(privateLine);
-    }
-    d.setTextColor(cyan,bg);d.setCursor(8,127);d.print(gMeshBusOwned?"Starting...  Esc cancel":"Enter chat H help S scan N name");return;
   }
-  const auto& session=*gMeshSession;
-  const auto& state=session.state;
-  if(state.nodeView) {
-    const size_t people=meshPeopleCount(session);
-    d.setTextColor(cyan,bg);d.setCursor(8,44);d.print("PEOPLE: ");d.print(int(session.contacts.count));d.print(" contacts, ");
-    d.print(int(state.nodeCount));d.print(" heard");
-    const size_t first=people?(min(state.nodeSel,people-1)/2)*2:0;
-    for(size_t row=0;row<2;++row) {
-      MeshPerson p;if(!meshPersonAt(session,first+row,p))break;
-      const int y=56+int(row)*33;const bool chosen=first+row==state.nodeSel;
-      if(chosen)d.drawRect(4,y-2,232,31,rgb565_local(52,64,74));
-      d.setFont(&fonts::efontCN_12);d.setTextColor(TFT_WHITE,bg);d.setCursor(8,y);
-      d.print(meshClip(p.name[0]?String(p.name):meshNodeName(p.id),150));
-      d.setFont(&fonts::Font0);
-      if(p.contact) {d.setTextColor(rgb565_local(88,240,141),bg);d.setCursor(232-d.textWidth("contact")-2,y+2);d.print("contact");}
-      else if(p.node) {const String rssi=String(p.node->rssi)+" dBm";d.setTextColor(rgb565_local(88,240,141),bg);d.setCursor(232-min<int>(56,d.textWidth(rssi))-2,y+2);d.print(meshClip(rssi,56));}
-      d.setTextColor(muted,bg);d.setCursor(8,y+16);
-      char line[48];
-      if(p.node)snprintf(line,sizeof(line),"!%08lx / %lus%s",static_cast<unsigned long>(p.id),
-        static_cast<unsigned long>((millis()-p.node->seen)/1000),p.contact||p.node->hasKey?"":" / no key yet");
-      else snprintf(line,sizeof(line),"!%08lx / not heard yet",static_cast<unsigned long>(p.id));
-      d.print(meshClip(line,220));
-    }
-    if(!people) {d.setFont(&fonts::Font0);d.setTextColor(muted,bg);d.setCursor(8,64);d.print("No radios heard yet");}
-    d.setFont(&fonts::Font0);d.setTextColor(muted,bg);d.setCursor(8,127);
-    MeshPerson sel;const bool any=meshPersonAt(session,state.nodeSel,sel);
-    d.print(any && sel.contact?"Up/Down  Del remove  Esc back":"Up/Down  Enter save  Esc back");return;
+  meshFoot(rows[picked].about);
+}
+
+// While the radio starts, before the chat or the scanner can show anything.
+void meshRenderStarting(uint8_t region,bool scanning) {
+  MeshInk ink;
+  meshHead(scanning?"Radio Scan":"Mesh",ink.accent,meshBand(region),ink.muted);
+  meshBoldCenter(40,"Starting the radio",ink.white);
+  char channel[40];
+  if(scanning)snprintf(channel,sizeof(channel),"Listening only, nothing sent");
+  else snprintf(channel,sizeof(channel),"Public channel, %.3f MHz",double(s1_mesh::regionFrequency(region)));
+  meshTextCenter(64,channel,ink.muted);
+  if(!gMeshNotice.isEmpty())meshTextCenter(84,gMeshNotice,ink.orange);
+  meshKeys("Esc cancel",ink.muted);
+}
+
+void meshRenderName() {
+  MeshInk ink;auto& d=gCanvas;
+  meshHead("Your name",ink.accent);
+  meshText(8,kMeshTop+3,"Others on the mesh see it",ink.muted);
+  d.drawRoundRect(2,44,236,22,6,ink.frame);
+  if(gMeshNameInput[0])meshText(8,47,meshTail(String(gMeshNameInput),222),ink.white);
+  else meshText(8,47,s1_mesh::kDefaultLongName,ink.muted);
+  char shortName[5];s1_mesh::shortNameFor(gMeshNameInput[0]?gMeshNameInput:"",shortName);
+  if(!gMeshNameInput[0])strcpy(shortName,s1_mesh::kDefaultShortName);
+  meshText(8,74,String("Short name: ")+shortName,ink.white);
+  meshText(8,92,"Empty is S1-ADV",ink.muted);
+  meshKeys("Enter save  Esc cancel",ink.muted);
+}
+
+void meshRenderPeople(const s1_mesh::RadioSession& session) {
+  MeshInk ink;auto& d=gCanvas;const auto& state=session.state;
+  const size_t people=meshPeopleCount(session);
+  meshHead("People",ink.accent,String(int(session.contacts.count))+" contacts, "+String(int(state.nodeCount))+" heard",ink.muted);
+  if(!people) {
+    meshBoldCenter(44,"No radios heard yet",ink.white);
+    meshTextCenter(68,"They show up when they send",ink.muted);
   }
-  if(state.detailView && state.messageCount) {
-    const auto& m=state.messages[state.messageCount-1-state.historyOffset];
-    d.setTextColor(cyan,bg);d.setCursor(8,42);d.print(meshClip(m.outgoing?meshSentLabel(m):meshFromLabel(m),224));
-    d.setFont(&fonts::efontCN_12);d.setTextColor(TFT_WHITE,bg);d.setClipRect(8,54,224,72);
-    String line;line.reserve(s1_mesh::kTextBytes);String text(m.text);int y=54;
-    for(size_t i=0;i<text.length();) {
-      size_t end=i+1;while(end<text.length() && (uint8_t(text[end])&0xc0)==0x80)++end;
-      const String glyph=text.substring(i,end);
-      if(!line.isEmpty() && d.textWidth(line+glyph)>224) {d.setCursor(8,y);d.print(line);y+=12;line=glyph;} else line+=glyph;
-      i=end;
-    }
-    d.setCursor(8,y);d.print(line);d.clearClipRect();
-    d.setFont(&fonts::Font0);d.setTextColor(muted,bg);d.setCursor(8,127);d.print("Up/Down message C-O back");return;
+  // Three to a page: each with its name, and its number with when it was last heard.
+  const size_t first=people?(min(state.nodeSel,people-1)/3)*3:0;
+  for(size_t row=0;row<3;++row) {
+    MeshPerson p;if(!meshPersonAt(session,first+row,p))break;
+    const int y=kMeshTop+int(row)*32;const bool chosen=first+row==state.nodeSel;
+    if(chosen)d.fillRoundRect(1,y,238,31,6,ink.accent);
+    String tag;
+    if(p.contact)tag="contact";
+    else if(p.node)tag=String(p.node->rssi)+" dBm";
+    const int tagW=tag.isEmpty()?0:meshWidth(tag)+8;
+    if(!tag.isEmpty())meshTextRight(232,y+1,tag,chosen?ink.ink:ink.green);
+    meshText(8,y+1,meshFit(p.name[0]?String(p.name):meshNodeName(p.id),224-tagW),chosen?ink.ink:ink.white);
+    char id[12];snprintf(id,sizeof(id),"!%08lx",static_cast<unsigned long>(p.id));
+    String line=String(id)+"  ";
+    if(p.node)line+=meshAgo(millis()-p.node->seen)+(p.contact||p.node->hasKey?"":"  no key yet");
+    else line+="not heard yet";
+    meshText(8,y+16,meshFit(line,224),chosen?ink.ink:ink.muted);
   }
+  MeshPerson sel;const bool any=meshPersonAt(session,state.nodeSel,sel);
+  meshFoot(any && sel.contact?"\x18\x19  Del remove  Esc back":"\x18\x19  Enter save  Esc back");
+}
+
+// Ctrl+O: one message whole, in Font2 if five lines hold it, else in the small font's six.
+void meshRenderMessage(const s1_mesh::RadioSession& session) {
+  MeshInk ink;const auto& state=session.state;
+  const size_t index=state.messageCount-1-state.historyOffset;
+  const auto& m=state.messages[index];
+  meshHead("Mesh",ink.accent,String(int(index+1))+" of "+String(int(state.messageCount)),ink.muted);
+  meshText(8,kMeshTop,meshFit(m.outgoing?meshSentLabel(m):meshFromLabel(m),224),meshLabelColor(m,ink));
+  const String text(m.text);
+  const auto none=[](const String&,int){};
+  const bool big=meshWrap(text,224,true,none)<=5;
+  const int lineH=big?16:12,most=big?5:6,total=meshWrap(text,224,big,none);
+  meshWrap(text,224,big,[&](const String& line,int n) {
+    if(n>=most)return;
+    // The last line that fits says when there's more.
+    const String shown=n==most-1 && total>most?meshFit(line+String(" ..."),224,big):line;
+    meshText(8,38+n*lineH,shown,ink.white,big);
+  });
+  meshFoot("\x18\x19 older and newer  Esc back");
+}
+
+// The chat: the last two messages as bubbles, sent ones to the right, then what's being typed.
+void meshRenderChat(const s1_mesh::RadioSession& session) {
+  MeshInk ink;auto& d=gCanvas;const auto& state=session.state;
+  // Looking back, the chip says where; otherwise it's the band.
+  const String chip=state.historyOffset && state.messageCount?String(int(state.messageCount-state.historyOffset))+" of "+
+    String(int(state.messageCount)):meshBand(session.region);
+  meshHead("Mesh",ink.accent,chip,state.historyOffset?ink.muted:ink.accent);
   if(!state.messageCount) {
-    d.setFont(&fonts::Font2);d.setTextColor(TFT_WHITE,bg);d.setCursor(56,59);d.print("Listening...");
-    d.setFont(&fonts::Font0);d.setTextColor(muted,bg);d.setCursor(66,82);d.print("No messages yet");
+    meshBoldCenter(40,"Listening...",ink.white);
+    meshTextCenter(62,"No messages yet",ink.muted);
   } else for(size_t row=0;row<2;++row) {
     const int index=int(state.messageCount)-2+int(row)-int(state.historyOffset);if(index<0)continue;
-    const auto& m=state.messages[size_t(index)];const int y=44+int(row)*31;
-    d.setFont(&fonts::Font0);d.setTextColor(m.outgoing?rgb565_local(157,102,255):cyan,bg);d.setCursor(8,y);
-    d.print(meshClip(m.outgoing?meshSentLabel(m):meshFromLabel(m),224));
-    d.setFont(&fonts::efontCN_12);d.setTextColor(TFT_WHITE,bg);d.setCursor(8,y+10);d.print(meshClip(String(m.text),224));
+    const auto& m=state.messages[size_t(index)];
+    const int y=kMeshTop+int(row)*37,x=m.outgoing?12:2;
+    d.fillRoundRect(x,y,226,34,6,m.outgoing?ink.sent:ink.heard);
+    meshText(x+6,y+1,meshFit(m.outgoing?meshSentLabel(m):meshFromLabel(m),214),meshLabelColor(m,ink));
+    meshText(x+6,y+17,meshFit(String(m.text),214),ink.white);
   }
-  d.drawRect(5,108,230,17,rgb565_local(52,64,74));
-  // Who Enter sends to, then what's typed. Left and Right change who.
-  const String to=meshClip(meshTargetName(state.target),72)+">";
-  const uint16_t toColor=state.target==s1_mesh::kTargetPrivate?rgb565_local(255,200,64):state.target?rgb565_local(88,240,141):cyan;
-  d.setFont(&fonts::Font0);d.setTextColor(toColor,bg);d.setCursor(9,113);d.print(to);
-  const int textX=9+d.textWidth(to)+3,textW=232-textX-2;
-  d.setFont(&fonts::efontCN_12);d.setTextColor(TFT_WHITE,bg);d.setCursor(textX,110);
-  String composer=state.input[0]?String(state.input):String("Message...");
-  while(!composer.isEmpty() && d.textWidth(composer)>textW) {
-    size_t n=1;while(n<composer.length() && (uint8_t(composer[n])&0xc0)==0x80)++n;composer.remove(0,n);
+  // Who Enter sends to, then what's typed. Fn with Left and Right changes who.
+  d.drawRoundRect(2,95,236,21,6,ink.frame);
+  const String to=meshFit(meshTargetName(state.target),96)+">";
+  const uint16_t toColor=state.target==s1_mesh::kTargetPrivate?ink.amber:state.target?ink.green:ink.cyan;
+  meshText(8,97,to,toColor);
+  const int textX=8+meshWidth(to)+4;
+  if(state.input[0])meshText(textX,97,meshTail(String(state.input),232-textX),ink.white);
+  else meshText(textX,97,"Message...",ink.muted);
+  // A notice first, then Help while it repeats, then two lines of keys taking turns.
+  if(meshNoticeShowing())meshBanner(gMeshNotice,ink.orange);
+  else if(session.help.repeating())meshBanner(String("Help on, again in ")+meshClock(session.help.nextInMs(millis())),ink.red);
+  else meshKeys((millis()/4000)%2?"C-N people  C-O read  C-L location":"Enter send  Fn\x1b\x1a who  C-H help",ink.muted);
+}
+
+void renderMeshUi() {
+  const bool ready=gMeshSession && gMeshSession->initResult.load(std::memory_order_acquire)==0;
+  const bool scanning=gMeshSession && gMeshSession->use==s1_mesh::Use::Scan;
+  if(scanning && ready) {renderRadioScanUi(*gMeshSession);return;}
+  // A running radio keeps the region it started with, so show that one.
+  const uint8_t region=gMeshSession?uint8_t(gMeshSession->region):gDeviceSettings.meshRegion;
+  if(!ready) {
+    if(gMeshSession)meshRenderStarting(region,scanning);
+    else if(gMeshChannelSetup)renderMeshChannelUi();
+    else if(gMeshNaming)meshRenderName();
+    else meshRenderStart(region);
+    return;
   }
-  d.print(composer);
-  // Two lines of keys, taking turns, since one line can't hold them all.
-  d.setFont(&fonts::Font0);d.setTextColor(muted,bg);d.setCursor(8,127);
-  d.print((millis()/4000)%2?"C-N people C-O read C-L location":"Enter send  <> who  C-H help");
+  const auto& session=*gMeshSession;
+  if(session.state.helpView)renderMeshHelpUi();
+  else if(session.state.nodeView)meshRenderPeople(session);
+  else if(session.state.detailView && session.state.messageCount)meshRenderMessage(session);
+  else meshRenderChat(session);
 }
 } // namespace

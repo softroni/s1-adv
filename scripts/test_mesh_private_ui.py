@@ -12,10 +12,14 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 part = (ROOT / 'bots/CardputerADV/src/main_parts/091_main.cpp.inc').read_text()
+# Mesh's drawing helpers, which the screen shares with the rest of Mesh.
+mesh = (ROOT / 'bots/CardputerADV/src/main_parts/068_main.cpp.inc').read_text()
+drawing = mesh[mesh.index('// --- Mesh drawing'):mesh.index('// --- end of Mesh drawing')]
 typed_key = bytes(random.Random(11).randrange(256) for _ in range(32))
 typed_text = base64.b64encode(typed_key).decode()
 
 CODE = r'''
+#include "launcher_icons.h"
 #include "mesh_private_channel.h"
 #include <cassert>
 #include <cctype>
@@ -36,7 +40,7 @@ struct String:std::string {
  String substring(size_t a,size_t b)const{return substr(a,b-a);}
 };
 String operator+(const String&a,const char*b){return String(std::string(a)+b);}
-namespace fonts{int Font0=0,Font2=2;}
+namespace fonts{int Font0=0,Font2=2,FreeSansBold9pt7b=9,efontCN_12=12;}
 constexpr int TFT_WHITE=65535;int rgb565_local(int,int,int){return 1;}
 uint32_t gNow=1000;uint32_t millis(){return gNow;}
 std::vector<std::string> logs;
@@ -55,17 +59,24 @@ struct Preferences{bool ro=true;
 };
 uint8_t gFill=3;void esp_fill_random(void*out,size_t n){auto p=static_cast<uint8_t*>(out);for(size_t i=0;i<n;++i)p[i]=uint8_t(gFill+=29);}
 struct Canvas{int font=0,x=0,y=0;std::set<std::string> printed;std::vector<std::string> order;
- void setFont(int*f){font=*f;}void setTextColor(int,int){}void setCursor(int a,int b){x=a;y=b;}
- int textWidth(const String&s)const{return int(s.size())*(font==0?6:9);}
+ void setFont(int*f){font=*f;}void setTextColor(int,int=0){}void setCursor(int a,int b){x=a;y=b;}void setTextSize(int){}
+ void fillScreen(int){}
+ int textWidth(const String&s)const{return int(s.size())*(font==0||font==12?6:font==9?12:9);}
  template<class T>void print(T v){String s(v);if(s.empty())return;const int w=textWidth(s);
-  assert(x>=0&&y>=0&&x+w<=(font==0?232:240)&&y+(font==0?8:16)<=135);printed.insert(s);order.push_back(s);x+=w;}
- void drawRect(int a,int b,int w,int h,int){assert(a>=0&&b>=0&&a+w<=240&&b+h<=135);}
+  assert(x>=0&&y>=0&&x+w<=(font==0?232:240)&&y+(font==0?8:font==9?18:font==12?12:16)<=135);printed.insert(s);order.push_back(s);x+=w;}
+ static void box(int a,int b,int w,int h){assert(a>=0&&b>=0&&a+w<=240&&b+h<=135);}
+ void drawRect(int a,int b,int w,int h,int){box(a,b,w,h);}
+ void drawRoundRect(int a,int b,int w,int h,int,int){box(a,b,w,h);}void fillRoundRect(int a,int b,int w,int h,int,int){box(a,b,w,h);}
+ void fillRect(int a,int b,int w,int h,int){box(a,b,w,h);}
+ void drawFastHLine(int a,int b,int w,int){box(a,b,w,1);}void drawFastVLine(int a,int b,int h,int){box(a,b,1,h);}
+ void drawBitmap(int a,int b,const uint8_t*,int w,int h,int){box(a,b,w,h);}
  std::string qr;void qrcode(const char*t,int a,int b,int w,int,bool margin){assert(a>=0&&b>=0&&a+w<=240&&b+w<=135&&margin);qr=t;}
 }gCanvas;
 // What the radio session is told when Mesh starts.
 namespace libmeshtastic_leaf{struct Fake{int calls=0;bool ok=true;uint8_t key[32]={};size_t len=0;std::string name;
  bool setSecondaryChannel(const uint8_t*k,size_t n,const char*nm){++calls;memcpy(key,k,n);len=n;name=nm;return ok;}};}
 namespace s1_mesh{struct RadioSession{libmeshtastic_leaf::Fake mesh;PrivateChannel privateChannel;};}
+''' + drawing + r'''
 ''' + part + r'''
 using namespace s1_mesh;
 Keyboard_Class::KeysState plain,enterKey,delKey;
@@ -79,7 +90,7 @@ int main(){
  enterKey.enter=true;delKey.del=true;
  const std::string typedKey="''' + typed_text + r'''";
  // Nothing saved: the first screen says what C does, and the setup shows nothing yet.
- assert(meshChannelStartLine()=="C sets up a private channel");
+ assert(meshChannelLabel()=="none");
  meshChannelOpen();assert(gMeshChannelSetup&&shows("none yet")&&shows("N name K key G new V show X del"));
  // A name first: refused when it isn't one, then taken. With no key, nothing is saved yet.
  key('n');type("Fam!ly");enter();assert(shows("Letters, digits, - and _, up to 11")&&shows("Enter save  Esc cancel"));
@@ -108,7 +119,7 @@ int main(){
  for(size_t i=0;i<4;++i)meshChannelKey('\b',delKey);type(typedKey.c_str());render();  // A long key keeps its end in view.
  enter();assert(gMeshChannel.keyLength==32&&shows("Saved. Mesh hears it from now on"));
  PrivateChannel stored;assert(loadChannel(gNvs["privch"].data(),gNvs["privch"].size(),stored)&&std::string(stored.name)=="Family");
- assert(meshChannelStartLine()=="C private channel: #Family");
+ assert(meshChannelLabel()=="#Family");
  // Esc leaves an edit first, then the screen.
  key('n');assert(meshChannelEscape()&&gMeshChannelSetup&&gMeshChannelEdit==MeshChannelEdit::None);
  assert(meshChannelEscape()&&!gMeshChannelSetup&&!meshChannelEscape());
@@ -121,7 +132,7 @@ int main(){
  assert(gNvs.count("privch"));
  // X twice removes it from the screen and from NVS.
  key('x');key('x');assert(!gNvs.count("privch")&&!gMeshChannel.set()&&shows("Removed"));
- assert(meshChannelStartLine()=="C sets up a private channel");
+ assert(meshChannelLabel()=="none");
  RadioSession none;meshLoadPrivateChannel(none);assert(!none.mesh.calls&&!none.privateChannel.set());
  // A key typed first, then the name, saves once both are there.
  key('k');type(typedKey.c_str());enter();assert(shows("Now N to give it a name")&&!gNvs.count("privch"));

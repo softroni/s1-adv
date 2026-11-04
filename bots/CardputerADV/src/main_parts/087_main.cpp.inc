@@ -156,16 +156,16 @@ int scanChartY(int16_t dbm, int top, int bottom) {
   return bottom - (clamped - kScanChartLow) * (bottom - top) / (kScanChartHigh - kScanChartLow);
 }
 
-void renderScanSweep(s1_mesh::RadioSession& s, uint16_t bg, uint16_t muted, uint16_t orange) {
+void renderScanSweep(s1_mesh::RadioSession& s, const MeshInk& ink) {
   auto& d = gCanvas;
   const auto& plan = s.scan.plan;
   const auto& sweep = s.scan.sweep;
   char text[64];
-  d.setFont(&fonts::Font0);
   snprintf(text, sizeof(text), "%.1f-%.1f MHz", double(plan.start), double(plan.end()));
-  d.setTextColor(muted, bg); d.setCursor(8, 28); d.print(text);
-  d.setTextColor(orange, bg); d.print("  | LongFast");
-  constexpr int kLeft = 8, kWidth = 224, kTop = 38, kBottom = 100;
+  meshText(8, kMeshTop, text, ink.muted);
+  const int after = 16 + meshWidth(text);
+  meshTextFit(after, kMeshTop, "| LongFast", 232 - after, ink.orange);
+  constexpr int kLeft = 8, kWidth = 224, kTop = 40, kBottom = 92;
   for (int16_t dbm : {int16_t(-120), int16_t(-100), int16_t(-80)})
     d.drawFastHLine(kLeft, scanChartY(dbm, kTop, kBottom), kWidth, rgb565_local(28, 36, 44));
   const int points = std::max<int>(1, plan.points);
@@ -180,82 +180,79 @@ void renderScanSweep(s1_mesh::RadioSession& s, uint16_t bg, uint16_t muted, uint
     if (sweep.peak[i] != s1_scan::kNone) d.drawFastHLine(x, scanChartY(sweep.peak[i], kTop, kBottom), w, peakInk);
   }
   const uint8_t channel = plan.pointAt(s1_mesh::regionFrequency(s.region));
-  if (channel < plan.points) d.fillRect(left + channel * bar, kBottom + 3, std::max(2, bar), 4, orange);
+  if (channel < plan.points) d.fillRect(left + channel * bar, kBottom + 3, std::max(2, bar), 4, ink.orange);
   const int16_t floor = sweep.floor(plan);
   const uint8_t top = sweep.strongest(plan);
-  if (floor == s1_scan::kNone || top >= plan.points) snprintf(text, sizeof(text), "Reading the band...");
-  else snprintf(text, sizeof(text), "Floor %d dBm  Top %d at %.3f", int(floor), int(sweep.peak[top]),
-                double(plan.frequency(top)));
-  d.setTextColor(TFT_WHITE, bg); d.setCursor(8, 112); d.print(text);
-  d.setTextColor(muted, bg); d.setCursor(8, 127); d.print("Enter listen for packets  Esc stop");
+  // The floor on the left, the strongest on the right.
+  if (floor == s1_scan::kNone || top >= plan.points) meshText(8, 100, "Reading the band...", ink.white);
+  else {
+    char strongest[32];
+    snprintf(strongest, sizeof(strongest), "Top %d at %.3f", int(sweep.peak[top]), double(plan.frequency(top)));
+    // The floor gives up its unit before the two crowd each other.
+    snprintf(text, sizeof(text), "Floor %d dBm", int(floor));
+    if (meshWidth(text) + meshWidth(strongest) + 12 > 224) snprintf(text, sizeof(text), "Floor %d", int(floor));
+    meshText(8, 100, text, ink.muted);
+    meshTextRight(232, 100, strongest, ink.white);
+  }
+  meshKeys("Enter listen for packets  Esc stop", ink.muted);
 }
 
-void renderScanListen(s1_mesh::RadioSession& s, uint16_t bg, uint16_t muted, uint16_t green) {
+void renderScanListen(s1_mesh::RadioSession& s, const MeshInk& ink) {
   auto& d = gCanvas;
   const auto& listen = s.scan.listen;
   char text[64];
-  d.setFont(&fonts::Font0); d.setTextColor(muted, bg);
   snprintf(text, sizeof(text), "%s  %.3f MHz", s1_mesh::scanPresetName(s.scan.preset),
            double(s1_mesh::scanPresetFrequency(s.region, s.scan.preset)));
-  d.setCursor(8, 28); d.print(text);
-  d.setFont(&fonts::Font2); d.setTextColor(TFT_WHITE, bg); d.setCursor(8, 40);
-  if (!listen.packets) d.print("Listening...");
+  meshTextFit(8, kMeshTop, text, 224, ink.muted);
+  if (!listen.packets) meshBoldFit(8, 38, "Listening...", 224, ink.white);
   else {
     constexpr uint32_t kMostShown = 99999;  // Keeps the line on the screen however long it listens.
     snprintf(text, sizeof(text), "%lu%s packet%s, %u%s node%s",
              static_cast<unsigned long>(std::min(listen.packets, kMostShown)), listen.packets > kMostShown ? "+" : "",
              listen.packets == 1 ? "" : "s", unsigned(listen.nodeCount), listen.moreNodes ? "+" : "",
              listen.nodeCount == 1 && !listen.moreNodes ? "" : "s");
-    d.print(text);
+    meshBoldFit(8, 38, text, 224, ink.white);
   }
-  d.setFont(&fonts::Font0); d.setTextColor(muted, bg); d.setCursor(8, 60);
-  if (!listen.packets && !listen.damaged) d.print("Nothing yet on this preset");
+  if (!listen.packets && !listen.damaged) snprintf(text, sizeof(text), "Nothing yet on this preset");
   else {
     const uint32_t ago = (millis() - listen.lastAt) / 1000;
     if (ago < 600) snprintf(text, sizeof(text), "%lu garbled  last %lus ago", static_cast<unsigned long>(listen.damaged),
                             static_cast<unsigned long>(ago));
     else snprintf(text, sizeof(text), "%lu garbled  last %lum ago", static_cast<unsigned long>(listen.damaged),
                   static_cast<unsigned long>(ago / 60));
-    d.print(text);
   }
+  meshTextFit(8, 57, text, 224, ink.muted);
+  // The packets themselves stay in Font0: five columns don't fit in anything bigger.
+  d.setFont(&fonts::Font0);
   for (size_t i = 0; i < listen.recentCount; ++i) {
     const auto& h = listen.recent[i];
-    const int y = 74 + int(i) * 12;
-    d.setTextColor(TFT_WHITE, bg); d.setCursor(8, y);
+    const int y = 75 + int(i) * 11;
+    d.setTextColor(TFT_WHITE, ink.bg); d.setCursor(8, y);
     snprintf(text, sizeof(text), "!%08lx", static_cast<unsigned long>(h.from)); d.print(text);
     if (h.rssi == s1_scan::kNone) snprintf(text, sizeof(text), "?dBm");
     else snprintf(text, sizeof(text), "%ddBm", int(h.rssi));
-    d.setTextColor(muted, bg); d.setCursor(108 - d.textWidth(text), y); d.print(text);
+    d.setTextColor(ink.muted, ink.bg); d.setCursor(108 - d.textWidth(text), y); d.print(text);
     snprintf(text, sizeof(text), "%+.1fdB", double(h.snrTenths) / 10.0); d.setCursor(114, y); d.print(text);
     if (h.hops < 0) snprintf(text, sizeof(text), "hops ?");
     else if (h.hops == 0) snprintf(text, sizeof(text), "direct");
     else snprintf(text, sizeof(text), "%d hop%s", int(h.hops), h.hops == 1 ? "" : "s");
     d.setCursor(160, y); d.print(text);
-    d.setTextColor(h.publicChannel ? green : muted, bg); d.setCursor(200, y); d.print(h.publicChannel ? "pub" : "other");
+    d.setTextColor(h.publicChannel ? ink.green : ink.muted, ink.bg); d.setCursor(200, y); d.print(h.publicChannel ? "pub" : "other");
   }
-  d.setTextColor(muted, bg); d.setCursor(8, 127); d.print("Enter sweep  Up/Down preset  Esc stop");
+  meshKeys("Enter sweep  \x18\x19 preset  Esc stop", ink.muted);
 }
 
 void renderRadioScanUi(s1_mesh::RadioSession& s) {
-  auto& d = gCanvas;
-  const uint16_t bg = rgb565_local(3, 8, 14), muted = rgb565_local(130, 145, 155),
-                 orange = rgb565_local(255, 136, 64), green = rgb565_local(88, 240, 141);
-  d.fillScreen(bg); d.setTextSize(1); d.setFont(&fonts::Font2); d.setTextColor(TFT_WHITE, bg);
-  d.setCursor(8, 5); d.print("Radio Scan");
-  const String tag = String(s1_mesh::regionName(s.region)) + (s.scan.listening ? " / listen" : " / sweep");
-  d.setFont(&fonts::Font0); d.setTextColor(muted, bg); d.setCursor(232 - d.textWidth(tag), 12); d.print(tag);
-  d.drawFastHLine(6, 23, 228, rgb565_local(48, 54, 61));
+  MeshInk ink;
+  const String tag = String(s1_mesh::regionName(s.region)) + (s.scan.listening ? " listen" : " sweep");
+  meshHead("Radio Scan", ink.accent, tag, ink.muted);
   if (s.scan.failures >= kScanGiveUp) {
-    d.setFont(&fonts::Font2); d.setTextColor(TFT_WHITE, bg);
-    const char* title = "Radio not answering";
-    d.setCursor(120 - d.textWidth(title) / 2, 58); d.print(title);
-    d.setFont(&fonts::Font0); d.setTextColor(muted, bg);
-    const char* hint = "Esc, check the Cap, then try again";
-    d.setCursor(120 - d.textWidth(hint) / 2, 81); d.print(hint);
-    d.setCursor(8, 127); d.print("Esc stop");
+    meshBoldCenter(44, "Radio not answering", ink.white);
+    meshTextCenter(68, "Esc, check the Cap, then try again", ink.muted);
+    meshKeys("Esc stop", ink.muted);
     return;
   }
-  if (s.scan.listening) renderScanListen(s, bg, muted, green);
-  else renderScanSweep(s, bg, muted, orange);
+  if (s.scan.listening) renderScanListen(s, ink);
+  else renderScanSweep(s, ink);
 }
 }  // namespace
