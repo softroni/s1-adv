@@ -479,6 +479,7 @@ void loop() {
   serviceBalloon();
   serviceBallCatch();
   serviceLab();
+  servicePulseGps(millis());  // After the Lab, which may have just taken or given back the GPS.
   serviceBrainFlow();
   serviceTetris();
   serviceSmartLamp();

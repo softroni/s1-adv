@@ -1882,6 +1882,17 @@ void testGpsReadings() {
     gpsLine("GNRMC,123519,A,4230.5000,N,07054.0000,W,10.0,084.4,230394,,,A");
     assert(onceAsk(onceRead(Sig::Speed)) == "Speed 19 km/h."); assert(gAirSensor.opens == opens && gUnits.commands == bus && gGrove.frames == 0);
     assert(!Serial1.open); }
+  // Pulse shares the GPS port for its weather: the Lab letting go doesn't close it under Pulse,
+  // and only the last one out closes it.
+  setUiMode(UiMode::Home); run(100); assert(!Serial1.open && !gGpsHolders);
+  gpsHold(kGpsForPulse); assert(Serial1.open && gGpsHolders == kGpsForPulse);
+  setUiMode(UiMode::LabDevices); run(100); assert(Serial1.open && gGpsHolders == (kGpsForPulse | kGpsForLab));
+  setUiMode(UiMode::Home); run(100); assert(Serial1.open && gGpsHolders == kGpsForPulse);
+  { onceOnGrove(); gpsHold(kGpsForPulse); gpsLine("GNRMC,123530,A,4230.5000,N,07054.0000,W,10.0,084.4,230394,,,A");
+    assert(onceAsk(onceRead(Sig::Speed)) == "Speed 19 km/h.");
+    assert(Serial1.open && gGpsHolders == kGpsForPulse); }
+  gpsRelease(kGpsForPulse); assert(!Serial1.open && !gGpsHolders);
+  gpsRelease(kGpsForPulse); assert(!gGpsHolders);
 }
 int main(int argc, char** argv) {
   if (argc > 1) gDump = std::fopen(argv[1], "w");

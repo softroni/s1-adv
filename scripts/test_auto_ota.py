@@ -47,7 +47,7 @@ uint32_t millis(){return now;}void logf(const char*,...){}
 String hubBaseUrl(){return "https://bridge.invalid";}
 struct InboxHttpPayload {String url,token,eventId;bool otaManifest=false,applyAfter=false,announce=false,weather=false;};
 #include "weather_view.h"
-weather_view::Schedule gWeatherSchedule;String urlEncodePathSegment(const String&){return "Salem%2C%20MA";}
+weather_view::Schedule gWeatherSchedule;String urlEncodePathSegment(const String&){return "Salem%2C%20MA";}String weatherQuery(uint32_t){return String("place=")+urlEncodePathSegment(String());}
 std::vector<InboxHttpPayload> dispatched;std::vector<uint32_t> manifestTimes;
 bool startInboxNetworkRequest(std::unique_ptr<InboxHttpPayload> p){assert(!gInboxHttpBusy);if(failStart)return false;gInboxHttpBusy=true;
  if(p->otaManifest)manifestTimes.push_back(now);dispatched.push_back(*p);gLastInboxAutoPollMs=now;return true;}

@@ -9,6 +9,9 @@ const STALE_LIMIT_MS = 3 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 3000;
 const MAX_PLACES = 8;
 const MAX_PLACE_CHARS = 40;
+// What Pulse shows for weather at the Cap's GPS position rather than a saved city.
+export const HERE = "Here";
+const COORDINATE = /^-?\d{1,3}(\.\d{1,6})?$/u;
 
 const STATES = Object.freeze({ AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
   CO: "Colorado", CT: "Connecticut", DE: "Delaware", DC: "District of Columbia", FL: "Florida", GA: "Georgia",
@@ -24,6 +27,15 @@ const STATE_NAMES = Object.values(STATES).sort((a, b) => b.length - a.length);
 export function validPlace(text) {
   return typeof text === "string" && text.length <= MAX_PLACE_CHARS && /^[\p{L}\p{N}][\p{L}\p{N} ,.'-]*$/u.test(text) &&
     /\p{L}{2}|\p{N}{5}/u.test(text);
+}
+
+// A position from the Cap's GPS, as the device sends it. Only two decimals, about a kilometre,
+// are kept or passed on, whatever arrives.
+export function parseCoordinates(lat, lon) {
+  if (typeof lat !== "string" || typeof lon !== "string" || !COORDINATE.test(lat) || !COORDINATE.test(lon)) return null;
+  const latitude = Math.round(Number(lat) * 100) / 100, longitude = Math.round(Number(lon) * 100) / 100;
+  if (!(Math.abs(latitude) <= 90) || !(Math.abs(longitude) <= 180)) return null;
+  return { latitude: latitude || 0, longitude: longitude || 0 };  // Never -0, which would print as "-0.00".
 }
 
 // "Salem, MA", "Salem MA", "salem, massachusetts" or just "Salem".
@@ -110,7 +122,10 @@ export class WeatherService {
   }
 
   async fetchReport(key, text) {
-    const place = await this.place(key, text);
+    return this.forecast(await this.place(key, text));
+  }
+
+  async forecast(place) {
     const query = new URLSearchParams({ latitude: place.latitude, longitude: place.longitude,
       current: "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,is_day,wind_speed_10m",
       daily: "temperature_2m_max,temperature_2m_min,precipitation_probability_max",
@@ -125,10 +140,23 @@ export class WeatherService {
 
   async report(text) {
     const key = comparable(text);
+    return this.cached(key, () => this.fetchReport(key, text));
+  }
+
+  // Weather at a GPS position, with no city to look up. Its key can't match a city's, which
+  // only ever holds letters and digits.
+  async reportAt(position) {
+    const at = parseCoordinates(String(position?.latitude), String(position?.longitude));
+    if (!at) throw Object.assign(new Error("invalid_position"), { code: "invalid_position" });
+    const key = `gps:${at.latitude.toFixed(2)},${at.longitude.toFixed(2)}`;
+    return this.cached(key, () => this.forecast({ name: HERE, ...at }));
+  }
+
+  async cached(key, fetcher) {
     const saved = this.reports.get(key);
     if (saved && this.now() - saved.at < FRESH_MS) return saved.report;
     if (!this.running.has(key)) {
-      this.running.set(key, this.fetchReport(key, text).finally(() => this.running.delete(key)));
+      this.running.set(key, fetcher().finally(() => this.running.delete(key)));
     }
     try {
       const report = await this.running.get(key);

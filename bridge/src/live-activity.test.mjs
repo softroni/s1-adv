@@ -373,4 +373,19 @@ test("the weather route answers the device, and only the device", async t => {
   const unknown = await get("Nowhereville");
   assert.equal(unknown.status, 404);
   assert.match(await unknown.text(), /unknown_place/u);
+  // By the Cap's GPS: no city to look up, two decimals passed on, and the device is still checked.
+  const at = (query, headers = { authorization: bridge.authorization }) => fetch(`${bridge.base}/api/cardputer/weather?${query}`, { headers });
+  const before = seen.length;
+  const here = await at("lat=42.5083&lon=-70.9049");
+  assert.equal(here.status, 200);
+  assert.equal((await here.json()).place, "Here");
+  assert.equal(seen.length, before + 1);
+  assert.ok(seen.at(-1).includes("latitude=42.51") && seen.at(-1).includes("longitude=-70.9") && !seen.at(-1).includes("42.5083"));
+  assert.equal((await at("lat=42.51&lon=-70.90", {})).status, 401);
+  for (const bad of ["lat=42.51", "lon=-70.9", "lat=95&lon=0", "lat=abc&lon=1", "lat=&lon="]) {
+    const response = await at(bad);
+    assert.equal(response.status, 400, bad);
+    assert.match(await response.text(), /invalid_position/u);
+  }
+  assert.equal(seen.length, before + 1, "a bad position reaches no service");
 });

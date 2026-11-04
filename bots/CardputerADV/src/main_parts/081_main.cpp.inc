@@ -439,10 +439,27 @@ bool labSaveSpot() {
   gLabSpotLoaded = true;
   return saved;
 }
-void labReadGps(uint32_t now) {
+void labGpsOn();
+// Who has the GPS's serial port open: the Lab, a check from the chat, or Pulse for its weather. It
+// opens for the first and closes when the last lets go, so none of them shuts it on another.
+constexpr uint8_t kGpsForLab = 1, kGpsForOnce = 2, kGpsForPulse = 4;
+uint8_t gGpsHolders = 0;
+void gpsHold(uint8_t who) {
+  if (!gGpsHolders) labGpsOn();
+  gGpsHolders |= who;
+}
+void gpsRelease(uint8_t who) {
+  if (!(gGpsHolders & who)) return;
+  gGpsHolders &= static_cast<uint8_t>(~who);
+  if (!gGpsHolders) Serial1.end();
+}
+void gpsFeed(uint32_t now) {
   for (int i = 0; i < kLabGpsBytesPerPass && Serial1.available() > 0; ++i) {
     gLabGps.feed(static_cast<char>(Serial1.read()), now);
   }
+}
+void labReadGps(uint32_t now) {
+  gpsFeed(now);
   const bool hearing = gLabGps.hearing(now);
   const lab_gps::Fix& fix = gLabGps.fix;
   if (hearing) gLabInputs.set(lab::Sig::Satellites, fix.satellites, now);
@@ -1093,14 +1110,14 @@ void beginLab() {
     gVoiceNotesBehindCard = true;
   }
   labEnterView(gUiMode);
-  labGpsOn();
+  gpsHold(kGpsForLab);
   labRedraw();
 }
 void stopLab() {
   if (!gLabOpen) return;
   labStopPlaying();
   labPartsOff();
-  Serial1.end();
+  gpsRelease(kGpsForLab);
   gLabOpen = false;
 }
 void labKeepAwake(uint32_t now) {
@@ -1249,7 +1266,7 @@ void labOnceGiveBack(bool restore = true) {
     labPartsOff();
     if (lit) pinMode(kLabYellowPin, INPUT_PULLDOWN);
   }
-  if (gLabOnceGps) Serial1.end();
+  if (gLabOnceGps) gpsRelease(kGpsForOnce);
   gLabOnceGps = false;
   labForgetOutputs();
 }
@@ -1332,7 +1349,7 @@ void labOnceOpen() {
   for (uint8_t i = 0; i < lab::kSigCount; ++i) {
     if (lab::fromGps(static_cast<lab::Sig>(i)) && gLabOnce.asksFor(static_cast<lab::Sig>(i))) gLabOnceGps = true;
   }
-  if (gLabOnceGps) labGpsOn();
+  if (gLabOnceGps) gpsHold(kGpsForOnce);
 }
 // A wire with nothing on it still reads as something, so a part there needs a clean look first.
 bool labOnceBelieved(lab::Sig sig) {

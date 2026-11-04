@@ -1,5 +1,5 @@
 import { REPLY_LANGUAGE_POLICY, requestedReplyLanguage } from "./reply-language.mjs";
-import { WeatherService, validPlace } from "./weather.mjs";
+import { WeatherService, parseCoordinates, validPlace } from "./weather.mjs";
 import { startFirmwareJob, updateFirmwareJob, publicFirmwareJob, firmwareJobDeliveryUncertain } from "./firmware-job-status.mjs";
 import { firmwareCapability, firmwareWorkflowPaths } from "./firmware-automation.mjs";
 import { AGENT_STATES, WORK_KINDS, hasAgentStatusAccess, publishedAfterTask } from './agent-status.mjs';
@@ -6515,13 +6515,17 @@ async function main() {
     }
 
     if (req.method === "GET" && url.pathname === "/api/cardputer/weather") {
+      // Pulse asks by the Cap's GPS position when it has a fix, and by the saved city otherwise.
+      // Neither is logged.
+      const byPosition = url.searchParams.has("lat") || url.searchParams.has("lon");
+      const position = byPosition ? parseCoordinates(url.searchParams.get("lat"), url.searchParams.get("lon")) : null;
       const place = url.searchParams.get("place");
-      if (!validPlace(place)) {
-        json(res, 400, { error: "invalid_place" });
+      if (byPosition ? !position : !validPlace(place)) {
+        json(res, 400, { error: byPosition ? "invalid_position" : "invalid_place" });
         return;
       }
       try {
-        json(res, 200, await runtime.weather.report(place));
+        json(res, 200, await (position ? runtime.weather.reportAt(position) : runtime.weather.report(place)));
       } catch (error) {
         console.warn(`[weather] failed: ${String(error.code || error.message || error).slice(0, 120)}`);
         json(res, error.code === "unknown_place" ? 404 : 503, { error: error.code || "weather_unavailable", retryable: error.code !== "unknown_place" });

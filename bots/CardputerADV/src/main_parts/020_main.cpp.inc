@@ -449,7 +449,7 @@ void serviceAutoInboxPoll() {
     if (!weather) { gInboxRetryAfterMs = now + 4000U; return; }
     weather->token = gDeviceToken;
     weather->weather = true;
-    weather->url = hubBaseUrl() + "/api/cardputer/weather?place=" + urlEncodePathSegment(gDeviceSettings.weatherPlace);
+    weather->url = hubBaseUrl() + "/api/cardputer/weather?" + weatherQuery(now);  // The GPS's position, or the city.
     gWeatherSchedule.retrySoon(now);  // Until the answer comes, nothing asks again.
     startInboxNetworkRequest(std::move(weather));
     return;
@@ -512,6 +512,7 @@ void applyWeatherResponse(int code, const String& body) {
                           gDeviceSettings.clockTwelveHour);
   }
   gWeather = report;
+  noteWeatherAnswered();
   logf("[WEATHER] %dF %s", report.temp, report.condition.c_str());
 }
 

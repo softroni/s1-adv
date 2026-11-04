@@ -8,7 +8,7 @@ import tempfile
 root = Path(__file__).resolve().parents[1]
 src = root / 'bots/CardputerADV/src'
 parts = src / 'main_parts'
-joined = ''.join((parts / f'{n:03d}_main.cpp.inc').read_text() for n in range(1, 82) if (parts / f'{n:03d}_main.cpp.inc').exists())
+joined = ''.join((parts / f'{n:03d}_main.cpp.inc').read_text() for n in range(1, 100) if (parts / f'{n:03d}_main.cpp.inc').exists())
 
 
 def function(signature):
@@ -28,7 +28,8 @@ assert 'kDeviceSettingsItemCount = 10;' in joined and 'kWeatherPlaceSetting = 8;
 assert 'gPrefs.getString("wx_place", weather_view::kDefaultPlace)' in joined and 'gPrefs.putString("wx_place", gDeviceSettings.weatherPlace)' in joined
 assert 'if (!weather_view::validPlace(gDeviceSettings.weatherPlace.c_str())) gDeviceSettings.weatherPlace = weather_view::kDefaultPlace;' in joined
 # A comma and a space have to survive the trip to the bridge.
-assert '"/api/cardputer/weather?place=" + urlEncodePathSegment(gDeviceSettings.weatherPlace)' in joined
+assert '"/api/cardputer/weather?" + weatherQuery(now)' in joined
+assert 'return "place=" + urlEncodePathSegment(gDeviceSettings.weatherPlace);' in joined
 # Typed keys go to the box ahead of every shortcut, as with a Wi-Fi password, or "s" would save settings.
 typing = function('void handleTypingKey(')
 assert typing.index('if (gPlaceEditing && !gLauncherVisible && !keys.tab) {') < typing.index('handleFocusShortcut(lowerKey,keys)')
@@ -46,6 +47,7 @@ code = r'''
 #include <string>
 #include <vector>
 #include "weather_view.h"
+#include "weather_gps.h"
 using namespace weather_view;
 using std::min;using std::max;
 struct String:std::string{using std::string::string;String()=default;String(const std::string&s):std::string(s){}
@@ -66,6 +68,7 @@ WeatherReport gWeather;String gWeatherNote="Getting weather";Schedule gWeatherSc
 bool gPlaceEditing=false;String gPlaceDraft;int saves=0;std::string statusText;
 struct{String weatherPlace="Salem, MA";bool clockTwelveHour=true;}gDeviceSettings;
 void saveDeviceSettings(){++saves;}void setStatus(const String&s,int){statusText=s;}void logf(const char*,...){}
+int answered=0;namespace{void noteWeatherAnswered();}  // As 005 declares it.
 namespace clock_display{void format(char*p,size_t n,int,int,bool){snprintf(p,n,"6:30 PM");}}
 // The parts of ArduinoJson this uses, reading a fake document.
 struct Field{bool isInt=false;int value=0;const char* text=nullptr;template<class T>bool is()const{return isInt;}
@@ -86,9 +89,104 @@ struct Canvas{int x=0,y=0,font=2;std::vector<Text> printed;int fills=0;
 }gCanvas;
 String fitCurrentFontToWidth(const String&s,int w){return String(s.substr(0,size_t(w/6)));}
 ''' + function('void applyWeatherResponse(') + function('bool handlePlaceEditKey(') + function('void drawHomeWeather()') + r'''
+// Pulse's GPS weather, against a pretend GPS port.
+enum class UiMode{Home,LabDevices,Mesh};UiMode gUiMode=UiMode::Home;bool gMeshBusOwned=false,gLabOpen=false;
+constexpr uint8_t kGpsForPulse=4;uint8_t gGpsHolders=0;int holds=0,releases=0,feeds=0;
+void gpsHold(uint8_t w){gGpsHolders|=w;++holds;}void gpsRelease(uint8_t w){gGpsHolders&=uint8_t(~w);++releases;}
+lab_gps::Parser gLabGps;void gpsFeed(uint32_t){++feeds;}
+String urlEncodePathSegment(const String&){return String("Salem%2C%20MA");}
+// Weather on Pulse from the Cap's GPS. With a fix, Pulse shows the weather where the Cardputer is,
+// as "Here", instead of at the saved city. Pulse listens to the GPS while it's on screen, and a fix
+// seen in the Lab counts too. Without the Cap, or with no fix, the saved city is used as before.
+namespace {
+weather_gps::Spot gWeatherHere;     // The latest fix.
+weather_gps::Spot gWeatherAsking;   // What the request in flight is for: not known means the city.
+weather_gps::Spot gWeatherShownAt;  // What the weather on screen is for.
+bool gPulseHoldsGps = false, gWeatherNudged = false;
+uint32_t gWeatherNudgeMs = 0;
+
+bool pulseWantsGps() { return gUiMode == UiMode::Home && !gMeshBusOwned && !gLabOpen; }
+
+void servicePulseGps(uint32_t now) {
+  const bool want = pulseWantsGps();
+  if (want && !gPulseHoldsGps) gpsHold(kGpsForPulse);
+  else if (!want && gPulseHoldsGps) gpsRelease(kGpsForPulse);
+  gPulseHoldsGps = want;
+  if (gPulseHoldsGps) gpsFeed(now);
+  if (gGpsHolders && gLabGps.hearing(now) && gLabGps.fix.valid) {
+    gWeatherHere.known = true;
+    gWeatherHere.latE5 = gLabGps.fix.latE5;
+    gWeatherHere.lonE5 = gLabGps.fix.lonE5;
+    gWeatherHere.atMs = now;
+  }
+  if (weather_gps::askSooner(gWeatherHere, gWeatherShownAt, now, gWeatherNudged, gWeatherNudgeMs)) {
+    gWeatherNudged = true;
+    gWeatherNudgeMs = now;
+    gWeatherSchedule.reset();  // Due now; the next background poll asks.
+  }
+}
+
+String weatherQuery(uint32_t now) {
+  if (weather_gps::usable(gWeatherHere, now)) {
+    char text[48];
+    weather_gps::query(text, sizeof(text), gWeatherHere);
+    gWeatherAsking = gWeatherHere;
+    return String(text);
+  }
+  gWeatherAsking = weather_gps::Spot{};
+  return "place=" + urlEncodePathSegment(gDeviceSettings.weatherPlace);
+}
+
+// The weather that just arrived is for wherever it was asked about.
+void noteWeatherAnswered() { ++answered; gWeatherShownAt = gWeatherAsking; }
+}  // namespace
+
+void hear(int32_t lat,int32_t lon,bool valid=true){gLabGps.lines=1;gLabGps.lastMs=nowMs;gLabGps.fix.valid=valid;gLabGps.fix.latE5=lat;gLabGps.fix.lonE5=lon;}
 bool printed(const char*t){for(auto&p:gCanvas.printed)if(p.s==t)return true;return false;}
 void type(const char*keys){for(;*keys;++keys)handlePlaceEditKey(*keys);}
+void testGpsWeather(){
+ // Two decimals, rounded half away from zero, and never minus nothing.
+ char t[48];weather_gps::hundredths(t,sizeof(t),4250833);assert(std::string(t)=="42.51");
+ weather_gps::hundredths(t,sizeof(t),-7090000);assert(std::string(t)=="-70.90");
+ weather_gps::hundredths(t,sizeof(t),-499);assert(std::string(t)=="0.00");
+ weather_gps::hundredths(t,sizeof(t),-500);assert(std::string(t)=="-0.01");
+ weather_gps::hundredths(t,sizeof(t),-18000000);assert(std::string(t)=="-180.00");
+ weather_gps::hundredths(t,sizeof(t),5);assert(std::string(t)=="0.00");
+ weather_gps::Spot at{true,4250833,-7090000,1};weather_gps::query(t,sizeof(t),at);assert(std::string(t)=="lat=42.51&lon=-70.90");
+ assert(weather_gps::usable(at,1+weather_gps::kFreshMs-1)&&!weather_gps::usable(at,1+weather_gps::kFreshMs)&&!weather_gps::usable({},5));
+ // Asks sooner when the weather shown is the city's or 3 km away, but not more than every 2 minutes.
+ const weather_gps::Spot city{},near{true,4251733,-7090000,1},far{true,4253533,-7090000,1};
+ assert(weather_gps::askSooner(at,city,10,false,0)&&!weather_gps::askSooner(at,near,10,false,0)&&weather_gps::askSooner(at,far,10,false,0));
+ assert(!weather_gps::askSooner(at,city,10,true,5)&&weather_gps::askSooner(at,city,5+weather_gps::kNudgeGapMs,true,5));
+ assert(!weather_gps::askSooner({},city,10,false,0));
+
+ // Pulse holds the GPS while it's on screen, and not while the Lab or Mesh has the Cap.
+ gWeatherSchedule.asked(nowMs);servicePulseGps(nowMs);assert(gGpsHolders==kGpsForPulse&&holds==1&&feeds==1);
+ servicePulseGps(nowMs);assert(holds==1&&feeds==2);
+ gUiMode=UiMode::LabDevices;gLabOpen=true;servicePulseGps(nowMs);assert(!gGpsHolders&&releases==1&&feeds==2);
+ gLabOpen=false;gUiMode=UiMode::Mesh;gMeshBusOwned=true;servicePulseGps(nowMs);assert(holds==1);gMeshBusOwned=false;
+ gUiMode=UiMode::Home;servicePulseGps(nowMs);assert(gGpsHolders==kGpsForPulse&&holds==2);
+ // No fix: the saved city as before, and nothing hurried.
+ hear(4250833,-7090000,false);servicePulseGps(nowMs);assert(!gWeatherSchedule.due(nowMs+1));
+ assert(weatherQuery(nowMs)=="place=Salem%2C%20MA");
+ // A fix: ask now, by position, and once it's answered, stop hurrying.
+ hear(4250833,-7090000);servicePulseGps(nowMs);assert(gWeatherSchedule.due(nowMs));
+ assert(weatherQuery(nowMs)=="lat=42.51&lon=-70.90");answered=0;gWeather=WeatherReport();applyWeatherResponse(200,"{}");
+ assert(answered==1&&gWeather.valid&&!gWeatherSchedule.due(nowMs+1));
+ nowMs+=weather_gps::kNudgeGapMs;hear(4251733,-7090000);servicePulseGps(nowMs);assert(!gWeatherSchedule.due(nowMs+1));  // 1 km: not worth it
+ hear(4253533,-7090000);servicePulseGps(nowMs);assert(gWeatherSchedule.due(nowMs));            // 3 km: worth it
+ // A failed answer isn't for anywhere, and hurrying waits its 2 minutes.
+ assert(weatherQuery(nowMs)=="lat=42.54&lon=-70.90");applyWeatherResponse(-1,"");assert(answered==1);
+ servicePulseGps(nowMs+1);assert(!gWeatherSchedule.due(nowMs+2));
+ // An old position gives way to the city again.
+ nowMs+=weather_gps::kFreshMs+1;gUiMode=UiMode::LabDevices;servicePulseGps(nowMs);assert(!gGpsHolders);
+ assert(weatherQuery(nowMs)=="place=Salem%2C%20MA");gUiMode=UiMode::Home;
+ // Back to the plain city state for the tests below.
+ gWeatherHere=weather_gps::Spot{};gWeatherShownAt=weather_gps::Spot{};gWeatherAsking=weather_gps::Spot{};gWeather=WeatherReport();gWeatherNote="Getting weather";
+ gWeatherSchedule=Schedule{};nowMs=100000;
+}
 int main(){
+ testGpsWeather();
  // Places.
  assert(std::string(kDefaultPlace)=="Salem, MA"&&validPlace(kDefaultPlace));
  for(const char*good:{"Salem","St. Louis, MO","O'Fallon, IL","Winston-Salem","New York","10001"})assert(validPlace(good));
@@ -170,7 +268,7 @@ int main(){
  // The same city changes nothing.
  applyWeatherResponse(200,"{}");gPlaceEditing=true;gPlaceDraft="Boston, MA";before=saves;handlePlaceEditKey('\n');
  assert(!gPlaceEditing&&saves==before&&gWeather.valid&&!gWeatherSchedule.due(nowMs));
- std::cout<<"PASS weather: schedule, failures keep the last report, city entry, colour pictures, panel bounds\n";
+ std::cout<<"PASS weather: schedule, failures keep the last report, city entry, colour pictures, panel bounds, and weather at the Cap's GPS position\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-weather-') as directory:

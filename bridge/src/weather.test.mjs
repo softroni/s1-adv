@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { WeatherService, bestMatch, parsePlace, validPlace, weatherCondition } from "./weather.mjs";
+import { HERE, WeatherService, bestMatch, parseCoordinates, parsePlace, validPlace, weatherCondition } from "./weather.mjs";
 
 // Sample answers for these names, trimmed, with North Carolina listed first.
 const town = (name, admin1, population, latitude, longitude, feature_code = "PPL") => ({ name, admin1, population, latitude, longitude, feature_code });
@@ -133,4 +133,46 @@ test("the place list can't grow without limit", async () => {
   const service = new WeatherService({ fetchImpl: fakeFetch().impl });
   for (let i = 0; i < 20; ++i) await service.report(`Salem${"x".repeat(i)}`).catch(() => {});
   assert.ok(service.places.size <= 8 && service.reports.size <= 8);
+});
+
+test("a GPS position is kept to two decimals, and anything else is refused", () => {
+  assert.deepEqual(parseCoordinates("42.5083", "-70.9049"), { latitude: 42.51, longitude: -70.9 });
+  assert.deepEqual(parseCoordinates("42.51", "-70.90"), { latitude: 42.51, longitude: -70.9 });
+  assert.deepEqual(parseCoordinates("-0.004", "0"), { latitude: 0, longitude: 0 });
+  assert.deepEqual(parseCoordinates("90", "-180"), { latitude: 90, longitude: -180 });
+  for (const [lat, lon] of [["91", "0"], ["0", "180.01"], ["1e2", "0"], ["42.5", ""], ["", "0"], [null, "0"], ["42.5", undefined],
+    ["0x10", "0"], ["42.5083331", "0"], ["NaN", "0"], ["Infinity", "0"], [" 42", "0"], ["42,5", "0"], ["4250", "0"]])
+    assert.equal(parseCoordinates(lat, lon), null, `${lat},${lon}`);
+});
+
+test("weather at a GPS position needs no city, asks with two decimals, and says Here", async () => {
+  const fake = fakeFetch();
+  const service = new WeatherService({ fetchImpl: fake.impl });
+  const report = await service.reportAt({ latitude: 42.5083, longitude: -70.9049 });
+  assert.equal(report.place, HERE);
+  assert.equal(report.temp, 70);
+  assert.equal(fake.calls.length, 1, "no city lookup");
+  const asked = new URL(fake.calls[0]).searchParams;
+  assert.equal(asked.get("latitude"), "42.51");
+  assert.equal(asked.get("longitude"), "-70.9");
+  // Within the same hundredth of a degree it's the same report, and a city's report is separate.
+  await service.reportAt({ latitude: 42.5149, longitude: -70.9001 });
+  assert.equal(fake.calls.length, 1);
+  await service.report("Salem, MA");
+  assert.equal(service.reports.size, 2);
+  await assert.rejects(service.reportAt({ latitude: 95, longitude: 0 }), error => error.code === "invalid_position");
+  await assert.rejects(service.reportAt(null), error => error.code === "invalid_position");
+});
+
+test("old weather at a position beats none, and the list stays bounded", async () => {
+  let now = 0, fail = false;
+  const service = new WeatherService({ now: () => now,
+    fetchImpl: fakeFetch({ forecast: () => fail ? reply({}, 500) : reply(FORECAST) }).impl });
+  await service.reportAt({ latitude: 42.51, longitude: -70.9 });
+  now += 20 * 60 * 1000;
+  fail = true;
+  assert.equal((await service.reportAt({ latitude: 42.51, longitude: -70.9 })).stale, true);
+  fail = false;
+  for (let i = 0; i < 20; ++i) await service.reportAt({ latitude: i, longitude: i });
+  assert.ok(service.reports.size <= 8);
 });

@@ -101,6 +101,16 @@ Add the state, like `Salem, MA` or `Salem, Massachusetts`, because many towns sh
 you get the largest town with that name. US places only, and a state that has no such town shows
 "Check your city" rather than another state's weather.
 
+**With the Cap LoRa-1262 fitted**, Pulse listens to its GPS while it's on screen. Once the GPS has
+a fix, which needs the sky, Pulse shows the weather where you are, with **Here** as the place,
+instead of at the saved city. This works outside the US too. The first fix asks for the weather
+straight away, and so does moving more than 3 km, at most every 2 minutes. A fix seen in the Lab
+counts as well. With no fix for 2 hours, or without the Cap, it goes back to the saved city.
+
+The position goes only to your own bridge, rounded to a hundredth of a degree (about a kilometre),
+and from there to the same weather service, Open-Meteo, in place of the city's position. Neither
+the Cardputer nor the bridge writes it to a log.
+
 ## Status and sounds
 
 While you wait, AI Chat and the Pulse screen show what Claude is doing right now, and each kind

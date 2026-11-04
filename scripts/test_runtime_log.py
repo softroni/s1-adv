@@ -130,7 +130,7 @@ def wiring():
     assert notes.index('saveVoiceNoteMetadata') < notes.index('if (voiceToolAwaitsAnswer())') < notes.index('gVoiceNotes.push_back')
     assert 'gVoiceNotesBehindCard = true;' in notes
     lab = part(81)
-    assert lab.index('std::vector<VoiceNote>().swap(gVoiceNotes);') < lab.index('labEnterView(gUiMode);\n  labGpsOn')
+    assert lab.index('std::vector<VoiceNote>().swap(gVoiceNotes);') < lab.index('labEnterView(gUiMode);\n  gpsHold(kGpsForLab)')
     modes = part(24)
     assert 'if (mode == UiMode::Voice && gVoiceNotesBehindCard) {' in modes
 
