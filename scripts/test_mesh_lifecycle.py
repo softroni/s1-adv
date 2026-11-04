@@ -15,8 +15,13 @@ def function(file,signature):
 
 enum=(PARTS/'002_main.cpp.inc').read_text().split('enum class UiMode',1)[1].split('};',1)[0]
 code=r'''
+#include "mesh_contacts.h"
+#include "mesh_help.h"
 #include "mesh_leaf_state.h"
+#include "mesh_outbox.h"
 #include <cassert>
+#include <cctype>
+using std::max;using std::min;
 bool radioBusy(){return false;}
 bool vlcBusy(){return false;} namespace vlc_remote{void cancel(){}}
 void stopInternetRadio(){}
@@ -80,7 +85,9 @@ struct Preferences {
  size_t putBytes(const char*,const uint8_t*b,size_t n){++nvWrites;if(!nvWritable)return 0;memcpy(nv.data(),b,n);nvPresent=true;return n;}
  void end(){}
 };
+using meshtastic_PortNum=int;
 namespace libmeshtastic_leaf {
+using NodeNum=uint32_t;
 struct MeshPacket{};
 struct MeshCryptoPKI {
  static bool isUsablePublicKey(const uint8_t*p){return p[0]!=0;}
@@ -91,11 +98,23 @@ struct libmeshtastic_leaf {
 };
 }
 uint32_t nextSendId=100;
+struct Sent{int port;uint32_t to;bool pki,wantAck;uint8_t key0;std::string data;};
 struct FakeMesh {
+ bool pendingAck=false,tx=false;int lastResult=0,nodeInfos=0;std::vector<Sent>sent;
  void setMyPublicKey(const uint8_t*p){assert(p[0]==42);}void setMyPrivateKey(const uint8_t*p){assert(p[0]==42);}
  uint32_t getNodeNum()const{return 42;}
- uint32_t sendText(const char*){assert(gMeshBusOwned&&!gSdReady);return nextSendId;}
+ uint32_t record(int port,const uint8_t*d,size_t n,uint32_t to,bool pki,const uint8_t*key,bool ack){
+  assert(gMeshBusOwned&&!gSdReady&&n<=200);if(!nextSendId)return 0;
+  sent.push_back({port,to,pki,ack,key?key[0]:uint8_t(0),std::string(reinterpret_cast<const char*>(d),n)});
+  pendingAck=ack;tx=true;return nextSendId++;
+ }
+ uint32_t sendData(int port,const uint8_t*d,size_t n,uint32_t to,bool ack){return record(port,d,n,to,false,nullptr,ack);}
+ uint32_t sendDataPKI(int port,const uint8_t*d,size_t n,uint32_t to,const uint8_t key[32],bool ack){return record(port,d,n,to,true,key,ack);}
+ int getLastSendResult()const{return lastResult;}
+ bool hasPendingAck()const{return pendingAck;}bool isTransmitting()const{return tx;}
+ uint32_t sendNodeInfo(){++nodeInfos;return 1;}
  void onReceive(void(*)(const libmeshtastic_leaf::MeshPacket&)){}
+ void onReceivePKI(bool(*)(uint32_t,uint8_t*)){}
  void update(){assert(gMeshBusOwned&&!gSdReady);++updates;}
 };
 struct {uint8_t meshRegion=1;}gDeviceSettings;
@@ -104,9 +123,13 @@ constexpr int kInitPending=-32768;
 inline const char* regionName(uint8_t){return "US";}
 inline float regionFrequency(uint8_t){return 906.875f;}
 enum class Use:uint8_t{Chat,Scan};
+constexpr int8_t kTxPowerDbm=20;
 struct RadioSession {
  FakeMesh mesh;State state;std::atomic<int>initResult{kInitPending};
  bool readyReported=false;uint32_t lowHeap=UINT32_MAX,lowLargest=UINT32_MAX;uint8_t region;Use use;
+ Contacts contacts;Outbox outbox;Help help;Where where;uint32_t nextSeq=1;
+ char longName[kNameBytes+1]="S1-ADV";char shortName[5]="S1";
+ bool historyDirty=false,announce=false;uint32_t savedMs=0,publicLocationMs=0,stopAskedMs=0;
  // The radio starts on whatever region Settings holds at that moment.
  RadioSession(Spi&,uint8_t saved,Use purpose):region(saved),use(purpose){assert(saved==gDeviceSettings.meshRegion);++live;}
  ~RadioSession(){assert(!workerPending);--live;}
@@ -130,6 +153,21 @@ bool handleRadioScanKey(char,const Keyboard_Class::KeysState&){++scanKeys;return
 void startMeshMode(s1_mesh::Use use=s1_mesh::Use::Chat);
 String translateInputChar(char c){return String(1,c);}
 void meshHandlePacket(const libmeshtastic_leaf::MeshPacket&){}
+// Part 090's hardware: the GPS, NVS, LittleFS, the speaker and the screen.
+bool gpsOn=false;s1_mesh::Where fakeWhere;
+void meshGps(bool on){gpsOn=on;}
+void meshReadGps(uint32_t,s1_mesh::Where& w){if(fakeWhere.known)w=fakeWhere;}
+bool meshGpsHearing(uint32_t){return true;}
+std::string savedName;int nameSaves=0,profileLoads=0,contactSaves=0,historyLoads=0,historyWrites=0,chimes=0,screenServices=0;
+void meshSavedName(char* l,char* s){strcpy(l,savedName.empty()?"S1-ADV":savedName.c_str());strcpy(s,"S1");}
+bool meshSaveName(const char* n){savedName=n;++nameSaves;return true;}
+void meshLoadProfile(s1_mesh::RadioSession&){++profileLoads;}
+bool meshSaveContacts(const s1_mesh::Contacts&){++contactSaves;return true;}
+void meshLoadHistory(s1_mesh::State&){++historyLoads;}
+bool meshWriteHistory(const s1_mesh::State&){++historyWrites;return true;}
+void meshChime(bool){++chimes;}
+void meshScreenService(uint32_t,bool){++screenServices;}
+void meshWakeScreen(){}
 void setUiMode(UiMode);
 '''
 code=code.replace('void setUiMode(UiMode);','enum class UiMode'+enum+'};\nUiMode gUiMode=UiMode::Mesh;\nvoid setUiMode(UiMode);')
@@ -137,11 +175,10 @@ for signature in ['bool mountSdCardOnSharedSpi()','fs::FS* activeVoiceFs()','fs:
     file='032_main.cpp.inc' if signature.startswith('bool mount') else '011_main.cpp.inc'
     code+=function(file,signature)+'\n'
 code+='bool stopMeshMode(bool goHome);\n'
-for signature in ['bool handleMeshEscape(', 'bool meshBlocksMode(','bool meshStartIsBusy(','bool meshCapBit(',
-                  'void meshRestoreCap(','bool meshEnableCap(','bool loadMeshIdentity(',
-                  'void meshRadioInitTask(','bool stopMeshMode(','void startMeshMode(',
-                  'void serviceMeshMode(','bool meshSendInput(','bool handleMeshKey(']:
-    code+=function('068_main.cpp.inc',signature)+'\n'
+# Every part of Mesh's logic but the packet decoder (faked above) and the screens.
+mesh=(PARTS/'068_main.cpp.inc').read_text()
+body=mesh[mesh.index('namespace {')+len('namespace {'):mesh.index('String meshClip(')]
+code+=body[:body.index('void meshHandlePacket(')]+body[body.index('void serviceMeshMode('):body.index('bool handleMeshHostCommand(')]+'\n'
 actual=function('024_main.cpp.inc','void setUiMode(')
 code+=actual[:actual.index('  if (mode != UiMode::Face)')]+ 'gUiMode=mode;\n}\n'
 realtime=function('042_main.cpp.inc','void startRealtimeSession(')
@@ -155,6 +192,93 @@ void reset() {
  m5::In_I2C.reg[3]=0xaa;m5::In_I2C.reg[5]=0x54;m5::In_I2C.reg[7]=0xff;
  nvPresent=false;nvOpen=nvWritable=true;nvWrites=0;
  sdEnds=sdBegins=spiBegins=updates=renders=taskCreates=0;nextSendId=100;
+}
+void completeWorker();
+void active();
+void restored();
+// Contacts, direct messages, Help, the name and sharing a location, through the keys.
+void mesh_features() {
+ Keyboard_Class::KeysState plain,ctrl,enter,del;ctrl.ctrl=true;enter.enter=true;del.del=true;
+ uint8_t key[32];memset(key,7,32);
+ // The People list: contacts first, then radios heard. Only one with a key can be saved.
+ active();auto& s=*gMeshSession;
+ auto* heard=s.state.hear(77,clockMs,-80);strcpy(heard->name,"Alex");
+ s.state.hear(88,clockMs,-90);
+ assert(handleMeshKey('n',ctrl)&&s.state.nodeView);
+ assert(s.state.nodeSel==0&&handleMeshKey('\n',enter)&&!s.contacts.count&&gMeshNotice.find("No key")!=std::string::npos);
+ heard->hasKey=true;memcpy(heard->key,key,32);
+ const int saves=contactSaves;assert(handleMeshKey('\n',enter)&&s.contacts.count==1&&contactSaves==saves+1);
+ assert(s.contacts.list[0].id==77&&std::string(s.contacts.list[0].name)=="Alex");
+ assert(handleMeshKey(char(2),plain)&&s.state.nodeSel==1&&handleMeshKey(char(2),plain)&&s.state.nodeSel==0);
+ // Left and Right pick who Enter sends to: Public, then each contact.
+ assert(handleMeshEscape()&&!s.state.nodeView&&gMeshBusOwned);
+ assert(handleMeshKey(char(4),plain)&&s.state.target==1&&handleMeshKey(char(4),plain)&&s.state.target==0);
+ assert(handleMeshKey(char(3),plain)&&s.state.target==1);
+ assert(handleMeshKey('h',plain)&&handleMeshKey('i',plain)&&handleMeshKey('\n',enter));
+ for(int i=0;i<3;++i)serviceMeshMode();
+ // A direct message: encrypted to Alex's key, asking for an answer.
+ auto& dm=s.mesh.sent.back();assert(dm.to==77&&dm.pki&&dm.wantAck&&dm.key0==7&&dm.data=="hi"&&dm.port==1);
+ assert(s.state.bySeq(1)->direct&&s.state.bySeq(1)->to==77);
+ // Alex's radio answers: delivered.
+ struct Sink{s1_mesh::RadioSession& s;void status(uint32_t q,s1_mesh::Delivery d,uint8_t r,uint32_t id){
+  if(auto* m=s.state.bySeq(q)){m->status=d;m->reason=r;if(id)m->id=id;}}} sink{s};
+ assert(s.outbox.routing(77,s.outbox.currentId(),0,sink)&&s.state.bySeq(1)->status==s1_mesh::Delivery::Delivered);
+ s.mesh.pendingAck=false;s.mesh.tx=false;
+ // Removing a contact moves Enter back to the public channel.
+ assert(handleMeshKey('n',ctrl)&&s.state.nodeSel==0&&handleMeshKey('\b',del)&&!s.contacts.count&&s.state.target==0);
+ assert(handleMeshEscape());
+ // Ctrl+L: nothing without a fix, and the public channel asks twice.
+ const size_t before=s.mesh.sent.size();
+ assert(handleMeshKey('l',ctrl)&&gMeshNotice.find("No GPS")!=std::string::npos&&!s.outbox.queued());
+ fakeWhere.known=true;fakeWhere.latE5=4251912;fakeWhere.lonE5=-7089645;fakeWhere.atMs=clockMs;fakeWhere.satellites=8;
+ serviceMeshMode();
+ assert(handleMeshKey('l',ctrl)&&!s.outbox.queued()&&gMeshNotice.find("again")!=std::string::npos);
+ assert(handleMeshKey('l',ctrl)&&s.outbox.queued()==2);
+ serviceMeshMode();assert(s.mesh.sent.size()==before+1&&s.mesh.sent.back().port==3&&!s.mesh.sent.back().wantAck);
+ s.mesh.tx=false;serviceMeshMode();serviceMeshMode();
+ assert(s.mesh.sent.back().port==1&&s.mesh.sent.back().data.find("maps.google.com/?q=42.51912,-70.89645")!=std::string::npos);
+ s.mesh.pendingAck=false;s.mesh.tx=false;serviceMeshMode();
+ // Help: to every contact, then again in five minutes until a contact's radio has it.
+ s.contacts.add(77,"Alex",key);s.contacts.add(99,"Sam",key);
+ assert(handleMeshKey('h',ctrl)&&s.state.helpView&&handleMeshKey('p',plain)&&s.help.alsoPublic&&handleMeshKey('p',plain));
+ assert(handleMeshKey('1',plain)&&s.help.on&&s.help.repeating());
+ const size_t start=s.mesh.sent.size();serviceMeshMode();
+ assert(s.help.rounds==1&&s.mesh.sent.size()==start+1&&s.mesh.sent.back().to==77);
+ assert(s.mesh.sent.back().data.rfind("Out of gas.",0)==0&&!s.help.seq[s1_mesh::kContacts]);
+ s.outbox.routing(77,s.outbox.currentId(),0,sink);s.mesh.pendingAck=false;s.mesh.tx=false;serviceMeshMode();
+ assert(s.mesh.sent.back().to==99);
+ // The session's own sink is what Help hears from: Sam's radio doesn't answer, Alex's did.
+ s.mesh.pendingAck=false;s.mesh.tx=true;serviceMeshMode();s.mesh.tx=false;clockMs+=s1_mesh::kLastTryWaitMs;serviceMeshMode();
+ assert(s.state.bySeq(s.help.seq[1])->status==s1_mesh::Delivery::NoAnswer);
+ // A Help that's on warns before Esc turns the radio off.
+ assert(handleMeshEscape()&&!s.state.helpView&&handleMeshEscape()&&gMeshBusOwned&&gMeshNotice.find("Help is on")!=std::string::npos);
+ clockMs+=s1_mesh::kHelpRepeatMs;serviceMeshMode();assert(s.help.rounds==2);
+ // Delivered through the session's sink ends it, with a chime.
+ const int rang=chimes;serviceMeshMode();
+ MeshSink real{s};real.status(s.help.seq[0],s1_mesh::Delivery::Delivered,0,0);
+ assert(!s.help.repeating()&&s.help.stop==s1_mesh::HelpStop::Confirmed&&chimes==rang+1);
+ // A radio without this one's key asks for it to be announced again.
+ real.status(s.help.seq[1],s1_mesh::Delivery::Failed,35,0);assert(s.announce);
+ s.mesh.pendingAck=false;s.mesh.tx=false;
+ for(int i=0;i<200&&!s.outbox.idle();++i){s.mesh.pendingAck=false;s.mesh.tx=false;clockMs+=40000;serviceMeshMode();}
+ serviceMeshMode();assert(!s.announce&&s.mesh.nodeInfos==1);
+ assert(handleMeshEscape());restored();assert(gUiMode==UiMode::Home&&!gpsOn);
+ fakeWhere=s1_mesh::Where{};
+ // H on the start screen starts the radio on Help.
+ reset();assert(handleMeshKey('H',plain)&&gMeshBusOwned&&gMeshSession->state.helpView&&profileLoads>0&&historyLoads>0);
+ completeWorker();serviceMeshMode();assert(gpsOn);
+ assert(handleMeshKey('5',plain)&&!gMeshSession->help.on);  // Only 1 to 4.
+ assert(handleMeshEscape()&&!gMeshSession->state.helpView&&handleMeshEscape());restored();
+ // N on the start screen: the name others see. Esc leaves it as it was.
+ reset();assert(handleMeshKey('n',plain)&&gMeshNaming&&!gMeshBusOwned&&!gMeshNameInput[0]);
+ for(char c:std::string("Al x"))handleMeshKey(c,plain);
+ assert(handleMeshKey('\b',del)&&std::string(gMeshNameInput)=="Al ");
+ assert(handleMeshKey('\n',enter)&&!gMeshNaming&&savedName=="Al"&&nameSaves==1);
+ assert(handleMeshKey('n',plain)&&std::string(gMeshNameInput)=="Al");
+ assert(handleMeshEscape()&&!gMeshNaming&&nameSaves==1);
+ assert(handleMeshKey('n',plain)&&gMeshNaming);
+ for(int i=0;i<60;++i)handleMeshKey('z',plain);
+ assert(strlen(gMeshNameInput)==s1_mesh::kNameBytes);handleMeshEscape();
 }
 void completeWorker(){assert(workerPending);workerFunction(workerArg);assert(!workerPending);}
 void active(){reset();startMeshMode();assert(gMeshBusOwned&&!gSdReady&&!gStorageReady&&workerPending);completeWorker();serviceMeshMode();assert(updates==1);}
@@ -203,10 +327,23 @@ int main() {
  assert(handleMeshEscape());restored();assert(gUiMode==UiMode::Home&&!handleMeshEscape());
  reset();startMeshMode();assert(handleMeshEscape()&&workerPending&&live==1&&sdBegins==0);
  completeWorker();serviceMeshMode();restored();assert(gUiMode==UiMode::Home);
- active();assert(gMeshSession->state.append("hello"));nextSendId=0;assert(!meshSendInput());assert(gMeshSession->state.messageCount==0&&std::string(gMeshSession->state.input)=="hello");
- nextSendId=77;assert(meshSendInput());assert(gMeshSession->state.messageCount==1&&gMeshSession->state.messages[0].outgoing&&!gMeshSession->state.input[0]);
+ active();
+ for(size_t i=0;i<s1_mesh::kOutbox;++i){assert(gMeshSession->state.append("m")&&meshSendInput());}
+ assert(gMeshSession->state.append("hello"));assert(!meshSendInput());
+ assert(gMeshSession->state.messageCount==s1_mesh::kMessages&&std::string(gMeshSession->state.input)=="hello");
+ assert(gMeshSession->state.messages[0].outgoing&&gMeshSession->state.messages[0].status==s1_mesh::Delivery::Waiting);
+ const int writes=historyWrites;
  for(int i=0;i<50;++i){serviceMeshMode();}
+ assert(historyWrites==writes+1);  // Saved once, though it changed again: at most once a second.
+ // One goes out, on the public channel, asking for an answer; the rest wait their turn.
+ assert(gMeshSession->mesh.sent.size()==1&&gMeshSession->mesh.sent[0].to==s1_mesh::kBroadcast&&gMeshSession->mesh.sent[0].wantAck);
+ assert(gMeshSession->state.bySeq(1)->status==s1_mesh::Delivery::Sending&&gMeshSession->state.bySeq(1)->id==100);
+ // Another radio repeats it: heard, and the next one goes.
+ gMeshSession->mesh.pendingAck=false;gMeshSession->mesh.tx=false;serviceMeshMode();
+ assert(gMeshSession->state.bySeq(1)->status==s1_mesh::Delivery::Heard);serviceMeshMode();assert(gMeshSession->mesh.sent.size()==2);
+ clockMs+=1000;serviceMeshMode();assert(historyWrites==writes+2);
  assert(sdBegins==0);stopMeshMode(false);restored();
+ mesh_features();
  active();sdSucceeds=false;stopMeshMode(false);assert(!gMeshBusOwned&&!gSdReady&&gStorageReady&&!live);assert(activeVoiceFs()==&LittleFS);assert(activeNotesFs()==&LittleFS);
  // Scan: S on the start screen. Same bus handoff and guards, no identity written, no mesh run,
  // no sending, and Esc stops it the same way.
@@ -230,4 +367,4 @@ with tempfile.TemporaryDirectory(prefix='s1-mesh-mode-') as directory:
                     '-fsanitize=address,undefined','-fno-omit-frame-pointer',
                     '-I'+str(ROOT/'bots/CardputerADV/src'),str(cpp),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)
-print('PASS actual Mesh lifecycle: busy/heap/NVS/Cap/task failures, cancellation during init, SD exclusivity and rollback, app guards, bounded send, Scan sharing all of it without identity, mesh or sending, and no worker use-after-free (ASan/UBSan)')
+print('PASS actual Mesh lifecycle: busy/heap/NVS/Cap/task failures, cancellation during init, SD exclusivity and rollback, app guards, bounded send, the outbox one at a time, contacts and direct messages, Help repeating until delivered and warning before Esc, Ctrl+L asking twice for public, the name editor, Scan sharing all of it without identity, mesh or sending, and no worker use-after-free (ASan/UBSan)')

@@ -119,7 +119,7 @@ S1-ADV gives you a working device on day one. Then you go as deep as you like: p
 | **NFC Universal unit** (ST25R3916) | NFC Notes: read tags and save notes on them |
 | **1-to-3 hub** | Two or more parts on the one Grove port |
 | **I/O hub** (Unit PbHub) | Runs a Mini Angle, Light, PIR, relays, a servo and an LED strip all at once. One at a time, they plug straight into the Grove port. [Which setup do I need?](docs/LAB.md#pick-a-setup) |
-| **Cap LoRa-1262** (about $15) | Mesh text, a radio scanner and GPS. Read the [Mesh note](#good-to-know) first. M5Stack also sells it with the Cardputer as a Mesh Kit |
+| **Cap LoRa-1262** (about $15) | Mesh text and direct messages, Help with your location when your phone can't, a radio scanner and GPS. Read the [Mesh note](#good-to-know) first. M5Stack also sells it with the Cardputer as a Mesh Kit |
 | **Grove IR receiver** | Teaching the IR Remote new buttons. Sending needs nothing extra |
 
 RFID Lab (an RC522 reader) uses a part wired to the EXT header instead of the Grove port, and it can't share that header with the Cap. Sonar works with the Ultrasonic unit on Grove or with an HC-SR04 wired to the EXT header, and finds whichever is plugged in. Mesh keeps it closed either way, because of the HC-SR04's pins.

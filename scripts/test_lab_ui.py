@@ -1902,6 +1902,9 @@ void testGpsReadings() {
     assert(Serial1.open && gGpsHolders == kGpsForPulse); }
   gpsRelease(kGpsForPulse); assert(!Serial1.open && !gGpsHolders);
   gpsRelease(kGpsForPulse); assert(!gGpsHolders);
+  // Mesh holds it for Help too: Pulse letting go leaves it open for Mesh, and the last one closes it.
+  gpsHold(kGpsForMesh); gpsHold(kGpsForPulse); gpsRelease(kGpsForPulse); assert(Serial1.open && gGpsHolders == kGpsForMesh);
+  gpsRelease(kGpsForMesh); assert(!Serial1.open && !gGpsHolders);
 }
 int main(int argc, char** argv) {
   if (argc > 1) gDump = std::fopen(argv[1], "w");

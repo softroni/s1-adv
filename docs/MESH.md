@@ -5,10 +5,27 @@ Cardputer ADV with Cap LoRa-1262. It preserves the existing applications and
 8 MB dual-OTA partition layout. It does not replace S1-ADV with the standalone
 Meshtastic firmware.
 
-Attach the antenna before powering the Cap. Start Mesh with Enter. Esc stops
-the radio and returns Home; while reading a message, the first Esc closes the
-message. Cancelling during radio initialization waits for the worker to finish
-before releasing the radio or restoring SD.
+Besides the public channel, it sends direct messages that only one person's
+radio can read, says whether each one arrived, and has **Help**: one key sends
+a ready message with where the Cap's GPS puts you to everyone you've saved, and
+sends it again every five minutes until one of their radios has it. It's meant
+for when your phone is dead or has no signal and someone you know has a
+Meshtastic radio.
+
+Attach the antenna before powering the Cap. The first screen's keys:
+
+| Key | What it does |
+| --- | --- |
+| Enter | Starts the radio and opens the chat |
+| H | Starts the radio and opens [Help](#help) |
+| S | [Radio Scan](#radio-scan), which only listens |
+| N | [Your name](#your-name) on the mesh |
+
+Esc closes whatever is open (a message, People or Help) and then stops the
+radio and returns Home. While Help is repeating, the first Esc only warns, and
+a second within four seconds stops the radio. Cancelling during radio
+initialization waits for the worker to finish before releasing the radio or
+restoring SD.
 
 ## Shared hardware
 
@@ -21,8 +38,12 @@ No files are formatted or deleted. Mount failure is reported separately from
 radio state; internal storage becomes available again after leaving Mesh.
 
 Network-heavy polling and voice services pause during Mesh. Pomodoro time,
-alarms, battery and SmartLamp servicing continue. This first version does not
-run Mesh in the background alongside those applications.
+alarms, battery and SmartLamp servicing continue. Mesh doesn't run in the
+background alongside those applications.
+
+The Cap's GPS is on its own serial port, so Mesh reads it while the radio runs.
+Contacts and the name are kept in NVS, and the chat history in the Cardputer's
+internal flash (LittleFS), never on the SD card.
 
 ## Region
 
@@ -57,27 +78,129 @@ Regions below 868 MHz (IN, NZ_865, KZ_863, NP_865, EU_866), the 433 MHz and
 in software doesn't make transmitting legal where you are, so check your local
 rules. Until 0.2.269 Mesh was fixed to TH.
 
-## Channel and controls
+## Chat
 
-- Transmit power is fixed at 10 dBm; the library applies regional airtime
-  accounting and carrier sensing. These software settings do not certify an
-  antenna or regulatory approval.
-- Enter sends up to 200 UTF-8 bytes to the public channel. `Queued` means local
-  acceptance, not confirmed delivery. Public-channel messages are public.
-- Ctrl+N switches to nodes heard; Up/Down changes pages or message selection.
-- Ctrl+O opens the selected message. Esc closes it before exiting Mesh.
-- The in-memory history holds eight messages and sixteen recently heard nodes.
-  It resets on exit. No SD writes occur while the radio owns SPI.
+The chat runs on the region's LongFast public channel, the one every Meshtastic
+radio uses out of the box.
+
+- Type, and Enter sends up to 200 UTF-8 bytes. The box at the bottom starts with
+  who it goes to: `Public>` or a contact's name. Left and Right change who.
+- Ctrl+N opens [People](#people-and-direct-messages), Ctrl+O opens the selected
+  message, Ctrl+L [shares your location](#sharing-a-location) and Ctrl+H opens
+  [Help](#help). Up and Down move through the messages. The bottom line shows
+  these keys in two halves, taking turns.
+- A message for you is labelled `Sam > you`. One on the public channel shows
+  only who sent it. Public messages are public: anyone with a Meshtastic radio
+  in range can read them.
+- The history holds the last eight messages and sixteen radios heard. The
+  messages are kept on internal flash, so they're still there after Mesh closes
+  or the Cardputer restarts. The radios heard aren't.
+- Transmit power is 20 dBm, the most M5Stack rates the Cap for. Until 0.2.275
+  it was 10 dBm. The library applies regional airtime accounting and carrier
+  sensing. These software settings don't certify an antenna or regulatory
+  approval.
 - The device identity is generated once and retained in NVS, independently of SD.
 
-The client receives channel text and node announcements and sends channel text
-and its own NodeInfo. It does not relay packets, provide the Meshtastic phone
-API, use the Cap GNSS, or provide private-message UI. Chat stays on its region's
-LongFast channel; [Radio Scan](#radio-scan) is the only part that tunes anywhere
-else, and it only listens.
-An empty list means no compatible announcements were received during this
-session; it does not establish that there are no nodes nearby. Received radio text
-is display data and is never executed as a device or agent instruction.
+The radio sends one message at a time, so the next one waits its turn. Under
+each message you sent, the chat says what became of it:
+
+| Shown | For a direct message | For a public message |
+| --- | --- | --- |
+| waiting | Behind another message | Behind another message |
+| sending | On the air, tried up to five times | On the air, tried up to three times |
+| relayed / heard nearby | Another radio repeated it on its way | Another radio repeated it, which is all anyone can know for a public message |
+| delivered | The person's own radio said it arrived | (never) |
+| not confirmed | Repeated on the way, but their radio never answered | (never) |
+| no answer / not heard | No radio repeated or answered any try | No radio repeated any try |
+| failed | Refused, with the reason, such as "they don't have your key yet" | Refused here |
+| unknown | Still going when the Cardputer restarted | The same |
+
+"Delivered" means it reached their radio, not that they've read it. Their radio
+answers on its own main channel, so if they moved theirs off LongFast, a message
+that arrived can still show "not confirmed".
+
+The client receives channel text, direct messages, acknowledgements and node
+announcements, and sends text, positions and its own NodeInfo (15 seconds after
+the radio starts, then every three hours). It doesn't relay other radios'
+packets or provide the Meshtastic phone API. Chat stays on its region's LongFast
+channel; [Radio Scan](#radio-scan) is the only part that tunes anywhere else, and
+it only listens. Received radio text is display data and is never executed as a
+device or agent instruction. Nothing heard on the radio acts on its own: it can
+only chime and wake the screen.
+
+## People and direct messages
+
+Ctrl+N lists your contacts first, heard lately or not, then every other radio
+heard this session, with its signal and how long ago it was heard. Up and Down
+pick one.
+
+- **Enter** saves the selected radio as a contact. It needs that radio's public
+  key, which comes in its NodeInfo. A radio announces itself when it starts and
+  every few hours, so "no key yet" usually means restarting their radio near the
+  Cardputer.
+- **Del** removes the selected contact.
+- Up to four contacts. A contact keeps the key it was saved with. If their radio
+  later announces a different one, the saved key stays and the log says so.
+
+A message to a contact is a Meshtastic direct message, encrypted to their key so
+only their radio can read it, and it asks their radio to confirm it arrived. For
+them to read it, their radio must also have heard this Cardputer announce itself.
+That happens 15 seconds after the radio starts here, and again whenever a radio
+says it lacks this Cardputer's key. A direct message to you is decrypted with a
+contact's saved key, or with the key of any radio heard announcing itself, and
+it chimes and wakes the screen.
+
+The other person needs any Meshtastic radio with the Meshtastic app, set to the
+same region and left on the default LongFast channel.
+
+## Help
+
+H on the first screen, or Ctrl+H in the chat, opens Help. It shows the GPS
+(a fix and its satellites, how old the last fix is, or none), the battery, and
+who it sends to.
+
+| Key | Sends |
+| --- | --- |
+| 1 | Out of gas. Please come and get me. |
+| 2 | Car trouble. I need help. |
+| 3 | My phone is dead. Reply here. |
+| 4 | I'm OK now. No help needed. |
+
+Each message ends with where you are, as a map link most phones open:
+`Location: https://maps.google.com/?q=42.51912,-70.89645`. A fix older than
+two minutes says how old it is, and with no fix in the last hour it says
+`No GPS fix.` The GPS needs open sky. Indoors it may never get a fix.
+
+- It goes to every contact as a direct message. With no contacts saved, it goes
+  to the public channel instead. **P** sends it to the public channel as well,
+  where anyone in range can read it, location included.
+- 1, 2 and 3 repeat every five minutes until one contact's radio says a message
+  arrived, a contact writes back, or anyone sends you a direct message. Talk on
+  the public channel doesn't stop it. The screen shows each contact's latest
+  message, and when it goes again.
+- 4 goes once and ends Help. Pressing another number changes the message.
+- Esc goes back to the chat and leaves Help running. The chat's top line then
+  says `Help on, again in 4:12`.
+
+To save the battery while you wait, the screen turns off 30 seconds after the
+last key while Help repeats. Any key brings it back, and so does a message for
+you or from a contact. The rest of the time in Mesh, the screen turns off after
+the device's own screen-off time, if Settings → Display → Auto screen off is on.
+
+## Sharing a location
+
+Ctrl+L sends where the GPS puts you to whoever Enter sends to: a Meshtastic
+position, which puts you on their app's map, and a text with the map link. To
+the public channel, everyone in range sees it, so it asks for a second Ctrl+L
+within four seconds first. With no fix, it says so and sends nothing.
+
+## Your name
+
+N on the first screen edits the name other radios show for this Cardputer, up to
+39 bytes. Enter saves it and Esc leaves it as it was. Meshtastic's short name is
+made from it: the initials of two words or more, or the first four letters of
+one. Left empty, it's `S1-ADV` and `S1`, as before 0.2.275. A new name goes out
+the next time the radio starts.
 
 ## Radio Scan
 
@@ -123,17 +246,23 @@ If the radio stops answering, the screen says so and Radio Scan stops using it.
 
 `scripts/test_mesh_leaf_state.py`, `test_mesh_lifecycle.py`, `test_mesh_radio.py`
 and `test_mesh_ui.py` exercise the production state, lifecycle, radio setup and
-240×135 renderer. `test_radio_scan.py` runs Radio Scan's sums, service loop, keys
+240×135 renderer. `test_mesh_messaging.py` checks contacts, the outbox's
+delivery states, the history kept across a restart, Help's text and when it
+repeats, and the position message, whose bytes were checked against
+Meshtastic's own `mesh.proto` with `protoc`. `test_radio_scan.py` runs Radio Scan's sums, service loop, keys
 and screen against a pretend radio that has no way to transmit. `test_mesh_region.py`
 checks the region list, channels and scan presets against the library's own
 table, so it runs after a firmware build. Lifecycle tests use controlled hardware mocks and include
 worker cancellation, partial initialization, SD restoration and app guards.
 State and UI tests include malformed UTF-8, fixed bounds and sanitizers.
-These checks do not substitute for RF communication with a second node.
+These checks do not substitute for RF communication with a second node, and none
+of the direct messages, delivery states, Help or positions has been tried with a
+second radio yet.
 
 USB commands: `mesh.open`, `mesh.start`, `mesh.scan`, `mesh.status`, `mesh.nodes`, `mesh.stop`.
-During Radio Scan, `mesh.status` adds a line with the sweep's floor and top and the
-listening counts.
+During the chat, `mesh.status` adds a line with the contacts, the outbox, Help and
+whether there's a fix. During Radio Scan, it adds a line with the sweep's floor and
+top and the listening counts.
 They do not send a test chat message. Serial logs report successful radio init,
 session heap minima and SD restoration. No private keys are logged.
 

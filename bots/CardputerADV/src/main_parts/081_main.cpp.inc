@@ -440,9 +440,10 @@ bool labSaveSpot() {
   return saved;
 }
 void labGpsOn();
-// Who has the GPS's serial port open: the Lab, a check from the chat, or Pulse for its weather. It
-// opens for the first and closes when the last lets go, so none of them shuts it on another.
-constexpr uint8_t kGpsForLab = 1, kGpsForOnce = 2, kGpsForPulse = 4;
+// Who has the GPS's serial port open: the Lab, a check from the chat, Pulse for its weather, or
+// Mesh for Help and sharing a location. It opens for the first and closes when the last lets go, so
+// none of them shuts it on another.
+constexpr uint8_t kGpsForLab = 1, kGpsForOnce = 2, kGpsForPulse = 4, kGpsForMesh = 8;
 uint8_t gGpsHolders = 0;
 void gpsHold(uint8_t who) {
   if (!gGpsHolders) labGpsOn();

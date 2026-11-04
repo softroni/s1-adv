@@ -33,6 +33,8 @@
     moveLauncherSelection(1);
   } else if ((gUiMode == UiMode::Mesh || gUiMode == UiMode::NfcNotes || gUiMode == UiMode::WifiSettings) && (upDown || downDown)) {
     handleTypingKey(upDown ? char(1) : char(2),keys);
+  } else if (gUiMode == UiMode::Mesh && (leftDown || rightDown)) {
+    handleTypingKey(leftDown ? char(3) : char(4),keys);  // Who Enter sends to.
   } else if (labMode(gUiMode) && (upDown || downDown || leftDown || rightDown)) {
     handleTypingKey(upDown ? ';' : downDown ? '.' : leftDown ? ',' : '/', keys);
   } else if (gUiMode == UiMode::Files && (upDown || downDown || leftDown || rightDown)) {

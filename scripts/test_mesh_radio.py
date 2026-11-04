@@ -9,8 +9,10 @@ RADIO=r'''
 #pragma once
 #include <cassert>
 #include <cstdint>
+#include <string>
 constexpr int RADIOLIB_ERR_UNKNOWN=-1,RADIOLIB_SX126X_SYNC_WORD_PRIVATE=0x12;
 inline int step=0,failure=0,sleeps=0,meshBegins=0;inline float wanted=0;inline int wantedRegion=0;
+inline std::string wantedLong="S1-ADV",wantedShort="S1";
 inline int result(){return ++step==failure ? -19 : 0;}
 struct SPIClass{};
 struct Module {
@@ -20,7 +22,7 @@ struct Module {
 struct SX1262 {
  Module* module;explicit SX1262(Module*m):module(m){}
  int begin(float f,float bw,int sf,int cr,int sync,int power,int preamble,float tcxo) {
-  assert(f==wanted&&bw==250&&sf==11&&cr==5&&sync==0x12&&power==10&&preamble==16&&tcxo==1.8f);return result();
+  assert(f==wanted&&bw==250&&sf==11&&cr==5&&sync==0x12&&power==20&&preamble==16&&tcxo==1.8f);return result();
  }
  int setDio2AsRfSwitch(bool b){assert(b);return result();}
  int setCurrentLimit(float n){assert(n==140);return result();}
@@ -55,8 +57,8 @@ LEAF=r'''
 namespace libmeshtastic_leaf {
 struct MeshConfig {struct{int region=-1,preset=-1,txPower=0;}radio;int hopLimit=0;};
 struct libmeshtastic_leaf {
- void setOwner(const char* a,const char*b){assert(std::string(a)=="S1-ADV"&&std::string(b)=="S1");}
- bool begin(const MeshConfig&c,SX1262*){++meshBegins;assert(step==4&&c.radio.region==wantedRegion&&c.radio.preset==0&&c.radio.txPower==10&&c.hopLimit==3);return result()==0;}
+ void setOwner(const char* a,const char*b){assert(std::string(a)==wantedLong&&std::string(b)==wantedShort);}
+ bool begin(const MeshConfig&c,SX1262*){++meshBegins;assert(step==4&&c.radio.region==wantedRegion&&c.radio.preset==0&&c.radio.txPower==20&&c.hopLimit==3);return result()==0;}
 };
 }
 '''
@@ -89,6 +91,10 @@ int main(){
   }
   assert(sleeps==(failure==0?1:0));
  }
+ // The name saved for Mesh is the one the radio announces.
+ step=0;failure=0;wanted=906.875f;wantedRegion=1;wantedLong="Alex Car";wantedShort="AC";
+ {s1_mesh::RadioSession session(spi,1,s1_mesh::Use::Chat);strcpy(session.longName,"Alex Car");strcpy(session.shortName,"AC");assert(!session.initialize());}
+ wantedLong="S1-ADV";wantedShort="S1";
  // A session freed while init is still pending (the lifecycle never does this) doesn't touch the bus.
  sleeps=0;{s1_mesh::RadioSession session(spi,1,s1_mesh::Use::Scan);}assert(!sleeps);
 }
@@ -99,4 +105,4 @@ with tempfile.TemporaryDirectory(prefix='s1-mesh-radio-') as directory:
     subprocess.run([os.environ.get('CXX','c++'),'-std=c++17','-Wall','-Wextra','-Werror',
                     '-I'+str(p),'-I'+str(ROOT/'bots/CardputerADV/src'),str(p/'radio.cpp'),'-o',str(p/'radio')],check=True)
     subprocess.run([str(p/'radio')],check=True)
-print('PASS actual Cap setup: SPI identity/pins, bounded BUSY timeout, TCXO, RF switch, CRC, saved region (US when unset) on LongFast at 10 dBm, starting on that region channel, every initialization error propagated, and Scan never starting the mesh but sleeping the chip when done')
+print('PASS actual Cap setup: SPI identity/pins, bounded BUSY timeout, TCXO, RF switch, CRC, saved region (US when unset) on LongFast at 20 dBm with the saved name, starting on that region channel, every initialization error propagated, and Scan never starting the mesh but sleeping the chip when done')

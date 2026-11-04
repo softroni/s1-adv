@@ -509,6 +509,19 @@ bool meshBlocksMode(UiMode mode);
 bool handleMeshKey(char key, const Keyboard_Class::KeysState& keys);
 void renderMeshUi();
 bool handleMeshHostCommand(const String& command);
+// Mesh's GPS, flash, chime and screen, in part 090.
+void meshGps(bool on);
+void meshReadGps(uint32_t now, s1_mesh::Where& where);
+bool meshGpsHearing(uint32_t now);
+void meshSavedName(char* longName, char* shortName);
+bool meshSaveName(const char* name);
+void meshLoadProfile(s1_mesh::RadioSession& session);
+bool meshSaveContacts(const s1_mesh::Contacts& contacts);
+void meshLoadHistory(s1_mesh::State& state);
+bool meshWriteHistory(const s1_mesh::State& state);
+void meshChime(bool important);
+void meshScreenService(uint32_t now, bool helpOn);
+void meshWakeScreen();
 
 bool focusStateRuns(FocusState state);
 void focusStartOrResume();
