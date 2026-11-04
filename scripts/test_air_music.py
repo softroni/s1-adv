@@ -36,7 +36,7 @@ table = menu[menu.index('kLauncherGroups[kLauncherGroupCount] = {'):menu.index('
 groups = re.findall(r'rgb565_local\([^)]*\), (\d+),\s*\{(.*?)\}\}\}', table, re.S)
 assert len(groups) == 9
 for count, items in groups:
-    assert int(count) == items.count('UiMode::') <= 8, (count, items)
+    assert int(count) == items.count('UiMode::') <= 9, (count, items)
 
 code = r'''
 #include "air_music.h"

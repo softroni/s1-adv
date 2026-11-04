@@ -101,10 +101,10 @@ struct KeyRushRuntime {
 constexpr LauncherGroup kLauncherGroups[kLauncherGroupCount] = {
     {"AI Agent", "Assistant and chat", rgb565_local(47, 227, 255), 3,
      {{"Realtime", UiMode::Home, true}, {"Pulse", UiMode::Home}, {"AI Chat", UiMode::ChatFull}}},
-    {"Media", "Listen and capture", rgb565_local(88, 240, 141), 8,
+    {"Media", "Listen and capture", rgb565_local(88, 240, 141), 9,
      {{"Library", UiMode::Library}, {"Folders", UiMode::AudioFolders}, {"Voice Notes", UiMode::Voice},
       {"Notes", UiMode::Notes}, {"Assets", UiMode::Assets}, {"Files", UiMode::Files}, {"Internet Radio", UiMode::Radio},
-      {"VLC Remote", UiMode::VlcRemote}}},
+      {"Podcasts", UiMode::Podcasts}, {"VLC Remote", UiMode::VlcRemote}}},
     {"Focus", "Time and attention", rgb565_local(255,136,64), 8,
      {{"Pomodoro", UiMode::Focus}, {"Alarm", UiMode::Alarm},
       {"Stopwatch", UiMode::Stopwatch}, {"Calendar", UiMode::Calendar}, {"Chess Mind", UiMode::ChessMind},

@@ -2,6 +2,9 @@
       case UiMode::Radio:
         renderInternetRadioUi();
         break;
+      case UiMode::Podcasts:
+        renderPodcastsUi();
+        break;
       case UiMode::VlcRemote:
         renderVlcRemoteUi();
         break;
@@ -390,6 +393,7 @@ void loop() {
   updateG0VoiceTrigger();
   pollTyping();
   serviceInternetRadio();
+  servicePodcasts();
   serviceVlcRemote();
   if (vlcBusy()) {
     // Bounded DNS/TCP owner; keep input/timers alive, defer background TLS/OTA.

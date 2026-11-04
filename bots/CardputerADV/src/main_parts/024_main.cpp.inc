@@ -333,6 +333,7 @@ void setUiMode(UiMode mode) {
   if (modeChanged && mode == UiMode::NfcNotes) beginNfcNotes();
   if (modeChanged && mode == UiMode::WifiSettings) beginWifiSettings();
   if (modeChanged && mode == UiMode::Radio) beginInternetRadio();
+  if (modeChanged && mode == UiMode::Podcasts) beginPodcasts();
   if (modeChanged && mode == UiMode::VlcRemote) beginVlcRemote();
   if (modeChanged && mode == UiMode::ChessMind) beginChessMind();
   if (modeChanged && mode == UiMode::PocketSynth) beginPocketSynth();

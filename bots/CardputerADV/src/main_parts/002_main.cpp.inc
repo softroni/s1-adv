@@ -71,6 +71,7 @@ enum class UiMode : uint8_t {
   LabDevices,
   LabRules,
   LabSequences,
+  Podcasts,
 };
 
 enum class FocusState : uint8_t {

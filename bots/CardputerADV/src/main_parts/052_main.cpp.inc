@@ -68,6 +68,7 @@ const uint8_t* launcherItemIcon(const LauncherSubItem& item) {
     case UiMode::Assets: return kPicture;
     case UiMode::Files: return kFile;
     case UiMode::Radio: return kRadio;
+    case UiMode::Podcasts: return kHeadphones;
     case UiMode::VlcRemote: return kCone;
     case UiMode::Focus:
     case UiMode::FocusSettings: return kTomato;

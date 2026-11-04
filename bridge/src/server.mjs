@@ -1,5 +1,6 @@
 import { REPLY_LANGUAGE_POLICY, requestedReplyLanguage } from "./reply-language.mjs";
 import { WeatherService, parseCoordinates, validPlace } from "./weather.mjs";
+import { PodcastError, PodcastService, showLines } from "./podcasts.mjs";
 import { startFirmwareJob, updateFirmwareJob, publicFirmwareJob, firmwareJobDeliveryUncertain } from "./firmware-job-status.mjs";
 import { firmwareCapability, firmwareWorkflowPaths } from "./firmware-automation.mjs";
 import { AGENT_STATES, WORK_KINDS, hasAgentStatusAccess, publishedAfterTask } from './agent-status.mjs';
@@ -3705,6 +3706,7 @@ class BridgeRuntime {
 	    this.clients = new Set();
 	    this.labStates = new Map();
 	    this.weather = new WeatherService(config.weather || {});
+	    this.podcasts = new PodcastService(config.podcasts || {});
 	    this.turnActivity = new Map();
 	    this.activitySeq = 0;
 	    this.heldPolls = new Set();
@@ -6530,6 +6532,32 @@ async function main() {
       } catch (error) {
         console.warn(`[weather] failed: ${String(error.code || error.message || error).slice(0, 120)}`);
         json(res, error.code === "unknown_place" ? 404 : 503, { error: error.code || "weather_unavailable", retryable: error.code !== "unknown_place" });
+      }
+      return;
+    }
+
+    // Podcasts: lists as tab-separated lines, which the device reads without a JSON parser, and
+    // episodes as MP3 from ffmpeg. Search words and what's played aren't logged.
+    if (req.method === "GET" && url.pathname.startsWith("/api/cardputer/podcasts/")) {
+      const what = url.pathname.slice("/api/cardputer/podcasts/".length);
+      const params = url.searchParams;
+      const lines = (body) => {
+        const data = Buffer.from(body, "utf8");
+        res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "content-length": String(data.length),
+          "cache-control": "no-store", "x-content-type-options": "nosniff" });
+        res.end(data);
+      };
+      try {
+        if (what === "search") lines(showLines(await runtime.podcasts.search(params.get("kind") || "podcast", params.get("q") || "")));
+        else if (what === "episodes") lines(await runtime.podcasts.episodes(params.get("show") || "", params.get("from") || 0));
+        else if (what === "audio") await runtime.podcasts.audio(res, { device: device.device_id, show: params.get("show") || "",
+          episode: params.get("ep") || "", seconds: params.get("t") || 0 });
+        else json(res, 404, { error: "not_found" });
+      } catch (error) {
+        if (res.headersSent || res.destroyed) { res.destroy(); return; }
+        if (error.code !== "cancelled")
+          console.warn(`[podcasts] ${what.slice(0, 16)} failed: ${String(error.code || error.message || error).slice(0, 120)}`);
+        json(res, error instanceof PodcastError ? error.status : 503, { error: error.code || "podcasts_unavailable" });
       }
       return;
     }

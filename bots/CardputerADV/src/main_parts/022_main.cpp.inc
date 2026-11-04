@@ -232,6 +232,8 @@ bool mapActionUiMode(String mode, UiMode& out) {
     out = UiMode::Checkers;
   } else if (mode == "radio" || mode == "internet_radio") {
     out = UiMode::Radio;
+  } else if (mode == "podcasts" || mode == "podcast" || mode == "audiobooks") {
+    out = UiMode::Podcasts;
   } else if (mode == "minesweeper" || mode == "mines") {
     out = UiMode::Minesweeper;
   } else if (mode == "snake") {

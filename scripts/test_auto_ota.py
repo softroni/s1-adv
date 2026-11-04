@@ -20,7 +20,7 @@ template<class T>bool deferInternetRadioMode(T){return false;}
 #include <string>
 #include <vector>
 struct String:std::string {using std::string::string;String(const std::string&s):std::string(s){}explicit String(uint32_t n):std::string(std::to_string(n)){}bool isEmpty()const{return empty();}};
-enum class UiMode{Home,Face,ChatFull,Ota,Clock,Focus,Settings,FocusSettings,ScreenSettings,WifiSettings,Nes,Sonar,RfidLab,IrRemote,NfcNotes,Tetris,KeyRush,BrainFlow,Files,Chess,Checkers,Minesweeper,Snake,AirMusic,Flappy,Balloon,BallCatch,LabDevices,LabRules,LabSequences,Radio,VlcRemote};UiMode gUiMode=UiMode::Home;
+enum class UiMode{Home,Face,ChatFull,Ota,Clock,Focus,Settings,FocusSettings,ScreenSettings,WifiSettings,Nes,Sonar,RfidLab,IrRemote,NfcNotes,Tetris,KeyRush,BrainFlow,Files,Chess,Checkers,Minesweeper,Snake,AirMusic,Flappy,Balloon,BallCatch,LabDevices,LabRules,LabSequences,Radio,VlcRemote,Podcasts};UiMode gUiMode=UiMode::Home;
 namespace brainflow {enum class Phase {Menu,Playing,Feedback,Paused,Finished};}
 struct{brainflow::Phase phase=brainflow::Phase::Menu;}gBrainFlow;
 struct{bool running=false;}gKeyRush;

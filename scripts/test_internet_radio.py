@@ -15,7 +15,7 @@ typing=(parts/'048_main.cpp.inc').read_text()
 assert typing.index('if (radioTakesText() && !gLauncherVisible && !keys.tab)')<typing.index("if (key == '`' || key == '~'")
 # The arrows move in Find and its results, ahead of the player's W/A/S/D mapping.
 arrows=(parts/'049_main.cpp.inc').read_text()
-assert arrows.index('radioTakesArrows() && (upDown')<arrows.index('gUiMode == UiMode::Radio || gUiMode == UiMode::VlcRemote')
+assert arrows.index('(radioTakesArrows() || podcastTakesArrows()) && (upDown')<arrows.index('gUiMode == UiMode::Radio || gUiMode == UiMode::VlcRemote')
 # Escape steps back inside the radio before it stops the stream and leaves.
 escape=(parts/'047_main.cpp.inc').read_text()
 assert escape.index('gUiMode == UiMode::Radio && !gLauncherVisible && radioEscape()')<escape.index('if (radioBusy()) { stopInternetRadio(); setUiMode(UiMode::Home); return true; }')
@@ -94,7 +94,7 @@ void drawBigScrollbar(int,int,uint16_t){}
 void drawBigNotice(const String&t,uint16_t){gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,114);gCanvas.print(fitCurrentFontToWidth(t,220));}
 void renderLauncherOverlay(){}void renderDebugOverlay(){}
 struct Keyboard_Class{struct KeysState{bool ctrl=false,alt=false,opt=false,enter=false,fn=false;};};
-enum class UiMode{Home,Radio,Voice,Mesh};UiMode gUiMode=UiMode::Radio;
+enum class UiMode{Home,Radio,Voice,Mesh,Podcasts};UiMode gUiMode=UiMode::Radio;
 struct{bool clockTwelveHour=false;}gDeviceSettings;
 uint8_t gSpeakerVolume=128;uint32_t gLastRenderMs=0,tick=1000;
 uint32_t millis(){return tick;}
@@ -141,6 +141,9 @@ int decodedSides=0;
 bool radioDecodeLogo(const uint8_t*,size_t size,uint8_t*out,int16_t side,float scale){if(decodeFails||!size)return false;assert((side==96&&scale==1.0f)||(side==60&&scale>0.62f&&scale<0.63f));
  decodedSides+=side;memset(out,side==96?0x3C:0x1C,size_t(side)*side);return true;}
 void setUiMode(UiMode);
+// The podcast player shares the speaker and the heap, so the radio waits for it too.
+namespace podcast_player{bool fakeBusy=false;bool busy(){return fakeBusy;}}
+int podcastStops=0;void stopPodcasts(){++podcastStops;}
 namespace internet_radio{
  bool running=false,cancelling=false,fail=false,searchJob=false;int starts=0,stops=0,searches=0;String url,query,country;bool byGenre=false;
  State phase=State::Idle;Error err=Error::None;uint32_t got=0;std::string song;std::vector<Found> results;size_t shown=0;
@@ -582,6 +585,13 @@ int main(){
  gRadioSelection.select(0);gRadioRemoveGenre=gRadioSelection.genreName();gRadioRemoveLine=gRadioList->at(0).line;radioAskPlace();
  for(uint8_t at=0;at<gRadioPlaceCount;++at){gRadioPlaceAt=at;render();}
  gRadioView=RadioView::Player;
+ // A podcast playing keeps the radio from starting until it has stopped, and stopping the radio
+ // for something else stops the podcast too. The radio's own screen never stops a podcast.
+ if(radioBusy()){stopInternetRadio();internet_radio::finish();}service();
+ gUiMode=UiMode::Podcasts;podcast_player::fakeBusy=true;podcastStops=0;service();assert(!podcastStops);
+ setUiMode(UiMode::Radio);assert(gUiMode==UiMode::Podcasts&&podcastStops==1&&gRadioModePending);
+ service();assert(gUiMode==UiMode::Podcasts);podcast_player::fakeBusy=false;service();assert(gUiMode==UiMode::Radio&&!gRadioModePending);
+ podcast_player::fakeBusy=true;assert(radioBusy());stopInternetRadio();assert(podcastStops==2);podcast_player::fakeBusy=false;
  puts("PASS radio: stations file on the card (made, kept, recovered, limits), Find by genre or name, results that scroll, saving under the right genre, removing a line, reconnecting after a drop, the last station, resource guards and screens that fit");
 }
 '''

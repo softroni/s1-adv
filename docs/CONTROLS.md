@@ -157,6 +157,14 @@ DE), and S in the results saves one to your list on the SD card. M moves a stati
 genre or a new one, or changes its place in its genre. Del removes a station after you press Y. [Internet Radio](RADIO.md) has the
 details, including the file's format.
 
+## Podcasts
+
+Podcasts is under Tab, Media, and needs the bridge. It opens on three tabs, Listening, Shows and
+Saved, and `,` and `/` move between them. F finds podcasts, free audiobooks or old-time radio, S
+follows a show or saves an episode to the SD card, and Enter plays, carrying on from where you
+stopped. While it plays, `,` and `/` go back 15 or ahead 30 seconds, and `;` and `.` go to the
+previous or next episode. [Podcasts](PODCASTS.md) has the details.
+
 ## NFC Notes
 
 NFC Notes is under Tab, Tools, and `/nfc` opens it. It needs the M5Stack NFC unit

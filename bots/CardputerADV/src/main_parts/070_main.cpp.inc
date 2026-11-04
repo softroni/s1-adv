@@ -80,7 +80,9 @@ String gRadioNewGenre;
 uint8_t gRadioPlaceSlots[radio_catalog::kMaxStations], gRadioPlaceOrder[radio_catalog::kMaxStations];
 uint8_t gRadioPlaceCount = 0, gRadioPlaceAt = 0, gRadioPlaceFrom = 0;
 
-bool radioBusy() { return internet_radio::busy(); }
+// Either player holds the speaker and the heap, so everything that waits for the radio waits
+// for podcasts too.
+bool radioBusy() { return internet_radio::busy() || podcast_player::busy(); }
 // The worker plays, or is getting ready to: not a search or a logo, which also keep it busy.
 bool radioStreaming() { return radioBusy() && !internet_radio::searching() && !internet_radio::fetchingLogo(); }
 // Five percent a press, landing on the nearest five, so the number reads 60, 65, 70.
@@ -100,7 +102,7 @@ bool radioTakesArrows() {
   return gUiMode == UiMode::Radio && (gRadioView == RadioView::Find || gRadioView == RadioView::Results ||
                                       gRadioView == RadioView::Move || gRadioView == RadioView::Place);
 }
-void stopInternetRadio() {
+void stopRadioStream() {
   gRadioWantPlaying = false;
   gRadioStartPending = false;
   gRadioRetryWaiting = false;
@@ -110,10 +112,18 @@ void stopInternetRadio() {
   internet_radio::stop();
   radioInvalidate();
 }
+// For anything that needs the speaker or the network to itself: both players stop.
+void stopInternetRadio() {
+  stopRadioStream();
+  stopPodcasts();
+}
 bool deferInternetRadioMode(UiMode mode) {
-  if (!radioBusy() || mode == UiMode::Radio) return false;
+  // Each player may keep going on its own screen, but never into the other's.
+  const bool keeps = (mode == UiMode::Radio && !podcast_player::busy()) || (mode == UiMode::Podcasts && !internet_radio::busy());
+  if (!radioBusy() || keeps) return false;
+  const bool podcast = podcast_player::busy();
   stopInternetRadio(); gRadioModePending = true; gRadioNextMode = mode;
-  setStatus("Stopping radio...", 800);
+  setStatus(podcast ? "Stopping podcast..." : "Stopping radio...", 800);
   return true; // Do not reclaim the speaker/RAM before the worker exits.
 }
 bool radioStartAllowed() {
@@ -799,7 +809,8 @@ void serviceInternetRadio() {
   internet_radio::wantVisuals(gUiMode == UiMode::Radio && gRadioView == RadioView::Visual && !gRadioModePending);
   if (gUiMode != UiMode::Radio) {
     // A reconnect or search still waiting would otherwise start when the radio opens again.
-    if (radioBusy() || gRadioWantPlaying || gRadioStartPending || gRadioRetryWaiting || gRadioSearchPending || gRadioSearching) stopInternetRadio();
+    // Only the radio's own worker: the podcast player looks after itself.
+    if (internet_radio::busy() || gRadioWantPlaying || gRadioStartPending || gRadioRetryWaiting || gRadioSearchPending || gRadioSearching) stopRadioStream();
     else if (gRadioList) radioRelease();
     return;
   }

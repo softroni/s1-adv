@@ -2136,6 +2136,7 @@ bool handleGlobalEscape() {
   if (gUiMode == UiMode::NfcNotes && !gLauncherVisible && cancelNfcNotes()) return true;
   if (gUiMode == UiMode::WifiSettings && !gLauncherVisible && wifiSettingsEscape()) return true;
   if (gUiMode == UiMode::Radio && !gLauncherVisible && radioEscape()) return true;
+  if (gUiMode == UiMode::Podcasts && !gLauncherVisible && podcastEscape()) return true;
 
   if (gUiMode == UiMode::Files && !gLauncherVisible) {
     return handleFileManagerKey(27, gKeyboardState);

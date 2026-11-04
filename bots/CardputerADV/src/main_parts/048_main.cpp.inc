@@ -33,6 +33,11 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
     handleInternetRadioKey(key, keys);
     return;
   }
+  // And for a podcast search.
+  if (podcastTakesText() && !gLauncherVisible && !keys.tab) {
+    handlePodcastKey(key, keys);
+    return;
+  }
   if (gUiMode==UiMode::BrainFlow &&
       (keys.tab || (keys.ctrl && (lowerKey=='l'||lowerKey=='r'||lowerKey=='v')))) pauseBrainFlow();
   setKeyDiag(String("key=") + String(static_cast<int>(key)));
@@ -176,6 +181,7 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
   if (gUiMode == UiMode::NfcNotes && handleNfcNotesKey(key, keys)) return;
   if (gUiMode == UiMode::WifiSettings && handleWifiSettingsKey(key, keys)) return;
   if (gUiMode == UiMode::Radio && handleInternetRadioKey(key, keys)) return;
+  if (gUiMode == UiMode::Podcasts && handlePodcastKey(key, keys)) return;
   if (gUiMode == UiMode::VlcRemote && handleVlcRemoteKey(key, keys)) return;
   if (gUiMode == UiMode::ChessMind && handleChessMindKey(key, keys)) return;
   if (gUiMode == UiMode::PocketSynth && handlePocketSynthKey(key, keys)) return;

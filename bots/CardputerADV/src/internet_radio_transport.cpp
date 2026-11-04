@@ -98,7 +98,8 @@ Error Headers::line(const char* s) {
     char* semi = strchr(value,';'); if (semi) *semi=0;
     for (char* p=value;*p;++p) *p=tolower(static_cast<unsigned char>(*p));
     const bool audio = !strcmp(value,"audio/mpeg") || !strcmp(value,"audio/mp3");
-    const bool wanted = json ? !strcmp(value,"application/json") : image ? !strcmp(value,"image/jpeg") : audio;
+    const bool wanted = json ? !strcmp(value,"application/json") : image ? !strcmp(value,"image/jpeg") :
+                        text ? !strcmp(value,"text/plain") : audio;
     if (status == 200 && !wanted) return Error::Unsupported;
     hasType=true;
   } else if (!strcmp(name,"transfer-encoding")) {

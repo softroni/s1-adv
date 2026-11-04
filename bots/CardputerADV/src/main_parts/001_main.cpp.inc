@@ -84,6 +84,8 @@
 #include "radio_catalog.h"
 #include "radio_countries.h"
 #include "internet_radio_transport.h"
+#include "podcast_catalog.h"
+#include "podcast_player.h"
 #include "vlc_remote.h"
 #include "mesh_cap_radio.h"
 #include <pb_decode.h>
@@ -119,7 +121,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.290-dev"
+#define APP_VERSION "0.2.291-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"
@@ -238,7 +240,7 @@ constexpr uint32_t kVoiceSocketSettleMs = 300;
 constexpr uint32_t kCtrlDoubleTapWindowMs = 420;
 constexpr uint32_t kLauncherToggleDebounceMs = 140;
 constexpr uint8_t kLauncherGroupCount = 9;
-constexpr uint8_t kLauncherMaxSubItems = 8;
+constexpr uint8_t kLauncherMaxSubItems = 9;
 constexpr uint32_t kKeyRushDurationMs = 30000;
 constexpr const char* kKeyRushPrefsNs = "keyrush";
 constexpr uint16_t kSmartLampUdpPort = 61197;

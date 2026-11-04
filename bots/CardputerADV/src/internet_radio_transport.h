@@ -88,6 +88,7 @@ struct Headers {
   bool hasTransfer = false, hasMeta = false, hasLocation = false, done = false;
   bool json = false;   // Set before the first line: a search wants JSON, a stream MP3,
   bool image = false;  // and a logo a JPEG.
+  bool text = false;   // A podcast list from the bridge is plain text.
   char location[kUrlSize]{};
   Error line(const char*);  // Lines exclude CRLF; empty line finalizes.
 };
