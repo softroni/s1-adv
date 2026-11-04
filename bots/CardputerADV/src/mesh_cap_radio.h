@@ -2,6 +2,7 @@
 #include "mesh_contacts.h"
 #include "mesh_help.h"
 #include "mesh_leaf_state.h"
+#include "mesh_private_channel.h"
 #include "mesh_outbox.h"
 #include "mesh_region.h"
 #include "radio_scan.h"
@@ -31,6 +32,7 @@ struct RadioSession {
   Outbox outbox;
   Help help;
   Where where;
+  PrivateChannel privateChannel;  // Heard and sent alongside the public channel, when there is one.
   uint32_t nextSeq = 1;
   char longName[kNameBytes+1] = "S1-ADV";
   char shortName[5] = "S1";

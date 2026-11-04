@@ -10,6 +10,7 @@ constexpr uint32_t kMeshPublicLocationMs = 4000;
 bool handleMeshEscape() {
   if(gUiMode!=UiMode::Mesh || gLauncherVisible)return false;
   if(gMeshNaming) {gMeshNaming=false;return true;}
+  if(!gMeshSession && meshChannelEscape())return true;
   if(gMeshSession) {
     auto& s=*gMeshSession;auto& st=s.state;
     if(st.detailView) {st.detailView=false;return true;}
@@ -147,6 +148,7 @@ void startMeshMode(s1_mesh::Use use) {
   if(use==s1_mesh::Use::Chat) {
     // The name it announces, who it can message, and what was said before it last stopped.
     meshLoadProfile(*gMeshSession);
+    meshLoadPrivateChannel(*gMeshSession);
     meshLoadHistory(gMeshSession->state);
     for(size_t i=0;i<gMeshSession->state.messageCount;++i)
       gMeshSession->nextSeq=max<uint32_t>(gMeshSession->nextSeq,gMeshSession->state.messages[i].seq+1);
@@ -186,6 +188,7 @@ struct MeshRadioPort {
   uint32_t send(const s1_mesh::Outgoing& o) {
     const auto port=static_cast<meshtastic_PortNum>(o.port);
     if(o.pki)return mesh.sendDataPKI(port,o.data,o.len,o.to,o.key,o.reliable);
+    if(o.channel==1)return mesh.sendDataOnSecondary(port,o.data,o.len,o.reliable);
     return mesh.sendData(port,o.data,o.len,o.to,o.reliable);
   }
   uint8_t lastResult() const {return uint8_t(mesh.getLastSendResult());}
@@ -197,16 +200,28 @@ struct MeshRadioPort {
 const s1_mesh::Contact* meshTargetContact(const s1_mesh::RadioSession& s,uint8_t target) {
   return target && target<=s.contacts.count ? &s.contacts.list[target-1] : nullptr;
 }
+// The order Left and Right step through: public, the private channel when there is one, then each
+// contact. The private channel has a fixed number, so adding a contact can't move it.
+uint8_t meshNextTarget(const s1_mesh::RadioSession& s,uint8_t target,bool back) {
+  uint8_t order[s1_mesh::kContacts+2];size_t count=0,at=0;
+  order[count++]=0;
+  if(s.privateChannel.set())order[count++]=s1_mesh::kTargetPrivate;
+  for(size_t i=0;i<s.contacts.count;++i)order[count++]=uint8_t(i+1);
+  for(size_t i=0;i<count;++i)if(order[i]==target)at=i;
+  return order[(at+(back?count-1:1))%count];
+}
 // Puts a text in the outbox and the history. False when the outbox is full.
 bool meshQueueText(s1_mesh::RadioSession& s,uint8_t target,const char* text,uint32_t* seqOut=nullptr) {
-  const auto* contact=meshTargetContact(s,target);
-  if(target && !contact)return false;
+  const bool privateChannel=target==s1_mesh::kTargetPrivate;
+  if(privateChannel && !s.privateChannel.set())return false;
+  const auto* contact=privateChannel?nullptr:meshTargetContact(s,target);
+  if(target && !privateChannel && !contact)return false;
   s1_mesh::Outgoing o;
-  o.seq=s.nextSeq;o.to=contact?contact->id:s1_mesh::kBroadcast;o.pki=contact!=nullptr;
+  o.seq=s.nextSeq;o.to=contact?contact->id:s1_mesh::kBroadcast;o.pki=contact!=nullptr;o.channel=privateChannel?1:0;
   if(contact)memcpy(o.key,contact->key,32);
   o.len=uint8_t(min<size_t>(strlen(text),s1_mesh::kTextBytes));memcpy(o.data,text,o.len);
   if(!s.outbox.push(o))return false;
-  s.state.queued(s.mesh.getNodeNum(),o.to,o.pki,o.seq,text);
+  s.state.queued(s.mesh.getNodeNum(),o.to,o.pki,o.seq,text).privateChannel=privateChannel;
   ++s.nextSeq;s.historyDirty=true;
   if(seqOut)*seqOut=o.seq;
   return true;
@@ -288,9 +303,11 @@ void meshHandlePacket(const libmeshtastic_leaf::MeshPacket& packet) {
     auto* m=state.message(packet.header.from,packet.header.id,false,packet.payload,packet.payloadLen);
     if(m) {
       m->to=packet.header.to;m->direct=packet.isPKI;s.historyDirty=true;
+      m->privateChannel=!packet.isPKI && packet.channelIndex==1;
       const bool toMe=packet.header.to==me,contact=s.contacts.find(packet.header.from)!=nullptr;
       s.help.replied(contact,toMe,now);
-      if(toMe || contact) {meshWakeScreen();meshChime(true);}
+      // The private channel is only the people who share its key, so it's worth a chime too.
+      if(toMe || contact || m->privateChannel) {meshWakeScreen();meshChime(true);}
     }
   }
 }
@@ -442,11 +459,13 @@ bool handleMeshKey(char key,const Keyboard_Class::KeysState& keys) {
   const char lower=char(tolower(static_cast<unsigned char>(key)));
   if(keys.ctrl && lower!='n' && lower!='o' && lower!='l' && lower!='h')return false;
   if(gMeshNaming && !gMeshSession)return meshNameKey(key,keys);
+  if(gMeshChannelSetup && !gMeshSession)return meshChannelKey(key,keys);
   if(!gMeshSession) {
     if(keys.ctrl)return true;
     if(keys.enter || key=='\r' || key=='\n')startMeshMode(s1_mesh::Use::Chat);
     else if(lower=='s')startMeshMode(s1_mesh::Use::Scan);
     else if(lower=='h') {gMeshOpenHelp=true;startMeshMode(s1_mesh::Use::Chat);}
+    else if(lower=='c')meshChannelOpen();
     else if(lower=='n') {
       gMeshNaming=true;
       char shortName[5];meshSavedName(gMeshNameInput,shortName);
@@ -465,11 +484,7 @@ bool handleMeshKey(char key,const Keyboard_Class::KeysState& keys) {
   if(keys.ctrl && lower=='n') {state.nodeView=!state.nodeView;state.detailView=false;return true;}
   if(keys.ctrl && lower=='o') {state.detailView=!state.detailView;state.nodeView=false;return true;}
   if(keys.ctrl && lower=='l') {meshShareLocation();return true;}
-  if(key==3 || key==4) {
-    const uint8_t choices=uint8_t(s.contacts.count+1);
-    state.target=uint8_t((state.target+(key==3?choices-1:1))%choices);
-    return true;
-  }
+  if(key==3 || key==4) {state.target=meshNextTarget(s,state.target,key==3);return true;}
   if(key==1 || key==2) {
     if(state.nodeView) {
       const size_t people=meshPeopleCount(s);
@@ -526,19 +541,23 @@ String meshNodeName(uint32_t id) {
   }
   char label[12];snprintf(label,sizeof(label),"!%08lx",static_cast<unsigned long>(id));return String(label);
 }
+// The private channel by its name, with a # so it can't be taken for a person.
+String meshPrivateName() { return String("#")+(gMeshSession?gMeshSession->privateChannel.name:""); }
 String meshTargetName(uint8_t target) {
+  if(target==s1_mesh::kTargetPrivate)return meshPrivateName();
   const auto* c=gMeshSession?meshTargetContact(*gMeshSession,target):nullptr;
   return c?meshNodeName(c->id):String("Public");
 }
 // "You > Alex / delivered", or "You / heard nearby" on the public channel.
 String meshSentLabel(const s1_mesh::Message& m) {
-  String who=m.to==s1_mesh::kBroadcast?String("You"):String("You > ")+meshNodeName(m.to);
+  String who=m.privateChannel?String("You > ")+meshPrivateName():m.to==s1_mesh::kBroadcast?String("You"):String("You > ")+meshNodeName(m.to);
   String what=s1_mesh::deliveryLabel(m.status,m.direct);
   if(m.status==s1_mesh::Delivery::Failed)what=String("failed: ")+s1_mesh::failureLabel(m.reason);
   return what.isEmpty()?who:who+" / "+what;
 }
 String meshFromLabel(const s1_mesh::Message& m) {
   const uint32_t me=gMeshSession?gMeshSession->mesh.getNodeNum():0;
+  if(m.privateChannel)return meshPrivateName()+" "+meshNodeName(m.from);
   return m.to==me && m.to!=s1_mesh::kBroadcast?meshNodeName(m.from)+" > you":meshNodeName(m.from);
 }
 String meshClock(uint32_t ms) {
@@ -627,6 +646,7 @@ void renderMeshUi() {
   if(scanning && gMeshSession->initResult.load(std::memory_order_acquire)==0) {renderRadioScanUi(*gMeshSession);return;}
   if(helpScreen) {renderMeshHelpUi();return;}
   if(!gMeshSession || gMeshSession->initResult.load(std::memory_order_acquire)!=0) {
+    if(gMeshChannelSetup && !gMeshSession) {renderMeshChannelUi();return;}
     if(gMeshNaming && !gMeshSession) {
       d.setFont(&fonts::Font2);d.setTextColor(TFT_WHITE,bg);d.setCursor(8,46);d.print("Your name on the mesh");
       d.drawRect(5,70,230,17,rgb565_local(52,64,74));d.setFont(&fonts::efontCN_12);d.setCursor(10,72);
@@ -651,6 +671,8 @@ void renderMeshUi() {
       d.setCursor(120-d.textWidth(name)/2,88);d.print(name);
       const String where="Region: Settings > Device";
       d.setCursor(120-d.textWidth(where)/2,100);d.print(where);
+      const String privateLine=meshChannelStartLine();
+      d.setTextColor(rgb565_local(255,200,64),bg);d.setCursor(120-d.textWidth(privateLine)/2,112);d.print(privateLine);
     }
     d.setTextColor(cyan,bg);d.setCursor(8,127);d.print(gMeshBusOwned?"Starting...  Esc cancel":"Enter chat H help S scan N name");return;
   }
@@ -709,7 +731,8 @@ void renderMeshUi() {
   d.drawRect(5,108,230,17,rgb565_local(52,64,74));
   // Who Enter sends to, then what's typed. Left and Right change who.
   const String to=meshClip(meshTargetName(state.target),72)+">";
-  d.setFont(&fonts::Font0);d.setTextColor(state.target?rgb565_local(88,240,141):cyan,bg);d.setCursor(9,113);d.print(to);
+  const uint16_t toColor=state.target==s1_mesh::kTargetPrivate?rgb565_local(255,200,64):state.target?rgb565_local(88,240,141):cyan;
+  d.setFont(&fonts::Font0);d.setTextColor(toColor,bg);d.setCursor(9,113);d.print(to);
   const int textX=9+d.textWidth(to)+3,textW=232-textX-2;
   d.setFont(&fonts::efontCN_12);d.setTextColor(TFT_WHITE,bg);d.setCursor(textX,110);
   String composer=state.input[0]?String(state.input):String("Message...");

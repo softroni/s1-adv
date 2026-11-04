@@ -19,6 +19,7 @@ code=r'''
 #include "mesh_help.h"
 #include "mesh_leaf_state.h"
 #include "mesh_outbox.h"
+#include "mesh_private_channel.h"
 #include <cassert>
 #include <cctype>
 using std::max;using std::min;
@@ -98,7 +99,7 @@ struct libmeshtastic_leaf {
 };
 }
 uint32_t nextSendId=100;
-struct Sent{int port;uint32_t to;bool pki,wantAck;uint8_t key0;std::string data;};
+struct Sent{int port;uint32_t to;bool pki,wantAck;uint8_t key0;std::string data;bool secondary=false;};
 struct FakeMesh {
  bool pendingAck=false,tx=false;int lastResult=0,nodeInfos=0;std::vector<Sent>sent;
  void setMyPublicKey(const uint8_t*p){assert(p[0]==42);}void setMyPrivateKey(const uint8_t*p){assert(p[0]==42);}
@@ -110,6 +111,8 @@ struct FakeMesh {
  }
  uint32_t sendData(int port,const uint8_t*d,size_t n,uint32_t to,bool ack){return record(port,d,n,to,false,nullptr,ack);}
  uint32_t sendDataPKI(int port,const uint8_t*d,size_t n,uint32_t to,const uint8_t key[32],bool ack){return record(port,d,n,to,true,key,ack);}
+ uint32_t sendDataOnSecondary(int port,const uint8_t*d,size_t n,bool ack){
+  const uint32_t id=record(port,d,n,0xFFFFFFFF,false,nullptr,ack);if(id)sent.back().secondary=true;return id;}
  int getLastSendResult()const{return lastResult;}
  bool hasPendingAck()const{return pendingAck;}bool isTransmitting()const{return tx;}
  uint32_t sendNodeInfo(){++nodeInfos;return 1;}
@@ -130,6 +133,7 @@ struct RadioSession {
  Contacts contacts;Outbox outbox;Help help;Where where;uint32_t nextSeq=1;
  char longName[kNameBytes+1]="S1-ADV";char shortName[5]="S1";
  bool historyDirty=false,announce=false;uint32_t savedMs=0,publicLocationMs=0,stopAskedMs=0;
+ PrivateChannel privateChannel;
  // The radio starts on whatever region Settings holds at that moment.
  RadioSession(Spi&,uint8_t saved,Use purpose):region(saved),use(purpose){assert(saved==gDeviceSettings.meshRegion);++live;}
  ~RadioSession(){assert(!workerPending);--live;}
@@ -162,6 +166,12 @@ std::string savedName;int nameSaves=0,profileLoads=0,contactSaves=0,historyLoads
 void meshSavedName(char* l,char* s){strcpy(l,savedName.empty()?"S1-ADV":savedName.c_str());strcpy(s,"S1");}
 bool meshSaveName(const char* n){savedName=n;++nameSaves;return true;}
 void meshLoadProfile(s1_mesh::RadioSession&){++profileLoads;}
+// The private channel's screen is part 091; here only what starting the radio does with it.
+s1_mesh::PrivateChannel gSavedChannel;int channelLoads=0,channelOpens=0;bool gMeshChannelSetup=false;
+void meshLoadPrivateChannel(s1_mesh::RadioSession& s){++channelLoads;s.privateChannel=gSavedChannel;}
+void meshChannelOpen(){++channelOpens;gMeshChannelSetup=true;}
+bool meshChannelEscape(){if(!gMeshChannelSetup)return false;gMeshChannelSetup=false;return true;}
+bool meshChannelKey(char,const Keyboard_Class::KeysState&){return true;}
 bool meshSaveContacts(const s1_mesh::Contacts&){++contactSaves;return true;}
 void meshLoadHistory(s1_mesh::State&){++historyLoads;}
 bool meshWriteHistory(const s1_mesh::State&){++historyWrites;return true;}
@@ -200,8 +210,12 @@ void restored();
 void mesh_features() {
  Keyboard_Class::KeysState plain,ctrl,enter,del;ctrl.ctrl=true;enter.enter=true;del.del=true;
  uint8_t key[32];memset(key,7,32);
+ // C on the first screen opens the private channel's setup, and Esc closes that before anything else.
+ reset();assert(handleMeshKey('c',plain)&&channelOpens==1&&gMeshChannelSetup&&!gMeshSession);
+ assert(handleMeshEscape()&&!gMeshChannelSetup&&gUiMode==UiMode::Mesh&&!gMeshBusOwned);
+ const int loads=channelLoads;
  // The People list: contacts first, then radios heard. Only one with a key can be saved.
- active();auto& s=*gMeshSession;
+ active();auto& s=*gMeshSession;assert(channelLoads==loads+1);
  auto* heard=s.state.hear(77,clockMs,-80);strcpy(heard->name,"Alex");
  s.state.hear(88,clockMs,-90);
  assert(handleMeshKey('n',ctrl)&&s.state.nodeView);
@@ -224,6 +238,22 @@ void mesh_features() {
   if(auto* m=s.state.bySeq(q)){m->status=d;m->reason=r;if(id)m->id=id;}}} sink{s};
  assert(s.outbox.routing(77,s.outbox.currentId(),0,sink)&&s.state.bySeq(1)->status==s1_mesh::Delivery::Delivered);
  s.mesh.pendingAck=false;s.mesh.tx=false;
+ // With a private channel: Left and Right go Public, #Family, then the contact, and back.
+ strcpy(s.privateChannel.name,"Family");s.privateChannel.keyLength=32;
+ s.state.target=0;assert(handleMeshKey(char(4),plain)&&s.state.target==s1_mesh::kTargetPrivate);
+ assert(handleMeshKey(char(4),plain)&&s.state.target==1&&handleMeshKey(char(4),plain)&&s.state.target==0);
+ assert(handleMeshKey(char(3),plain)&&s.state.target==1&&handleMeshKey(char(3),plain)&&s.state.target==s1_mesh::kTargetPrivate);
+ // On it, a message is a reliable broadcast on the secondary channel, and the history says so.
+ for(int i=0;i<3;++i)serviceMeshMode();s.mesh.pendingAck=false;s.mesh.tx=false;for(int i=0;i<3;++i)serviceMeshMode();
+ assert(handleMeshKey('y',plain)&&handleMeshKey('o',plain)&&handleMeshKey('\n',enter));
+ for(int i=0;i<3;++i)serviceMeshMode();
+ auto& group=s.mesh.sent.back();assert(group.secondary&&!group.pki&&group.wantAck&&group.to==0xFFFFFFFF&&group.data=="yo");
+ auto* sentGroup=s.state.bySeq(2);assert(sentGroup&&sentGroup->privateChannel&&!sentGroup->direct&&sentGroup->to==s1_mesh::kBroadcast);
+ s.mesh.pendingAck=false;s.mesh.tx=false;for(int i=0;i<3;++i)serviceMeshMode();
+ // Without one, it's left out of the cycle, and a message can't be sent there.
+ s.privateChannel=s1_mesh::PrivateChannel{};s.state.target=0;
+ assert(handleMeshKey(char(4),plain)&&s.state.target==1&&handleMeshKey(char(4),plain)&&s.state.target==0);
+ assert(!meshQueueText(s,s1_mesh::kTargetPrivate,"lost"));
  // Removing a contact moves Enter back to the public channel.
  assert(handleMeshKey('n',ctrl)&&s.state.nodeSel==0&&handleMeshKey('\b',del)&&!s.contacts.count&&s.state.target==0);
  assert(handleMeshEscape());

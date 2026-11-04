@@ -55,6 +55,7 @@ struct Message {
   uint32_t seq = 0;           // This Cardputer's own number for a message it sent.
   bool outgoing = false;
   bool direct = false;        // Sent to one person, encrypted so only their radio can read it.
+  bool privateChannel = false;  // On the private channel rather than the public one.
   Delivery status = Delivery::Received;
   uint8_t reason = 0;         // Why it failed: Meshtastic's Routing error, or one of s1_mesh's.
   char text[kTextBytes+1] = {};
@@ -145,7 +146,7 @@ struct State {
       if (n + 20 + length > capacity) break;
       for (uint32_t v : {m.from, m.id, m.to, m.seq})
         for (int b = 0; b < 32; b += 8) out[n++] = uint8_t(v >> b);
-      out[n++] = uint8_t((m.outgoing ? 1 : 0) | (m.direct ? 2 : 0));
+      out[n++] = uint8_t((m.outgoing ? 1 : 0) | (m.direct ? 2 : 0) | (m.privateChannel ? 4 : 0));
       out[n++] = uint8_t(m.status);
       out[n++] = m.reason;
       out[n++] = uint8_t(length);
@@ -167,11 +168,11 @@ struct State {
       uint32_t v[4] = {};
       for (uint32_t& value : v) { for (int b = 0; b < 32; b += 8) value |= uint32_t(in[n++]) << b; }
       const uint8_t flags = in[n++], status = in[n++], reason = in[n++], textLength = in[n++];
-      if (flags > 3 || status >= kDeliveryCount || textLength > kTextBytes || n + textLength > length) return false;
+      if (flags > 7 || status >= kDeliveryCount || textLength > kTextBytes || n + textLength > length) return false;
       Message& m = messages[i];
       m = Message{};
       m.from = v[0]; m.id = v[1]; m.to = v[2]; m.seq = v[3];
-      m.outgoing = (flags & 1) != 0; m.direct = (flags & 2) != 0;
+      m.outgoing = (flags & 1) != 0; m.direct = (flags & 2) != 0; m.privateChannel = (flags & 4) != 0;
       m.status = Delivery(status); m.reason = reason;
       if (!m.outgoing) m.status = Delivery::Received;
       else if (m.status == Delivery::Waiting || m.status == Delivery::Sending || m.status == Delivery::Received)

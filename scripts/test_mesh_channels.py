@@ -102,7 +102,7 @@ void onPacket(const MeshPacket& p) { got.push_back(p); }
 // Sends whatever the node queued, and returns the frame that went on the air.
 std::vector<uint8_t> air(Node& n) {
   const size_t before = n.phy.sent.size();
-  for (int i = 0; i < 200 && n.phy.sent.size() == before; ++i) { gNow += 50; n.mesh.update(); }
+  for (int i = 0; i < 2000 && n.phy.sent.size() == before; ++i) { gNow += 50; n.mesh.update(); }
   assert(n.phy.sent.size() == before + 1);
   n.phy.irq(); gNow += 10; n.mesh.update();  // Transmit done.
   return n.phy.sent.back();
@@ -146,6 +146,16 @@ int main() {
   b.mesh.clearSecondaryChannel(); assert(!b.mesh.hasSecondaryChannel());
   assert(a.mesh.sendTextOnSecondary("club again")); f = air(a); got.clear(); hear(b, f); assert(got.empty());
   a.mesh.clearSecondaryChannel(); assert(a.mesh.sendTextOnSecondary("x") == 0);
+  // Reliable on the private channel, as the outbox sends: retried as the same frame until another
+  // radio is heard repeating it.
+  assert(a.mesh.setSecondaryChannel(key, 32, "Family") && b.mesh.setSecondaryChannel(key, 32, "Family"));
+  const char* ask = "are you there";
+  assert(a.mesh.sendDataOnSecondary(meshtastic_PortNum_TEXT_MESSAGE_APP, reinterpret_cast<const uint8_t*>(ask), strlen(ask), true));
+  f = air(a); assert(a.mesh.hasPendingAck() && f[13] == a.mesh.getSecondaryChannelHash() && (f[12] & 0x08));
+  const auto again = air(a); assert(again == f);  // No answer yet: the same encrypted frame again.
+  got.clear(); hear(b, f); assert(got.size() == 1 && got[0].channelIndex == 1 && text(got[0]) == "are you there");
+  hear(a, f); assert(!a.mesh.hasPendingAck());  // Hearing it repeated is its answer.
+  assert(a.mesh.sendText("public after reliable private")); f = air(a); assert(f[13] == a.mesh.getChannelHash());
   // A direct message still works with a secondary set on both ends, and isn't taken for either channel.
   assert(a.mesh.setSecondaryChannel(key, 32, "Family") && b.mesh.setSecondaryChannel(key, 32, "Family"));
   assert(a.mesh.sendTextPKI("just you", b.mesh.getNodeNum(), b.pub)); f = air(a);
@@ -186,4 +196,4 @@ with tempfile.TemporaryDirectory(prefix='s1-mesh-channels-') as directory:
     result = subprocess.run([str(p / 'loop')], check=True, capture_output=True, text=True)
     assert result.stdout.strip() == 'PASS', result.stdout
 print('PASS Mesh channels, real library: public as channel 0, private encrypted on the air and channel 1 only with its '
-      'key, a wrong key unreadable, 16 and 32 byte keys, clearing it, public again after private, and a direct message alongside')
+      'key, a wrong key unreadable, 16 and 32 byte keys, clearing it, public again after private, a reliable private send retried as the same frame until it is heard repeated, and a direct message alongside')

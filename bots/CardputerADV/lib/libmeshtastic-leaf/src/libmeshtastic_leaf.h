@@ -35,13 +35,16 @@ public:
   // S1-ADV patch: a second channel, the way a Meshtastic app adds a secondary
   // one. It shares the primary's radio settings and frequency, receive() also
   // decrypts its packets (MeshPacket::channelIndex is 1), and
-  // sendTextOnSecondary() broadcasts text on it. Everything else, NodeInfo and
-  // acks included, stays on the primary. It needs a name and a 16 or 32 byte
-  // key; anything else is refused and leaves no secondary.
+  // sendDataOnSecondary() broadcasts on it, reliably if asked, the same as
+  // sendData() does on the primary. Everything else, NodeInfo and acks
+  // included, stays on the primary. It needs a name and a 16 or 32 byte key;
+  // anything else is refused and leaves no secondary.
   bool setSecondaryChannel(const uint8_t *psk, size_t pskLen, const char *name);
   void clearSecondaryChannel() { hasSecondary_ = false; }
   bool hasSecondaryChannel() const { return hasSecondary_; }
   ChannelHash getSecondaryChannelHash() const { return secondary_.getHash(); }
+  uint32_t sendDataOnSecondary(meshtastic_PortNum port, const uint8_t *data,
+                               size_t len, bool wantAck = false);
   uint32_t sendTextOnSecondary(const char *text);
 
   // A keypair the mesh will accept. False means the entropy source failed and

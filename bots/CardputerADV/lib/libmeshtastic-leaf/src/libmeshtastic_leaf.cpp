@@ -164,8 +164,10 @@ bool libmeshtastic_leaf::setSecondaryChannel(const uint8_t *psk, size_t pskLen,
   return hasSecondary_;
 }
 
-uint32_t libmeshtastic_leaf::sendTextOnSecondary(const char *text) {
-  if (!initialized_ || !hasSecondary_ || text == nullptr) {
+uint32_t libmeshtastic_leaf::sendDataOnSecondary(meshtastic_PortNum port,
+                                                 const uint8_t *data,
+                                                 size_t len, bool wantAck) {
+  if (!initialized_ || !hasSecondary_) {
     return 0;
   }
   PacketHeader header;
@@ -176,12 +178,21 @@ uint32_t libmeshtastic_leaf::sendTextOnSecondary(const char *text) {
   header.channel = secondary_.getHash();
   header.setHopLimit(config_.hopLimit);
   header.setHopStart(config_.hopLimit);
+  header.setWantAck(wantAck);
+  // Only the encryption differs; a retry resends the frame already made.
   sendChannel_ = &secondary_;
-  const uint32_t id = sendPacket(header, meshtastic_PortNum_TEXT_MESSAGE_APP,
-                                 reinterpret_cast<const uint8_t *>(text),
-                                 strlen(text), 0, false, nullptr);
+  const uint32_t id = sendPacket(header, port, data, len, 0, false, nullptr);
   sendChannel_ = &channel_;
   return id;
+}
+
+uint32_t libmeshtastic_leaf::sendTextOnSecondary(const char *text) {
+  if (text == nullptr) {
+    return 0;
+  }
+  return sendDataOnSecondary(meshtastic_PortNum_TEXT_MESSAGE_APP,
+                             reinterpret_cast<const uint8_t *>(text),
+                             strlen(text), false);
 }
 
 void libmeshtastic_leaf::setDefaultChannel() {

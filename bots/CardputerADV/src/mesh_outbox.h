@@ -37,6 +37,7 @@ struct Outgoing {
   uint16_t port = kPortText;
   bool pki = false;       // Encrypted to the person's own key.
   bool reliable = true;   // Asks for an answer, and is retried until one comes.
+  uint8_t channel = 0;    // 1 is the private channel, for a channel message; direct messages ignore it.
   uint8_t len = 0;
   uint8_t data[kTextBytes] = {};
   uint8_t key[32] = {};

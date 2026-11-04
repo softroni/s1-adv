@@ -17,10 +17,12 @@ Changes on 2026-11-03, all in `src/libmeshtastic_leaf.h` and `src/libmeshtastic_
   packet's one-byte hash matches either, and keeps going if the primary's key
   doesn't give a Data message that parses. A packet read with the secondary key
   has `MeshPacket::channelIndex` 1, and 0 otherwise, as before.
-- `sendTextOnSecondary(text)` broadcasts text on the secondary channel.
-  `sendPacket()` encrypts with whichever channel `sendChannel_` points at, which
-  is the primary except during that call. NodeInfo, acks, PKI and every other
-  send stay on the primary.
+- `sendDataOnSecondary(port, data, length, wantAck)` broadcasts on the
+  secondary channel, reliably when asked, like `sendData()` on the primary, and
+  `sendTextOnSecondary(text)` is the plain text form. `sendPacket()` encrypts
+  with whichever channel `sendChannel_` points at, which is the primary except
+  during that call, and a retry resends the frame it already made. NodeInfo,
+  acks, PKI and every other send stay on the primary.
 
 Why: the library held one channel and dropped any packet whose hash didn't match
 it. A private channel in place of the public one would stop the radio hearing

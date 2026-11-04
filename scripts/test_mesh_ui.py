@@ -16,6 +16,7 @@ code=r'''
 #include "mesh_help.h"
 #include "mesh_leaf_state.h"
 #include "mesh_outbox.h"
+#include "mesh_private_channel.h"
 #include <algorithm>
 #include <atomic>
 #include <cassert>
@@ -62,7 +63,7 @@ constexpr int kInitPending=-32768;
 enum class Use:uint8_t{Chat,Scan};
 struct FakeMesh {uint32_t getNodeNum()const{return 42;}};
 struct RadioSession {State state;std::atomic<int>initResult{0};uint8_t region=1;Use use=Use::Chat;
- FakeMesh mesh;Contacts contacts;Outbox outbox;Help help;Where where;};
+ FakeMesh mesh;Contacts contacts;Outbox outbox;Help help;Where where;PrivateChannel privateChannel;};
 // UA_868 is as long as a region's name gets.
 inline const char* regionName(uint8_t c){return c==1?"US":"UA_868";}
 inline float regionFrequency(uint8_t c){return c==1?906.875f:868.375f;}
@@ -70,6 +71,10 @@ inline float regionFrequency(uint8_t c){return c==1?906.875f:868.375f;}
 struct {uint8_t meshRegion=1;}gDeviceSettings;
 int scanRenders=0;
 void renderRadioScanUi(s1_mesh::RadioSession&){++scanRenders;}
+// The private channel's own screen is part 091, tested on its own; here only that Mesh hands over.
+bool gMeshChannelSetup=false;int channelRenders=0;
+void renderMeshChannelUi(){++channelRenders;}
+String meshChannelStartLine(){return String("C private channel: #ElevenChars");}  // As long as it gets.
 
 std::unique_ptr<s1_mesh::RadioSession>gMeshSession;
 bool gMeshBusOwned=false,gSdReady=true;String gMeshNotice;
@@ -83,6 +88,9 @@ int main() {
  using namespace s1_mesh;
  (void)kMeshStopConfirmMs;(void)kMeshPublicLocationMs;  // The keys' timers, not the screens'.
  for(uint8_t region:{1,15})for(bool sd:{false,true}){gDeviceSettings.meshRegion=region;gSdReady=sd;renderMeshUi();assert(!gCanvas.clipped);}
+ assert(gCanvas.printed.count("C private channel: #ElevenChars"));
+ // C's setup screen takes over the first screen while it's open.
+ gMeshChannelSetup=true;renderMeshUi();assert(channelRenders==1);gMeshChannelSetup=false;
  // A running radio shows the region it started with, not one picked since.
  gMeshSession=std::make_unique<s1_mesh::RadioSession>();gMeshSession->region=15;gDeviceSettings.meshRegion=1;gMeshBusOwned=true;gSdReady=false;gCanvas.printed.clear();
  for(int init:{0,s1_mesh::kInitPending,-19}) {gMeshSession->initResult=init;renderMeshUi();assert(!gCanvas.clipped);}
@@ -115,6 +123,15 @@ int main() {
  s.message(3,9999,false,reinterpret_cast<const uint8_t*>("hi"),2)->to=42;s.detailView=false;
  for(uint8_t t=0;t<=kContacts;++t){s.target=t;for(uint32_t ms:{0u,4000u}){clockMs=ms;renderMeshUi();}}
  assert(gCanvas.printed.count(std::string(12,'W')+">")&&gCanvas.printed.count("Public>"));
+ // The private channel at the longest a name gets: as the target, heard, and sent in every state.
+ strcpy(gMeshSession->privateChannel.name,"ElevenChars");gMeshSession->privateChannel.keyLength=32;
+ s.target=kTargetPrivate;renderMeshUi();assert(gCanvas.printed.count("#ElevenChars>"));
+ s.message(3,9998,false,reinterpret_cast<const uint8_t*>("group hi"),8)->privateChannel=true;
+ for(uint8_t d=0;d<kDeliveryCount;++d){auto& m=s.queued(42,kBroadcast,false,100+d,std::string(200,'W').c_str());m.privateChannel=true;m.status=Delivery(d);
+  s.historyOffset=0;s.detailView=false;renderMeshUi();assert(!gCanvas.clipped);s.detailView=true;renderMeshUi();assert(!gCanvas.clipped);}
+ s.detailView=false;s.historyOffset=1;renderMeshUi();
+ bool sawGroup=false;for(const auto& t:gCanvas.printed)sawGroup=sawGroup||t.rfind("You > #ElevenChars",0)==0;assert(sawGroup);
+ s.target=0;
  // The People list: contacts first, heard or not, then the radios heard, with and without a key.
  s.nodeView=true;s.detailView=false;
  for(size_t sel=0;sel<kContacts+kNodes+1;++sel){s.nodeSel=sel;renderMeshUi();assert(!gCanvas.clipped);}

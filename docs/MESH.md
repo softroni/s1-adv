@@ -5,7 +5,8 @@ Cardputer ADV with Cap LoRa-1262. It preserves the existing applications and
 8 MB dual-OTA partition layout. It does not replace S1-ADV with the standalone
 Meshtastic firmware.
 
-Besides the public channel, it sends direct messages that only one person's
+Besides the public channel, it has a [private channel](#private-channel) for a
+group that shares its key, sends direct messages that only one person's
 radio can read, says whether each one arrived, and has **Help**: one key sends
 a ready message with where the Cap's GPS puts you to everyone you've saved, and
 sends it again every five minutes until one of their radios has it. It's meant
@@ -123,7 +124,7 @@ The client receives channel text, direct messages, acknowledgements and node
 announcements, and sends text, positions and its own NodeInfo (15 seconds after
 the radio starts, then every three hours). It doesn't relay other radios'
 packets or provide the Meshtastic phone API. Chat stays on its region's LongFast
-channel; [Radio Scan](#radio-scan) is the only part that tunes anywhere else, and
+channel, which the private channel shares; [Radio Scan](#radio-scan) is the only part that tunes anywhere else, and
 it only listens. Received radio text is display data and is never executed as a
 device or agent instruction. Nothing heard on the radio acts on its own: it can
 only chime and wake the screen.
@@ -202,6 +203,46 @@ made from it: the initials of two words or more, or the first four letters of
 one. Left empty, it's `S1-ADV` and `S1`, as before 0.2.275. A new name goes out
 the next time the radio starts.
 
+## Private channel
+
+A private channel is a group chat that only radios with its key can read, such
+as your family's. It runs alongside the public channel on the same frequency,
+the way the Meshtastic app adds a secondary channel, so public messages, direct
+messages and their receipts all carry on. Mesh holds one.
+
+Set it up with **C** on Mesh's first screen, while the radio is off:
+
+- **N** names it: up to 11 letters, digits, spaces, `-` or `_`. Every radio on it
+  uses exactly the same name.
+- **G** makes a new random key and shows it. G on a channel that already has a
+  key asks for a second press, because everyone else has the old one.
+- **K** types a key instead, as base64, the way the Meshtastic app shows it: 16 or
+  32 bytes. The app's one-byte keys like `AQ==` and Meshtastic's default key are
+  refused, because every radio knows them.
+- **V** shows the key as text and as a QR code. A phone's camera reads the code,
+  so the key can be pasted rather than copied by eye, where I and l look alike.
+- **X** twice removes the channel. Esc leaves.
+
+On a phone with the Meshtastic app, add a channel under Channels with the same
+name and paste the key. Leave the phone's first channel as LongFast: Mesh's
+public channel is always the region's LongFast default, and making the private
+channel a phone's first channel would move that phone to another frequency.
+
+In the chat, Left and Right step through Public, then `#Name`, then each contact.
+Messages on it are labelled `#Family Sam` and `You > #Family`, and like a direct
+message, one arriving chimes and wakes the screen. Delivery reads as for the
+public channel: "heard nearby" once another radio repeats it.
+
+The name and key are kept in the Cardputer's own flash with Mesh's other
+settings: never on the SD card, in a log or anywhere else. Anyone who sees the
+key can read the channel. As with every Meshtastic channel, who sent a message
+isn't hidden, only what it says. A change takes effect the next time the radio
+starts. Help still goes to contacts, and to the public channel when asked, not
+to the private channel.
+
+This needs a small change to libmeshtastic-leaf, which held one channel at a
+time; see [Source and licensing](#source-and-licensing).
+
 ## Radio Scan
 
 Press S on the Mesh screen instead of Enter. Radio Scan never transmits, needs
@@ -250,14 +291,20 @@ and `test_mesh_ui.py` exercise the production state, lifecycle, radio setup and
 delivery states, the history kept across a restart, Help's text and when it
 repeats, and the position message, whose bytes were checked against
 Meshtastic's own `mesh.proto` with `protoc`. `test_radio_scan.py` runs Radio Scan's sums, service loop, keys
-and screen against a pretend radio that has no way to transmit. `test_mesh_region.py`
-checks the region list, channels and scan presets against the library's own
-table, so it runs after a firmware build. Lifecycle tests use controlled hardware mocks and include
+and screen against a pretend radio that has no way to transmit. `test_mesh_private_channel.py`
+checks channel names, keys in base64 both ways, new keys and what's saved, and
+`test_mesh_private_ui.py` runs the setup screen's keys, its QR code and its
+storage, and checks the key never reaches a log. `test_mesh_channels.py` builds
+the patched library itself on a computer and passes real packets between three
+copies: public, private, a wrong key, a reliable private send and a direct
+message alongside. It and `test_mesh_region.py`, which checks the region list,
+channels and scan presets against the library's own table, run after a firmware
+build. Lifecycle tests use controlled hardware mocks and include
 worker cancellation, partial initialization, SD restoration and app guards.
 State and UI tests include malformed UTF-8, fixed bounds and sanitizers.
 These checks do not substitute for RF communication with a second node, and none
-of the direct messages, delivery states, Help or positions has been tried with a
-second radio yet.
+of the private channel, direct messages, delivery states, Help or positions has
+been tried with a second radio yet.
 
 USB commands: `mesh.open`, `mesh.start`, `mesh.scan`, `mesh.status`, `mesh.nodes`, `mesh.stop`.
 During the chat, `mesh.status` adds a line with the contacts, the outbox, Help and
