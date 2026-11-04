@@ -448,9 +448,15 @@ void serviceInternetRadio() {
 }
 
 // --- Keys ---------------------------------------------------------------------------------
-// char(1) to char(4) are the arrow keys up, down, left and right, so ; , . / can be typed.
-// Left and right pick genre or name; up and down move between the words and the country.
+// The Cardputer's arrows are the ; . , / keys, and Fn doesn't change what they send, so here
+// they move rather than type, as they do everywhere else in the radio. char(1) to char(4) are
+// a USB keyboard's arrows. Left and right pick genre or name; up and down move between the
+// words and the country.
 bool radioFindKey(char key, const Keyboard_Class::KeysState& keys) {
+  if (key == ';') key = char(1);
+  else if (key == '.') key = char(2);
+  else if (key == ',') key = char(3);
+  else if (key == '/') key = char(4);
   String& field = gRadioOnCountry ? gRadioCountry : gRadioQuery;
   if (key == char(3) || key == char(4)) { gRadioByGenre = !gRadioByGenre; gRadioNotice = ""; }
   else if (key == char(1) || key == char(2)) { gRadioOnCountry = !gRadioOnCountry; gRadioNotice = ""; }

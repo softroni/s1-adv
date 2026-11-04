@@ -84,7 +84,7 @@ void drawBigRow(int row,const String&l,const String&v,bool selected,uint16_t,uin
 void drawBigScrollbar(int,int,uint16_t){}
 void drawBigNotice(const String&t,uint16_t){gCanvas.setFont(&fonts::Font2);gCanvas.setCursor(8,114);gCanvas.print(fitCurrentFontToWidth(t,220));}
 void renderLauncherOverlay(){}void renderDebugOverlay(){}
-struct Keyboard_Class{struct KeysState{bool ctrl=false,alt=false,opt=false,enter=false;};};
+struct Keyboard_Class{struct KeysState{bool ctrl=false,alt=false,opt=false,enter=false,fn=false;};};
 enum class UiMode{Home,Radio,Voice,Mesh};UiMode gUiMode=UiMode::Radio;
 struct{bool clockTwelveHour=false;}gDeviceSettings;
 uint8_t gSpeakerVolume=128;uint32_t gLastRenderMs=0,tick=1000;
@@ -236,12 +236,18 @@ int main(){
  service();assert(gUiMode==UiMode::Radio);internet_radio::finish();service();assert(gUiMode==UiMode::Voice&&!gRadioModePending);
  service();assert(!gRadioList&&!gRadioSelection.list);gUiMode=UiMode::Radio;beginInternetRadio();
 
- // Find: every key types, even the player's own keys, and Tab-free arrows switch genre/name.
+ // Find: the player's letter keys type, and the arrows move instead of acting on the player.
  gRadioSelection.select(0);key('\n');service();assert(radioBusy());const int volume=gSpeakerVolume;
  key('f');assert(gRadioView==RadioView::Find&&radioTakesText()&&radioTakesArrows());
  render();assert(shows("Searching stops the radio")&&shows("By genre")&&shows("By name"));
  key('\n');assert(gRadioNotice=="Type a genre, like jazz"&&!internet_radio::searches);
- type("wasdl+-;,./ ");assert(gRadioQuery=="wasdl+-;,./ "&&gRadioSelection.stationIndex()==0&&gSpeakerVolume==volume&&radioBusy());
+ type("wasdl+-: ");assert(gRadioQuery=="wasdl+-: "&&gRadioSelection.stationIndex()==0&&gSpeakerVolume==volume&&radioBusy());
+ // The arrow keys are ; . , / on this keyboard, with or without Fn. They move, never type.
+ key(';');assert(gRadioOnCountry&&gRadioQuery=="wasdl+-: ");key('.');assert(!gRadioOnCountry);
+ key(',');assert(!gRadioByGenre);key('/');assert(gRadioByGenre);
+ {Keyboard_Class::KeysState fn;fn.fn=true;handleInternetRadioKey('.',fn);assert(gRadioOnCountry);handleInternetRadioKey(';',fn);assert(!gRadioOnCountry);
+  handleInternetRadioKey(',',fn);assert(!gRadioByGenre);handleInternetRadioKey('/',fn);assert(gRadioByGenre&&gRadioQuery=="wasdl+-: ");}
+ key(';');type(";.,/");assert(gRadioCountry.isEmpty());key('.');assert(!gRadioOnCountry&&gRadioByGenre);
  while(!gRadioQuery.isEmpty())key('\b');key('\b');
  for(int i=0;i<40;++i)key('x');assert(gRadioQuery.size()==kRadioQueryChars);render();assert(shows(std::string(29,'x')+"_"));
  while(!gRadioQuery.isEmpty())key('\b');

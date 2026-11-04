@@ -31,10 +31,12 @@ Press **F**, type, and press Enter.
 
 | Key | What it does |
 |---|---|
-| Left / Right | Search **By genre** or **By name** |
-| Up / Down | Move between the words and the country |
+| Left / Right (`,` `/`) | Search **By genre** or **By name** |
+| Up / Down (`;` `.`) | Move between the words and the country |
 | Enter | Search |
 | Esc | Back to your stations |
+
+The arrow keys work with or without Fn, so `;` `.` `,` and `/` can't be typed into a search.
 
 - **By genre** looks for a tag, like `jazz`, `rock`, `chillout`, `80s` or `news`.
 - **By name** looks for part of a station's name, like `BBC` or `Paradise`.
