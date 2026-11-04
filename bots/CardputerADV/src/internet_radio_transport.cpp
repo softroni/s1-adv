@@ -212,8 +212,9 @@ bool searchUrl(char* out, size_t room, bool byGenre, const char* text, const cha
   while (*text == ' ') ++text;
   size_t n = strlen(text);
   while (n && text[n-1] == ' ') --n;
-  if (!n || n > 64) return false;
-  int len = snprintf(out, room, "http://all.api.radio-browser.info/json/stations/search?%s=", byGenre ? "tag" : "name");
+  if (n > 64) return false;
+  // Nothing typed asks for no name or tag, which is the directory's most listened.
+  int len = snprintf(out, room, "http://all.api.radio-browser.info/json/stations/search?%s", !n ? "" : byGenre ? "tag=" : "name=");
   if (len <= 0 || size_t(len) >= room) return false;
   size_t at = size_t(len);
   static const char kHex[] = "0123456789ABCDEF";
@@ -224,13 +225,14 @@ bool searchUrl(char* out, size_t room, bool byGenre, const char* text, const cha
     if (plain) out[at++] = char(c);
     else { out[at++] = '%'; out[at++] = kHex[c >> 4]; out[at++] = kHex[c & 15]; }
   }
+  if (n) { if (at + 1 >= room) return false; out[at++] = '&'; }
   if (*country) {
-    if (at + 15 >= room) return false;
-    memcpy(out + at, "&countrycode=", 13); at += 13;
-    out[at++] = country[0]; out[at++] = country[1];
+    if (at + 16 >= room) return false;
+    memcpy(out + at, "countrycode=", 12); at += 12;
+    out[at++] = country[0]; out[at++] = country[1]; out[at++] = '&';
   }
   // Only what this player can play, most listened first. 30 leaves room for the duplicates.
-  static const char kRest[] = "&codec=MP3&is_https=false&hidebroken=true&order=clickcount&reverse=true&limit=30";
+  static const char kRest[] = "codec=MP3&is_https=false&hidebroken=true&order=clickcount&reverse=true&limit=30";
   if (at + sizeof(kRest) > room || at + sizeof(kRest) > kUrlSize) return false;
   memcpy(out + at, kRest, sizeof(kRest));
   return true;

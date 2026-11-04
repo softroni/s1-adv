@@ -92,7 +92,10 @@ int main(int argc,char**argv){
   assert(searchUrl(url,sizeof(url),true," smooth jazz ")&&std::string(url)=="http://all.api.radio-browser.info/json/stations/search?tag=smooth%20jazz&codec=MP3&is_https=false&hidebroken=true&order=clickcount&reverse=true&limit=30");
   assert(searchUrl(url,sizeof(url),false,"R&B/1?#")&&std::string(url).find("?name=R%26B%2F1%3F%23&")!=std::string::npos);
   Url u;assert(parseUrl(url,u)&&std::string(u.host)=="all.api.radio-browser.info"&&u.port==80);
-  assert(!searchUrl(url,sizeof(url),true,"   ")&&!searchUrl(url,sizeof(url),true,"")&&!searchUrl(url,40,true,"jazz"));
+  // Nothing typed asks for no tag or name: the directory's most listened, anywhere or in a country.
+  assert(searchUrl(url,sizeof(url),true,"   ")&&std::string(url)=="http://all.api.radio-browser.info/json/stations/search?codec=MP3&is_https=false&hidebroken=true&order=clickcount&reverse=true&limit=30");
+  assert(searchUrl(url,sizeof(url),false,"","US")&&std::string(url)=="http://all.api.radio-browser.info/json/stations/search?countrycode=US&codec=MP3&is_https=false&hidebroken=true&order=clickcount&reverse=true&limit=30");
+  assert(!searchUrl(url,40,true,"jazz"));
   assert(!searchUrl(url,sizeof(url),true,std::string(65,'a').c_str())&&searchUrl(url,sizeof(url),true,std::string(64,'%').c_str()));
   assert(parseUrl(url,u));
   // A country is two capital letters and goes in as the directory's countrycode.

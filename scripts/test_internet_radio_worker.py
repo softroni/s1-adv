@@ -141,7 +141,7 @@ int main(int argc,char**argv){
  readHook=[](){internet_radio::stop();};assert(internet_radio::startSearch(true,"jazz"));execute();readHook={};
  assert(internet_radio::state()==State::Idle&&!internet_radio::foundCount());
  internet_radio::clearFound();allocateFails=true;assert(!internet_radio::startSearch(true,"jazz")&&!internet_radio::busy()&&internet_radio::error()==Error::NoMemory);allocateFails=false;
- assert(!internet_radio::startSearch(true,"   ")&&internet_radio::error()==Error::InvalidUrl);
+ assert(!internet_radio::startSearch(true,std::string(65,'x').c_str())&&internet_radio::error()==Error::InvalidUrl);
  assert(!internet_radio::startSearch(true,"jazz","usa")&&!internet_radio::busy()&&internet_radio::error()==Error::InvalidUrl);
  assert(internet_radio::startSearch(true,"jazz"));execute();assert(internet_radio::foundCount()==2);internet_radio::clearFound();
  puts("PASS actual radio worker: bounded TCP/ICY/chunked MP3 decode, song titles, searches on the same worker, two safe PCM slots, async cancel and release, allocation/task/connect/malformed/public-IP failures (ASan/UBSan)");

@@ -54,6 +54,15 @@ uint16_t gRadioRemoveLine = 0;
 String gRadioRemoveName, gRadioRemoveUrl, gRadioRemoveGenre;
 
 bool radioBusy() { return internet_radio::busy(); }
+// Five percent a press, landing on the nearest five, so the number reads 60, 65, 70.
+void radioStepVolume(int direction) {
+  const int pct = (int(gSpeakerVolume) * 100 + 127) / 255;
+  int next = direction > 0 ? (pct / 5 + 1) * 5 : ((pct + 4) / 5 - 1) * 5;
+  next = next < 0 ? 0 : next > 100 ? 100 : next;
+  const int target = (next * 255 + 50) / 100;
+  // At either end it says so, the same as everywhere else.
+  adjustSpeakerVolume(target == int(gSpeakerVolume) ? direction : target - int(gSpeakerVolume));
+}
 void radioInvalidate() { gLastRenderMs = 0; gUiFramePolicy.invalidate(); }
 bool radioTakesText() { return gUiMode == UiMode::Radio && gRadioView == RadioView::Find; }
 bool radioTakesArrows() {
@@ -290,10 +299,7 @@ String radioSearchError() {
 void radioRequestSearch() {
   String query = gRadioQuery;
   query.trim();
-  if (query.isEmpty()) {
-    gRadioNotice = gRadioByGenre ? "Type a genre, like jazz" : "Type part of a name";
-    gRadioOnCountry = false;
-  } else if (gRadioCountry.length() == 1) {
+  if (gRadioCountry.length() == 1) {
     gRadioNotice = "Type 2 letters, like US";
     gRadioOnCountry = true;
   } else if (!gRadioCountry.isEmpty() && !radio_countries::name(gRadioCountry.c_str())) {
@@ -321,7 +327,8 @@ void radioStartSearch() {
 void radioSearchDone() {
   const size_t found = internet_radio::foundCount();
   if (internet_radio::error() != internet_radio::Error::None) gRadioNotice = radioSearchError();
-  else if (!found) gRadioNotice = "Nothing found for " + gRadioSearchedQuery + (gRadioSearchedCountry.isEmpty() ? "" : " in " + gRadioSearchedCountry);
+  else if (!found) gRadioNotice = String("Nothing found") + (gRadioSearchedQuery.isEmpty() ? "" : " for " + gRadioSearchedQuery) +
+                                  (gRadioSearchedCountry.isEmpty() ? "" : " in " + gRadioSearchedCountry);
   else if (gRadioView == RadioView::Find) { gRadioView = RadioView::Results; gRadioFoundSel = 0; gRadioNotice = ""; }
   radioInvalidate();
 }
@@ -346,7 +353,8 @@ void radioSaveFound() {
   if (had >= 0) { gRadioNotice = String("Already in ") + gRadioList->genre(gRadioList->at(size_t(had)).genre); return; }
   if (gRadioList->full()) { gRadioNotice = "The list is full: 100 stations"; return; }
   char genre[radio_catalog::kGenreBytes + 1];
-  radio_catalog::genreFor(*gRadioList, gRadioSearchedByGenre, gRadioSearchedQuery.c_str(), found->tags, genre, sizeof(genre));
+  // With nothing typed there's no genre to go by, so the station's own tags choose, as by name.
+  radio_catalog::genreFor(*gRadioList, gRadioSearchedByGenre && !gRadioSearchedQuery.isEmpty(), gRadioSearchedQuery.c_str(), found->tags, genre, sizeof(genre));
   if (gRadioList->findGenre(genre) < 0 && gRadioList->genres() >= radio_catalog::kMaxGenres) {
     gRadioNotice = "Too many genres: 24 at most";
     return;
@@ -498,8 +506,8 @@ bool radioResultsKey(char key, const Keyboard_Class::KeysState& keys) {
   else if (keys.enter || key == '\r' || key == '\n' || key == ' ') radioPlayFound();
   else if (lower == 's') radioSaveFound();
   else if (lower == 'f') { radioLeaveResults(); gRadioView = RadioView::Find; gRadioNotice = ""; }
-  else if (key == '-' || key == '_') adjustSpeakerVolume(-16);
-  else if (key == '+' || key == '=') adjustSpeakerVolume(16);
+  else if (key == '-' || key == '_') radioStepVolume(-1);
+  else if (key == '+' || key == '=') radioStepVolume(1);
   radioInvalidate();
   return true;
 }
@@ -537,8 +545,8 @@ bool handleInternetRadioKey(char key, const Keyboard_Class::KeysState& keys) {
   else if (lower == 'l') { gRadioSelection.nextLanguage(); radioRetune(); }
   else if (lower == 'f') { gRadioView = RadioView::Find; gRadioNotice = ""; radioInvalidate(); }
   else if (key == '\b') radioAskRemove();
-  else if (key == '-' || key == '_') { adjustSpeakerVolume(-16); radioInvalidate(); }
-  else if (key == '+' || key == '=') { adjustSpeakerVolume(16); radioInvalidate(); }
+  else if (key == '-' || key == '_') { radioStepVolume(-1); radioInvalidate(); }
+  else if (key == '+' || key == '=') { radioStepVolume(1); radioInvalidate(); }
   else if (keys.enter || key == '\r' || key == '\n' || key == ' ') {
     if (gRadioWantPlaying || radioBusy()) { stopInternetRadio(); gRadioNotice = "Paused"; }
     else radioPlaySelected();
@@ -835,7 +843,7 @@ void renderRadioFind() {
   uint16_t ink = amber;
   if (gRadioSearching || gRadioSearchPending) { line = "Searching..."; ink = green; }
   else if (line.isEmpty() && (gRadioWantPlaying || radioBusy())) { line = "Searching stops the radio"; ink = muted; }
-  else if (line.isEmpty()) { line = "Searches radio-browser.info"; ink = muted; }
+  else if (line.isEmpty()) { line = gRadioQuery.isEmpty() ? "Blank finds the most listened" : "Searches radio-browser.info"; ink = muted; }
   d.setTextColor(ink);
   d.setCursor(8, 100);
   d.print(radioFit(line, 222));

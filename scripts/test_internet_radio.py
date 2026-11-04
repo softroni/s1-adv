@@ -202,7 +202,11 @@ int main(){
  key('l');service();assert(internet_radio::starts==n);render();assert(gCanvas.printed[0].rfind("EN/INT  ",0)==0);
  key('l');render();assert(gCanvas.printed[0].rfind("RU  ",0)==0);key('l');render();assert(gCanvas.printed[0].find("  ")==std::string::npos);
  for(int i=0;i<40;++i)key('+');assert(gSpeakerVolume==255);for(int i=0;i<40;++i)key('-');assert(gSpeakerVolume==0);
- key('=');assert(gSpeakerVolume==16);render();assert(shows("6"));key('_');assert(gSpeakerVolume==0);render();assert(shows("0"));  // No Shift needed.
+ // Five percent a press, on the nearest five, with or without Shift.
+ for(int pct=5;pct<=100;pct+=5){key('=');assert((int(gSpeakerVolume)*100+127)/255==pct);render();assert(shows(std::to_string(pct)));}
+ key('+');assert(gSpeakerVolume==255);for(int pct=95;pct>=0;pct-=5){key('_');assert((int(gSpeakerVolume)*100+127)/255==pct);}
+ gSpeakerVolume=160;key('+');assert((int(gSpeakerVolume)*100+127)/255==65);gSpeakerVolume=160;key('-');assert((int(gSpeakerVolume)*100+127)/255==60);
+ gSpeakerVolume=0;
  // Every audio/network owner blocks a new radio worker, without touching it.
  for(bool*p:{&gBootBackgroundActive,&gRecording,&gSubmitting,&gThinking,&gPlaybackActive,&gTransferUiActive,&gOtaApplyInProgress,&gInboxHttpBusy,&gVoiceDialBusy,&gVoiceReplySpeechBusy,&gRealtimeActive,&gRealtimeDialBusy,&gRealtimeExclusiveMode,&gPendingRealtimeStart,&gMeshBusOwned,&gG0VoicePending,&gVoiceCapturePreparing}){
   *p=true;key('\n');serviceInternetRadio();assert(!radioBusy()&&!gRadioWantPlaying);*p=false;
@@ -294,7 +298,6 @@ int main(){
  gRadioSelection.select(0);key('\n');service();assert(radioBusy());const int volume=gSpeakerVolume;
  key('f');assert(gRadioView==RadioView::Find&&radioTakesText()&&radioTakesArrows());
  render();assert(shows("Searching stops the radio")&&shows("By genre")&&shows("By name"));
- key('\n');assert(gRadioNotice=="Type a genre, like jazz"&&!internet_radio::searches);
  type("wasdl+-: ");assert(gRadioQuery=="wasdl+-: "&&gRadioSelection.stationIndex()==0&&gSpeakerVolume==volume&&radioBusy());
  // The arrow keys are ; . , / on this keyboard, with or without Fn. They move, never type.
  key(';');assert(gRadioOnCountry&&gRadioQuery=="wasdl+-: ");key('.');assert(!gRadioOnCountry);
@@ -305,7 +308,7 @@ int main(){
  while(!gRadioQuery.isEmpty())key('\b');key('\b');
  for(int i=0;i<40;++i)key('x');assert(gRadioQuery.size()==kRadioQueryChars);render();assert(shows(std::string(29,'x')+"_"));
  while(!gRadioQuery.isEmpty())key('\b');
- key(char(3));assert(!gRadioByGenre);key('\n');assert(gRadioNotice=="Type part of a name");key(char(4));assert(gRadioByGenre);
+ key(char(3));assert(!gRadioByGenre);key(char(4));assert(gRadioByGenre);
  // Searching stops the stream first: one worker. Nothing found keeps the words to change.
  type("polka");key('\n');assert(gRadioSearchPending&&!gRadioWantPlaying);service();assert(!internet_radio::searches);
  internet_radio::finish();service();assert(internet_radio::searches==1&&internet_radio::query=="polka"&&gRadioSearching);
@@ -334,6 +337,18 @@ int main(){
  key(char(1));render();assert(shows("Anywhere"));key('\n');service();assert(internet_radio::country.empty()&&!disk.count("/radio/country.txt"));
  internet_radio::results={};internet_radio::finish();service();assert(gRadioNotice=="Nothing found for jazz");radioEscape();
  disk["/radio/country.txt"]="ZZ\n";reopen();assert(gRadioCountry.isEmpty());disk.erase("/radio/country.txt");
+ // Nothing typed finds the most listened, in the country if there is one. Saved from such a
+ // search, a station goes where its tags say, as from a search by name.
+ key('f');while(!gRadioQuery.isEmpty())key('\b');render();assert(shows("Blank finds the most listened"));
+ key('\n');service();assert(internet_radio::searching()&&internet_radio::query.empty()&&internet_radio::byGenre);
+ internet_radio::results={};internet_radio::finish();service();assert(gRadioNotice=="Nothing found");
+ key(char(2));type("us");key('\n');service();assert(internet_radio::country=="US"&&internet_radio::query.empty());
+ internet_radio::results={make("Top Jazz","http://top.example/","smooth jazz","US",128,false),make("Top Talk","http://talk.example/","news","US",64,false)};
+ internet_radio::finish();service();assert(gRadioView==RadioView::Results);key('s');assert(gRadioNotice=="Saved to Jazz");
+ key(char(2));key('s');assert(gRadioNotice=="Saved to Other");radioEscape();
+ key('f');if(!gRadioOnCountry)key(char(2));key('\b');key('\b');assert(gRadioCountry.isEmpty());key(char(1));assert(!gRadioOnCountry);
+ internet_radio::results={};key('\n');service();internet_radio::finish();service();
+ assert(gRadioNotice=="Nothing found"&&disk.count("/radio/country.txt")==0);radioEscape();disk[kList]=kStarter;reopen();
  // Results: a list that scrolls with its selection, saved and playing ones marked.
  std::vector<internet_radio::Found> jazz={
   make("Smooth One","http://one.example/","easy listening,smooth jazz","US",128,false),

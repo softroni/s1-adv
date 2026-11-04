@@ -106,8 +106,8 @@ class Body {
 // One frame's analysis: a Hann-windowed 512-point FFT of its start, mixed to mono, read as
 // the bands above, and its waveform. Uses 4 KB of stack and no allocation.
 void analyse(const int16_t* pcm, int samples, int channels, int hz, Visuals& out);
-// The directory's search address. False when the text is empty or too long, or the country
-// isn't empty or two capital letters.
+// The directory's search address. Empty text finds the most listened. False when the text is
+// over 64 bytes, or the country isn't empty or two capital letters.
 bool searchUrl(char* out, size_t room, bool byGenre, const char* text, const char* country = "");
 // Reads the directory's JSON answer, an array of flat objects, a byte at a time. Keeps MP3
 // stations with a plain-HTTP address not already kept, up to `room`. Other keys, nested

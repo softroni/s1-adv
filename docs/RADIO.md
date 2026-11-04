@@ -11,7 +11,7 @@ stations live in a text file on the SD card, and Find adds new ones from a publi
 | **A / D** or Left / Right | Change station |
 | **Enter** or **Space** | Play or pause |
 | **L** | Show all stations, only EN/INT, or only RU |
-| **-** and **+** | Volume down and up. The **=** key works for +, so Shift isn't needed |
+| **-** and **+** | Volume down and up, 5% a press. The **=** key works for +, so Shift isn't needed |
 | **V** | Full-screen visuals, and V again for the next look |
 | **F** | Find stations |
 | **Del** | Remove this station from your list |
@@ -65,6 +65,7 @@ The arrow keys work with or without Fn, so `;` `.` `,` and `/` can't be typed in
 
 - **By genre** looks for a tag, like `jazz`, `rock`, `chillout`, `80s` or `news`.
 - **By name** looks for part of a station's name, like `BBC` or `Paradise`.
+- **Nothing typed** finds the most listened stations, in the country if you've set one.
 - **Country** keeps the search to one country. Type its two-letter code, like `US`, `GB`, `DE`
   or `RU`, and its name shows beside it so you can tell it's the right one. `UK` becomes `GB`,
   the code the directory uses. Leave it empty to search everywhere. The radio remembers the
@@ -92,8 +93,8 @@ Where a saved station goes:
 - **Found by genre:** under that genre. If your list already has it, your spelling wins, so
   `jazz` joins **Jazz**, and `house` joins **Electro / House**. If not, it starts a new genre at
   the end of the list.
-- **Found by name:** under the first of your genres that one of its tags names. If none does,
-  under **Other**.
+- **Found by name, or with nothing typed:** under the first of your genres that one of its tags
+  names. If none does, under **Other**.
 
 The stations come from [radio-browser.info](https://www.radio-browser.info), a free directory
 that anyone can add to. Your search words go to it over plain HTTP, and the music comes the same
