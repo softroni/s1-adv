@@ -126,9 +126,9 @@ int main(int argc,char**argv){
   for(unsigned char ch:json)assert(j.feed(ch));
   assert(j.finished()&&j.count()==4);
   assert(std::string(found[0].name)=="Jazz \"Radio\" é🎷"&&std::string(found[0].url)=="http://jazz.example/live");
-  assert(std::string(found[0].tags)=="jazz,smooth jazz"&&std::string(found[0].country)=="FR"&&found[0].bitrate==128&&!found[0].russian);
-  assert(std::string(found[1].name)=="Радио Рекорд"&&found[1].russian&&found[1].bitrate==65535);
-  assert(std::string(found[2].name)=="No language"&&found[2].russian&&found[2].bitrate==1);
+  assert(std::string(found[0].tags)=="jazz,smooth jazz"&&std::string(found[0].country)=="FR"&&found[0].bitrate==128);
+  assert(std::string(found[1].name)=="Радио Рекорд"&&std::string(found[1].country)=="RU"&&found[1].bitrate==65535);
+  assert(std::string(found[2].name)=="No language"&&std::string(found[2].country)=="RU"&&found[2].bitrate==1);
   assert(std::string(found[3].name)=="lone ? half"&&std::string(found[3].tags)=="a b");
   // Only room for what was asked; anything past the array is ignored.
   Found two[2];StationJson k(two,2);for(unsigned char ch:json+"garbage")assert(k.feed(ch));assert(k.finished()&&k.count()==2);

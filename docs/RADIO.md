@@ -10,7 +10,7 @@ stations live in a text file on the SD card, and Find adds new ones from a publi
 | **W / S** or Up / Down | Change genre |
 | **A / D** or Left / Right | Change station |
 | **Enter** or **Space** | Play or pause |
-| **L** | Show all stations, only EN/INT, or only RU |
+| **L** | Show one country's stations: L steps through the countries in your list, then back to all |
 | **-** and **+** | Volume down and up, 5% a press. The **=** key works for +, so Shift isn't needed |
 | **V** | Full-screen visuals, and V again for the next look |
 | **F** | Find stations |
@@ -24,7 +24,7 @@ initials, and while it plays, bars in the tile follow how loud the music is, mea
 sound itself. While it connects, one bar runs along them. Beside the tile are the station's name,
 the song over two lines when the station sends it, and its place in the genre with its bitrate.
 Below are the buttons, drawn with their keys: W/S for genre, A, Enter and D for back, play and
-next, and the volume with - and +. The other keys are along the bottom, and the language filter
+next, and the volume with - and +. The other keys are along the bottom, and the country filter
 shows next to the clock while it's on.
 
 If a station that was playing drops, the radio tries again after 3, 10 and 30 seconds. If Wi-Fi
@@ -129,12 +129,14 @@ the built-in stations there, and after that it never replaces the file. One stat
 
 ```
 # Lines starting with # are notes.
-Jazz | Sonic Universe | http://ice2.somafm.com/sonicuniverse-128-mp3
+Jazz | Sonic Universe | http://ice2.somafm.com/sonicuniverse-128-mp3 | US
 Rock | Nashe Radio | http://nashe1.hostingradio.ru/nashe-128.mp3 | RU
 ```
 
-That's the genre, the name, the address, and `RU` if it's a Russian-language station for the L
-filter. Genres show in the order they first appear, and stations in the order they're written.
+That's the genre, the name, the address, and the station's country as a two-letter code, which
+the L filter steps through. The country is optional. A built-in station without one gets its
+country from the built-in list, so a list made before countries existed still filters by
+country. A station saved from Find gets the country the directory gives. Genres show in the order they first appear, and stations in the order they're written.
 Edit the file on a computer, and the changes show the next time you open Internet Radio.
 
 **Del** on a station asks first, and Y removes it. Only its own line goes: your notes and every

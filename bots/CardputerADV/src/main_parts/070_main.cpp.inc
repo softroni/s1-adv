@@ -381,8 +381,7 @@ void radioSaveFound() {
     return;
   }
   char line[radio_catalog::kGenreBytes + radio_catalog::kNameBytes + internet_radio::detail::kUrlSize + 16];
-  const size_t size = radio_catalog::formatLine(line, sizeof(line), genre, found->name, found->url,
-    found->russian ? radio_catalog::Language::Russian : radio_catalog::Language::International);
+  const size_t size = radio_catalog::formatLine(line, sizeof(line), genre, found->name, found->url, found->country);
   if (gRadioList->size() + size + 1 > radio_catalog::kMaxFileBytes) { gRadioNotice = "stations.txt is full: 16 KB"; return; }
   if (!size || !radioAppendLine(line, size)) { gRadioNotice = "Couldn't save to the SD card"; return; }
   const String url = found->url;
@@ -667,7 +666,7 @@ bool handleInternetRadioKey(char key, const Keyboard_Class::KeysState& keys) {
   else if (lower == 's' || key == '.') { gRadioSelection.moveGenre(1); radioRetune(); }
   else if (lower == 'a' || key == ',') { gRadioSelection.moveStation(-1); radioRetune(); }
   else if (lower == 'd' || key == '/') { gRadioSelection.moveStation(1); radioRetune(); }
-  else if (lower == 'l') { gRadioSelection.nextLanguage(); radioRetune(); }
+  else if (lower == 'l') { gRadioSelection.nextCountry(); radioRetune(); }
   else if (lower == 'f') { gRadioView = RadioView::Find; gRadioNotice = ""; radioInvalidate(); }
   else if (key == '\b') radioAskRemove();
   else if (key == '-' || key == '_') { radioStepVolume(-1); radioInvalidate(); }
@@ -887,7 +886,7 @@ void renderRadioPlayer() {
                        (radioStreaming() && state != internet_radio::State::Stopping));
   radioMeterTick(playing);
   d.fillScreen(TFT_BLACK);
-  // Above: the genre, and the clock with the language filter while it's on.
+  // Above: the genre, and the clock with the country filter while it's on.
   String right = "--:--";
   const time_t now = time(nullptr);
   if (now > 100000) {
@@ -895,7 +894,7 @@ void renderRadioPlayer() {
     clock_display::format(buf,sizeof(buf),ti.tm_hour,ti.tm_min,gDeviceSettings.clockTwelveHour);
     right = buf;
   }
-  if (gRadioSelection.language != radio_catalog::Language::All) right = String(radio_catalog::languageName(gRadioSelection.language)) + "  " + right;
+  if (gRadioSelection.country[0]) right = String(gRadioSelection.country) + "  " + right;
   d.setFont(&fonts::Font2);
   const int16_t rightX = kBigRight - d.textWidth(right);
   d.setTextColor(muted); d.setCursor(rightX, 2); d.print(right);
@@ -923,7 +922,7 @@ void renderRadioPlayer() {
   if (station) {
     String facts = String(gRadioSelection.index + 1) + " of " + String(gRadioSelection.count(gRadioSelection.genre));
     if (playing && internet_radio::bitrate()) facts += "   " + String(internet_radio::bitrate()) + " kbps";
-    if (station->language == radio_catalog::Language::Russian) facts += "   RU";
+    if (station->country[0]) facts += String("   ") + station->country;
     d.setFont(&fonts::Font0);
     d.setTextColor(muted); d.setCursor(textX, 75); d.print(facts);
   }
@@ -931,7 +930,7 @@ void renderRadioPlayer() {
   // The rest of the keys, quieter than the buttons' own.
   d.setFont(&fonts::Font0);
   d.setTextColor(rgb565_local(110,150,180));
-  const char* keys = "F find  V visuals  L EN/RU  Del remove";
+  const char* keys = "F find  V visuals  L country  Del remove";
   d.setCursor(120 - d.textWidth(keys) / 2, 126);
   d.print(keys);
   d.setFont(&fonts::Font2);

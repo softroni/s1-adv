@@ -170,9 +170,9 @@ void type(const char*s){for(;*s;++s)key(*s);}
 void service(int n=1){for(int i=0;i<n;++i)serviceInternetRadio();}
 void reopen(){if(radioBusy()){stopInternetRadio();internet_radio::finish();}gUiMode=UiMode::Home;service();assert(!gRadioList);gUiMode=UiMode::Radio;beginInternetRadio();}
 void render(){selectedRow=-1;renderInternetRadioUi();}
-internet_radio::Found make(const char*name,const char*url,const char*tags,const char*country,uint16_t bitrate,bool russian,const char*logo=""){
+internet_radio::Found make(const char*name,const char*url,const char*tags,const char*country,uint16_t bitrate,const char*logo=""){
  internet_radio::Found f{};snprintf(f.logo,sizeof(f.logo),"%s",logo);snprintf(f.name,sizeof(f.name),"%s",name);snprintf(f.url,sizeof(f.url),"%s",url);snprintf(f.tags,sizeof(f.tags),"%s",tags);
- snprintf(f.country,sizeof(f.country),"%s",country);f.bitrate=bitrate;f.russian=russian;return f;}
+ snprintf(f.country,sizeof(f.country),"%s",country);f.bitrate=bitrate;return f;}
 void search(const char*text,bool genre,std::vector<internet_radio::Found> results){
  key('f');assert(gRadioView==RadioView::Find);while(!gRadioQuery.isEmpty())key('\b');type(text);
  if(gRadioByGenre!=genre)key(char(3));assert(gRadioByGenre==genre);key('\n');service();
@@ -213,8 +213,10 @@ int main(){
  internet_radio::finish();service();assert(internet_radio::starts==2&&internet_radio::url==gRadioSelection.station()->url);
  // Pause stays paused and language browsing stays silent.
  key(' ');assert(!gRadioWantPlaying&&radioBusy());internet_radio::finish();service();int n=internet_radio::starts;
- key('l');service();assert(internet_radio::starts==n);render();assert(gCanvas.printed[0].rfind("EN/INT  ",0)==0);
- key('l');render();assert(gCanvas.printed[0].rfind("RU  ",0)==0);key('l');render();assert(gCanvas.printed[0].find("  ")==std::string::npos);
+ key('l');service();assert(internet_radio::starts==n);render();assert(gCanvas.printed[0].rfind("IT  ",0)==0);
+ // L steps through the countries the list has, in order, then back to all of them.
+ key('l');render();assert(gCanvas.printed[0].rfind("RU  ",0)==0);key('l');render();assert(gCanvas.printed[0].rfind("US  ",0)==0);
+ key('l');render();assert(gCanvas.printed[0].find("  ")==std::string::npos&&!gRadioSelection.country[0]);
  for(int i=0;i<40;++i)key('+');assert(gSpeakerVolume==255);for(int i=0;i<40;++i)key('-');assert(gSpeakerVolume==0);
  // Five percent a press, on the nearest five, with or without Shift.
  for(int pct=5;pct<=100;pct+=5){key('=');assert((int(gSpeakerVolume)*100+127)/255==pct);render();assert(shows(std::to_string(pct)));}
@@ -332,7 +334,7 @@ int main(){
  key('\n');service();internet_radio::finish(State::Error,Error::Timeout);service();assert(gRadioNotice=="Search: the directory didn't answer");
  // Escape while it searches stops the search, and its answer is never shown.
  key('\n');service();assert(internet_radio::searching());assert(radioEscape()&&gRadioView==RadioView::Player);
- internet_radio::results={make("Late","http://late.example/","","US",128,false)};internet_radio::finish();service();assert(gRadioView==RadioView::Player);
+ internet_radio::results={make("Late","http://late.example/","","US",128)};internet_radio::finish();service();assert(gRadioView==RadioView::Player);
 
  // A country narrows any search. Up and down move between the words and its box, which takes
  // letters only, two at most, in capitals. UK means GB. It's checked before anything is sent.
@@ -357,7 +359,7 @@ int main(){
  key('\n');service();assert(internet_radio::searching()&&internet_radio::query.empty()&&internet_radio::byGenre);
  internet_radio::results={};internet_radio::finish();service();assert(gRadioNotice=="Nothing found");
  key(char(2));type("us");key('\n');service();assert(internet_radio::country=="US"&&internet_radio::query.empty());
- internet_radio::results={make("Top Jazz","http://top.example/","smooth jazz","US",128,false),make("Top Talk","http://talk.example/","news","US",64,false)};
+ internet_radio::results={make("Top Jazz","http://top.example/","smooth jazz","US",128),make("Top Talk","http://talk.example/","news","US",64)};
  internet_radio::finish();service();assert(gRadioView==RadioView::Results);key('s');assert(gRadioNotice=="Saved to Jazz");
  key(char(2));key('s');assert(gRadioNotice=="Saved to Other");radioEscape();
  key('f');if(!gRadioOnCountry)key(char(2));key('\b');key('\b');assert(gRadioCountry.isEmpty());key(char(1));assert(!gRadioOnCountry);
@@ -365,10 +367,10 @@ int main(){
  assert(gRadioNotice=="Nothing found"&&disk.count("/radio/country.txt")==0);radioEscape();disk[kList]=kStarter;reopen();
  // Results: a list that scrolls with its selection, saved and playing ones marked.
  std::vector<internet_radio::Found> jazz={
-  make("Smooth One","http://one.example/","easy listening,smooth jazz","US",128,false),
-  make("Радио Джаз Москва Плюс Ещё Длиннее Название","http://ru.example/","jazz","RU",0,true),
-  make("Sonic Again",gRadioList->at(0).url,"jazz","US",128,false)};
- for(int i=0;i<17;++i)jazz.push_back(make(("Jazz Station "+std::to_string(i)).c_str(),("http://j"+std::to_string(i)+".example/").c_str(),"jazz","FR",192,false));
+  make("Smooth One","http://one.example/","easy listening,smooth jazz","US",128),
+  make("Радио Джаз Москва Плюс Ещё Длиннее Название","http://ru.example/","jazz","RU",0),
+  make("Sonic Again",gRadioList->at(0).url,"jazz","US",128)};
+ for(int i=0;i<17;++i)jazz.push_back(make(("Jazz Station "+std::to_string(i)).c_str(),("http://j"+std::to_string(i)+".example/").c_str(),"jazz","FR",192));
  search("jazz",true,jazz);assert(gRadioView==RadioView::Results&&internet_radio::foundCount()==20&&!radioTakesText()&&radioTakesArrows());
  for(int i=0;i<20;++i){gRadioFoundSel=i;render();assert(selectedRow>=0);gRadioNotice="Saved to Jazz";render();assert(selectedRow>=0&&selectedRow<4);gRadioNotice="";}
  gRadioFoundSel=0;key(char(1));assert(gRadioFoundSel==19);key(char(2));assert(gRadioFoundSel==0);key('.');key(';');assert(gRadioFoundSel==0);
@@ -376,7 +378,7 @@ int main(){
  render();assert(shows("Found")&&shows("US"));gRadioFoundSel=2;render();assert(shows("saved"));gRadioFoundSel=0;
  // Saving puts it under the genre searched, in the list's own spelling, on the card.
  key('s');assert(gRadioNotice=="Saved to Jazz"&&gRadioNoticeGood);
- assert(disk[kList]==std::string(kStarter)+"Jazz | Smooth One | http://one.example/\n"&&gRadioList->find("http://one.example/")==18);
+ assert(disk[kList]==std::string(kStarter)+"Jazz | Smooth One | http://one.example/ | US\n"&&gRadioList->find("http://one.example/")==18);
  key('s');assert(gRadioNotice=="Already in Jazz"&&!gRadioNoticeGood);
  gRadioFoundSel=1;key('s');assert(gRadioNotice=="Saved to Jazz");
  assert(disk[kList].find("Jazz | Радио Джаз Москва Плюс Ещё Длиннее Наз | http://ru.example/ | RU\n")!=std::string::npos||disk[kList].find(" | http://ru.example/ | RU\n")!=std::string::npos);
@@ -394,17 +396,17 @@ int main(){
  assert(radioEscape()&&gRadioWantPlaying&&radioBusy()&&std::string(gRadioSelection.station()->url)=="http://one.example/");
  key(' ');internet_radio::finish();service();
  // By name: the first genre a tag names, or Other. A new genre goes at the end.
- search("bbc",false,{make("BBC World","http://bbc.example/","news,talk","GB",56,false),make("Chill BBC","http://bbcchill.example/","chillout,lounge","GB",128,false)});
+ search("bbc",false,{make("BBC World","http://bbc.example/","news,talk","GB",56),make("Chill BBC","http://bbcchill.example/","chillout,lounge","GB",128)});
  key('s');assert(gRadioNotice=="Saved to Other"&&std::string(gRadioList->genre(gRadioList->genres()-1))=="Other");
  key(char(2));key('s');assert(gRadioNotice=="Saved to Chill");
  radioEscape();
  // By genre, words the list hasn't seen become a genre of their own.
- search("80s",true,{make("Eighties","http://80s.example/","80s,pop","US",128,false)});key('s');assert(gRadioNotice=="Saved to 80s");radioEscape();
+ search("80s",true,{make("Eighties","http://80s.example/","80s,pop","US",128)});key('s');assert(gRadioNotice=="Saved to 80s");radioEscape();
  // Saving can't overflow the list or its genres, and a card that fails says so.
  { std::string full;for(int i=0;i<100;++i)full+="G | S"+std::to_string(i)+" | http://s"+std::to_string(i)+".example/\n";
-   disk[kList]=full;reopen();search("x",true,{make("More","http://more.example/","","US",1,false)});key('s');assert(gRadioNotice=="The list is full: 100 stations");radioEscape();
+   disk[kList]=full;reopen();search("x",true,{make("More","http://more.example/","","US",1)});key('s');assert(gRadioNotice=="The list is full: 100 stations");radioEscape();
    std::string genres;for(int i=0;i<24;++i)genres+="G"+std::to_string(i)+" | S | http://g"+std::to_string(i)+".example/\n";
-   disk[kList]=genres;reopen();search("new",true,{make("More","http://more.example/","","US",1,false)});key('s');assert(gRadioNotice=="Too many genres: 24 at most");
+   disk[kList]=genres;reopen();search("new",true,{make("More","http://more.example/","","US",1)});key('s');assert(gRadioNotice=="Too many genres: 24 at most");
    std::string big=kStarter;while(big.size()<16300)big+="# padding to fill the file up to its limit\n";big+="#"+std::string(16370-big.size()-2,'x')+"\n";assert(big.size()==16370);
    disk[kList]=big;reopen();assert(gRadioListOnCard);search("jazz",true,jazz);key('s');assert(gRadioNotice=="stations.txt is full: 16 KB"&&disk[kList]==big);radioEscape();
    key(char(2));writeFails=true;disk[kList]=kStarter;reopen();search("jazz",true,jazz);key('s');assert(gRadioNotice=="Couldn't save to the SD card");writeFails=false;radioEscape();
@@ -461,7 +463,7 @@ int main(){
  // A search stops one too. A station saved from it brings its logo's address, asked for first.
  key('f');while(!gRadioQuery.isEmpty())key('\b');key('\n');assert(internet_radio::cancelling);internet_radio::endLogo(LogoResult::Found);service();
  assert(internet_radio::searching()&&!disk.count(logoPath(15,"332")));
- internet_radio::results={make("With Logo","http://withlogo.example/","jazz","US",128,false,"https://withlogo.example/l.png")};internet_radio::finish();service();
+ internet_radio::results={make("With Logo","http://withlogo.example/","jazz","US",128,"https://withlogo.example/l.png")};internet_radio::finish();service();
  key('s');assert(gRadioNotice=="Saved to Jazz");radioEscape();service();
  assert(internet_radio::fetchingLogo()&&internet_radio::logoGiven=="https://withlogo.example/l.png"&&internet_radio::logoStream=="http://withlogo.example/");
  internet_radio::endLogo(LogoResult::Found);service();assert(disk.count(std::string(radioLogoPath(radioHash("http://withlogo.example/"),"332"))));
@@ -471,7 +473,7 @@ int main(){
  gUiMode=UiMode::Radio;beginInternetRadio();internet_radio::logosOn=false;
  // Every reachable view fits on screen, with long names, Cyrillic, and every state.
  internet_radio::song="Очень длинное название песни, которое не помещается на экране - Исполнитель";
- for(int lang=0;lang<3;++lang){gRadioSelection.language=static_cast<Language>(lang);
+ for(const char*filter:{"","IT","RU","US"}){memcpy(gRadioSelection.country,filter,strlen(filter)+1);
   for(unsigned group=0;group<gRadioList->genres();++group){gRadioSelection.genre=group;
    for(unsigned index=0;index<gRadioSelection.count(group);++index){gRadioSelection.index=index;
     for(auto state:{State::Idle,State::Playing,State::Error,State::Stopping}){

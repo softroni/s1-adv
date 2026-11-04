@@ -26,8 +26,9 @@ int main() {
   assert(l.count() == 18 && l.genres() == 7 && !l.skipped() && l.endsWithNewline() && l.size() == sizeof(kStarter) - 1);
   const char* genres[] = {"Jazz", "Funk / Soul", "Rock", "Electro / House", "Chill", "Lounge", "Russian mix"};
   for (size_t g = 0; g < 7; ++g) assert(std::string(l.genre(g)) == genres[g]);
-  assert(name(l, 0) == "Sonic Universe" && l.at(0).line == 4 && l.at(0).language == Language::International);
-  assert(name(l, 1) == "Instrumental Jazz" && l.at(1).language == Language::Russian);
+  assert(name(l, 0) == "Sonic Universe" && l.at(0).line == 5 && std::string(l.at(0).country) == "US");
+  assert(name(l, 1) == "Instrumental Jazz" && std::string(l.at(1).country) == "RU" && std::string(l.at(2).country) == "IT");
+  for (size_t i = 0; i < l.count(); ++i) assert(strlen(l.at(i).country) == 2);  // Every built-in one has its country.
   for (size_t i = 0; i < l.count(); ++i) {
     internet_radio::detail::Url u;
     assert(internet_radio::detail::parseUrl(l.at(i).url, u));
@@ -50,7 +51,7 @@ int main() {
   assert(l.load(typed.data(), typed.size()));
   assert(l.count() == 4 && l.genres() == 2 && l.skipped() == 4 && !l.endsWithNewline());
   assert(name(l, 0) == "Radio 4" && std::string(l.at(0).url) == "http://radio.example/r4" && l.at(0).line == 3);
-  assert(l.at(1).language == Language::Russian && l.at(1).line == 4);
+  assert(std::string(l.at(1).country) == "RU" && l.at(1).line == 4 && !l.at(0).country[0]);
   assert(l.at(2).genre == 0 && std::string(l.genre(0)) == "Talk");  // "talk" joins "Talk".
   assert(std::string(l.genre(1)) == "Музыка" && name(l, 3) == "Радио" && l.at(3).line == 10);
 
@@ -72,17 +73,19 @@ int main() {
   // A saved station becomes one line that reads back as itself. A name can't add a field, a
   // line, or turn the line into a note.
   char line[700];
-  size_t n = formatLine(line, sizeof(line), "Jazz", "Smooth | Jazz\nFM", "http://radio.example/sj", Language::International);
+  size_t n = formatLine(line, sizeof(line), "Jazz", "Smooth | Jazz\nFM", "http://radio.example/sj", "");
   assert(n && std::string(line) == "Jazz | Smooth   Jazz FM | http://radio.example/sj\n" && n == strlen(line));
-  n = formatLine(line, sizeof(line), "# Talk", "Радио", "http://radio.example/ru", Language::Russian);
+  n = formatLine(line, sizeof(line), "# Talk", "Радио", "http://radio.example/ru", "ru");
   assert(n && std::string(line) == "Talk | Радио | http://radio.example/ru | RU\n");
-  assert(!formatLine(line, sizeof(line), "Jazz", "  ", "http://radio.example/sj", Language::All));
-  assert(!formatLine(line, sizeof(line), "Jazz", "Name", "https://radio.example/sj", Language::All));
-  assert(!formatLine(line, 20, "Jazz", "Name", "http://radio.example/sj", Language::All));
+  n = formatLine(line, sizeof(line), "Talk", "BBC", "http://bbc.example/", "GBR");  // Not a code: left out.
+  assert(n && std::string(line) == "Talk | BBC | http://bbc.example/\n");
+  assert(!formatLine(line, sizeof(line), "Jazz", "  ", "http://radio.example/sj", ""));
+  assert(!formatLine(line, sizeof(line), "Jazz", "Name", "https://radio.example/sj", ""));
+  assert(!formatLine(line, 20, "Jazz", "Name", "http://radio.example/sj", ""));
   {
     List a; assert(a.load(kStarter, sizeof(kStarter) - 1));
     std::string file(kStarter);
-    n = formatLine(line, sizeof(line), "Jazz", "Smooth | Jazz", "http://radio.example/sj", Language::International);
+    n = formatLine(line, sizeof(line), "Jazz", "Smooth | Jazz", "http://radio.example/sj", "US");
     file += line;
     List b; assert(b.load(file.data(), file.size()));
     assert(b.count() == 19 && b.genres() == 7 && name(b, 18) == "Smooth   Jazz" && b.at(18).genre == 0);
@@ -111,8 +114,22 @@ int main() {
   assert(skipLine("a\nb", 2) == "a\n");
 
   // Moving through the list never lands on nothing, for every filter, and wraps both ways.
-  for (auto language : {Language::All, Language::International, Language::Russian}) {
-    Selection s; s.list = &l; s.language = language; if (!s.count(s.genre)) s.moveGenre(1);
+  // A list made before stations had a country: the built-in ones get theirs from the built-in
+  // list, matched on the whole address, and a station that isn't built in stays without one.
+  {
+    const std::string old = "Chill | Groove Salad | http://ice2.somafm.com/groovesalad-128-mp3\n"
+      "Rock | Nashe Radio | http://nashe1.hostingradio.ru/nashe-128.mp3 | RU\n"
+      "Chill | Groove | http://ice2.somafm.com/groovesalad-128\n"
+      "Talk | Mine | http://mine.example/\n"
+      "Talk | Odd | http://odd.example/ | International\n";
+    List o; assert(o.load(old.data(), old.size()) && o.count() == 5);
+    assert(std::string(o.at(0).country) == "US" && std::string(o.at(1).country) == "RU");
+    assert(!o.at(2).country[0] && !o.at(3).country[0] && !o.at(4).country[0]);
+  }
+  char code[3];
+  assert(countryCode("gb", code) && std::string(code) == "GB" && !countryCode("G", code) && !countryCode("GBR", code) && !countryCode("1A", code) && !countryCode(nullptr, code));
+  for (const char* country : {"", "IT", "RU", "US"}) {
+    Selection s; s.list = &l; memcpy(s.country, country, strlen(country) + 1); if (!s.count(s.genre)) s.moveGenre(1);
     for (int i = 0; i < 1000; ++i) {
       assert(s.genre < l.genres() && s.count(s.genre) && s.station() && s.matches(*s.station(), s.genre));
       s.moveStation(i % 2 ? 1 : -1); assert(s.station());
@@ -120,17 +137,25 @@ int main() {
     }
   }
   // Pointing at a station shows it even when the filter hid it.
-  Selection s; s.list = &l; s.language = Language::Russian;
-  assert(s.select(11) && s.language == Language::All && s.stationIndex() == 11 && std::string(s.genreName()) == "Chill");
+  // L: all, then each country the list has, in order, then all again.
+  {
+    Selection c; c.list = &l; std::vector<std::string> seen;
+    for (int i = 0; i < 5; ++i) { c.nextCountry(); seen.push_back(c.country); assert(c.station() || !c.country[0]); }
+    assert((seen == std::vector<std::string>{"IT", "RU", "US", "", "IT"}));
+    List none; const std::string bare = "Talk | Mine | http://mine.example/\n"; assert(none.load(bare.data(), bare.size()));
+    Selection d; d.list = &none; d.nextCountry(); assert(!d.country[0] && d.station());
+  }
+  Selection s; s.list = &l; memcpy(s.country, "RU", 3);
+  assert(s.select(11) && !s.country[0] && s.stationIndex() == 11 && std::string(s.genreName()) == "Chill");
   assert(!s.select(-1) && !s.select(99));
   // After a reload: the same genre and place where it can, something valid where it can't.
   List shorter; const std::string two = "Chill | Only | http://a.example/1\n";
   assert(shorter.load(two.data(), two.size()));
   s.list = &shorter; s.genre = 4; s.index = 2; s.fit();
   assert(s.genre == 0 && s.index == 0 && s.station() && name(shorter, 0) == "Only");
-  s.language = Language::Russian; s.fit(); assert(s.language == Language::All && s.station());
+  memcpy(s.country, "RU", 3); s.fit(); assert(!s.country[0] && s.station());
   List empty; s.list = &empty; s.fit(); assert(!s.station() && !s.count(0));
-  s.moveGenre(1); s.moveStation(1); s.nextLanguage(); assert(!s.station());
+  s.moveGenre(1); s.moveStation(1); s.nextCountry(); assert(!s.station());
   Selection none; assert(!none.station() && !none.count(0) && std::string(none.genreName()).empty());
   // Countries: sorted and unique for the halving search, two capitals each, ASCII names.
   for (size_t i = 0; i < radio_countries::kCountryCount; ++i) {

@@ -7,12 +7,12 @@
 #include "internet_radio_transport.h"
 
 // The station list. It lives on the SD card as /radio/stations.txt, one station per line:
-//   Genre | Name | http://address | RU
-// The last field is optional: RU marks a Russian-language station for the L filter, and
-// anything else counts as EN/INT. Lines starting with # are notes. Genres show in the order
-// they first appear. With no card the built-in list below is used, and nothing can be saved.
+//   Genre | Name | http://address | US
+// The last field is optional: the station's country as a two-letter code, which the L filter
+// steps through. RU, which older lists used to mark Russian stations, is one already. Lines
+// starting with # are notes. Genres show in the order they first appear. With no card the
+// built-in list below is used, and nothing can be saved.
 namespace radio_catalog {
-enum class Language : uint8_t { All, International, Russian };
 constexpr size_t kMaxStations = 100;
 constexpr size_t kMaxGenres = 24;
 constexpr size_t kMaxFileBytes = 16384;
@@ -20,30 +20,50 @@ constexpr size_t kNameBytes = 47, kGenreBytes = 23;  // UTF-8 bytes, cut at a wh
 
 // What a new card gets, in the file's own format. Checked 2026-10-22 and again 2026-11-03.
 constexpr char kStarter[] =
-  "# S1-ADV Internet Radio stations, one per line: Genre | Name | http:// address | RU\n"
-  "# RU marks a Russian-language station for the L filter. Lines starting with # are notes.\n"
+  "# S1-ADV Internet Radio stations, one per line: Genre | Name | http:// address | country\n"
+  "# The country is a two-letter code like US or RU, which L steps through. Lines starting\n"
+  "# with # are notes.\n"
   "# Only plain http:// MP3 streams play. Find on the Cardputer adds stations here.\n"
-  "Jazz | Sonic Universe | http://ice2.somafm.com/sonicuniverse-128-mp3\n"
+  "Jazz | Sonic Universe | http://ice2.somafm.com/sonicuniverse-128-mp3 | US\n"
   "Jazz | Instrumental Jazz | http://jfm1.hostingradio.ru:14536/ijstream.mp3 | RU\n"
-  "Funk / Soul | Funky Radio | http://funkyradio.streamingmedia.it/play.mp3\n"
-  "Funk / Soul | Seven Inch Soul | http://ice2.somafm.com/7soul-128-mp3\n"
-  "Rock | Radio Paradise | http://stream.radioparadise.com/mp3-128\n"
-  "Rock | Indie Pop Rocks | http://ice2.somafm.com/indiepop-128-mp3\n"
+  "Funk / Soul | Funky Radio | http://funkyradio.streamingmedia.it/play.mp3 | IT\n"
+  "Funk / Soul | Seven Inch Soul | http://ice2.somafm.com/7soul-128-mp3 | US\n"
+  "Rock | Radio Paradise | http://stream.radioparadise.com/mp3-128 | US\n"
+  "Rock | Indie Pop Rocks | http://ice2.somafm.com/indiepop-128-mp3 | US\n"
   "Rock | Nashe Radio | http://nashe1.hostingradio.ru/nashe-128.mp3 | RU\n"
   "Rock | Rock FM | http://nashe1.hostingradio.ru/rock-128.mp3 | RU\n"
-  "Electro / House | Beat Blender | http://ice2.somafm.com/beatblender-128-mp3\n"
-  "Electro / House | DEF CON | http://ice2.somafm.com/defcon-128-mp3\n"
-  "Electro / House | cliqhop IDM | http://ice2.somafm.com/cliqhop-128-mp3\n"
-  "Chill | Groove Salad | http://ice2.somafm.com/groovesalad-128-mp3\n"
-  "Chill | Lush | http://ice2.somafm.com/lush-128-mp3\n"
+  "Electro / House | Beat Blender | http://ice2.somafm.com/beatblender-128-mp3 | US\n"
+  "Electro / House | DEF CON | http://ice2.somafm.com/defcon-128-mp3 | US\n"
+  "Electro / House | cliqhop IDM | http://ice2.somafm.com/cliqhop-128-mp3 | US\n"
+  "Chill | Groove Salad | http://ice2.somafm.com/groovesalad-128-mp3 | US\n"
+  "Chill | Lush | http://ice2.somafm.com/lush-128-mp3 | US\n"
   "Chill | 101.ru Chill Out | http://pub0201.101.ru/stream/trust/mp3/128/24 | RU\n"
-  "Lounge | Secret Agent | http://ice2.somafm.com/secretagent-128-mp3\n"
-  "Lounge | Illinois Lounge | http://ice2.somafm.com/illstreet-128-mp3\n"
+  "Lounge | Secret Agent | http://ice2.somafm.com/secretagent-128-mp3 | US\n"
+  "Lounge | Illinois Lounge | http://ice2.somafm.com/illstreet-128-mp3 | US\n"
   "Russian mix | Russkie Pesni | http://listen.rusongs.ru/ru-mp3-128 | RU\n"
   "Russian mix | Nashe Radio | http://nashe1.hostingradio.ru/nashe-128.mp3 | RU\n";
 
-inline const char* languageName(Language language) {
-  return language == Language::All ? "ALL" : language == Language::Russian ? "RU" : "EN/INT";
+// A built-in station's country, for a list made before stations had one: the card's file
+// keeps the stations as they were written, and only Russian ones were marked then.
+inline bool starterCountry(const char* url, char out[3]) {
+  const size_t n = strlen(url);
+  for (const char* p = strstr(kStarter, url); n && p; p = strstr(p + 1, url)) {
+    const char* end = p + n;
+    if (p > kStarter && p[-1] == ' ' && !strncmp(end, " | ", 3) && end[3] >= 'A' && end[3] <= 'Z' &&
+        end[4] >= 'A' && end[4] <= 'Z' && end[5] == '\n') {
+      out[0] = end[3]; out[1] = end[4]; out[2] = 0;
+      return true;
+    }
+  }
+  return false;
+}
+// Two letters, either case, as capitals. False for anything else.
+inline bool countryCode(const char* text, char out[3]) {
+  const char a = text ? text[0] : 0, b = a ? text[1] : 0;
+  const auto letter = [](char c) { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'); };
+  if (!letter(a) || !letter(b) || text[2]) return false;
+  out[0] = char(a & ~0x20); out[1] = char(b & ~0x20); out[2] = 0;
+  return true;
 }
 
 // ASCII letters only: enough for genre words, and never splits a UTF-8 letter.
@@ -74,7 +94,7 @@ struct Station {
   const char* name = "";
   const char* url = "";
   uint8_t genre = 0;
-  Language language = Language::International;
+  char country[3] = {};  // Two capitals, or empty when the line doesn't say.
   uint16_t line = 0;  // Line number in the file, from 1, so a removal can skip exactly it.
 };
 
@@ -182,7 +202,8 @@ class List {
     s.name = field[1];
     s.url = field[2];
     s.genre = uint8_t(genre);
-    s.language = fields == 4 && sameText(field[3], "RU") ? Language::Russian : Language::International;
+    s.country[0] = 0;
+    if (!(fields == 4 && countryCode(field[3], s.country))) starterCountry(s.url, s.country);
     s.line = number;
   }
 
@@ -197,7 +218,7 @@ class List {
 
 // One file line for a station, ending in a newline. A '|' or control character in a name
 // becomes a space, so a name can't add fields or lines. 0 when it doesn't fit or isn't valid.
-inline size_t formatLine(char* out, size_t room, const char* genre, const char* name, const char* url, Language language) {
+inline size_t formatLine(char* out, size_t room, const char* genre, const char* name, const char* url, const char* country) {
   internet_radio::detail::Url parsed;
   if (!out || !room || !internet_radio::detail::parseUrl(url, parsed)) return 0;
   size_t n = 0;
@@ -219,7 +240,8 @@ inline size_t formatLine(char* out, size_t room, const char* genre, const char* 
   text(name, kNameBytes);
   for (const char* s = " | "; *s; ++s) put(*s);
   for (const char* s = url; *s; ++s) put(*s);
-  if (language == Language::Russian) for (const char* s = " | RU"; *s; ++s) put(*s);
+  char code[3];
+  if (countryCode(country, code)) { for (const char* s = " | "; *s; ++s) put(*s); put(code[0]); put(code[1]); }
   put('\n');
   if (!ok) return 0;
   out[n] = 0;
@@ -279,9 +301,9 @@ struct Selection {
   const List* list = nullptr;
   uint8_t genre = 0;
   uint8_t index = 0;
-  Language language = Language::All;
+  char country[3] = {};  // The L filter: one country's stations, or empty for all of them.
   bool matches(const Station& station, uint8_t group) const {
-    return station.genre == group && (language == Language::All || language == station.language);
+    return station.genre == group && (!country[0] || !strcmp(country, station.country));
   }
   uint8_t count(uint8_t group) const {
     uint8_t n = 0;
@@ -311,16 +333,24 @@ struct Selection {
     const int n = count(genre);
     index = n ? static_cast<uint8_t>((int(index) + n + (delta < 0 ? -1 : 1)) % n) : 0;
   }
-  void nextLanguage() {
-    language = static_cast<Language>((static_cast<unsigned>(language) + 1) % 3);
+  // All, then each country the list has, in alphabetical order, then all again.
+  void nextCountry() {
+    const char* next = nullptr;
+    if (list) {
+      for (size_t i = 0; i < list->count(); ++i) {
+        const char* c = list->at(i).country;
+        if (c[0] && strcmp(c, country) > 0 && (!next || strcmp(c, next) < 0)) next = c;
+      }
+    }
+    if (next) memcpy(country, next, 3); else country[0] = 0;
     index = 0;
     if (!count(genre)) moveGenre(1);
   }
-  // Points at the list's station i, showing every language if the filter would hide it.
+  // Points at the list's station i, showing every country if the filter would hide it.
   bool select(int i) {
     if (!list || i < 0 || size_t(i) >= list->count()) return false;
     const Station& s = list->at(size_t(i));
-    if (language != Language::All && language != s.language) language = Language::All;
+    if (country[0] && strcmp(country, s.country)) country[0] = 0;
     genre = s.genre;
     index = 0;
     for (size_t j = 0; j < size_t(i); ++j) if (matches(list->at(j), genre)) ++index;
@@ -332,8 +362,8 @@ struct Selection {
     if (!genres) { genre = index = 0; return; }
     if (genre >= genres) genre = uint8_t(genres - 1);
     if (!count(genre)) moveGenre(1);
-    if (!count(genre) && language != Language::All) {
-      language = Language::All;
+    if (!count(genre) && country[0]) {
+      country[0] = 0;
       if (!count(genre)) moveGenre(1);
     }
     const uint8_t n = count(genre);

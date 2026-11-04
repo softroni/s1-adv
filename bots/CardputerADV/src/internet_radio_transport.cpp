@@ -405,7 +405,6 @@ void StationJson::startValue() {
     case Field::Url: dst_ = cur_.url; dstRoom_ = sizeof(cur_.url); break;
     case Field::Tags: dst_ = cur_.tags; dstRoom_ = sizeof(cur_.tags); break;
     case Field::Country: dst_ = cur_.country; dstRoom_ = sizeof(cur_.country); break;
-    case Field::Language: dst_ = language_; dstRoom_ = sizeof(language_); break;
     case Field::Codec: dst_ = codec_; dstRoom_ = sizeof(codec_); break;
     case Field::Logo: dst_ = cur_.logo; dstRoom_ = sizeof(cur_.logo); break;
     default: break;
@@ -442,15 +441,6 @@ void StationJson::endItem() {
   if (!n || urlTooLong_ || hls_ || count_ >= room_ || !parseUrl(cur_.url, url)) return;
   if (codec_[0] && strcasecmp(codec_, "MP3")) return;
   for (size_t i = 0; i < count_; ++i) if (!strcmp(out_[i].url, cur_.url)) return;
-  bool russian = false;
-  static const char kRussian[] = "russian";
-  for (size_t i = 0; !russian && language_[i]; ++i) {
-    size_t j = 0;
-    while (kRussian[j] && language_[i+j] && char(tolower(static_cast<unsigned char>(language_[i+j]))) == kRussian[j]) ++j;
-    russian = !kRussian[j];
-  }
-  if (!language_[0] && !strcmp(cur_.country, "RU")) russian = true;
-  cur_.russian = russian;
   out_[count_++] = cur_;
 }
 bool StationJson::feed(uint8_t c) {
@@ -464,7 +454,7 @@ bool StationJson::feed(uint8_t c) {
       if (space) return true;
       if (c == ']' && !expectItem_) { phase_ = Phase::Done; return true; }
       if (c != '{') return fail();
-      cur_ = Found{}; language_[0] = codec_[0] = 0; hls_ = urlTooLong_ = logoTooLong_ = expectKey_ = false;
+      cur_ = Found{}; codec_[0] = 0; hls_ = urlTooLong_ = logoTooLong_ = expectKey_ = false;
       phase_ = Phase::Key; return true;
     case Phase::AfterItem:
       if (space) return true;
@@ -484,7 +474,7 @@ bool StationJson::feed(uint8_t c) {
       key_[dstLen_] = 0; dst_ = nullptr;
       field_ = overflow_ ? Field::None : !strcmp(key_, "name") ? Field::Name : !strcmp(key_, "url_resolved") ? Field::Url :
         !strcmp(key_, "tags") ? Field::Tags : !strcmp(key_, "countrycode") ? Field::Country :
-        !strcmp(key_, "language") ? Field::Language : !strcmp(key_, "codec") ? Field::Codec :
+        !strcmp(key_, "codec") ? Field::Codec :
         !strcmp(key_, "bitrate") ? Field::Bitrate : !strcmp(key_, "hls") ? Field::Hls :
         !strcmp(key_, "favicon") ? Field::Logo : Field::None;
       phase_ = Phase::Colon; return true;

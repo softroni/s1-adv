@@ -48,7 +48,6 @@ struct Found {
   char logo[160];  // The directory's address for its logo, http or https, or empty.
   char country[3];
   uint16_t bitrate;
-  bool russian;
 };
 constexpr size_t kMaxFound = 20;
 // Searches by genre (the directory's tags) or by part of a name, for plain-HTTP MP3 stations
@@ -146,7 +145,7 @@ class StationJson {
   size_t count() const { return count_; }
  private:
   enum class Phase : uint8_t { Start, Item, AfterItem, Key, KeyText, Colon, Value, ValueText, Number, Word, Nested, AfterMember, Done, Bad };
-  enum class Field : uint8_t { None, Name, Url, Tags, Country, Language, Codec, Bitrate, Hls, Logo };
+  enum class Field : uint8_t { None, Name, Url, Tags, Country, Codec, Bitrate, Hls, Logo };
   bool fail() { phase_ = Phase::Bad; return false; }
   bool text(uint8_t c, bool& closed);
   void emit(uint32_t codepoint);
@@ -158,7 +157,7 @@ class StationJson {
   size_t room_, count_ = 0;
   Found cur_{};
   char key_[16]{};
-  char language_[32]{}, codec_[8]{};
+  char codec_[8]{};
   char* dst_ = nullptr;
   size_t dstRoom_ = 0, dstLen_ = 0;
   bool logos_ = false;

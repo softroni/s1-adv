@@ -92,9 +92,9 @@ struct{uint8_t minBatteryForUpdate=40;bool clockTwelveHour=true;}gDeviceSettings
 bool powerOk=true,installStarting=false;bool otaInstallStarting(){return installStarting;}
 namespace release_delivery{bool otaPowerAllowed(int,bool,int){return powerOk;}}
 namespace clock_display{void format(char*p,size_t n,int,int,bool){snprintf(p,n,"6:45");}}
-namespace radio_catalog{enum class Language{All,International,Russian};const char* languageName(Language){return "EN";}struct St{const char* name="WBGO Jazz 88.3 Newark";const char* url="http://wbgo.example/";Language language=Language::International;};}
+namespace radio_catalog{struct St{const char* name="WBGO Jazz 88.3 Newark";const char* url="http://wbgo.example/";char country[3]="US";};}
 namespace internet_radio{enum class State{Idle,Playing,Stopping};State state(){return State::Playing;}String status(){return "Playing 128 kbps";}bool searching(){return false;}uint16_t bitrate(){return 128;}}
-struct{int genre=0,index=2;radio_catalog::Language language=radio_catalog::Language::All;radio_catalog::St st;const radio_catalog::St* station(){return &st;}int count(int){return 14;}const char* genreName()const{return "Jazz & Blues";}}gRadioSelection;
+struct{int genre=0,index=2;char country[3]={};radio_catalog::St st;const radio_catalog::St* station(){return &st;}int count(int){return 14;}const char* genreName()const{return "Jazz & Blues";}}gRadioSelection;
 void radioMeterTick(bool){}uint16_t radioGenreInk(const char*){return 0xffff;}void drawRadioTile(int16_t,int16_t,const char*,const char*,bool,bool,const uint8_t*){}uint8_t* gRadioLogo=nullptr;uint32_t gRadioLogoFor=0;uint32_t radioHash(const char*){return 1;}bool radioStreaming(){return true;}
 void drawRadioControls(bool,uint16_t,uint16_t){}int radioWrap(const String&s,int w,String*out,int){out[0]=fitCurrentFontToWidth(s,w);return 1;}
 bool gRadioStartPending=false,gRadioRetryWaiting=false,gRadioWantPlaying=false;String gRadioNotice;bool radioBusy(){return true;}uint8_t gSpeakerVolume=170;
@@ -151,7 +151,7 @@ int main(){
  // The rest show their main facts in the bigger fonts.
  renderRadioPlayer();
  { auto starts=[](const char*p){for(const auto&t:gCanvas.printed)if(t.s.rfind(p,0)==0)return true;return false;};
-   assert(starts("WBGO Jazz")&&starts("Playing")&&shows("Jazz & Blues")&&shows("3 of 14   128 kbps")); }
+   assert(starts("WBGO Jazz")&&starts("Playing")&&shows("Jazz & Blues")&&shows("3 of 14   128 kbps   US")); }
  for(const auto&t:gCanvas.printed)if(t.s=="Jazz & Blues")assert(t.font==2);
  renderAlarmUi();assert(shows("Alarm")&&shows("06:30")&&shows("6:45 PM")&&shows("Daily alarm is on"));
  gAlarmEditBuffer="07";renderAlarmUi();assert(shows("07"));gAlarmEditBuffer="";
