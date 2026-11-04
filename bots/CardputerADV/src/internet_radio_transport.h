@@ -62,7 +62,7 @@ void clearFound();  // Frees the results. Does nothing while a search runs.
 
 // Station logos. The logo's address comes with a search, or is looked up in the directory: by
 // the stream's address, then by the station's name on the same website. A public image
-// service, wsrv.nl, shrinks it to a 60x60 JPEG and serves that over plain HTTP whatever the
+// service, wsrv.nl, shrinks it to a 96x96 JPEG and serves that over plain HTTP whatever the
 // logo's own format, so no HTTPS and no PNG decoder are needed here. The same single worker.
 enum class LogoResult : uint8_t { None, Found, Missing, Failed };
 constexpr size_t kLogoBytes = 16384;  // The largest JPEG kept. The service's are about 2 KB.

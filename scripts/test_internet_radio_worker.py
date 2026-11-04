@@ -154,7 +154,7 @@ int main(int argc,char**argv){
  requests.clear();replies={image};assert(internet_radio::startLogo(stream,"Groove Salad","https://radioparadise.com/apple-touch-icon.png"));
  assert(internet_radio::fetchingLogo()&&internet_radio::logoResult()==LogoResult::None&&!internet_radio::start("http://radio.example/stream"));
  execute();{size_t n=0;const uint8_t*p=internet_radio::logoJpeg(n);assert(internet_radio::logoResult()==LogoResult::Found&&p&&n==1700&&p[0]==0xAB);}
- assert(requests.size()==1&&requests[0].rfind("GET /?url=https://radioparadise.com/apple-touch-icon.png&w=60&h=60&fit=cover&output=jpg&q=85 ",0)==0);
+ assert(requests.size()==1&&requests[0].rfind("GET /?url=https://radioparadise.com/apple-touch-icon.png&w=96&h=96&fit=cover&output=jpg&q=85 ",0)==0);
  assert(requests[0].find("Host: wsrv.nl:80\r\n")!=npos&&requests[0].find("Accept: image/jpeg\r\n")!=npos&&requests[0].find("Icy-MetaData")==npos);
  internet_radio::clearLogo();{size_t n=1;assert(!internet_radio::logoJpeg(n)&&!n&&internet_radio::logoResult()==LogoResult::None);}
  // Not given: by the stream's address first.

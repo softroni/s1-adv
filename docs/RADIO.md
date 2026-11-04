@@ -44,8 +44,10 @@ While the station plays, the bars sit in a dark strip along the logo's bottom.
   station's name. A name only counts on the stream's own website, because names like Rock FM
   aren't unique.
 - [wsrv.nl](https://wsrv.nl), a free image service, shrinks the logo to the tile's size and
-  sends it as a small JPEG over plain HTTP, whatever format the logo was in. The radio decodes
-  it once and keeps it on the card in `/radio/logos/`, ready to draw.
+  sends it as a 96×96 JPEG over plain HTTP, whatever format the logo was in. The radio decodes
+  it once at that size for the visuals and at the tile's size, and keeps both on the card in
+  `/radio/logos/`, ready to draw. A logo fetched by 0.2.288 or earlier is only the tile's size,
+  so it's fetched once more; the tile shows it until then.
 - It only fetches while nothing is playing, after you've rested on a station for a second on
   the play screen, so browsing doesn't fetch one per station and a stream never waits for one.
   Pressing Enter stops a fetch at once.
@@ -59,7 +61,10 @@ While the station plays, the bars sit in a dark strip along the logo's bottom.
 
 Press **V** while it plays for a full-screen picture of the music, with the station above and
 the song below. **V** again changes the look, and its name shows next to the clock for a moment.
-**Esc** goes back. The first time you open them, a card in the middle shows these keys. Enter, the station keys and
+**I** shows the station's logo large on the left, with the look beside it, or hides it to give
+the look the whole width; a station with no logo shows its tile large instead. **Esc** goes back.
+The first time you open them, a card shows these keys. The look and the logo setting are kept
+on the card in `/radio/visuals.txt`. Enter, the station keys and
 the volume keys work there as they do on the play screen.
 
 | Look | What it shows |

@@ -236,8 +236,9 @@ static bool composed(char* out, size_t room, const char* head, const char* value
 bool logoImageUrl(char* out, size_t room, const char* logo) {
   if (!logo || !(startsWith(logo, "http://") || startsWith(logo, "https://"))) return false;
   for (const char* p = logo; *p; ++p) if (static_cast<unsigned char>(*p) <= ' ' || static_cast<unsigned char>(*p) >= 127) return false;
-  // Square, cropped to fill the tile; a JPEG, which needs only a small decoder.
-  return composed(out, room, "http://wsrv.nl/?url=", logo, "&w=60&h=60&fit=cover&output=jpg&q=85");
+  // Square and cropped, at the visuals' size; the tile's is drawn from it here. A JPEG, which
+  // needs only a small decoder.
+  return composed(out, room, "http://wsrv.nl/?url=", logo, "&w=96&h=96&fit=cover&output=jpg&q=85");
 }
 bool logoByStreamUrl(char* out, size_t room, const char* stream) {
   return stream && *stream && composed(out, room, "http://all.api.radio-browser.info/json/stations/byurl?url=", stream, "");
