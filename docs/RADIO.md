@@ -14,7 +14,7 @@ stations live in a text file on the SD card, and Find adds new ones from a publi
 | **-** and **+** | Volume down and up, 5% a press. The **=** key works for +, so Shift isn't needed |
 | **V** | Full-screen visuals, and V again for the next look |
 | **F** | Find stations |
-| **M** | Move this station to another genre, or a new one, or remove it |
+| **M** | Move this station to another genre or a new one, change its place in its genre, or remove it |
 | **Del** | Remove this station from your list |
 | **Esc** | Stop and go Home |
 
@@ -150,6 +150,12 @@ then **+ New genre** and **Remove from the list**. Pick a genre and press Enter 
 station there. **+ New genre** asks for a name; typing one you already have, in any case, joins
 that genre. A genre left with no stations goes. Only the station's own line changes, and it
 keeps its place in the file. **Esc** steps back.
+
+**Change its place**, in the same list when the genre has more than one station, shows the
+genre's stations in order, numbered, with this one highlighted. Up and Down move it past one
+station at a time, Enter keeps the new order, and Esc leaves it as it was. In the file, the
+genre's lines are put back in their own spots in the new order, so other genres' lines and
+your notes stay where they are.
 
 **Del** on a station asks first, and Y removes it. Only its own line goes: your notes and every
 other line stay exactly as you typed them.

@@ -2,7 +2,7 @@
 // text file on the SD card (radio_catalog.h says how it reads), and Find adds to it from
 // radio-browser.info, a public directory that needs no account and no bridge.
 namespace {
-enum class RadioView : uint8_t { Player, Find, Results, Remove, Visual, Move, NewGenre };
+enum class RadioView : uint8_t { Player, Find, Results, Remove, Visual, Move, NewGenre, Place };
 constexpr const char* kRadioDir = "/radio";
 constexpr const char* kRadioListPath = "/radio/stations.txt";
 constexpr const char* kRadioListNewPath = "/radio/stations.new";
@@ -73,8 +73,12 @@ String gRadioLogoQueuedUrl, gRadioLogoQueuedName, gRadioLogoQueuedLogo;  // From
 // Move and remove: the station they're for, taken when M or Del is pressed.
 uint16_t gRadioRemoveLine = 0;
 String gRadioRemoveName, gRadioRemoveUrl, gRadioRemoveGenre, gRadioRemoveCountry;
-int gRadioMoveSel = 0;  // A genre, then New genre, then Remove.
+int gRadioMoveSel = 0;  // A genre, then New genre, then Change its place, then Remove.
 String gRadioNewGenre;
+// Place: the genre's stations as list indices, in their file order (the slots) and in the order
+// being made, with where the moving one is now and was.
+uint8_t gRadioPlaceSlots[radio_catalog::kMaxStations], gRadioPlaceOrder[radio_catalog::kMaxStations];
+uint8_t gRadioPlaceCount = 0, gRadioPlaceAt = 0, gRadioPlaceFrom = 0;
 
 bool radioBusy() { return internet_radio::busy(); }
 // The worker plays, or is getting ready to: not a search or a logo, which also keep it busy.
@@ -93,7 +97,8 @@ bool radioTakesText() {
   return gUiMode == UiMode::Radio && (gRadioView == RadioView::Find || gRadioView == RadioView::NewGenre);
 }
 bool radioTakesArrows() {
-  return gUiMode == UiMode::Radio && (gRadioView == RadioView::Find || gRadioView == RadioView::Results || gRadioView == RadioView::Move);
+  return gUiMode == UiMode::Radio && (gRadioView == RadioView::Find || gRadioView == RadioView::Results ||
+                                      gRadioView == RadioView::Move || gRadioView == RadioView::Place);
 }
 void stopInternetRadio() {
   gRadioWantPlaying = false;
@@ -181,41 +186,50 @@ bool radioAppendLine(const char* line, size_t size) {
   file.close();
   return ok;
 }
-// Copies the file without one line, or with a new line in its place, so every note and
-// hand-typed station stays as it was and a moved station keeps its place in the file.
-bool radioRewriteLine(uint16_t line, const char* replacement = nullptr) {
+// Copies the file with some of its lines replaced, or left out where the replacement is empty,
+// so every note and hand-typed station stays as it was and a station keeps its place in the
+// file. lines go in ascending order, and each one has to be there.
+bool radioRewriteLines(const uint16_t* lines, const String* replacements, size_t count) {
   File in = SD.open(kRadioListPath, "r");
   if (!in) return false;
   SD.remove(kRadioListNewPath);
   File out = SD.open(kRadioListNewPath, FILE_WRITE);
   if (!out) { in.close(); return false; }
-  radio_catalog::LineSkipper skipper;
-  skipper.skip = line;
   uint8_t chunk[256], kept[256];
-  bool ok = true, replaced = !replacement;
+  size_t n = 0, next = 0;
+  uint16_t line = 1;
+  bool ok = true, start = true, skipping = false;
+  const auto flush = [&]() { if (n && out.write(kept, n) != n) ok = false; n = 0; };
   for (;;) {
     const size_t got = in.read(chunk, sizeof(chunk));
     if (!got) break;
-    size_t n = 0;
     for (size_t i = 0; i < got && ok; ++i) {
-      if (skipper.keep(chunk[i])) { kept[n++] = chunk[i]; continue; }
-      if (replaced) continue;
-      // The line's first byte: what's kept so far goes first, then the new line in its place.
-      const size_t size = strlen(replacement);
-      ok = (!n || out.write(kept, n) == n) && out.write(reinterpret_cast<const uint8_t*>(replacement), size) == size;
-      n = 0;
-      replaced = true;
+      if (start) {
+        start = false;
+        skipping = next < count && lines[next] == line;
+        if (skipping) {
+          flush();
+          const String& with = replacements[next++];
+          if (ok && with.length() && out.write(reinterpret_cast<const uint8_t*>(with.c_str()), with.length()) != with.length()) ok = false;
+        }
+      }
+      if (!skipping) { kept[n++] = chunk[i]; if (n == sizeof(kept)) flush(); }
+      if (chunk[i] == '\n') { ++line; start = true; }
     }
-    if (ok && n && out.write(kept, n) != n) ok = false;
     if (!ok) break;
   }
-  ok = ok && replaced;
+  flush();
+  ok = ok && next == count;
   in.close();
   out.close();
   if (!ok) { SD.remove(kRadioListNewPath); return false; }
   // The old file stays until the new one is whole, so a power cut loses at most this change.
   SD.remove(kRadioListPath);
   return SD.rename(kRadioListNewPath, kRadioListPath);
+}
+bool radioRewriteLine(uint16_t line, const char* replacement = nullptr) {
+  const String with = replacement ? replacement : "";
+  return radioRewriteLines(&line, &with, 1);
 }
 void radioReadLast() {
   gRadioLastUrl = "";
@@ -512,15 +526,82 @@ void radioMoveTo(String genre) {
   gRadioNoticeGood = true;
   radioInvalidate();
 }
+// The Move list: the genres, then New genre, then Change its place when the genre has more
+// than one station, then Remove.
+enum class RadioMoveRow : uint8_t { Genre, NewGenre, Place, Remove };
+int radioGenreSize(int genre) {
+  int n = 0;
+  if (gRadioList && genre >= 0) for (size_t i = 0; i < gRadioList->count(); ++i) if (int(gRadioList->at(i).genre) == genre) ++n;
+  return n;
+}
+bool radioCanPlace() { return gRadioList && radioGenreSize(gRadioList->findGenre(gRadioRemoveGenre.c_str())) > 1; }
+int radioMoveRows() { return int(gRadioList ? gRadioList->genres() : 0) + (radioCanPlace() ? 3 : 2); }
+RadioMoveRow radioMoveRowAt(int i) {
+  const int genres = int(gRadioList ? gRadioList->genres() : 0);
+  if (i < genres) return RadioMoveRow::Genre;
+  if (i == genres) return RadioMoveRow::NewGenre;
+  return radioCanPlace() && i == genres + 1 ? RadioMoveRow::Place : RadioMoveRow::Remove;
+}
+// Its genre's stations in their order, all of them whatever the country filter shows, since
+// the order is the file's.
+void radioAskPlace() {
+  const int genre = gRadioList->findGenre(gRadioRemoveGenre.c_str());
+  gRadioPlaceCount = 0;
+  for (size_t i = 0; i < gRadioList->count(); ++i) {
+    if (int(gRadioList->at(i).genre) != genre) continue;
+    if (gRadioList->at(i).line == gRadioRemoveLine) gRadioPlaceAt = gRadioPlaceFrom = gRadioPlaceCount;
+    gRadioPlaceSlots[gRadioPlaceCount] = gRadioPlaceOrder[gRadioPlaceCount] = uint8_t(i);
+    ++gRadioPlaceCount;
+  }
+  gRadioView = RadioView::Place;
+  gRadioNotice = "";
+}
+// The genre's lines stay in their own slots in the file, refilled in the new order.
+void radioSavePlace() {
+  gRadioView = RadioView::Player;
+  gRadioNoticeGood = false;
+  if (gRadioPlaceAt == gRadioPlaceFrom) { gRadioNotice = "Kept its place"; radioInvalidate(); return; }
+  std::vector<uint16_t> lines(gRadioPlaceCount);
+  std::vector<String> texts(gRadioPlaceCount);
+  char line[radio_catalog::kGenreBytes + radio_catalog::kNameBytes + internet_radio::detail::kUrlSize + 16];
+  const String genre = gRadioRemoveGenre;
+  for (uint8_t k = 0; k < gRadioPlaceCount; ++k) {
+    const auto& s = gRadioList->at(gRadioPlaceOrder[k]);
+    lines[k] = gRadioList->at(gRadioPlaceSlots[k]).line;
+    if (!radio_catalog::formatLine(line, sizeof(line), genre.c_str(), s.name, s.url, s.country)) { gRadioNotice = "Couldn't change the SD card"; radioInvalidate(); return; }
+    texts[k] = line;
+  }
+  const uint16_t now = lines[gRadioPlaceAt];
+  if (!radioRewriteLines(lines.data(), texts.data(), lines.size())) { gRadioNotice = "Couldn't change the SD card"; radioInvalidate(); return; }
+  radioLoadList();
+  gRadioSelection.select(gRadioList ? gRadioList->findLine(now) : -1);
+  gRadioNotice = "Now " + String(gRadioPlaceAt + 1) + " of " + String(gRadioPlaceCount) + " in " + genre;
+  gRadioNoticeGood = true;
+  radioInvalidate();
+}
+bool radioPlaceKey(char key, const Keyboard_Class::KeysState& keys) {
+  const char lower = static_cast<char>(tolower(static_cast<unsigned char>(key)));
+  const bool up = key == char(1) || key == char(3) || key == ';' || key == ',' || lower == 'w';
+  const bool down = key == char(2) || key == char(4) || key == '.' || key == '/' || lower == 's';
+  // It moves past one neighbour a press, and stops at either end rather than wrapping round.
+  if (up && gRadioPlaceAt > 0) { std::swap(gRadioPlaceOrder[gRadioPlaceAt], gRadioPlaceOrder[gRadioPlaceAt - 1]); --gRadioPlaceAt; }
+  else if (down && gRadioPlaceAt + 1 < gRadioPlaceCount) { std::swap(gRadioPlaceOrder[gRadioPlaceAt], gRadioPlaceOrder[gRadioPlaceAt + 1]); ++gRadioPlaceAt; }
+  else if (keys.enter || key == '\n' || key == '\r') radioSavePlace();
+  radioInvalidate();
+  return true;
+}
 bool radioMoveKey(char key, const Keyboard_Class::KeysState& keys) {
-  const int rows = int(gRadioList ? gRadioList->genres() : 0) + 2;
+  const int rows = radioMoveRows();
   const char lower = static_cast<char>(tolower(static_cast<unsigned char>(key)));
   if (key == char(1) || key == char(3) || key == ';' || key == ',' || lower == 'w') gRadioMoveSel = (gRadioMoveSel + rows - 1) % rows;
   else if (key == char(2) || key == char(4) || key == '.' || key == '/' || lower == 's') gRadioMoveSel = (gRadioMoveSel + 1) % rows;
   else if (keys.enter || key == '\n' || key == '\r') {
-    if (gRadioMoveSel < rows - 2) radioMoveTo(gRadioList->genre(size_t(gRadioMoveSel)));
-    else if (gRadioMoveSel == rows - 2) { gRadioView = RadioView::NewGenre; gRadioNewGenre = ""; gRadioNotice = ""; }
-    else gRadioView = RadioView::Remove;
+    switch (radioMoveRowAt(gRadioMoveSel)) {
+      case RadioMoveRow::Genre: radioMoveTo(gRadioList->genre(size_t(gRadioMoveSel))); break;
+      case RadioMoveRow::NewGenre: gRadioView = RadioView::NewGenre; gRadioNewGenre = ""; gRadioNotice = ""; break;
+      case RadioMoveRow::Place: radioAskPlace(); break;
+      case RadioMoveRow::Remove: gRadioView = RadioView::Remove; break;
+    }
   }
   radioInvalidate();
   return true;
@@ -565,6 +646,11 @@ bool radioEscape() {
     case RadioView::NewGenre:
       gRadioView = RadioView::Move;
       gRadioNotice = "";
+      break;
+    case RadioView::Place:
+      gRadioView = RadioView::Player;
+      gRadioNotice = "Kept its place";
+      gRadioNoticeGood = false;
       break;
     default:
       return false;
@@ -794,6 +880,7 @@ bool handleInternetRadioKey(char key, const Keyboard_Class::KeysState& keys) {
   if (gRadioView == RadioView::Results) return radioResultsKey(key, keys);
   if (gRadioView == RadioView::Move) return radioMoveKey(key, keys);
   if (gRadioView == RadioView::NewGenre) return radioNewGenreKey(key, keys);
+  if (gRadioView == RadioView::Place) return radioPlaceKey(key, keys);
   if (gRadioView == RadioView::Remove) {
     if (key == 'y' || key == 'Y') radioRemove();
     else { gRadioView = RadioView::Player; gRadioNotice = "Kept " + gRadioRemoveName; radioInvalidate(); }
@@ -1199,23 +1286,36 @@ String radioAsciiOr(const String& text, const char* otherwise) {
 // The genres to move to, in their colours, the current one marked, then New genre and Remove.
 void renderRadioMove() {
   const uint16_t cyan = rgb565_local(47,227,255), muted = rgb565_local(182,219,255), amber = rgb565_local(255,136,64);
-  const int genres = int(gRadioList ? gRadioList->genres() : 0), rows = genres + 2;
+  const int rows = radioMoveRows();
   // No counter: the scrollbar shows where it is, and the keys need the room.
   drawBigHeader("Move", cyan, "", radioAsciiOr(gRadioRemoveName, "This station"), "Enter choose  Esc back");
   const int first = bigListFirstRow(gRadioMoveSel, rows);
   for (int row = 0; row < kBigVisibleRows && first + row < rows; ++row) {
     const int i = first + row;
-    if (i < genres) {
-      const char* genre = gRadioList->genre(size_t(i));
-      const bool now = radio_catalog::sameText(genre, gRadioRemoveGenre.c_str());
-      drawBigRow(row, genre, now ? "now" : "", i == gRadioMoveSel, cyan, radioGenreInk(genre), muted);
-    } else if (i == genres) {
-      drawBigRow(row, "+ New genre", "", i == gRadioMoveSel, cyan, cyan, muted);
-    } else {
-      drawBigRow(row, "Remove from the list", "", i == gRadioMoveSel, amber, amber, muted);
+    switch (radioMoveRowAt(i)) {
+      case RadioMoveRow::Genre: {
+        const char* genre = gRadioList->genre(size_t(i));
+        const bool now = radio_catalog::sameText(genre, gRadioRemoveGenre.c_str());
+        drawBigRow(row, genre, now ? "now" : "", i == gRadioMoveSel, cyan, radioGenreInk(genre), muted);
+        break;
+      }
+      case RadioMoveRow::NewGenre: drawBigRow(row, "+ New genre", "", i == gRadioMoveSel, cyan, cyan, muted); break;
+      case RadioMoveRow::Place: drawBigRow(row, "Change its place", "", i == gRadioMoveSel, cyan, cyan, muted); break;
+      case RadioMoveRow::Remove: drawBigRow(row, "Remove from the list", "", i == gRadioMoveSel, amber, amber, muted); break;
     }
   }
   drawBigScrollbar(first, rows, cyan);
+}
+// The genre's stations in order, numbered, the moving one highlighted where it is now.
+void renderRadioPlace() {
+  const uint16_t cyan = rgb565_local(47,227,255), white = TFT_WHITE, muted = rgb565_local(182,219,255);
+  drawBigHeader("Place", cyan, "", "Up/Down moves it", "Enter keeps  Esc undoes");
+  const int first = bigListFirstRow(gRadioPlaceAt, gRadioPlaceCount);
+  for (int row = 0; row < kBigVisibleRows && first + row < gRadioPlaceCount; ++row) {
+    const int k = first + row;
+    drawBigRow(row, gRadioList->at(gRadioPlaceOrder[k]).name, String(k + 1), k == gRadioPlaceAt, cyan, white, muted);
+  }
+  drawBigScrollbar(first, gRadioPlaceCount, cyan);
 }
 void renderRadioNewGenre() {
   auto& d = gCanvas;
@@ -1421,6 +1521,7 @@ void renderInternetRadioUi() {
     case RadioView::Remove: renderRadioRemove(); break;
     case RadioView::Move: renderRadioMove(); break;
     case RadioView::NewGenre: renderRadioNewGenre(); break;
+    case RadioView::Place: renderRadioPlace(); break;
     default: renderRadioPlayer(); break;
   }
   renderLauncherOverlay(); renderDebugOverlay();

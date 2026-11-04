@@ -503,7 +503,7 @@ int main(){
  reopen();assert(gRadioList->count()==3&&gRadioList->genres()==2);
  gRadioSelection.select(1);key('m');assert(gRadioView==RadioView::Move&&gRadioMoveSel==1&&radioTakesArrows()&&!radioTakesText());
  render();assert(shows("News")&&shows("Other")&&shows("now")&&shows("+ New genre")&&showsPart("Remove"));
- key(';');assert(gRadioMoveSel==0);key(char(1));assert(gRadioMoveSel==3);key(char(2));key('\n');
+ key(';');assert(gRadioMoveSel==0);key(char(1));assert(gRadioMoveSel==radioMoveRows()-1);key(char(2));key('\n');
  assert(gRadioView==RadioView::Player&&gRadioNotice=="Moved to News"&&gRadioNoticeGood);
  assert(disk[kList]=="# mine\nNews | BBC | http://bbc.example/ | GB\nNews | Talk One | http://t1.example/ | US\nOther | Talk Two | http://t2.example/\n# end\n");
  assert(std::string(gRadioSelection.station()->name)=="Talk One"&&std::string(gRadioSelection.genreName())=="News");
@@ -522,7 +522,7 @@ int main(){
  // Esc steps back: from the name to the list, from the list to the player. Remove asks first.
  key('m');gRadioMoveSel=1;key('\n');assert(gRadioView==RadioView::NewGenre);assert(radioEscape()&&gRadioView==RadioView::Move);
  assert(radioEscape()&&gRadioView==RadioView::Player);
- key('m');gRadioMoveSel=2;key('\n');assert(gRadioView==RadioView::Remove);render();assert(shows("Remove station?"));key('n');assert(gRadioView==RadioView::Player);
+ key('m');gRadioMoveSel=radioMoveRows()-1;key('\n');assert(gRadioView==RadioView::Remove);render();assert(shows("Remove station?"));key('n');assert(gRadioView==RadioView::Player);
  // The same address twice: the one chosen is the one moved and shown.
  disk[kList]=kStarter;reopen();gRadioSelection.select(17);
  { const uint16_t line=gRadioList->at(17).line;key('m');gRadioMoveSel=gRadioList->findGenre("Jazz");key('\n');
@@ -536,6 +536,30 @@ int main(){
    const std::string before=disk[kList];gRadioSelection.select(0);key('m');gRadioMoveSel=2;writeFails=true;key('\n');writeFails=false;
    assert(gRadioNotice=="Couldn't change the SD card"&&disk[kList]==before&&!disk.count("/radio/stations.new")); }
  gSdReady=false;reopen();key('m');assert(gRadioView==RadioView::Player&&gRadioNotice=="No SD card: built-in stations");gSdReady=true;
+ // A station's place in its genre. Its genre's lines keep their slots in the file, between the
+ // other genre's and the notes, refilled in the new order; nothing else changes.
+ disk[kList]="# n\nJazz | A | http://a.example/ | US\nRock | R | http://r.example/\nJazz | B | http://b.example/\n# mid\nJazz | C | http://c.example/ | GB\n";
+ reopen();gRadioSelection.select(gRadioList->find("http://c.example/"));key('m');assert(radioMoveRows()==5&&radioMoveRowAt(3)==RadioMoveRow::Place);
+ render();assert(showsPart("Change its"));gRadioMoveSel=3;key('\n');assert(gRadioView==RadioView::Place&&gRadioPlaceAt==2&&gRadioPlaceCount==3&&radioTakesArrows());
+ render();assert(shows("A")&&shows("B")&&shows("C")&&shows("3"));
+ key(';');assert(gRadioPlaceAt==1);key(char(1));assert(gRadioPlaceAt==0);key(char(1));key('w');assert(gRadioPlaceAt==0);  // No wrapping round.
+ key('\n');assert(gRadioView==RadioView::Player&&gRadioNotice=="Now 1 of 3 in Jazz"&&gRadioNoticeGood);
+ assert(disk[kList]=="# n\nJazz | C | http://c.example/ | GB\nRock | R | http://r.example/\nJazz | A | http://a.example/ | US\n# mid\nJazz | B | http://b.example/\n");
+ assert(std::string(gRadioSelection.station()->name)=="C"&&gRadioSelection.index==0);
+ // Down, to the end and no further; Esc and an unchanged Enter keep the order.
+ key('m');gRadioMoveSel=3;key('\n');key('.');key(char(2));key(char(4));assert(gRadioPlaceAt==2);
+ { const std::string before=disk[kList];assert(radioEscape()&&gRadioView==RadioView::Player&&gRadioNotice=="Kept its place"&&disk[kList]==before);
+   key('m');gRadioMoveSel=3;key('\n');key('\n');assert(gRadioNotice=="Kept its place"&&disk[kList]==before);
+   key('m');gRadioMoveSel=3;key('\n');key('s');writeFails=true;key('\n');writeFails=false;
+   assert(gRadioNotice=="Couldn't change the SD card"&&disk[kList]==before&&!disk.count("/radio/stations.new")); }
+ key('m');gRadioMoveSel=3;key('\n');key('s');key('\n');assert(gRadioNotice=="Now 2 of 3 in Jazz");
+ assert(disk[kList]=="# n\nJazz | A | http://a.example/ | US\nRock | R | http://r.example/\nJazz | C | http://c.example/ | GB\n# mid\nJazz | B | http://b.example/\n");
+ // A genre of one has no place to change: the row isn't there.
+ gRadioSelection.select(gRadioList->find("http://r.example/"));key('m');assert(radioMoveRows()==4&&radioMoveRowAt(3)==RadioMoveRow::Remove);
+ render();assert(!showsPart("Change its"));radioEscape();
+ // The country filter doesn't hide any of the genre's stations from the order.
+ memcpy(gRadioSelection.country,"GB",3);gRadioSelection.fit();key('m');gRadioMoveSel=int(gRadioList->genres())+1;key('\n');assert(gRadioView==RadioView::Place&&gRadioPlaceCount==3);
+ radioEscape();gRadioSelection.country[0]=0;
  disk[kList]=kStarter;reopen();
  // Every reachable view fits on screen, with long names, Cyrillic, and every state.
  internet_radio::song="Очень длинное название песни, которое не помещается на экране - Исполнитель";
@@ -555,6 +579,8 @@ int main(){
  gRadioView=RadioView::Remove;gRadioRemoveName="Радио с очень длинным названием станции";gRadioRemoveGenre="Русская музыка и песни";gRadioRemoveUrl="http://example.org/"+std::string(200,'a');render();
  gRadioView=RadioView::Move;for(int sel=0;sel<int(gRadioList->genres())+2;++sel){gRadioMoveSel=sel;render();}
  gRadioView=RadioView::NewGenre;for(const std::string& g:{std::string(),std::string("Podcasts"),std::string(23,'W')}){gRadioNewGenre=g;render();}
+ gRadioSelection.select(0);gRadioRemoveGenre=gRadioSelection.genreName();gRadioRemoveLine=gRadioList->at(0).line;radioAskPlace();
+ for(uint8_t at=0;at<gRadioPlaceCount;++at){gRadioPlaceAt=at;render();}
  gRadioView=RadioView::Player;
  puts("PASS radio: stations file on the card (made, kept, recovered, limits), Find by genre or name, results that scroll, saving under the right genre, removing a line, reconnecting after a drop, the last station, resource guards and screens that fit");
 }
