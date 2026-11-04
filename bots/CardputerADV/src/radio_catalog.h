@@ -159,6 +159,10 @@ class List {
     for (size_t i = 0; i < count_; ++i) if (!strcmp(stations_[i].url, url)) return int(i);
     return -1;
   }
+  int findLine(uint16_t line) const {
+    for (size_t i = 0; i < count_; ++i) if (stations_[i].line == line) return int(i);
+    return -1;
+  }
   int findGenre(const char* name) const {
     for (size_t i = 0; i < genreCount_; ++i) if (sameText(genres_[i], name)) return int(i);
     return -1;

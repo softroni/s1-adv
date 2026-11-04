@@ -2,7 +2,7 @@
 // text file on the SD card (radio_catalog.h says how it reads), and Find adds to it from
 // radio-browser.info, a public directory that needs no account and no bridge.
 namespace {
-enum class RadioView : uint8_t { Player, Find, Results, Remove, Visual };
+enum class RadioView : uint8_t { Player, Find, Results, Remove, Visual, Move, NewGenre };
 constexpr const char* kRadioDir = "/radio";
 constexpr const char* kRadioListPath = "/radio/stations.txt";
 constexpr const char* kRadioListNewPath = "/radio/stations.new";
@@ -62,9 +62,11 @@ uint32_t gRadioRestSinceMs = 0;          // When the selection last changed.
 uint32_t gRadioLogoTried[16] = {};       // Failed this session, so not tried again until next.
 uint8_t gRadioLogoTriedCount = 0;
 String gRadioLogoQueuedUrl, gRadioLogoQueuedName, gRadioLogoQueuedLogo;  // From a save.
-// Remove.
+// Move and remove: the station they're for, taken when M or Del is pressed.
 uint16_t gRadioRemoveLine = 0;
-String gRadioRemoveName, gRadioRemoveUrl, gRadioRemoveGenre;
+String gRadioRemoveName, gRadioRemoveUrl, gRadioRemoveGenre, gRadioRemoveCountry;
+int gRadioMoveSel = 0;  // A genre, then New genre, then Remove.
+String gRadioNewGenre;
 
 bool radioBusy() { return internet_radio::busy(); }
 // The worker plays, or is getting ready to: not a search or a logo, which also keep it busy.
@@ -79,9 +81,11 @@ void radioStepVolume(int direction) {
   adjustSpeakerVolume(target == int(gSpeakerVolume) ? direction : target - int(gSpeakerVolume));
 }
 void radioInvalidate() { gLastRenderMs = 0; gUiFramePolicy.invalidate(); }
-bool radioTakesText() { return gUiMode == UiMode::Radio && gRadioView == RadioView::Find; }
+bool radioTakesText() {
+  return gUiMode == UiMode::Radio && (gRadioView == RadioView::Find || gRadioView == RadioView::NewGenre);
+}
 bool radioTakesArrows() {
-  return gUiMode == UiMode::Radio && (gRadioView == RadioView::Find || gRadioView == RadioView::Results);
+  return gUiMode == UiMode::Radio && (gRadioView == RadioView::Find || gRadioView == RadioView::Results || gRadioView == RadioView::Move);
 }
 void stopInternetRadio() {
   gRadioWantPlaying = false;
@@ -169,8 +173,9 @@ bool radioAppendLine(const char* line, size_t size) {
   file.close();
   return ok;
 }
-// Copies the file without one line, so every note and hand-typed station stays as it was.
-bool radioRewriteWithout(uint16_t line) {
+// Copies the file without one line, or with a new line in its place, so every note and
+// hand-typed station stays as it was and a moved station keeps its place in the file.
+bool radioRewriteLine(uint16_t line, const char* replacement = nullptr) {
   File in = SD.open(kRadioListPath, "r");
   if (!in) return false;
   SD.remove(kRadioListNewPath);
@@ -179,14 +184,24 @@ bool radioRewriteWithout(uint16_t line) {
   radio_catalog::LineSkipper skipper;
   skipper.skip = line;
   uint8_t chunk[256], kept[256];
-  bool ok = true;
+  bool ok = true, replaced = !replacement;
   for (;;) {
     const size_t got = in.read(chunk, sizeof(chunk));
     if (!got) break;
     size_t n = 0;
-    for (size_t i = 0; i < got; ++i) if (skipper.keep(chunk[i])) kept[n++] = chunk[i];
-    if (n && out.write(kept, n) != n) { ok = false; break; }
+    for (size_t i = 0; i < got && ok; ++i) {
+      if (skipper.keep(chunk[i])) { kept[n++] = chunk[i]; continue; }
+      if (replaced) continue;
+      // The line's first byte: what's kept so far goes first, then the new line in its place.
+      const size_t size = strlen(replacement);
+      ok = (!n || out.write(kept, n) == n) && out.write(reinterpret_cast<const uint8_t*>(replacement), size) == size;
+      n = 0;
+      replaced = true;
+    }
+    if (ok && n && out.write(kept, n) != n) ok = false;
+    if (!ok) break;
   }
+  ok = ok && replaced;
   in.close();
   out.close();
   if (!ok) { SD.remove(kRadioListNewPath); return false; }
@@ -416,13 +431,82 @@ void radioAskRemove() {
   gRadioRemoveName = station->name;
   gRadioRemoveUrl = station->url;
   gRadioRemoveGenre = gRadioSelection.genreName();
+  gRadioRemoveCountry = station->country;
   gRadioView = RadioView::Remove;
   radioInvalidate();
+}
+// --- Moving -------------------------------------------------------------------------------
+// M: the list of genres to move the station to, then New genre, then Remove.
+void radioAskMove() {
+  radioAskRemove();  // The same checks, and it takes the same station.
+  if (gRadioView != RadioView::Remove) return;
+  gRadioView = RadioView::Move;
+  gRadioMoveSel = max(0, gRadioList->findGenre(gRadioRemoveGenre.c_str()));
+  radioInvalidate();
+}
+void radioMoveTo(String genre) {
+  genre.trim();
+  gRadioNoticeGood = false;
+  if (genre.isEmpty()) { gRadioNotice = "Type the new genre's name"; radioInvalidate(); return; }
+  const int existing = gRadioList->findGenre(genre.c_str());
+  const String target = existing >= 0 ? String(gRadioList->genre(size_t(existing))) : genre;  // Its spelling, if there's one.
+  gRadioView = RadioView::Player;
+  if (existing >= 0 && radio_catalog::sameText(target.c_str(), gRadioRemoveGenre.c_str())) {
+    gRadioNotice = "Already in " + target;
+    radioInvalidate();
+    return;
+  }
+  // A new genre has to fit, unless this was its old genre's only station.
+  int left = 0;
+  const int from = gRadioList->findGenre(gRadioRemoveGenre.c_str());
+  for (size_t i = 0; i < gRadioList->count(); ++i) if (int(gRadioList->at(i).genre) == from) ++left;
+  if (existing < 0 && gRadioList->genres() >= radio_catalog::kMaxGenres && left > 1) {
+    gRadioNotice = "Too many genres: 24 at most";
+    radioInvalidate();
+    return;
+  }
+  char line[radio_catalog::kGenreBytes + radio_catalog::kNameBytes + internet_radio::detail::kUrlSize + 16];
+  if (!radio_catalog::formatLine(line, sizeof(line), target.c_str(), gRadioRemoveName.c_str(), gRadioRemoveUrl.c_str(), gRadioRemoveCountry.c_str()) ||
+      !radioRewriteLine(gRadioRemoveLine, line)) {
+    gRadioNotice = "Couldn't change the SD card";
+    radioInvalidate();
+    return;
+  }
+  radioLoadList();
+  // By its line, which a move keeps: an address can be in the list twice.
+  gRadioSelection.select(gRadioList ? gRadioList->findLine(gRadioRemoveLine) : -1);
+  char shown[radio_catalog::kGenreBytes + 1];
+  const String moved = gRadioSelection.station() ? String(gRadioSelection.genreName()) : target;
+  snprintf(shown, sizeof(shown), "%s", moved.c_str());
+  gRadioNotice = String("Moved to ") + shown;
+  gRadioNoticeGood = true;
+  radioInvalidate();
+}
+bool radioMoveKey(char key, const Keyboard_Class::KeysState& keys) {
+  const int rows = int(gRadioList ? gRadioList->genres() : 0) + 2;
+  const char lower = static_cast<char>(tolower(static_cast<unsigned char>(key)));
+  if (key == char(1) || key == char(3) || key == ';' || key == ',' || lower == 'w') gRadioMoveSel = (gRadioMoveSel + rows - 1) % rows;
+  else if (key == char(2) || key == char(4) || key == '.' || key == '/' || lower == 's') gRadioMoveSel = (gRadioMoveSel + 1) % rows;
+  else if (keys.enter || key == '\n' || key == '\r') {
+    if (gRadioMoveSel < rows - 2) radioMoveTo(gRadioList->genre(size_t(gRadioMoveSel)));
+    else if (gRadioMoveSel == rows - 2) { gRadioView = RadioView::NewGenre; gRadioNewGenre = ""; gRadioNotice = ""; }
+    else gRadioView = RadioView::Remove;
+  }
+  radioInvalidate();
+  return true;
+}
+// Every key types here, as in Find: a genre can be called anything.
+bool radioNewGenreKey(char key, const Keyboard_Class::KeysState& keys) {
+  if (key == '\b') { if (!gRadioNewGenre.isEmpty()) gRadioNewGenre.remove(gRadioNewGenre.length() - 1); }
+  else if (keys.enter || key == '\n' || key == '\r') radioMoveTo(gRadioNewGenre);
+  else if (key >= ' ' && key < 127 && key != '|' && gRadioNewGenre.length() < radio_catalog::kGenreBytes) gRadioNewGenre += key;
+  radioInvalidate();
+  return true;
 }
 void radioRemove() {
   gRadioView = RadioView::Player;
   if (radioPlayingUrl(gRadioRemoveUrl.c_str())) stopInternetRadio();
-  if (!radioRewriteWithout(gRadioRemoveLine)) { gRadioNotice = "Couldn't change the SD card"; radioInvalidate(); return; }
+  if (!radioRewriteLine(gRadioRemoveLine)) { gRadioNotice = "Couldn't change the SD card"; radioInvalidate(); return; }
   radioLoadList();
   gRadioNotice = "Removed " + gRadioRemoveName;
   radioInvalidate();
@@ -443,6 +527,14 @@ bool radioEscape() {
       break;
     case RadioView::Visual:
       gRadioView = RadioView::Player;
+      break;
+    case RadioView::Move:
+      gRadioView = RadioView::Player;
+      gRadioNotice = "";
+      break;
+    case RadioView::NewGenre:
+      gRadioView = RadioView::Move;
+      gRadioNotice = "";
       break;
     default:
       return false;
@@ -639,6 +731,8 @@ bool handleInternetRadioKey(char key, const Keyboard_Class::KeysState& keys) {
   if (keys.ctrl || keys.alt || keys.opt) return true;
   if (gRadioView == RadioView::Find) return radioFindKey(key, keys);
   if (gRadioView == RadioView::Results) return radioResultsKey(key, keys);
+  if (gRadioView == RadioView::Move) return radioMoveKey(key, keys);
+  if (gRadioView == RadioView::NewGenre) return radioNewGenreKey(key, keys);
   if (gRadioView == RadioView::Remove) {
     if (key == 'y' || key == 'Y') radioRemove();
     else { gRadioView = RadioView::Player; gRadioNotice = "Kept " + gRadioRemoveName; radioInvalidate(); }
@@ -669,6 +763,7 @@ bool handleInternetRadioKey(char key, const Keyboard_Class::KeysState& keys) {
   else if (lower == 'l') { gRadioSelection.nextCountry(); radioRetune(); }
   else if (lower == 'f') { gRadioView = RadioView::Find; gRadioNotice = ""; radioInvalidate(); }
   else if (key == '\b') radioAskRemove();
+  else if (lower == 'm') radioAskMove();
   else if (key == '-' || key == '_') { radioStepVolume(-1); radioInvalidate(); }
   else if (key == '+' || key == '=') { radioStepVolume(1); radioInvalidate(); }
   else if (keys.enter || key == '\r' || key == '\n' || key == ' ') {
@@ -930,7 +1025,7 @@ void renderRadioPlayer() {
   // The rest of the keys, quieter than the buttons' own.
   d.setFont(&fonts::Font0);
   d.setTextColor(rgb565_local(110,150,180));
-  const char* keys = "F find  V visuals  L country  Del remove";
+  const char* keys = "F find  V visuals  L country  M move";
   d.setCursor(120 - d.textWidth(keys) / 2, 126);
   d.print(keys);
   d.setFont(&fonts::Font2);
@@ -1024,6 +1119,55 @@ void renderRadioResults() {
     const bool good = radioStreaming() || gRadioNoticeGood;
     drawBigNotice(radioFit(text, kBigRight - kBigLeft), good ? green : amber);
   }
+}
+// The header's small font has ASCII only, so a name in another script stays out of it.
+String radioAsciiOr(const String& text, const char* otherwise) {
+  for (size_t i = 0; i < text.length(); ++i) if (static_cast<uint8_t>(text[i]) >= 0x80) return otherwise;
+  return text;
+}
+// The genres to move to, in their colours, the current one marked, then New genre and Remove.
+void renderRadioMove() {
+  const uint16_t cyan = rgb565_local(47,227,255), muted = rgb565_local(182,219,255), amber = rgb565_local(255,136,64);
+  const int genres = int(gRadioList ? gRadioList->genres() : 0), rows = genres + 2;
+  // No counter: the scrollbar shows where it is, and the keys need the room.
+  drawBigHeader("Move", cyan, "", radioAsciiOr(gRadioRemoveName, "This station"), "Enter choose  Esc back");
+  const int first = bigListFirstRow(gRadioMoveSel, rows);
+  for (int row = 0; row < kBigVisibleRows && first + row < rows; ++row) {
+    const int i = first + row;
+    if (i < genres) {
+      const char* genre = gRadioList->genre(size_t(i));
+      const bool now = radio_catalog::sameText(genre, gRadioRemoveGenre.c_str());
+      drawBigRow(row, genre, now ? "now" : "", i == gRadioMoveSel, cyan, radioGenreInk(genre), muted);
+    } else if (i == genres) {
+      drawBigRow(row, "+ New genre", "", i == gRadioMoveSel, cyan, cyan, muted);
+    } else {
+      drawBigRow(row, "Remove from the list", "", i == gRadioMoveSel, amber, amber, muted);
+    }
+  }
+  drawBigScrollbar(first, rows, cyan);
+}
+void renderRadioNewGenre() {
+  auto& d = gCanvas;
+  const uint16_t cyan = rgb565_local(47,227,255), white = TFT_WHITE, muted = rgb565_local(182,219,255);
+  const uint16_t amber = rgb565_local(255,136,64);
+  drawBigHeader("New genre", cyan, "", radioAsciiOr(gRadioRemoveName, ""));
+  d.setFont(&fonts::Font2);
+  d.fillRoundRect(8, 34, 222, 22, 5, TFT_BLACK);
+  d.drawRoundRect(8, 34, 222, 22, 5, cyan);
+  String shown = gRadioNewGenre + "_";
+  while (shown.length() > 1 && d.textWidth(shown) > 210) shown.remove(0, 1);
+  d.setTextColor(white); d.setCursor(14, 37); d.print(shown);
+  if (gRadioNewGenre.isEmpty()) {
+    const int16_t x = 14 + d.textWidth(shown) + 4;
+    d.setTextColor(muted); d.setCursor(x, 37); d.print(radioFit("like News or Podcasts", 222 - x));
+  }
+  d.setTextColor(gRadioNotice.isEmpty() ? muted : amber);
+  d.setCursor(8, 66);
+  d.print(radioFit(gRadioNotice.isEmpty() ? String("A name you have joins it") : gRadioNotice, 222));
+  d.setFont(&fonts::Font0);
+  d.setTextColor(muted);
+  d.setCursor(8, 120); d.print("Enter move  Esc back");
+  d.setFont(&fonts::Font2);
 }
 void renderRadioRemove() {
   auto& d = gCanvas;
@@ -1161,6 +1305,8 @@ void renderInternetRadioUi() {
     case RadioView::Find: renderRadioFind(); break;
     case RadioView::Results: renderRadioResults(); break;
     case RadioView::Remove: renderRadioRemove(); break;
+    case RadioView::Move: renderRadioMove(); break;
+    case RadioView::NewGenre: renderRadioNewGenre(); break;
     default: renderRadioPlayer(); break;
   }
   renderLauncherOverlay(); renderDebugOverlay();

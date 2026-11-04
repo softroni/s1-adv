@@ -471,6 +471,46 @@ int main(){
  gSdReady=false;reopen();gRadioSelection.select(4);{const int l0=internet_radio::logoStarts;tick+=5000;service();assert(internet_radio::logoStarts==l0&&!gRadioLogo);}
  gSdReady=true;disk[kList]=kStarter;reopen();gRadioSelection.select(11);service();assert(gRadioLogo);setUiMode(UiMode::Home);service();assert(!gRadioLogo);
  gUiMode=UiMode::Radio;beginInternetRadio();internet_radio::logosOn=false;
+ // Moving. M lists the genres, the current one marked, then New genre and Remove. A move
+ // rewrites the station's own line in place, so the notes and the file's order stay.
+ disk[kList]="# mine\nNews | BBC | http://bbc.example/ | GB\nOther | Talk One | http://t1.example/ | US\nOther | Talk Two | http://t2.example/\n# end\n";
+ reopen();assert(gRadioList->count()==3&&gRadioList->genres()==2);
+ gRadioSelection.select(1);key('m');assert(gRadioView==RadioView::Move&&gRadioMoveSel==1&&radioTakesArrows()&&!radioTakesText());
+ render();assert(shows("News")&&shows("Other")&&shows("now")&&shows("+ New genre")&&showsPart("Remove"));
+ key(';');assert(gRadioMoveSel==0);key(char(1));assert(gRadioMoveSel==3);key(char(2));key('\n');
+ assert(gRadioView==RadioView::Player&&gRadioNotice=="Moved to News"&&gRadioNoticeGood);
+ assert(disk[kList]=="# mine\nNews | BBC | http://bbc.example/ | GB\nNews | Talk One | http://t1.example/ | US\nOther | Talk Two | http://t2.example/\n# end\n");
+ assert(std::string(gRadioSelection.station()->name)=="Talk One"&&std::string(gRadioSelection.genreName())=="News");
+ key('m');assert(gRadioMoveSel==0);key('\n');assert(gRadioNotice=="Already in News"&&gRadioView==RadioView::Player);
+ // A new genre: every key types its name, and the genre left empty goes.
+ gRadioSelection.select(gRadioList->find("http://t2.example/"));key('m');assert(gRadioMoveSel==1);key('.');assert(gRadioMoveSel==2);
+ key('\n');assert(gRadioView==RadioView::NewGenre&&radioTakesText());render();assert(shows("New genre")&&shows("A name you have joins it"));
+ key('\n');assert(gRadioView==RadioView::NewGenre&&gRadioNotice=="Type the new genre's name");
+ type("Podcasts;");assert(gRadioNewGenre=="Podcasts;");key('\b');key('|');assert(gRadioNewGenre=="Podcasts");
+ for(int i=0;i<30;++i)key('x');assert(gRadioNewGenre.size()==radio_catalog::kGenreBytes);while(gRadioNewGenre.size()>8)key('\b');
+ key('\n');assert(gRadioNotice=="Moved to Podcasts"&&gRadioList->genres()==2&&std::string(gRadioList->genre(1))=="Podcasts");
+ assert(disk[kList]=="# mine\nNews | BBC | http://bbc.example/ | GB\nNews | Talk One | http://t1.example/ | US\nPodcasts | Talk Two | http://t2.example/\n# end\n");
+ // A name the list has, in any case, joins that genre in its spelling.
+ key('m');gRadioMoveSel=2;key('\n');type("news");key('\n');assert(gRadioNotice=="Moved to News"&&gRadioList->genres()==1);
+ assert(disk[kList].find("News | Talk Two | http://t2.example/\n")!=std::string::npos);
+ // Esc steps back: from the name to the list, from the list to the player. Remove asks first.
+ key('m');gRadioMoveSel=1;key('\n');assert(gRadioView==RadioView::NewGenre);assert(radioEscape()&&gRadioView==RadioView::Move);
+ assert(radioEscape()&&gRadioView==RadioView::Player);
+ key('m');gRadioMoveSel=2;key('\n');assert(gRadioView==RadioView::Remove);render();assert(shows("Remove station?"));key('n');assert(gRadioView==RadioView::Player);
+ // The same address twice: the one chosen is the one moved and shown.
+ disk[kList]=kStarter;reopen();gRadioSelection.select(17);
+ { const uint16_t line=gRadioList->at(17).line;key('m');gRadioMoveSel=gRadioList->findGenre("Jazz");key('\n');
+   assert(gRadioNotice=="Moved to Jazz"&&gRadioList->at(size_t(gRadioSelection.stationIndex())).line==line&&std::string(gRadioSelection.genreName())=="Jazz");
+   assert(disk[kList].find("Jazz | Nashe Radio | http://nashe1.hostingradio.ru/nashe-128.mp3 | RU\n")!=std::string::npos&&disk[kList].find("Russian mix | Russkie Pesni")!=std::string::npos); }
+ // A new genre has to fit, unless it takes the old one's place. A card that fails changes nothing.
+ { std::string many;for(int i=0;i<24;++i)many+="G"+std::to_string(i)+" | S"+std::to_string(i)+" | http://g"+std::to_string(i)+".example/\n";
+   many+="G0 | Extra | http://extra.example/\n";disk[kList]=many;reopen();assert(gRadioList->genres()==24);
+   gRadioSelection.select(0);key('m');gRadioMoveSel=24;key('\n');type("Brand new");key('\n');assert(gRadioNotice=="Too many genres: 24 at most"&&disk[kList]==many);
+   gRadioSelection.select(1);key('m');gRadioMoveSel=24;key('\n');type("Brand new");key('\n');assert(gRadioNotice=="Moved to Brand new"&&gRadioList->genres()==24);
+   const std::string before=disk[kList];gRadioSelection.select(0);key('m');gRadioMoveSel=2;writeFails=true;key('\n');writeFails=false;
+   assert(gRadioNotice=="Couldn't change the SD card"&&disk[kList]==before&&!disk.count("/radio/stations.new")); }
+ gSdReady=false;reopen();key('m');assert(gRadioView==RadioView::Player&&gRadioNotice=="No SD card: built-in stations");gSdReady=true;
+ disk[kList]=kStarter;reopen();
  // Every reachable view fits on screen, with long names, Cyrillic, and every state.
  internet_radio::song="Очень длинное название песни, которое не помещается на экране - Исполнитель";
  for(const char*filter:{"","IT","RU","US"}){memcpy(gRadioSelection.country,filter,strlen(filter)+1);
@@ -487,6 +527,8 @@ int main(){
   for(bool box:{false,true}){gRadioOnCountry=box;for(const char*c:{"","G","GB","QQ","GS","US"}){gRadioCountry=c;render();}}}}
  gRadioOnCountry=false;gRadioCountry="";
  gRadioView=RadioView::Remove;gRadioRemoveName="Радио с очень длинным названием станции";gRadioRemoveGenre="Русская музыка и песни";gRadioRemoveUrl="http://example.org/"+std::string(200,'a');render();
+ gRadioView=RadioView::Move;for(int sel=0;sel<int(gRadioList->genres())+2;++sel){gRadioMoveSel=sel;render();}
+ gRadioView=RadioView::NewGenre;for(const std::string& g:{std::string(),std::string("Podcasts"),std::string(23,'W')}){gRadioNewGenre=g;render();}
  gRadioView=RadioView::Player;
  puts("PASS radio: stations file on the card (made, kept, recovered, limits), Find by genre or name, results that scroll, saving under the right genre, removing a line, reconnecting after a drop, the last station, resource guards and screens that fit");
 }

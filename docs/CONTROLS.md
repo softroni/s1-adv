@@ -153,7 +153,8 @@ OpenClaw, or an older bridge, it stays on THINKING until the reply arrives.
 
 Internet Radio is under Tab, Media. W and S change genre, A and D change station, and Enter
 plays or pauses, - and + (or =) set the volume, and V shows full-screen visuals. F finds stations by genre or name, in one country if you type its code (US, GB,
-DE), and S in the results saves one to your list on the SD card. Del removes a station after you press Y. [Internet Radio](RADIO.md) has the
+DE), and S in the results saves one to your list on the SD card. M moves a station to another
+genre or a new one. Del removes a station after you press Y. [Internet Radio](RADIO.md) has the
 details, including the file's format.
 
 ## NFC Notes
