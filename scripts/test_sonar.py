@@ -20,7 +20,7 @@ for file, text in [
         # The HC-SR04 shares the Cap's pins, so Mesh still keeps Sonar out.
         ('068_main.cpp.inc', 'case UiMode::RfidLab: case UiMode::Sonar:'),
         # A check from the chat leaves the Grove port alone while Sonar has it.
-        ('081_main.cpp.inc', 'mode == UiMode::NfcNotes || mode == UiMode::Sonar;')]:
+        ('081_main.cpp.inc', 'mode == UiMode::NfcNotes || mode == UiMode::Sonar || mode == UiMode::Radio;')]:
     assert text in (parts / file).read_text(), (file, text)
 main = (src / 'main.cpp').read_text()
 assert main.index('main_parts/081_main.cpp.inc') < main.index('main_parts/088_main.cpp.inc')

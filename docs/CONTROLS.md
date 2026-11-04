@@ -177,7 +177,9 @@ Internet Radio is under Tab, Media. W and S change genre, A and D change station
 plays or pauses, - and + (or =) set the volume, and V shows full-screen visuals. F finds stations by genre or name, in one country if you type its code (US, GB,
 DE), and S in the results saves one to your list on the SD card. M moves a station to another
 genre or a new one, or changes its place in its genre. Del removes a station after you press Y.
-Esc goes Home and the radio keeps playing, there and on Pomodoro, Alarm, Stopwatch, Calendar,
+1 to 9 play the station kept on that number, and an empty number keeps the one on screen there;
+Shift with a number keeps it there instead. The Lab's Mini Angle on the Grove port tunes, and its
+LED strip shows the music. Esc goes Home and the radio keeps playing, there and on Pomodoro, Alarm, Stopwatch, Calendar,
 Calculator and Notes. **Ctrl+M** stops it from any screen, and on those screens plays the last
 station again. [Internet Radio](RADIO.md) has the details, including the file's format.
 

@@ -373,5 +373,44 @@ struct Selection {
     const uint8_t n = count(genre);
     if (index >= n) index = n ? uint8_t(n - 1) : 0;
   }
+  // The dial: every station the selection shows, genre after genre and each genre in its file
+  // order, as one row that a knob turns through.
+  int dialCount() const {
+    int n = 0;
+    if (list) for (size_t i = 0; i < list->count(); ++i) if (!country[0] || !strcmp(country, list->at(i).country)) ++n;
+    return n;
+  }
+  // The list's index for a place on the dial, or -1.
+  int dialAt(int slot) const {
+    if (!list || slot < 0) return -1;
+    int n = 0;
+    for (size_t g = 0; g < list->genres(); ++g) {
+      for (size_t i = 0; i < list->count(); ++i) {
+        if (matches(list->at(i), uint8_t(g)) && n++ == slot) return int(i);
+      }
+    }
+    return -1;
+  }
+  // Where the station shown is on the dial, or -1.
+  int dialSlot() const {
+    if (!list || genre >= list->genres()) return -1;
+    int before = 0;
+    for (uint8_t g = 0; g < genre; ++g) before += count(g);
+    return index < count(genre) ? before + index : -1;
+  }
 };
+
+// Which of `count` places a knob at `permille` (0 to 1000) points at. It stays on `held`, the
+// place it last chose, until it's a quarter of a place past either edge, so a reading that
+// wobbles on a boundary doesn't flip between two stations.
+inline int dialSlotFor(int permille, int count, int held) {
+  if (count <= 0) return -1;
+  permille = permille < 0 ? 0 : permille > 1000 ? 1000 : permille;
+  int slot = permille * count / 1000;
+  if (slot >= count) slot = count - 1;
+  if (held < 0 || held >= count) return slot;
+  const int low = held * 1000 / count, high = (held + 1) * 1000 / count;
+  const int margin = 1000 / count / 4 > 8 ? 1000 / count / 4 : 8;
+  return permille >= low - margin && permille < high + margin ? held : slot;
+}
 }  // namespace radio_catalog

@@ -32,6 +32,8 @@ for old, new in [('enum class UiMode{Home,Radio,Voice,Mesh,Podcasts,Clock,Batter
                  ('void useBigTextFont(const String&s){bool wide=false;for(unsigned char c:s)wide=wide||c>=0x80;gCanvas.setFont(wide?&fonts::efontCN_12:&fonts::FreeSansBold9pt7b);}',
                   'int16_t useBigTextFont(const String&s){bool wide=false;for(unsigned char c:s)wide=wide||c>=0x80;gCanvas.setFont(wide?&fonts::efontCN_12:&fonts::FreeSansBold9pt7b);return wide?4:3;}'),
                  ('}SD;', ' uint64_t totalBytes(){return cardTotal;}uint64_t usedBytes(){return cardUsed;}\n}SD;'),
+                 # The podcasts' own fakes log too.
+                 ('void logf(const char*,...){}\n', ''),
                  ('bool gSdReady=true,cardAnswers=true,writeFails=false;', 'bool gSdReady=true,cardAnswers=true,writeFails=false;uint64_t cardTotal=32ull<<30,cardUsed=1ull<<30;'),
                  ]:
     assert old in prefix, old[:60]
@@ -108,7 +110,7 @@ void end() { assert(playing()); ended = true; finish(); }
 void wrote(uint32_t bytes) { assert(saving()); written = bytes; saved = true; disk[sdPath] = std::string(16, 'm'); finish(); }
 }  // namespace podcast_player
 '''
-code = prefix + fakes + radio + pods + r'''
+code = prefix + fakes + radio + pods + (parts / '093_main.cpp.inc').read_text() + r'''
 const std::string kHex = "0123456789abcdef0123456789abcdef";
 const std::string kTicket = "ticket\t31890\t/podcasts/" + kHex + "\nlan\t192.168.0.20\t22\n";
 void setUiMode(UiMode m) { if (deferInternetRadioMode(m)) return; const bool changed = gUiMode != m; gUiMode = m; if (changed && m == UiMode::Podcasts) beginPodcasts(); }

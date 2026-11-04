@@ -5,7 +5,8 @@ and resource boundaries."""
 from pathlib import Path
 import os, subprocess, tempfile
 root=Path(__file__).resolve().parents[1];src=root/'bots/CardputerADV/src';parts=src/'main_parts'
-app=(parts/'070_main.cpp.inc').read_text()
+# The radio, and its knob and strip on the Grove port.
+app=(parts/'070_main.cpp.inc').read_text()+'\n'+(parts/'093_main.cpp.inc').read_text()
 for f,s in [('004_main.cpp.inc','{"Internet Radio", UiMode::Radio}'),('024_main.cpp.inc','if (deferInternetRadioMode(mode)) return;'),('033_main.cpp.inc','if (radioBusy())'),('042_main.cpp.inc','if (radioBusy())'),('017_main.cpp.inc','if (radioBusy())'),('022_main.cpp.inc','if (radioBusy())'),('010_main.cpp.inc','gInboxHttpBusy || radioBusy()'),('063_main.cpp.inc','if (radioBusy() || radioOn() || podcastOn()) return false;'),('061_main.cpp.inc','serviceInternetRadio();'),('048_main.cpp.inc','handleInternetRadioKey(key, keys)')]:
  assert s in (parts/f).read_text(),(f,s)
 loop=(parts/'061_main.cpp.inc').read_text().split('void loop() {',1)[1]
@@ -40,7 +41,9 @@ code=r'''
 #include "radio_countries.h"
 #include "internet_radio_transport.h"
 #include "clock_display.h"
+#include "lab.h"
 #include <cassert>
+#include <cstdarg>
 #include <cstdint>
 #include <cctype>
 #include <cmath>
@@ -189,6 +192,38 @@ namespace internet_radio{
  void endLogo(LogoResult r){assert(logoJob&&running);running=false;logoJob=false;phase=State::Idle;logoRes=cancelling?LogoResult::None:r;cancelling=false;}
  void finish(State s=State::Idle,Error e=Error::None){assert(!logoJob);if(searchJob&&!cancelling&&e==Error::None)shown=results.size();running=false;cancelling=false;phase=s;err=e;}
 }
+// The Lab's side of the Grove port, as the radio borrows it: what its setup says is plugged in,
+// the knob as it reads, and every frame that reaches the strip.
+bool gLauncherVisible=false;
+void logf(const char*,...){}
+lab::Book gLabBook;bool gLabBookKnown=true;int bookReads=0;void labReadBook(){++bookReads;}
+struct{bool open=false;bool busOpen()const{return open;}}gNfcRadio;
+lab::Drive gLabDrive[lab::kOutCount];void labDriveOff(lab::Out o){gLabDrive[uint8_t(o)]=lab::Drive{};}
+struct rmt_obj_t{};rmt_obj_t rmtObj;rmt_obj_t* gLabRmt=nullptr;
+struct rmt_data_t{uint32_t level0,duration0,level1,duration1;};
+bool gLabOnWires=false;int wiresTaken=0,partsOff=0,stripWrites=0,pulledDown=0;
+lab::AnalogRange gLabKnobRange;uint16_t gLabKnobRaw=0;lab::Inputs gLabInputs;uint8_t gLabWhiteSilent=0;uint32_t gLabKnobMs=0;
+constexpr uint8_t kLabSilentChecks=3,kLabYellowPin=2;constexpr uint32_t kLabStripGapMs=50;
+uint8_t gLabStripRgb[lab::kStripLeds][3],stripShown[lab::kStripLeds][3];
+void labPartsFresh(){gLabOnWires=false;}
+void labTakeWires(){++wiresTaken;gLabOnWires=true;gLabKnobRange=lab::AnalogRange::fixedAt(lab::kDirectKnobTop);if(gLabBook.direct.has(lab::Part::Strip))gLabRmt=&rmtObj;}
+void labPartsOff(){++partsOff;gLabOnWires=false;gLabRmt=nullptr;gLabInputs=lab::Inputs{};}
+void labForgetOutputs(){}
+bool labOnWires(lab::Part p){return gLabOnWires&&gLabBook.direct.has(p);}
+// The strip as an SK6812 would see it: green, red, blue, a long high for a one.
+bool rmtWriteBlocking(rmt_obj_t*o,rmt_data_t*bits,size_t size){assert(o==&rmtObj&&size==size_t(lab::kStripLeds)*lab::kStripBits);++stripWrites;
+ for(int led=0;led<lab::kStripLeds;++led)for(int c=0;c<3;++c){uint8_t v=0;for(int bit=0;bit<8;++bit)v=uint8_t(v<<1|(bits[(led*3+c)*8+bit].duration0==7));stripShown[led][c==0?1:c==1?0:2]=v;}
+ return true;}
+void labStripShow(){rmt_data_t bits[lab::kStripLeds*lab::kStripBits];lab::encodeStrip(gLabStripRgb,lab::kStripLeds,bits);rmtWriteBlocking(gLabRmt,bits,lab::kStripLeds*lab::kStripBits);}
+#define INPUT_PULLDOWN 9
+void pinMode(int pin,int mode){if(pin==kLabYellowPin&&mode==INPUT_PULLDOWN)++pulledDown;}
+// The knob as the Lab reads it every 40 ms, a share of the way clockwise in thousandths, or unplugged.
+int knobAt=-1;
+void labReadWires(uint32_t now){if(gLabBook.direct.white!=lab::Part::Knob||now-gLabKnobMs<40)return;gLabKnobMs=now;
+ if(knobAt<0){gLabInputs.lose(lab::Sig::Knob);return;}
+ gLabKnobRaw=uint16_t((1000-knobAt)*lab::kDirectKnobTop/1000);gLabInputs.set(lab::Sig::Knob,lab::knobPercent(gLabKnobRange,gLabKnobRaw),now);}
+int wakes=0;bool handleScreensaverWake(){++wakes;return false;}
+int stripLit(){int n=0;for(auto&l:stripShown)n+=(l[0]|l[1]|l[2])!=0;return n;}
 '''+app+r'''
 void setUiMode(UiMode m){if(deferInternetRadioMode(m))return;gUiMode=m;}
 void key(char c){Keyboard_Class::KeysState k;handleInternetRadioKey(c,k);}
@@ -400,6 +435,106 @@ int main(){
    gUiMode=UiMode::Radio;beginInternetRadio();gRadioSelection.select(2);key('\n');service();assert(gRadioResumeUrl==gRadioList->at(2).url);
    key('\n');internet_radio::finish();service();key('\b');key('y');assert(gRadioResumeUrl.isEmpty());
    disk[kList]=kStarter;reopen(); }
+
+ // Presets: 1 to 9 play the station kept there. An empty number keeps the station shown, and
+ // Shift with a number keeps it there instead, or lets the number go if it's there already.
+ { const std::string kPresets="/radio/presets.txt";disk.erase(kPresets);disk[kList]=kStarter;reopen();
+   for(auto&kept:gRadioPresets)assert(kept.isEmpty());
+   gRadioSelection.select(4);const std::string four=gRadioList->at(4).url,twelve=gRadioList->at(12).url;
+   key('3');assert(gRadioPresets[2]==four&&gRadioFlash=="Kept on 3"&&gRadioFlashGood&&!gRadioWantPlaying&&!gRadioStartPending);
+   assert(disk[kPresets]=="\n\n"+four+"\n\n\n\n\n\n\n");
+   // The word shows over the status line for a moment, and the number as a key after the facts.
+   render();assert(shows("Kept on 3")&&shows("3"));tick+=1900;render();assert(!shows("Kept on 3")&&shows("3"));
+   gRadioSelection.select(12);key('7');render();assert(gRadioPresets[6]==twelve&&shows("7")&&!shows("3"));
+   // A kept number plays its station from anywhere in the list, and again changes nothing.
+   key('3');assert(gRadioSelection.stationIndex()==4&&gRadioWantPlaying&&gRadioStartPending);service();
+   assert(internet_radio::url==four);internet_radio::playing(100000);
+   n=internet_radio::starts;key('3');service();assert(internet_radio::starts==n&&gRadioWantPlaying);
+   // The visuals take them too.
+   key('v');assert(gRadioView==RadioView::Visual);key('7');assert(gRadioSelection.stationIndex()==12&&gRadioStartPending);
+   internet_radio::finish();service();assert(internet_radio::url==twelve);internet_radio::playing(100000);radioEscape();
+   // Shift moves a station to another number, and on its own number lets it go. Shift with 9 is (.
+   key('#');assert(gRadioPresets[2]==twelve&&gRadioPresets[6].isEmpty()&&gRadioFlash=="Kept on 3");
+   key('#');assert(gRadioPresets[2].isEmpty()&&gRadioFlash=="3 is free again");
+   key('(');assert(gRadioPresets[8]==twelve);
+   // They're on the card, so they're there when the radio opens again.
+   reopen();assert(gRadioPresets[8]==twelve&&gRadioPresets[2].isEmpty());
+   // A station that left the list by hand frees its number, which says so.
+   gRadioPresets[0]="http://gone.example/";key('1');assert(gRadioPresets[0].isEmpty()&&gRadioFlash=="1's station is gone"&&!gRadioFlashGood&&!gRadioWantPlaying);
+   // Removing a station frees its number too.
+   gRadioSelection.select(12);key('\b');key('y');assert(gRadioPresets[8].isEmpty()&&disk[kPresets].find(twelve)==std::string::npos);
+   // Digits are words in Find, and with no card there's nothing to keep them on.
+   key('f');type("80s");assert(gRadioQuery=="80s"&&gRadioPresets[7].isEmpty());radioEscape();gRadioQuery="";
+   gSdReady=false;reopen();key('2');assert(gRadioPresets[1].isEmpty()&&gRadioFlash=="No SD card: can't keep it");gSdReady=true;
+   disk.erase(kPresets);disk[kList]=kStarter;reopen(); }
+
+ // The knob and the strip on the Grove port, where the Lab's setup has them.
+ { auto settle=[](int readings){for(int i=0;i<readings;++i){tick+=40;service();}};
+   auto turnTo=[&](int slot,int count){knobAt=slot*1000/count+500/count;settle(4);};
+   // A setup with neither, one that couldn't be read, or one with the relays on the port: untouched.
+   gLabBook=lab::Book{};reopen();settle(3);assert(!gRadioPartsHeld&&!wiresTaken);
+   gLabBook.direct.claim(lab::Part::Knob);gLabBookKnown=false;reopen();settle(3);assert(!gRadioPartsHeld&&!wiresTaken);gLabBookKnown=true;
+   gLabBook.direct.claim(lab::Part::Relay);reopen();settle(3);assert(!gRadioPartsHeld&&!wiresTaken);
+   gNfcRadio.open=true;gLabBook.direct=lab::Direct{};gLabBook.direct.claim(lab::Part::Knob);reopen();settle(3);assert(!gRadioPartsHeld);gNfcRadio.open=false;
+   // The knob on the white wire and the strip on the yellow. Where the knob sits when it's found
+   // isn't a turn, so the station stays.
+   gLabBook.direct.claim(lab::Part::Strip);gLabBook.capPercent=100;knobAt=100;gRadioSelection.select(9);
+   const int strips=stripWrites;reopen();gRadioSelection.select(9);settle(10);
+   assert(gRadioPartsHeld&&wiresTaken==1&&gLabRmt&&gRadioSelection.stationIndex()==9&&stripWrites>strips);
+   // The strip opens on the station's place on the dial: one LED, a radio's needle.
+   assert(stripLit()==1&&(stripShown[9*29/17][0]|stripShown[9*29/17][1]|stripShown[9*29/17][2]));
+   // Turned, it goes to the station at that place once three readings agree, and paused it only shows it.
+   knobAt=990;settle(2);assert(gRadioSelection.stationIndex()==9);settle(1);assert(gRadioSelection.stationIndex()==17);
+   assert(!gRadioWantPlaying&&!gRadioKnobTuning&&wakes>0);
+   for(int slot=0;slot<18;++slot){turnTo(slot,18);assert(gRadioSelection.stationIndex()==slot&&gRadioSelection.dialSlot()==slot);}
+   // A reading that wobbles on an edge doesn't flip it.
+   turnTo(5,18);for(int p=270;p<=285;++p){knobAt=p;settle(1);assert(gRadioSelection.stationIndex()==5);}
+   // Playing, a sweep plays only the station it stops on, once the knob has rested.
+   turnTo(10,18);key('\n');service();internet_radio::playing(100000);n=internet_radio::starts;
+   for(int slot=9;slot>=2;--slot)turnTo(slot,18);
+   assert(gRadioSelection.stationIndex()==2&&gRadioKnobTuning&&internet_radio::starts==n);render();assert(shows("Tuning..."));
+   tick+=600;service();assert(!gRadioKnobTuning&&gRadioStartPending);internet_radio::finish();service();
+   assert(internet_radio::starts==n+1&&internet_radio::url==gRadioList->at(2).url);internet_radio::playing(100000);
+   // Back to the station playing before it rests: nothing restarts. Enter cancels a tune.
+   turnTo(3,18);turnTo(2,18);tick+=700;service();assert(internet_radio::starts==n+1&&!gRadioKnobTuning);
+   turnTo(4,18);key('\n');assert(!gRadioKnobTuning&&!gRadioWantPlaying);tick+=700;service();assert(!gRadioWantPlaying);internet_radio::finish();service();
+   // Behind the menu, in Find, or in Move, turning it doesn't change the station, and leaving them
+   // doesn't make it jump: it tunes when it's turned again.
+   gLauncherVisible=true;turnTo(12,18);assert(gRadioSelection.stationIndex()==4);gLauncherVisible=false;settle(3);assert(gRadioSelection.stationIndex()==4);
+   key('f');turnTo(14,18);assert(gRadioSelection.stationIndex()==4);radioEscape();settle(3);assert(gRadioSelection.stationIndex()==4);
+   turnTo(15,18);assert(gRadioSelection.stationIndex()==15);
+   // Unplugged and back, it starts again without a jump.
+   knobAt=-1;settle(3);knobAt=100;settle(5);assert(gRadioSelection.stationIndex()==15);turnTo(16,18);assert(gRadioSelection.stationIndex()==16);
+   // L redraws the dial with fewer stations, which isn't a turn either.
+   key('l');const int filtered=gRadioSelection.stationIndex();settle(5);assert(gRadioSelection.stationIndex()==filtered);
+   const int few=gRadioSelection.dialCount();assert(few<18);turnTo(0,few);assert(gRadioSelection.stationIndex()==gRadioSelection.dialAt(0));
+   while(gRadioSelection.country[0])key('l');settle(5);
+   // The strip, playing: the music's loudness in the genre's colour, after the needle's moment.
+   turnTo(11,18);key('\n');service();internet_radio::playing(100000);internet_radio::loud=8000;tick+=1600;settle(2);
+   { const uint8_t* ink=radioGenreRgb(gRadioSelection.genreName());assert(stripLit()==21);
+     for(int i=0;i<21;++i)assert(stripShown[i][0]==ink[0]&&stripShown[i][1]==ink[1]&&stripShown[i][2]==ink[2]); }
+   // Quiet, it falls a LED a frame; the same frame isn't sent again.
+   internet_radio::loud=0;tick+=50;service();assert(stripLit()==20);for(int i=0;i<30;++i){tick+=50;service();}assert(stripLit()==0);
+   { const int sent=stripWrites;settle(10);assert(stripWrites==sent); }
+   // The volume shows in white while it changes, then the music again.
+   gSpeakerVolume=128;key('=');tick+=50;service();
+   assert(stripLit()==(int(gSpeakerVolume)*30+127)/255&&stripShown[0][0]==200&&stripShown[0][1]==200&&stripShown[0][2]==200);
+   tick+=1600;internet_radio::loud=8000;service();assert(stripLit()==21&&stripShown[0][0]!=200);
+   // The Lab's cap on the strip's power holds: at 25%, a quarter of the colour.
+   gLabBook.capPercent=25;tick+=50;service();{ const uint8_t* ink=radioGenreRgb(gRadioSelection.genreName());assert(stripShown[0][0]==ink[0]/4||stripShown[0][0]==ink[0]*25/100); }
+   gLabBook.capPercent=0;tick+=50;service();assert(stripLit()==0);gLabBook.capPercent=25;
+   // Paused: dark once the needle's moment has gone.
+   key('\n');internet_radio::finish();service();tick+=1600;settle(2);assert(stripLit()==0);
+   // Leaving the radio's screen gives the port back, dark, with the data line held low.
+   { const int off=partsOff,low=pulledDown;internet_radio::loud=8000;key('\n');service();internet_radio::playing(100000);tick+=1600;settle(2);assert(stripLit()==21);
+     setUiMode(UiMode::Voice);service();assert(!gRadioPartsHeld&&partsOff==off+1&&pulledDown==low+1&&stripLit()==0&&!gLabRmt);
+     internet_radio::finish();service();assert(gUiMode==UiMode::Voice);service();assert(partsOff==off+1); }
+   // And the next time the radio opens, it takes them again.
+   gUiMode=UiMode::Radio;beginInternetRadio();settle(2);assert(gRadioPartsHeld&&wiresTaken==2);
+   radioPartsGiveBack();assert(!gRadioPartsHeld&&stripLit()==0);settle(2);assert(!gRadioPartsHeld);
+   // The strip alone: no knob reading, the strip still works.
+   gLabBook.direct=lab::Direct{};gLabBook.direct.claim(lab::Part::Strip);knobAt=-1;reopen();settle(3);assert(gRadioPartsHeld&&gLabRmt);
+   gLabBook=lab::Book{};internet_radio::loud=0;reopen();assert(!gRadioPartsHeld); }
 
  // Find: the player's letter keys type, and the arrows move instead of acting on the player.
  gRadioSelection.select(0);key('\n');service();assert(radioBusy());const int volume=gSpeakerVolume;

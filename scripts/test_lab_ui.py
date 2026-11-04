@@ -304,7 +304,7 @@ bool waitForInboxToFinish(uint32_t) { return true; }
 bool speechToWavFile(const String& text, const String& path) { ++gSpeechFetches; gSpeechText = text; if (!gSpeechWorks) return false; gDisk.files[std::string(path)] = {1, 2}; return true; }
 void render() {}
 struct Keyboard_Class { struct KeysState { bool ctrl = false, alt = false, opt = false, enter = false, del = false; }; };
-enum class UiMode { Home, NfcNotes, Mesh, SmartLamp, IrRemote, LabDevices, LabRules, LabSequences, AirMusic, Flappy, Balloon, BallCatch, Nes, Sonar };
+enum class UiMode { Home, NfcNotes, Mesh, SmartLamp, IrRemote, LabDevices, LabRules, LabSequences, AirMusic, Flappy, Balloon, BallCatch, Nes, Sonar, Radio };
 UiMode gUiMode = UiMode::Home;
 bool gLauncherVisible = false, gRecording = false, gRealtimeActive = false, gPlaybackActive = false, gToneAllowed = true;
 bool gRealtimeExclusiveMode = false, gMeshBusOwned = false, gActionsFollowSpeech = false, gRadioBusy = false;

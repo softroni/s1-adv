@@ -96,7 +96,7 @@ namespace radio_catalog{struct St{const char* name="WBGO Jazz 88.3 Newark";const
 namespace internet_radio{enum class State{Idle,Playing,Stopping};State state(){return State::Playing;}String status(){return "Playing 128 kbps";}bool searching(){return false;}uint16_t bitrate(){return 128;}}
 struct{int genre=0,index=2;char country[3]={};radio_catalog::St st;const radio_catalog::St* station(){return &st;}int count(int){return 14;}const char* genreName()const{return "Jazz & Blues";}}gRadioSelection;
 void radioMeterTick(bool){}uint16_t radioGenreInk(const char*){return 0xffff;}void drawRadioTile(int16_t,int16_t,const char*,const char*,bool,bool,const uint8_t*){}uint8_t* gRadioLogo=nullptr;uint32_t gRadioLogoFor=0;uint32_t radioHash(const char*){return 1;}bool radioStreaming(){return true;}
-void drawRadioControls(bool,uint16_t,uint16_t){}int radioWrap(const String&s,int w,String*out,int){out[0]=fitCurrentFontToWidth(s,w);return 1;}
+void drawRadioControls(bool,uint16_t,uint16_t){}int radioPresetOf(const char*){return 0;}bool radioFlashing(){return false;}bool gRadioFlashGood=true;int radioWrap(const String&s,int w,String*out,int){out[0]=fitCurrentFontToWidth(s,w);return 1;}
 bool gRadioStartPending=false,gRadioRetryWaiting=false,gRadioWantPlaying=false;String gRadioNotice;bool radioBusy(){return true;}uint8_t gSpeakerVolume=170;
 String radioStatusText(bool* song=nullptr){if(song)*song=false;return "Playing 128 kbps";}
 bool radioTextFont(const String&){gCanvas.setFont(&fonts::Font2);return false;}

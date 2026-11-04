@@ -16,6 +16,8 @@ stations live in a text file on the SD card, and Find adds new ones from a publi
 | **F** | Find stations |
 | **M** | Move this station to another genre or a new one, change its place in its genre, or remove it |
 | **Del** | Remove this station from your list |
+| **1** to **9** | Play the station kept on that number. An empty number keeps the station on screen there |
+| **Shift** with **1** to **9** | Keep the station on screen on that number instead, or free the number if it's already there |
 | **Esc** | Go Home. The radio keeps playing there |
 | **Ctrl+M** | Stop the radio from any screen. Press it again to play the last station again |
 
@@ -34,6 +36,43 @@ went, it waits up to a minute for it first. A station that never started isn't t
 because it's more likely broken than dropped. Press Enter to try it yourself.
 
 The radio opens on the last station you played. It doesn't start playing until you press Enter.
+
+## Number keys
+
+1 to 9 work like the buttons on a car radio. Press an empty one and it keeps the station on
+screen. From then on that number plays it, from anywhere in your list and whatever else is
+playing. The number shows as a key after the station's facts, and the line under the name says
+**Kept on 3** for a moment.
+
+Shift with a number (`!` to `(` on this keyboard) puts the station on screen there instead,
+moving it if it had another number, because a station has one number at most. Shift on its own
+number frees it. The numbers work on the player and in the visuals, and they're kept on the SD
+card, so they're still there after a restart. Removing a station frees its number. With no card
+there's nothing to keep them on.
+
+## A knob and an LED strip
+
+Plug the Lab's Mini Angle (the knob) and LED strip into the Grove port, both at once through the
+1-to-3 hub, and the radio uses them while its screen is open. The knob is on the white wire and
+the strip on the yellow, so they share the port. Set each one up once in the Lab first: plug it
+straight in and open it in Tab, L, Devices, which is how the Lab, and now the radio, knows it's
+there. See [Connect a part](LAB.md#connect-a-part).
+
+- **The knob tunes.** One turn runs across every station on screen, genre after genre in the
+  order they're listed, so the dial covers your whole list, or one country's stations while L is
+  on. Where it sits when the radio opens isn't a turn: the station only changes once you turn
+  it. While one plays, the screen shows each station you pass and the line under the name says
+  **Tuning...**, and the one you stop on plays once the knob rests. It works on the player and in
+  the visuals.
+- **The strip is a meter.** It lights in the genre's colour as loud as the music is. Change the
+  volume and it shows the volume in white for a moment. When the station changes, and while it
+  tunes, one LED shows where it is along the dial, like a radio's needle. Paused, it's dark. The
+  Lab's limit on the strip's power, 25% unless you changed it, holds here too.
+- **Only on the radio's own screen.** Leaving it turns the strip off and lets go of both, so the
+  Lab and the games find the port free. They don't work while the radio plays behind Home.
+- **Not through the I/O hub.** Its setup names a knob on its first port whether one is plugged
+  in or not, and an empty port would turn the dial at random. Plug them straight into Grove.
+- With the relays set up on the Grove port in the Lab, the radio leaves the port alone.
 
 ## Playing behind other screens
 
@@ -199,10 +238,12 @@ other line stay exactly as you typed them.
 - `/radio/art/` holds the stations' logos.
 - `/radio/last.txt` holds the last station you played, and `/radio/country.txt` the country
   you last searched in.
+- `/radio/presets.txt` holds the number keys' stations, one address per line, 1 to 9.
 
 With no card, the built-in stations play, and nothing can be saved or removed.
 
 ## Not yet
 
 - HTTPS, AAC and HLS streams.
+- The knob and the strip through the I/O hub.
 - Playing on behind the screens that need the network or the speaker, such as AI Chat.

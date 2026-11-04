@@ -197,7 +197,42 @@ int main() {
     uint32_t random = 5; unsigned char junk[64];
     for (int i = 0; i < 20000; ++i) { for (auto& b : junk) { random = random * 1664525u + 1013904223u; b = uint8_t(random >> 24); } junk[0] = 0xFF; junk[1] = 0xD8; jpegSize(junk, sizeof(junk), w, h); }
   }
-  puts("PASS radio station list: the built-in file, typed files, limits, safe saved lines, genre choice, line removal, selection, the country table, dithering and JPEG sizes");
+  // The dial: every station shown, genre after genre and each in its file order, as one row a knob
+  // turns through, and the way back from a station to its place.
+  {
+    Selection d; d.list = &l;
+    assert(d.dialCount() == 18 && d.dialAt(-1) == -1 && d.dialAt(18) == -1);
+    for (int slot = 0; slot < 18; ++slot) { assert(d.dialAt(slot) == slot); assert(d.select(slot) && d.dialSlot() == slot); }
+    // L on one country: only its stations, in the same order.
+    memcpy(d.country, "RU", 3); d.fit();
+    assert(d.dialCount() == 6);
+    for (int slot = 0, last = -1; slot < 6; ++slot) {
+      const int at = d.dialAt(slot);
+      assert(at > last && std::string(l.at(at).country) == "RU" && d.select(at) && d.country[0] && d.dialSlot() == slot);
+      last = at;
+    }
+    assert(d.dialAt(6) == -1);
+    // A genre split up in the file is together on the dial.
+    List mixed; const std::string text = "A | One | http://1.example/\nB | Two | http://2.example/\nA | Three | http://3.example/\n";
+    assert(mixed.load(text.data(), text.size()));
+    Selection m; m.list = &mixed;
+    assert(m.dialCount() == 3 && m.dialAt(0) == 0 && m.dialAt(1) == 2 && m.dialAt(2) == 1);
+    assert(m.select(1) && m.dialSlot() == 2 && m.select(2) && m.dialSlot() == 1);
+    Selection none; assert(none.dialCount() == 0 && none.dialAt(0) == -1 && none.dialSlot() == -1);
+  }
+  // The knob: 0 to 1000 split evenly, and a place held until the knob is a quarter of one past it,
+  // so a reading that wobbles on an edge doesn't flip between two stations.
+  assert(dialSlotFor(0, 4, -1) == 0 && dialSlotFor(499, 4, -1) == 1 && dialSlotFor(500, 4, -1) == 2 && dialSlotFor(1000, 4, -1) == 3);
+  assert(dialSlotFor(-50, 4, -1) == 0 && dialSlotFor(1500, 4, -1) == 3 && dialSlotFor(500, 0, -1) == -1 && dialSlotFor(500, 4, 9) == 2);
+  assert(dialSlotFor(561, 4, 1) == 1 && dialSlotFor(562, 4, 1) == 2 && dialSlotFor(188, 4, 1) == 1 && dialSlotFor(187, 4, 1) == 0);
+  for (int p = 480; p <= 520; ++p) assert(dialSlotFor(p, 4, 1) == 1 && dialSlotFor(p, 4, 2) == 2);
+  assert(dialSlotFor(1000, 4, 3) == 3 && dialSlotFor(0, 4, 0) == 0);
+  // With a hundred stations the margin is still eight thousandths, a little over the ADC's wobble.
+  assert(dialSlotFor(507, 100, 49) == 49 && dialSlotFor(508, 100, 49) == 50 && dialSlotFor(482, 100, 49) == 49 && dialSlotFor(481, 100, 49) == 48);
+  for (int count = 1; count <= 100; ++count)
+    for (int p = -10; p <= 1010; p += 7)
+      for (int held = -1; held <= count; held += count / 3 + 1) { const int slot = dialSlotFor(p, count, held); assert(slot >= 0 && slot < count); }
+  puts("PASS radio station list: the built-in file, typed files, limits, safe saved lines, genre choice, line removal, selection, the dial and its knob, the country table, dithering and JPEG sizes");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-radio-catalog-') as d:

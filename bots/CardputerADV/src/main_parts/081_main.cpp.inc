@@ -1213,8 +1213,9 @@ char gLabOnceText[lab::kOnceTextChars] = "";  // What it last found, which also 
 
 bool labOnceInLab() { return labMode(gUiMode) && gLabOpen; }
 bool labHoldsGrove(UiMode mode) {
+  // The radio takes the knob and the strip when the Lab's setup has them on the port.
   return mode == UiMode::AirMusic || mode == UiMode::Flappy || mode == UiMode::Balloon || mode == UiMode::BallCatch ||
-         mode == UiMode::NfcNotes || mode == UiMode::Sonar;
+         mode == UiMode::NfcNotes || mode == UiMode::Sonar || mode == UiMode::Radio;
 }
 // Whatever has the mic, the speaker or the whole loop for now, so a check waits rather than poll.
 bool labOnceHeld() {

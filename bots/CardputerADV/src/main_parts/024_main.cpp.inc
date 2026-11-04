@@ -321,6 +321,8 @@ void setUiMode(UiMode mode) {
   if (modeChanged && gUiMode == UiMode::Balloon) stopBalloon();
   if (modeChanged && gUiMode == UiMode::BallCatch) stopBallCatch();
   if (modeChanged && gUiMode == UiMode::Sonar) stopSonar();
+  // The radio's knob and strip, before the next screen looks at the Grove port.
+  if (modeChanged && gUiMode == UiMode::Radio) radioPartsGiveBack();
   if (modeChanged && labMode(gUiMode)) stopLab();
   if (modeChanged && gUiMode == UiMode::WifiSettings) stopWifiSettings();
   gUiMode = mode;

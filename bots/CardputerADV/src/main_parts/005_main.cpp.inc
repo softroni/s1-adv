@@ -642,6 +642,7 @@ bool radioOn();
 bool radioStopsOnEscape();
 bool radioMusicKey();
 bool radioHomeCardShows();
+void radioPartsGiveBack();
 void drawHomeRadioCard();
 void beginChessMind();
 void beginPocketSynth();

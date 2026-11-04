@@ -10,6 +10,8 @@ constexpr const char* kRadioLastPath = "/radio/last.txt";
 constexpr const char* kRadioCountryPath = "/radio/country.txt";
 constexpr const char* kRadioVisualsSeenPath = "/radio/visuals.seen";  // The keys card has been shown.
 constexpr const char* kRadioVisualsPath = "/radio/visuals.txt";        // The look, and the logo on or off.
+constexpr const char* kRadioPresetsPath = "/radio/presets.txt";        // Nine lines: the stream on each number.
+constexpr int kRadioPresetCount = 9;
 constexpr uint32_t kRadioPlayedBytes = 32768;  // About two seconds of 128k: it was playing.
 constexpr uint32_t kRadioRetryMs[] = {3000, 10000, 30000};
 constexpr uint32_t kRadioWifiWaitMs = 60000;
@@ -29,6 +31,18 @@ bool gRadioNoticeGood = false;  // Saved or paused: green on the results list, n
 // What Enter asked for, and what is playing: a found station needn't be on the list.
 String gRadioWantUrl, gRadioWantName, gRadioPlayingUrl;
 String gRadioLastUrl;  // What last.txt holds, so it's only written when it changes.
+// The number keys: the stream address kept on each, or empty.
+String gRadioPresets[kRadioPresetCount];
+// A word about what a key just did, over the status line for a moment, playing or not.
+String gRadioFlash;
+uint32_t gRadioFlashUntilMs = 0;
+bool gRadioFlashGood = true;  // Green for done, amber for what couldn't be.
+// The knob moved the dial to a station while one played: it plays once the knob rests.
+bool gRadioKnobTuning = false;
+uint32_t gRadioKnobTuneAtMs = 0;
+// The knob and the strip on the Grove port, in part 093.
+void serviceRadioParts();
+void radioPartsReopen();
 // Playing on behind another screen: since when, for Home's hint, and its genre's colour there.
 // Ctrl+M plays again the last station that played from the list.
 uint32_t gRadioBehindSinceMs = 0;
@@ -107,6 +121,13 @@ void radioStepVolume(int direction) {
   adjustSpeakerVolume(target == int(gSpeakerVolume) ? direction : target - int(gSpeakerVolume));
 }
 void radioInvalidate() { gLastRenderMs = 0; gUiFramePolicy.invalidate(); }
+void radioFlash(const String& text, bool good = true) {
+  gRadioFlash = text;
+  gRadioFlashGood = good;
+  gRadioFlashUntilMs = max<uint32_t>(millis() + 1800, 1);
+  radioInvalidate();
+}
+bool radioFlashing() { return gRadioFlashUntilMs && int32_t(gRadioFlashUntilMs - millis()) > 0; }
 bool radioTakesText() {
   return gUiMode == UiMode::Radio && (gRadioView == RadioView::Find || gRadioView == RadioView::NewGenre);
 }
@@ -116,6 +137,7 @@ bool radioTakesArrows() {
 }
 void stopRadioStream() {
   gRadioWantPlaying = false;
+  gRadioKnobTuning = false;
   gRadioStartPending = false;
   gRadioRetryWaiting = false;
   gRadioRetries = 0;
@@ -329,6 +351,7 @@ void radioRelease() {
   delete gRadioList;
   gRadioList = nullptr;
   gRadioSelection.list = nullptr;
+  for (String& kept : gRadioPresets) kept = "";
   internet_radio::clearFound();
   gRadioView = RadioView::Player;
 }
@@ -352,9 +375,42 @@ void radioWriteVisuals() {
   file.write(reinterpret_cast<const uint8_t*>(text), sizeof(text));
   file.close();
 }
+void radioReadPresets() {
+  for (String& kept : gRadioPresets) kept = "";
+  if (!gRadioListOnCard) return;
+  File file = SD.open(kRadioPresetsPath, "r");
+  if (!file) return;
+  String line;
+  int n = 0;
+  uint8_t c = 0;
+  while (n < kRadioPresetCount && file.read(&c, 1) == 1) {
+    if (c == '\n') { gRadioPresets[n++] = line; line = ""; }
+    else if (c != '\r' && line.length() < internet_radio::detail::kUrlSize) line += char(c);
+  }
+  if (n < kRadioPresetCount) gRadioPresets[n] = line;
+  file.close();
+}
+bool radioWritePresets() {
+  if (!gRadioListOnCard) return false;
+  File file = SD.open(kRadioPresetsPath, FILE_WRITE);
+  if (!file) return false;
+  bool ok = true;
+  for (const String& kept : gRadioPresets) {
+    ok = ok && file.write(reinterpret_cast<const uint8_t*>(kept.c_str()), kept.length()) == kept.length() && file.write('\n') == 1;
+  }
+  file.close();
+  return ok;
+}
+// The number a station is kept on, 1 to 9, or 0.
+int radioPresetOf(const char* url) {
+  for (int i = 0; i < kRadioPresetCount; ++i) if (!gRadioPresets[i].isEmpty() && gRadioPresets[i] == url) return i + 1;
+  return 0;
+}
 void beginInternetRadio() {
   gRadioView = RadioView::Player;
   radioLoadList();
+  radioReadPresets();
+  radioPartsReopen();
   radioReadLast();
   radioReadCountry();
   if (gRadioListOnCard && SD.exists(kRadioVisualsSeenPath)) gRadioVisualsKnown = true;
@@ -373,6 +429,7 @@ void beginInternetRadio() {
 
 // --- Playing ------------------------------------------------------------------------------
 void radioPlay(const String& url, const String& name) {
+  gRadioKnobTuning = false;
   gRadioWantUrl = url;
   gRadioWantName = name;
   gRadioWantPlaying = true;
@@ -668,6 +725,7 @@ void radioRemove() {
   if (!radioRewriteLine(gRadioRemoveLine)) { gRadioNotice = "Couldn't change the SD card"; radioInvalidate(); return; }
   radioLoadList();
   if (gRadioResumeUrl == gRadioRemoveUrl) gRadioResumeUrl = "";  // Ctrl+M won't bring it back.
+  if (const int kept = radioPresetOf(gRadioRemoveUrl.c_str())) { gRadioPresets[kept - 1] = ""; radioWritePresets(); }
   gRadioNotice = "Removed " + gRadioRemoveName;
   radioInvalidate();
 }
@@ -876,6 +934,7 @@ void radioStoppedBehind(const String& why) {
   setStatus(gRadioBehindNote.startsWith("Radio") ? gRadioBehindNote : "Radio: " + gRadioBehindNote, 3000);
 }
 void serviceInternetRadio() {
+  serviceRadioParts();
   if (gRadioModePending && !radioBusy()) {
     gRadioModePending = false; const UiMode next = gRadioNextMode;
     setUiMode(next); return;
@@ -970,6 +1029,50 @@ bool radioResultsKey(char key, const Keyboard_Class::KeysState& keys) {
   radioInvalidate();
   return true;
 }
+// 1 to 9 play the station kept on that number, and an empty number keeps the station shown.
+// Shift with a number keeps the station there instead, or lets the number go if it's there
+// already. A station is kept on one number at most.
+bool radioPresetKey(char key) {
+  static const char kShifted[] = "!@#$%^&*(";  // Shift with 1 to 9 on the Cardputer.
+  int n = 0;
+  bool shifted = false;
+  if (key >= '1' && key <= '9') {
+    n = key - '0';
+  } else if (key) {
+    const char* at = strchr(kShifted, key);
+    if (at) { n = int(at - kShifted) + 1; shifted = true; }
+  }
+  if (!n) return false;
+  String& kept = gRadioPresets[n - 1];
+  if (!shifted && !kept.isEmpty()) {
+    const int at = gRadioList ? gRadioList->find(kept.c_str()) : -1;
+    if (at < 0) {
+      kept = "";
+      radioWritePresets();
+      radioFlash(String(n) + "'s station is gone", false);
+      return true;
+    }
+    gRadioSelection.select(at);
+    gRadioRestSinceMs = millis();
+    if (!radioPlayingUrl(kept.c_str())) radioPlaySelected();
+    radioInvalidate();
+    return true;
+  }
+  const auto* station = gRadioSelection.station();
+  if (!station) return true;
+  if (!gRadioListOnCard) { radioFlash(gSdReady ? "Can't keep it: stations.txt unreadable" : "No SD card: can't keep it", false); return true; }
+  if (shifted && kept == station->url) {
+    kept = "";
+    const bool saved = radioWritePresets();
+    radioFlash(saved ? String(n) + " is free again" : String("Couldn't change the SD card"), saved);
+    return true;
+  }
+  if (const int had = radioPresetOf(station->url)) gRadioPresets[had - 1] = "";
+  kept = station->url;
+  const bool saved = radioWritePresets();
+  radioFlash(saved ? "Kept on " + String(n) : String("Couldn't change the SD card"), saved);
+  return true;
+}
 bool handleInternetRadioKey(char key, const Keyboard_Class::KeysState& keys) {
   if (keys.ctrl || keys.alt || keys.opt) return true;
   if (gRadioView == RadioView::Find) return radioFindKey(key, keys);
@@ -983,6 +1086,7 @@ bool handleInternetRadioKey(char key, const Keyboard_Class::KeysState& keys) {
     return true;
   }
   const char lower = static_cast<char>(tolower(static_cast<unsigned char>(key)));
+  if (radioPresetKey(key)) return true;
   // V opens the visuals, and there it changes the look. Every other key works as it does here.
   if (lower == 'i' && gRadioView == RadioView::Visual) {
     gRadioVisualLogo = !gRadioVisualLogo;
@@ -1099,6 +1203,8 @@ uint32_t radioRetrySecondsLeft() {
 }
 String radioStatusText(bool* song = nullptr) {
   if (song) *song = false;
+  if (radioFlashing()) return gRadioFlash;
+  if (gRadioKnobTuning) return "Tuning...";
   if (gRadioRetryWaiting) {
     if (!gWifiReady) return "Waiting for Wi-Fi...";
     return "Reconnecting in " + String(radioRetrySecondsLeft()) + "s";
@@ -1153,12 +1259,15 @@ void radioMeterTick(bool playing) {
 }
 // Each genre keeps a colour, from its name, so a genre you add gets one too. Twelve colours
 // keep the built-in seven apart, and these are in the order that suits them.
-uint16_t radioGenreInk(const char* genre) {
+const uint8_t* radioGenreRgb(const char* genre) {
   static const uint8_t kInks[12][3] = {{230,60,70},{240,90,150},{150,230,70},{235,200,60},{255,165,40},{255,115,80},
                                        {165,105,255},{90,230,150},{70,165,255},{40,210,190},{210,110,230},{95,125,255}};
   uint32_t h = 2166136261u;
   for (const char* p = genre; *p; ++p) h = (h ^ uint8_t(radio_catalog::lower(*p))) * 16777619u;
-  const auto& k = kInks[h % 12];
+  return kInks[h % 12];
+}
+uint16_t radioGenreInk(const char* genre) {
+  const uint8_t* k = radioGenreRgb(genre);
   return rgb565_local(k[0], k[1], k[2]);
 }
 // One or two capitals from the first letters of a name's words, so a tile reads like a label.
@@ -1301,7 +1410,7 @@ void renderRadioPlayer() {
   const bool wide = radioTextFont(status);
   String lines[2];
   const int n = radioWrap(status, textW, lines, 2);
-  d.setTextColor(song ? white : radioStreaming() || gRadioRetryWaiting ? green : amber);
+  d.setTextColor(song ? white : radioFlashing() ? (gRadioFlashGood ? green : amber) : radioStreaming() || gRadioRetryWaiting ? green : amber);
   for (int i = 0; i < n; ++i) { d.setCursor(textX, (wide ? 40 : 38) + i * 16); d.print(lines[i]); }
   if (station) {
     String facts = String(gRadioSelection.index + 1) + " of " + String(gRadioSelection.count(gRadioSelection.genre));
@@ -1309,6 +1418,13 @@ void renderRadioPlayer() {
     if (station->country[0]) facts += String("   ") + station->country;
     d.setFont(&fonts::Font0);
     d.setTextColor(muted); d.setCursor(textX, 75); d.print(facts);
+    if (const int kept = radioPresetOf(station->url)) {
+      const int16_t keyX = textX + d.textWidth(facts) + 8;
+      if (keyX + 11 <= 229) {
+        d.drawRoundRect(keyX, 73, 11, 11, 2, muted);
+        d.setTextColor(white); d.setCursor(keyX + 3, 75); d.print(String(kept));
+      }
+    }
   }
   drawRadioControls(gRadioWantPlaying || radioStreaming(), playing ? green : cyan, muted);
   // The rest of the keys, quieter than the buttons' own.
@@ -1653,7 +1769,7 @@ void renderRadioVisual() {
   bool song = false;
   const String status = radioStatusText(&song);
   const bool wide = radioTextFont(status);
-  d.setTextColor(song ? white : radioStreaming() || gRadioRetryWaiting ? green : amber);
+  d.setTextColor(song ? white : radioFlashing() ? (gRadioFlashGood ? green : amber) : radioStreaming() || gRadioRetryWaiting ? green : amber);
   d.setCursor(kBigLeft, wide ? 120 : 118);
   d.print(song ? radioMarquee(status, 222) : radioFit(status, 222));
   // The first time only: what the look is called and the keys, for a few seconds.
