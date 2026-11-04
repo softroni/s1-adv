@@ -16,6 +16,9 @@ code=r'''
 #include <fstream>
 #include <iterator>
 #include <cstring>
+#include <cmath>
+#include <cstdlib>
+#include <algorithm>
 using namespace internet_radio;using namespace internet_radio::detail;
 Headers header(const std::vector<std::string>&lines){Headers h;for(auto&s:lines)assert(h.line(s.c_str())==Error::None);return h;}
 std::string parse(const std::string&wire,const Headers&h){Body body(h);std::string audio;for(unsigned char c:wire){int r=body.feed(c);assert(r>=0);if(r)audio+=char(c);}assert(body.complete());return audio;}
@@ -146,6 +149,28 @@ int main(int argc,char**argv){
   Headers jh;jh.json=true;assert(jh.line("HTTP/1.1 200 OK")==Error::None&&jh.line("Content-Type: application/json; charset=utf-8")==Error::None);
   Headers mh;mh.json=true;assert(mh.line("HTTP/1.1 200 OK")==Error::None&&mh.line("Content-Type: audio/mpeg")==Error::Unsupported);
   Headers ah;assert(ah.line("HTTP/1.1 200 OK")==Error::None&&ah.line("Content-Type: application/json")==Error::Unsupported);
+ }
+ // The visuals: a tone lights the band its frequency is in, at its level, and bands well
+ // away from it stay low. Silence is all zeros. It works at any rate and frame length.
+ {
+  auto tone=[](double f,double amp,int hz,int n,int ch){std::vector<int16_t>v(size_t(n*ch));for(int i=0;i<n;++i)for(int c=0;c<ch;++c)v[size_t(i*ch+c)]=int16_t(amp*sin(2*M_PI*f*i/hz));return v;};
+  auto bandOf=[](double f){int b=0;for(;b<16;++b)if(f<60.0*pow(16000.0/60.0,(b+1)/16.0))break;return b;};
+  for(int hz:{44100,48000,32000,22050})for(int ch:{1,2})for(double f:{100.0,440.0,1000.0,5000.0}){
+   if(f*2>=hz)continue;
+   auto v=tone(f,16000,hz,1152,ch);internet_radio::Visuals out{};analyse(v.data(),1152,ch,hz,out);
+   int best=0;for(int b=1;b<16;++b)if(out.bands[b]>out.bands[best])best=b;
+   assert(std::abs(best-bandOf(f))<=1);
+   assert(out.bands[best]>205&&out.bands[best]<=240);  // A sine at -6 dBFS reads about 229.
+   for(int b=0;b<16;++b)if(std::abs(b-best)>3)assert(out.bands[b]<out.bands[best]-60);
+   int top=0;for(int8_t w:out.wave)top=std::max(top,std::abs(int(w)));assert(top<=63&&(f>1000||top>40));
+  }
+  internet_radio::Visuals quiet{};std::vector<int16_t>zero(2304,0);analyse(zero.data(),1152,2,44100,quiet);
+  for(auto b:quiet.bands)assert(b==0);for(auto w:quiet.wave)assert(w==0);
+  auto shortFrame=tone(1000,8000,24000,576,1);internet_radio::Visuals sf{};analyse(shortFrame.data(),576,1,24000,sf);
+  int best=0;for(int b=1;b<16;++b)if(sf.bands[b]>sf.bands[best])best=b;assert(std::abs(best-bandOf(1000))<=1);
+  auto lowRate=tone(1000,8000,8000,576,1);internet_radio::Visuals lr{};analyse(lowRate.data(),576,1,8000,lr);
+  for(int b=bandOf(4000)+1;b<16;++b)assert(lr.bands[b]==0);  // Nothing above what 8 kHz can hold.
+  internet_radio::Visuals none{};analyse(nullptr,0,2,44100,none);for(auto b:none.bands)assert(b==0);
  }
  // Actual pinned decoder, not a decoder stub, on generated mono/stereo MP3.
  for(int file=1;file<argc;++file){std::ifstream in(argv[file],std::ios::binary);std::vector<uint8_t>data((std::istreambuf_iterator<char>(in)),{});assert(data.size()>2000);

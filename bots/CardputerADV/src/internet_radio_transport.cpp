@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <math.h>
 #include <atomic>
 // Upstream lieff/minimp3, CC0: vendor/minimp3.LICENSE.
 // Pinned official source: https://github.com/lieff/minimp3
@@ -234,6 +235,62 @@ bool searchUrl(char* out, size_t room, bool byGenre, const char* text, const cha
   memcpy(out + at, kRest, sizeof(kRest));
   return true;
 }
+// In place, radix 2. n must be a power of two.
+static void fft(float* re, float* im, int n) {
+  for (int i = 1, j = 0; i < n; ++i) {
+    int bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { float t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+  }
+  for (int len = 2; len <= n; len <<= 1) {
+    const float angle = -6.28318531f / float(len);
+    const float wr = cosf(angle), wi = sinf(angle);
+    for (int i = 0; i < n; i += len) {
+      float cr = 1.0f, ci = 0.0f;
+      for (int k = 0; k < len / 2; ++k) {
+        const int a = i + k, b = a + len / 2;
+        const float xr = re[b] * cr - im[b] * ci, xi = re[b] * ci + im[b] * cr;
+        re[b] = re[a] - xr; im[b] = im[a] - xi; re[a] += xr; im[a] += xi;
+        const float t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
+      }
+    }
+  }
+}
+void analyse(const int16_t* pcm, int samples, int channels, int hz, Visuals& out) {
+  constexpr int kN = 512;
+  float re[kN], im[kN];
+  const int stereo = channels == 2 ? 1 : 0;
+  if (!pcm || samples < 0) samples = 0;
+  for (int i = 0; i < kN; ++i) {
+    const float v = i >= samples ? 0.0f : stereo ? (float(pcm[2 * i]) + float(pcm[2 * i + 1])) * 0.5f : float(pcm[i]);
+    re[i] = v * (0.5f - 0.5f * cosf(6.28318531f * float(i) / float(kN - 1)));
+    im[i] = 0.0f;
+  }
+  fft(re, im, kN);
+  const float binHz = float(hz > 0 ? hz : 44100) / float(kN);
+  const float ref = float(kN) / 4.0f * 32768.0f;  // A full-scale sine's peak after the window.
+  int lo = 1;
+  for (size_t b = 0; b < kBands; ++b) {
+    const float edge = 60.0f * powf(16000.0f / 60.0f, float(b + 1) / float(kBands));
+    int hi = int(edge / binHz + 0.5f);
+    if (hi <= lo) hi = lo + 1;  // Low bands are narrower than a bin: one bin each.
+    if (hi > kN / 2) hi = kN / 2;
+    float peak = 0.0f;
+    for (int k = lo; k < hi; ++k) { const float p = re[k] * re[k] + im[k] * im[k]; if (p > peak) peak = p; }
+    const float db = peak > 0.0f ? 10.0f * log10f(peak / (ref * ref)) : -120.0f;
+    const float v = (db + 60.0f) * 255.0f / 60.0f;
+    out.bands[b] = uint8_t(v < 0.0f ? 0.0f : v > 255.0f ? 255.0f : v);
+    lo = hi;
+  }
+  // About 11 ms from the frame's start, every fourth sample, as a scope would show it. Spread
+  // over the whole frame instead, a tone can line up with the spacing and look flat.
+  for (size_t i = 0; i < kWavePoints; ++i) {
+    const int s = int(i) * 4;
+    const int v = s >= samples ? 0 : stereo ? (int(pcm[2 * s]) + int(pcm[2 * s + 1])) / 2 : int(pcm[s]);
+    out.wave[i] = int8_t(v >> 8);
+  }
+}
 void StationJson::put(char c) {
   if (!dst_) return;
   if (dstLen_ + 1 < dstRoom_) dst_[dstLen_++] = c; else overflow_ = true;
@@ -437,6 +494,8 @@ std::atomic<Error> failure{Error::None};
 std::atomic<bool> owned{false}, cancel{false};
 std::atomic<uint32_t> received{0};
 std::atomic<uint16_t> loudness{0}, kbps{0};
+std::atomic<bool> visualsWanted{false};
+Visuals shownVisuals{};  // Guarded by gate.
 std::atomic<Job> job{Job::Stream};
 char nowTitle[128];  // Guarded by gate.
 // Search results outlive the search, so a found station can play while the list shows.
@@ -616,6 +675,12 @@ Error stream(WiFiClient& tcp, mp3dec_t* decoder, uint8_t* input, int16_t* pcm[2]
         uint32_t sum=0; const int count=samples*info.channels;
         for(int i=0;i<count;i+=2){ const int v=pcm[slot][i]; sum+=uint32_t(v<0?-v:v); }
         loudness.store(uint16_t(sum/uint32_t((count+1)/2)));
+        if(visualsWanted.load()) {
+          Visuals v; detail::analyse(pcm[slot],samples,info.channels,info.hz,v);
+          portENTER_CRITICAL(&gate);
+          memcpy(shownVisuals.bands,v.bands,sizeof(v.bands)); memcpy(shownVisuals.wave,v.wave,sizeof(v.wave)); ++shownVisuals.frames;
+          portEXIT_CRITICAL(&gate);
+        }
         if(!M5Cardputer.Speaker.playRaw(pcm[slot],samples*info.channels,info.hz,info.channels==2,1,kChannel,false)) return Error::Speaker;
         slot^=1; played=true; junk=0; lastFrame=millis(); setState(State::Playing);
       }
@@ -673,7 +738,7 @@ bool begin(const char* url, Job kind) {
   if(owned.load()) {portEXIT_CRITICAL(&gate);return false;}
   owned.store(true);cancel.store(false);failure.store(Error::None);received.store(0);job.store(kind);
   strcpy(requested,url);current.store(State::Connecting);
-  if(kind==Job::Stream) { nowTitle[0]=0; loudness.store(0); kbps.store(0); }
+  if(kind==Job::Stream) { nowTitle[0]=0; loudness.store(0); kbps.store(0); shownVisuals=Visuals{}; }
   else resultCount.store(0);
   portEXIT_CRITICAL(&gate);
   if(kind==Job::Search && !results) results=static_cast<Found*>(heap_caps_malloc(sizeof(Found)*kMaxFound,MALLOC_CAP_8BIT));
@@ -699,6 +764,12 @@ bool startSearch(bool byGenre, const char* text, const char* country) {
 bool searching() { return owned.load() && job.load()==Job::Search; }
 uint16_t level() { return current.load()==State::Playing ? loudness.load() : 0; }
 uint16_t bitrate() { return kbps.load(); }
+void wantVisuals(bool on) { visualsWanted.store(on); }
+bool visuals(Visuals& out) {
+  if(current.load()!=State::Playing) return false;
+  portENTER_CRITICAL(&gate); out=shownVisuals; portEXIT_CRITICAL(&gate);
+  return out.frames>0;
+}
 size_t foundCount() { return searching() ? 0 : resultCount.load(); }
 const Found* found(size_t i) { return results && i<foundCount() ? &results[i] : nullptr; }
 void clearFound() {

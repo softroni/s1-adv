@@ -29,6 +29,16 @@ size_t title(char* out, size_t room);
 uint16_t level();
 // The station's own figure from its icy-br header, in kbit/s, or 0 when it didn't say.
 uint16_t bitrate();
+// For full-screen visuals. While wanted, each decoded frame also gives 16 bands of its spectrum
+// and 120 points of its waveform; not wanted, the worker skips the work.
+constexpr size_t kBands = 16, kWavePoints = 120;
+struct Visuals {
+  uint8_t bands[kBands];     // 60 Hz to 16 kHz, log-spaced, each 0 to 255 for -60 to 0 dBFS.
+  int8_t wave[kWavePoints];  // Every 4th sample from the frame's start, as the top 8 bits.
+  uint32_t frames;           // Counts up with each frame analysed.
+};
+void wantVisuals(bool on);
+bool visuals(Visuals& out);  // False until a frame playing now has been analysed.
 
 // A station found by searching radio-browser.info, a public directory with no account.
 struct Found {
@@ -93,6 +103,9 @@ class Body {
   char meta_[256]{};
   char title_[128]{};
 };
+// One frame's analysis: a Hann-windowed 512-point FFT of its start, mixed to mono, read as
+// the bands above, and its waveform. Uses 4 KB of stack and no allocation.
+void analyse(const int16_t* pcm, int samples, int channels, int hz, Visuals& out);
 // The directory's search address. False when the text is empty or too long, or the country
 // isn't empty or two capital letters.
 bool searchUrl(char* out, size_t room, bool byGenre, const char* text, const char* country = "");

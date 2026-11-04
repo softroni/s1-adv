@@ -63,9 +63,9 @@ struct Frame{const int16_t*data;size_t n;uint64_t hash;uint32_t end;};
 struct FakeSpeaker{
  std::deque<Frame>queue;unsigned rendered=0;size_t maxQueued=0;
  size_t isPlaying(uint8_t channel){assert(channel==7);return queue.size();}
- uint16_t loudest=0;
+ uint16_t loudest=0;internet_radio::Visuals seen{};
  bool playRaw(const int16_t*p,size_t n,uint32_t hz,bool stereo,int repeat,uint8_t channel,bool stop){
-  loudest=std::max(loudest,internet_radio::level());
+  loudest=std::max(loudest,internet_radio::level());internet_radio::Visuals v{};if(internet_radio::visuals(v))seen=v;
   assert(channel==7&&!stop&&repeat==1&&queue.size()<2&&hz==44100&&stereo);
   assert(n>0&&n<=2304);for(auto&f:queue)assert(f.data!=p);
   uint32_t end=(queue.empty()?clockMs:queue.back().end)+uint32_t(n*1000/(hz*2));queue.push_back({p,n,hashPcm(p,n),end});maxQueued=std::max(maxQueued,queue.size());return true;
@@ -113,6 +113,11 @@ int main(int argc,char**argv){
  assert(request.find("Icy-MetaData: 1\r\n")!=npos&&request.find("Accept: audio/mpeg\r\n")!=npos);
  char song[64];assert(internet_radio::title(song,sizeof(song))==13&&std::string(song)=="Artist - Song");
  assert(internet_radio::title(song,5)==4&&std::string(song)=="Arti");
+ // Off, no frame is analysed. On, they are, and the fixture's 440 Hz tone tops its own band.
+ assert(!M5Cardputer.Speaker.seen.frames);
+ internet_radio::wantVisuals(true);response=header+"\r\n"+mp3;assert(internet_radio::start("http://radio.example/stream"));execute();internet_radio::wantVisuals(false);
+ { const auto&s=M5Cardputer.Speaker.seen;assert(s.frames>20);int best=0;for(int b=1;b<16;++b)if(s.bands[b]>s.bands[best])best=b;assert(best==4&&s.bands[4]>150);
+   internet_radio::Visuals after{};assert(!internet_radio::visuals(after)); }
  response=header+"\r\n"+mp3;assert(internet_radio::start("http://radio.example/stream"));assert(!internet_radio::title(song,sizeof(song)));execute();
  // A search: JSON in chunks, read into results that outlast the worker, on the one worker.
  const std::string body=R"([{"name":"One","url_resolved":"http://one.example/","codec":"MP3","bitrate":128,"tags":"jazz"},{"name":"Two","url_resolved":"http://two.example/","codec":"MP3"}])";

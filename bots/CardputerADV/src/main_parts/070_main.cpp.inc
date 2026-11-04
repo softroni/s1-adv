@@ -2,7 +2,7 @@
 // text file on the SD card (radio_catalog.h says how it reads), and Find adds to it from
 // radio-browser.info, a public directory that needs no account and no bridge.
 namespace {
-enum class RadioView : uint8_t { Player, Find, Results, Remove };
+enum class RadioView : uint8_t { Player, Find, Results, Remove, Visual };
 constexpr const char* kRadioDir = "/radio";
 constexpr const char* kRadioListPath = "/radio/stations.txt";
 constexpr const char* kRadioListNewPath = "/radio/stations.new";
@@ -38,6 +38,13 @@ bool gRadioOnCountry = false;  // Find's cursor is in the country box, not the w
 bool gRadioByGenre = true, gRadioSearchedByGenre = true;
 bool gRadioSearchPending = false, gRadioSearching = false;
 int gRadioFoundSel = 0;
+// Visuals: which look, when its name last showed, and the bars as drawn, which rise at once
+// and fall back slowly, with caps that fall slower still.
+constexpr const char* kRadioLooks[] = {"Bars", "Mirror", "Wave", "Rings"};
+constexpr uint8_t kRadioLookCount = sizeof(kRadioLooks) / sizeof(kRadioLooks[0]);
+uint8_t gRadioLook = 0;
+uint32_t gRadioLookShownMs = 0, gRadioVisualAtMs = 0;
+uint8_t gRadioShown[internet_radio::kBands] = {}, gRadioPeaks[internet_radio::kBands] = {};
 // Remove.
 uint16_t gRadioRemoveLine = 0;
 String gRadioRemoveName, gRadioRemoveUrl, gRadioRemoveGenre;
@@ -399,6 +406,9 @@ bool radioEscape() {
       gRadioView = RadioView::Player;
       gRadioNotice = "Kept " + gRadioRemoveName;
       break;
+    case RadioView::Visual:
+      gRadioView = RadioView::Player;
+      break;
     default:
       return false;
   }
@@ -411,6 +421,8 @@ void serviceInternetRadio() {
     gRadioModePending = false; const UiMode next = gRadioNextMode;
     setUiMode(next); return;
   }
+  // The worker only analyses frames while the visuals are on screen.
+  internet_radio::wantVisuals(gUiMode == UiMode::Radio && gRadioView == RadioView::Visual && !gRadioModePending);
   if (gUiMode != UiMode::Radio) {
     // A reconnect or search still waiting would otherwise start when the radio opens again.
     if (radioBusy() || gRadioWantPlaying || gRadioStartPending || gRadioRetryWaiting || gRadioSearchPending || gRadioSearching) stopInternetRadio();
@@ -496,6 +508,14 @@ bool handleInternetRadioKey(char key, const Keyboard_Class::KeysState& keys) {
     return true;
   }
   const char lower = static_cast<char>(tolower(static_cast<unsigned char>(key)));
+  // V opens the visuals, and there it changes the look. Every other key works as it does here.
+  if (lower == 'v') {
+    if (gRadioView == RadioView::Visual) gRadioLook = uint8_t((gRadioLook + 1) % kRadioLookCount);
+    gRadioView = RadioView::Visual;
+    gRadioLookShownMs = millis();
+    radioInvalidate();
+    return true;
+  }
   if (lower == 'w' || key == ';') { gRadioSelection.moveGenre(-1); radioRetune(); }
   else if (lower == 's' || key == '.') { gRadioSelection.moveGenre(1); radioRetune(); }
   else if (lower == 'a' || key == ',') { gRadioSelection.moveStation(-1); radioRetune(); }
@@ -528,6 +548,21 @@ void radioDropLastLetter(String& text) {
   size_t n = text.length();
   while (n > 0 && !radioLetterStart(text[n - 1])) --n;
   text.remove(n > 0 ? n - 1 : 0);
+}
+// Scrolls a letter at a time. marqueeText steps by bytes, which would split a Cyrillic letter.
+String radioMarquee(const String& text, int32_t pixelLimit) {
+  if (gCanvas.textWidth(text) <= pixelLimit) return text;
+  const String padded = text + "    " + text;
+  size_t letters = 0;
+  for (size_t i = 0; i < text.length() + 4; ++i) if (radioLetterStart(padded[i])) ++letters;
+  const size_t step = letters ? (millis() / 240) % letters : 0;
+  size_t at = 0;
+  for (size_t seen = 0; at < padded.length(); ++at) {
+    if (radioLetterStart(padded[at]) && seen++ == step) break;
+  }
+  String out = padded.substring(at);
+  while (out.length() > 1 && gCanvas.textWidth(out) > pixelLimit) radioDropLastLetter(out);
+  return out;
 }
 String radioFit(String text, int32_t pixelLimit) {
   if (gCanvas.textWidth(text) <= pixelLimit) return text;
@@ -672,8 +707,8 @@ void renderRadioPlayer() {
   d.setTextColor(muted); d.setCursor(20, 96);
   d.print(String((int(gSpeakerVolume) * 100 + 127) / 255) + "%");
   d.setFont(&fonts::Font0);
-  d.setCursor(8,112); d.print("A/D station  W/S genre  Enter play");
-  d.setCursor(8,123); d.print("F find  L EN/RU  Del remove  +/- vol");
+  d.setCursor(8,112); d.print("Enter play  A/D station  W/S genre");
+  d.setCursor(8,123); d.print("V visuals  F find  L EN/RU  +/- vol");
   d.setFont(&fonts::Font2);
 }
 void renderRadioFind() {
@@ -786,8 +821,117 @@ void renderRadioRemove() {
   d.print("From stations.txt on the card");
   drawBigNotice("Y remove   any other key keeps", amber);
 }
+// The whole screen for the music: four looks from the same analysis of what's playing, with
+// the station above and the song below.
+void renderRadioVisual() {
+  auto& d = gCanvas;
+  const uint16_t cyan = rgb565_local(47,227,255), violet = rgb565_local(170,120,255), white = TFT_WHITE;
+  const uint16_t muted = rgb565_local(182,219,255), green = rgb565_local(88,240,141), amber = rgb565_local(255,136,64);
+  const uint16_t dim = rgb565_local(36,73,85);
+  d.fillScreen(TFT_BLACK);
+  const bool playing = internet_radio::state() == internet_radio::State::Playing && !internet_radio::searching();
+  internet_radio::Visuals v{};
+  const bool live = playing && internet_radio::visuals(v);
+  // Falls by time, not by frame, so it looks the same however often this draws.
+  const uint32_t now = millis();
+  const uint32_t ticks = min<uint32_t>((now - gRadioVisualAtMs) / 20, 50);
+  if (ticks) gRadioVisualAtMs = now;
+  for (size_t i = 0; i < internet_radio::kBands; ++i) {
+    const int target = live ? v.bands[i] : 0;
+    const int fallen = max<int>(0, int(gRadioShown[i]) - 6 * int(ticks));
+    gRadioShown[i] = uint8_t(max(target, fallen));
+    gRadioPeaks[i] = uint8_t(max<int>(gRadioShown[i], int(gRadioPeaks[i]) - 2 * int(ticks)));
+  }
+  const int16_t bottom = 114, mid = 66, height = 94;
+  switch (gRadioLook) {
+    case 0:  // A spectrum, low notes on the left, with caps on the bars' recent highs.
+      for (int i = 0; i < int(internet_radio::kBands); ++i) {
+        const int16_t x = 9 + i * 14;
+        const uint16_t ink = rgb565_local(47 + (170 - 47) * i / 15, 227 + (120 - 227) * i / 15, 255);
+        const int16_t h = int16_t(gRadioShown[i] * height / 255), p = int16_t(gRadioPeaks[i] * height / 255);
+        if (h > 0) d.fillRect(x, bottom - h, 12, h, ink);
+        d.fillRect(x, bottom - p - 2, 12, 2, p > 0 ? white : dim);
+      }
+      break;
+    case 1:  // The same, twice as fine, mirrored about the middle.
+      d.drawFastHLine(8, mid, 224, dim);
+      for (int j = 0; j < 32; ++j) {
+        const int a = gRadioShown[j / 2], b = gRadioShown[min(15, j / 2 + 1)];
+        const int16_t half = int16_t(((j & 1) ? (a + b) / 2 : a) * 46 / 255);
+        if (half > 0) d.fillRect(9 + j * 7, mid - half, 5, half * 2 + 1, rgb565_local(88 - 41 * j / 31, 240 - 13 * j / 31, 141 + 114 * j / 31));
+      }
+      break;
+    case 2: {  // The sound itself, about 11 ms of it, drawn twice for a line that reads.
+      d.drawFastHLine(8, mid, 224, dim);
+      // Scaled to its loudest point so quiet music still fills the screen, but not past
+      // 46/40 times, so hiss doesn't fill it too.
+      int peak = 40;
+      if (live) for (int8_t w : v.wave) peak = max(peak, w < 0 ? -int(w) : int(w));
+      if (live) {
+        for (int i = 0; i + 1 < int(internet_radio::kWavePoints); ++i) {
+          const int16_t x0 = 9 + i * 222 / 119, x1 = 9 + (i + 1) * 222 / 119;
+          const int16_t y0 = mid - v.wave[i] * 46 / peak, y1 = mid - v.wave[i + 1] * 46 / peak;
+          d.drawLine(x0, y0, x1, y1, green);
+          d.drawLine(x0, y0 + 1, x1, y1 + 1, green);
+        }
+      }
+      break;
+    }
+    default: {  // Bass, middle and treble as rings in the Pulse colours, a dot for the level.
+      int bass = 0, mids = 0, highs = 0;
+      for (int i = 0; i < 4; ++i) bass += gRadioShown[i];
+      for (int i = 4; i < 10; ++i) mids += gRadioShown[i];
+      for (int i = 10; i < 16; ++i) highs += gRadioShown[i];
+      const int16_t rb = int16_t(8 + bass / 4 * 38 / 255), rm = int16_t(6 + mids / 6 * 30 / 255), rh = int16_t(4 + highs / 6 * 22 / 255);
+      d.drawCircle(120, mid, 46, dim);
+      d.drawCircle(120, mid, rb, cyan); d.drawCircle(120, mid, rb - 1, cyan);
+      d.drawCircle(120, mid, rm, violet); d.drawCircle(120, mid, rm - 1, violet);
+      d.drawCircle(120, mid, rh, amber); d.drawCircle(120, mid, rh - 1, amber);
+      d.fillCircle(120, mid, 2, live ? white : dim);
+      break;
+    }
+  }
+  // The station above, the clock beside it.
+  const auto* station = gRadioSelection.station();
+  const String name = station ? station->name : "Internet Radio";
+  String hhmm = "--:--";
+  const time_t clock = time(nullptr);
+  if (clock > 100000) {
+    struct tm ti; localtime_r(&clock,&ti); char buf[6];
+    clock_display::format(buf,sizeof(buf),ti.tm_hour,ti.tm_min,gDeviceSettings.clockTwelveHour);
+    hhmm = buf;
+  }
+  d.setFont(&fonts::Font2);
+  const int16_t clockX = kBigRight - d.textWidth(hhmm);
+  d.setTextColor(muted); d.setCursor(clockX, 1); d.print(hhmm);
+  const bool wideName = radioTextFont(name);
+  d.setTextColor(white); d.setCursor(kBigLeft, wideName ? 3 : 1);
+  d.print(radioFit(name, clockX - kBigLeft - 8));
+  // The song below, scrolling if it's long, or what the radio is doing.
+  bool song = false;
+  const String status = radioStatusText(&song);
+  const bool wide = radioTextFont(status);
+  d.setTextColor(song ? white : radioBusy() || gRadioRetryWaiting ? green : amber);
+  d.setCursor(kBigLeft, wide ? 120 : 118);
+  d.print(song ? radioMarquee(status, 222) : radioFit(status, 222));
+  // The look's name for a moment after it changes, with the keys.
+  if (now - gRadioLookShownMs < 1500) {
+    d.fillRoundRect(60, 46, 120, 40, 6, TFT_BLACK);
+    d.drawRoundRect(60, 46, 120, 40, 6, cyan);
+    d.setFont(&fonts::Font2);
+    d.setTextColor(cyan);
+    const char* look = kRadioLooks[gRadioLook];
+    d.setCursor(120 - d.textWidth(look) / 2, 50); d.print(look);
+    d.setFont(&fonts::Font0);
+    d.setTextColor(muted);
+    const char* keys = "V next  Esc back";
+    d.setCursor(120 - d.textWidth(keys) / 2, 72); d.print(keys);
+    d.setFont(&fonts::Font2);
+  }
+}
 void renderInternetRadioUi() {
   switch (gRadioView) {
+    case RadioView::Visual: renderRadioVisual(); break;
     case RadioView::Find: renderRadioFind(); break;
     case RadioView::Results: renderRadioResults(); break;
     case RadioView::Remove: renderRadioRemove(); break;

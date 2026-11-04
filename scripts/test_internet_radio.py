@@ -55,6 +55,9 @@ struct Canvas{
  void fillRoundRect(int a,int b,int w,int h,int,uint16_t c){fillRect(a,b,w,h,c);}
  void drawRoundRect(int a,int b,int w,int h,int r,uint16_t c){fillRoundRect(a,b,w,h,r,c);}
  void drawFastHLine(int a,int b,int w,uint16_t c){fillRect(a,b,w,1,c);}
+ void drawLine(int a,int b,int c,int e,uint16_t){bounds(min(a,c),min(b,e),abs(c-a)+1,abs(e-b)+1);}
+ void drawCircle(int a,int b,int r,uint16_t c){assert(r>0);fillRect(a-r,b-r,2*r+1,2*r+1,c);}
+ void fillCircle(int a,int b,int r,uint16_t c){drawCircle(a,b,r,c);}
  void fillTriangle(int a,int b,int c,int d,int e,int f,uint16_t color){fillRect(min({a,c,e}),min({b,d,f}),max({a,c,e})-min({a,c,e})+1,max({b,d,f})-min({b,d,f})+1,color);}
  void setFont(const int*f){font=f;}void setTextColor(uint16_t,uint16_t=0){}
  void setCursor(int a,int b){x=a;y=b;}
@@ -139,6 +142,7 @@ namespace internet_radio{
  const char*status(){return phase==State::Error?"Radio timed out":phase==State::Stopping?"Stopping":phase==State::Playing?"Playing":"Connecting";}
  size_t title(char*o,size_t room){size_t n=std::min(song.size(),room-1);memcpy(o,song.data(),n);o[n]=0;return n;}
  uint16_t loud=0,kbps=0;uint16_t level(){return phase==State::Playing?loud:0;}uint16_t bitrate(){return kbps;}
+ bool wantV=false;Visuals vis{};void wantVisuals(bool on){wantV=on;}bool visuals(Visuals&o){if(phase!=State::Playing)return false;o=vis;return o.frames>0;}
  size_t foundCount(){return searching()?0:shown;}
  const Found* found(size_t i){return i<foundCount()?&results[i]:nullptr;}
  void clearFound(){if(!searching())shown=0;}
@@ -243,6 +247,33 @@ int main(){
  key('\n');assert(!gRadioRetryWaiting&&!gRadioWantPlaying);n=internet_radio::starts;tick+=60000;service();assert(internet_radio::starts==n);
  key('\n');service();internet_radio::playing(100000);internet_radio::finish(State::Error,Error::Unsupported);service();assert(!gRadioRetryWaiting&&!gRadioWantPlaying);
 
+ // V opens the visuals, and the worker analyses frames only while they show. V again changes
+ // the look; the player's keys still work; Esc goes back, and leaving the radio turns them off.
+ key('\n');service();internet_radio::playing(100000);assert(gRadioView==RadioView::Player);service();assert(!internet_radio::wantV);
+ key('v');assert(gRadioView==RadioView::Visual&&gRadioLook==0);service();assert(internet_radio::wantV);render();assert(shows("Bars")&&shows("V next  Esc back"));
+ tick+=1600;render();assert(!shows("Bars"));
+ for(int i=1;i<=4;++i){key('V');assert(gRadioLook==i%4&&gRadioView==RadioView::Visual);render();assert(shows(kRadioLooks[i%4]));}
+ { const int s=gRadioSelection.stationIndex();key('d');assert(gRadioSelection.stationIndex()!=s&&gRadioStartPending&&gRadioView==RadioView::Visual);
+   internet_radio::finish();service();assert(radioBusy());internet_radio::playing(100000);
+   const int vol=gSpeakerVolume;key('=');assert(gSpeakerVolume>vol||vol==255);key('-'); }
+ // Bars rise at once, fall back by time, and their caps fall slower.
+ internet_radio::vis=internet_radio::Visuals{};for(auto&b:internet_radio::vis.bands)b=255;internet_radio::vis.frames=1;
+ for(uint8_t look=0;look<4;++look){gRadioLook=look;
+  for(int i=0;i<16;++i){internet_radio::vis.bands[i]=uint8_t(i*17);internet_radio::vis.wave[i*7]=int8_t(i%2?127:-128);}
+  for(int t=0;t<30;++t){tick+=40;render();}}
+ for(auto&b:internet_radio::vis.bands)b=255;tick+=40;render();for(int i=0;i<16;++i)assert(gRadioShown[i]==255&&gRadioPeaks[i]==255);
+ for(auto&b:internet_radio::vis.bands)b=0;tick+=100;render();for(int i=0;i<16;++i)assert(gRadioShown[i]==225&&gRadioPeaks[i]==245);
+ tick+=5000;render();for(int i=0;i<16;++i)assert(gRadioShown[i]==0&&gRadioPeaks[i]==145);  // One draw after a long gap falls only so far.
+ for(int k=0;k<2;++k){tick+=1000;render();}for(int i=0;i<16;++i)assert(gRadioPeaks[i]==0);
+ // Paused or never analysed, every look still draws, flat.
+ key('\n');assert(gRadioView==RadioView::Visual&&!gRadioWantPlaying);internet_radio::finish();service();
+ for(uint8_t look=0;look<4;++look){gRadioLook=look;render();}
+ internet_radio::song="Очень длинное название песни, которое никак не помещается на экране";
+ key('\n');service();internet_radio::playing(100000);internet_radio::vis.frames=0;for(uint8_t look=0;look<4;++look){gRadioLook=look;for(int t=0;t<12;++t){tick+=240;render();}}
+ internet_radio::song="Artist - Song";gRadioLook=0;
+ assert(radioEscape()&&gRadioView==RadioView::Player);service();assert(!internet_radio::wantV);
+ key('v');service();assert(internet_radio::wantV);setUiMode(UiMode::Home);service();assert(!internet_radio::wantV);internet_radio::finish();service();service();
+ gUiMode=UiMode::Radio;beginInternetRadio();assert(gRadioView==RadioView::Player);
  // The list opens on the last station played, and doesn't play it.
  gRadioSelection.select(12);key('\n');service();const std::string twelve=gRadioList->at(12).url;assert(disk["/radio/last.txt"]==twelve+"\n");
  n=internet_radio::starts;reopen();assert(gRadioSelection.stationIndex()==12&&!radioBusy()&&internet_radio::starts==n);

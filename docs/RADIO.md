@@ -12,6 +12,7 @@ stations live in a text file on the SD card, and Find adds new ones from a publi
 | **Enter** or **Space** | Play or pause |
 | **L** | Show all stations, only EN/INT, or only RU |
 | **-** and **+** | Volume down and up. The **=** key works for +, so Shift isn't needed |
+| **V** | Full-screen visuals, and V again for the next look |
 | **F** | Find stations |
 | **Del** | Remove this station from your list |
 | **Esc** | Stop and go Home |
@@ -30,6 +31,22 @@ went, it waits up to a minute for it first. A station that never started isn't t
 because it's more likely broken than dropped. Press Enter to try it yourself.
 
 The radio opens on the last station you played. It doesn't start playing until you press Enter.
+
+## Visuals
+
+Press **V** while it plays for a full-screen picture of the music, with the station above and
+the song below. **V** again changes the look, and **Esc** goes back. Enter, the station keys and
+the volume keys work there as they do on the play screen.
+
+| Look | What it shows |
+|---|---|
+| **Bars** | The spectrum in 16 bars, low notes on the left, with caps that hold each bar's recent high |
+| **Mirror** | The same, twice as fine, mirrored above and below a line |
+| **Wave** | The sound wave itself, about 11 ms of it, scaled to fill the screen |
+| **Rings** | Bass, middle and treble as three rings that swell with them |
+
+They come from the music itself: while the visuals are on, the radio works out each moment's
+spectrum as it plays. That's a little extra work, so it only happens while they're showing.
 
 ## Finding stations
 
