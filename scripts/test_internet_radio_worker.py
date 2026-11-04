@@ -29,7 +29,7 @@ using portMUX_TYPE=int;
 #define pdMS_TO_TICKS(x) (x)
 constexpr int pdPASS=1;
 void(*scheduled)(void*)=nullptr;
-int xTaskCreate(void(*f)(void*),const char*,int n,void*,int,void*){assert(n==24576);if(createFails)return 0;assert(!scheduled);scheduled=f;return pdPASS;}
+int xTaskCreate(void(*f)(void*),const char*,int n,void*,int,void*){assert(n==24576||n==12288);if(createFails)return 0;assert(!scheduled);scheduled=f;return pdPASS;}
 void vTaskDelete(void*){}
 struct IPAddress{
  uint8_t a[4]={};IPAddress()=default;IPAddress(uint8_t x,uint8_t y,uint8_t z,uint8_t w){a[0]=x;a[1]=y;a[2]=z;a[3]=w;}
@@ -102,7 +102,40 @@ int main(int argc,char**argv){
  for(auto wire:{std::string("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\nx"),header+"\r\nnot mp3",header+"Transfer-Encoding: chunked\r\n\r\n3\r\nab"}){
   response=wire;assert(internet_radio::start("http://radio.example/stream"));execute();assert(internet_radio::state()==internet_radio::State::Error);
  }
- puts("PASS actual radio worker: bounded TCP/ICY/chunked MP3 decode, two safe PCM slots, async cancel and release, allocation/task/connect/malformed/public-IP failures (ASan/UBSan)");
+ using internet_radio::Error;using internet_radio::State;const auto npos=std::string::npos;
+ // A song title in the stream reaches the screen, and a new stream starts without one.
+ std::string titled;for(size_t pos=0;pos<mp3.size();pos+=777){auto b=mp3.substr(pos,777);titled+=b;if(b.size()==777){std::string m="StreamTitle='Artist - Song';";m.resize(32,'\0');titled+=char(2);titled+=m;}}
+ response=header+"icy-metaint: 777\r\n\r\n"+titled;
+ assert(internet_radio::start("http://radio.example/stream"));execute();
+ assert(request.find("Icy-MetaData: 1\r\n")!=npos&&request.find("Accept: audio/mpeg\r\n")!=npos);
+ char song[64];assert(internet_radio::title(song,sizeof(song))==13&&std::string(song)=="Artist - Song");
+ assert(internet_radio::title(song,5)==4&&std::string(song)=="Arti");
+ response=header+"\r\n"+mp3;assert(internet_radio::start("http://radio.example/stream"));assert(!internet_radio::title(song,sizeof(song)));execute();
+ // A search: JSON in chunks, read into results that outlast the worker, on the one worker.
+ const std::string body=R"([{"name":"One","url_resolved":"http://one.example/","codec":"MP3","bitrate":128,"tags":"jazz"},{"name":"Two","url_resolved":"http://two.example/","codec":"MP3"}])";
+ response="HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n"+chunks(body);
+ assert(internet_radio::startSearch(true,"smooth jazz"));assert(internet_radio::searching()&&!internet_radio::foundCount());
+ assert(!internet_radio::start("http://radio.example/stream")&&!internet_radio::startSearch(true,"rock"));
+ execute();assert(!internet_radio::searching());
+ assert(request.rfind("GET /json/stations/search?tag=smooth%20jazz&codec=MP3",0)==0&&request.find("Host: all.api.radio-browser.info:80\r\n")!=npos);
+ assert(request.find("Accept: application/json\r\n")!=npos&&request.find("Icy-MetaData")==npos);
+ assert(internet_radio::error()==Error::None&&internet_radio::foundCount()==2);
+ assert(std::string(internet_radio::found(0)->name)=="One"&&internet_radio::found(0)->bitrate==128&&!internet_radio::found(2));
+ // Playing a found station leaves the list alone; clearing it frees it.
+ response=header+"\r\n"+mp3;assert(internet_radio::start("http://one.example/"));execute();assert(internet_radio::foundCount()==2);
+ internet_radio::clearFound();assert(!internet_radio::foundCount()&&!internet_radio::found(0));
+ // Odd answers are errors with nothing found: MP3 instead of JSON, a cut answer, a busy server.
+ for(auto wire:{std::string("HTTP/1.1 200 OK\r\nContent-Type: audio/mpeg\r\n\r\n[]"),std::string("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n[{\"name\":"),std::string("HTTP/1.1 503 Busy\r\n\r\n")}){
+  response=wire;assert(internet_radio::startSearch(false,"x"));execute();assert(internet_radio::state()==State::Error&&!internet_radio::foundCount());
+ }
+ // A stopped search finds nothing. No memory for results, or nothing to search for: refused.
+ response="HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n"+body;
+ readHook=[](){internet_radio::stop();};assert(internet_radio::startSearch(true,"jazz"));execute();readHook={};
+ assert(internet_radio::state()==State::Idle&&!internet_radio::foundCount());
+ internet_radio::clearFound();allocateFails=true;assert(!internet_radio::startSearch(true,"jazz")&&!internet_radio::busy()&&internet_radio::error()==Error::NoMemory);allocateFails=false;
+ assert(!internet_radio::startSearch(true,"   ")&&internet_radio::error()==Error::InvalidUrl);
+ assert(internet_radio::startSearch(true,"jazz"));execute();assert(internet_radio::foundCount()==2);internet_radio::clearFound();
+ puts("PASS actual radio worker: bounded TCP/ICY/chunked MP3 decode, song titles, searches on the same worker, two safe PCM slots, async cancel and release, allocation/task/connect/malformed/public-IP failures (ASan/UBSan)");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-radio-worker-') as d:

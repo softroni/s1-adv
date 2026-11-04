@@ -28,6 +28,11 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
     handlePlaceEditKey(key);
     return;
   }
+  // And for the radio's search words.
+  if (radioTakesText() && !gLauncherVisible && !keys.tab) {
+    handleInternetRadioKey(key, keys);
+    return;
+  }
   if (gUiMode==UiMode::BrainFlow &&
       (keys.tab || (keys.ctrl && (lowerKey=='l'||lowerKey=='r'||lowerKey=='v')))) pauseBrainFlow();
   setKeyDiag(String("key=") + String(static_cast<int>(key)));

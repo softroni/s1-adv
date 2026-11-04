@@ -119,6 +119,7 @@ jobs:
       - run: python scripts/test_wifi_fallback.py
       - run: python scripts/test_home_wifi_icon.py
       - run: python scripts/test_internet_radio.py
+      - run: python scripts/test_radio_catalog.py
       - run: python scripts/test_internet_radio_transport.py
       - run: python scripts/test_internet_radio_worker.py
       - run: python scripts/test_internet_radio_threads.py

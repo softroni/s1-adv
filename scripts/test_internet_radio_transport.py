@@ -51,6 +51,90 @@ int main(int argc,char**argv){
  Body metadata(m);for(unsigned char ch:std::string("abc\1xx",6))assert(metadata.feed(ch)>=0);assert(!metadata.complete());
  // Malformed byte-level payload fuzz cannot escape bounded parser state.
  uint32_t random=49;for(int test=0;test<20000;++test){Body b(test&1?cm:c);for(int i=0;i<500;++i){random=random*1664525U+1013904223U;if(b.feed(random>>24)<0||b.done())break;}}
+ // Song titles ride in the metadata blocks, which can cross any chunk or read boundary. A
+ // block without a title keeps the last; a title with an apostrophe ends at "';", not "'".
+ {
+  auto meta=[](const std::string&text){std::string b=text;b.resize((b.size()+15)/16*16,'\0');return std::string(1,char(b.size()/16))+b;};
+  // Audio, a block with a title, audio, a block without one, audio, an empty block, audio.
+  std::string wire="abc"+meta("StreamTitle='Shock - Let Your Body Do The Talkin'';StreamUrl='';")+"def"+meta("StreamUrl='x';")+"ghi"+std::string(1,'\0')+"j";
+  auto t=header({"HTTP/1.0 200 OK","Content-Type: audio/mpeg","icy-metaint: 3",""});
+  {Body b(t);std::string audio;for(unsigned char ch:wire){int r=b.feed(ch);assert(r>=0);if(r)audio+=char(ch);}
+   assert(audio=="abcdefghij"&&b.titles()==1&&std::string(b.title())=="Shock - Let Your Body Do The Talkin'");}
+  auto tc=header({"HTTP/1.1 200 OK","Content-Type: audio/mpeg","Transfer-Encoding: chunked","icy-metaint: 3",""});
+  for(unsigned n=1;n<60;n+=3){Body cb(tc);std::string audio;for(unsigned char ch:chunk(wire,n)){int r=cb.feed(ch);assert(r>=0);if(r)audio+=char(ch);}
+   assert(cb.complete()&&audio=="abcdefghij"&&std::string(cb.title())=="Shock - Let Your Body Do The Talkin'");}
+  // Cyrillic in UTF-8 stays as it is; an older station's Latin-1 becomes UTF-8; control
+  // characters become spaces, and a long title is cut at a whole letter.
+  Body ru(t);for(unsigned char ch:"abc"+meta("StreamTitle='\xD0\x9C\xD0\x98\xD0\x9B\xD0\x95\xD0\x9D\xD0\x90 - \xD0\x92 \xD0\xAD\xD1\x82\xD1\x83';"))ru.feed(ch);
+  assert(std::string(ru.title())=="МИЛЕНА - В Эту");
+  Body latin(t);for(unsigned char ch:"abc"+meta("StreamTitle='Caf\xE9\t del Mar';"))latin.feed(ch);
+  assert(std::string(latin.title())=="Café del Mar");
+  std::string longTitle="StreamTitle='";for(int i=0;i<200;++i)longTitle+="\xD0\x96";longTitle+="';";
+  Body cut(t);for(unsigned char ch:"abc"+meta(longTitle))cut.feed(ch);
+  assert(strlen(cut.title())<128&&strlen(cut.title())%2==0&&cut.titles()==1);
+  char out[8];assert(cleanText("  a\x01  b  ",10,out,sizeof(out))==3&&std::string(out)=="a b");
+  assert(cleanText("abcdefghij",10,out,sizeof(out))==7&&std::string(out)=="abcdefg");
+  assert(cleanText("\xD0\x96\xD0\x96\xD0\x96\xD0\x96",8,out,sizeof(out))==6);
+  assert(cleanText("",0,out,sizeof(out))==0&&!out[0]);
+ }
+ // The search asks only for what this player can play, with the words safely escaped.
+ {
+  char url[kUrlSize];
+  assert(searchUrl(url,sizeof(url),true," smooth jazz ")&&std::string(url)=="http://all.api.radio-browser.info/json/stations/search?tag=smooth%20jazz&codec=MP3&is_https=false&hidebroken=true&order=clickcount&reverse=true&limit=30");
+  assert(searchUrl(url,sizeof(url),false,"R&B/1?#")&&std::string(url).find("?name=R%26B%2F1%3F%23&")!=std::string::npos);
+  Url u;assert(parseUrl(url,u)&&std::string(u.host)=="all.api.radio-browser.info"&&u.port==80);
+  assert(!searchUrl(url,sizeof(url),true,"   ")&&!searchUrl(url,sizeof(url),true,"")&&!searchUrl(url,40,true,"jazz"));
+  assert(!searchUrl(url,sizeof(url),true,std::string(65,'a').c_str())&&searchUrl(url,sizeof(url),true,std::string(64,'%').c_str()));
+  assert(parseUrl(url,u));
+ }
+ // The directory's answer: keys in any order, nested values, escapes and surrogate pairs. It
+ // keeps MP3 on plain HTTP once each, and skips HLS, AAC, https, cut-off and empty entries.
+ {
+  const std::string json=R"([
+ {"changeuuid":"x","name":"Jazz \"Radio\" \u00e9\ud83c\udfb7","url":"http://a/pls","url_resolved":"http:\/\/jazz.example\/live",
+  "tags":"jazz,smooth jazz","countrycode":"FR","language":"french","codec":"MP3","bitrate":128,"hls":0,"geo_lat":48.85,
+  "lastcheckok":1,"extra":{"a":[1,2,{"b":"}]"}]},"votes":-3},
+ {"name":"Same address","url_resolved":"http://jazz.example/live","codec":"MP3","bitrate":64,"hls":0},
+ {"name":"HLS","url_resolved":"http://hls.example/x.m3u8","codec":"MP3","hls":1},
+ {"name":"AAC","url_resolved":"http://aac.example/x","codec":"AAC+","hls":0},
+ {"name":"Secure","url_resolved":"https://secure.example/x","codec":"MP3"},
+ {"name":"","url_resolved":"http://noname.example/x","codec":"MP3"},
+ {"name":"Long","url_resolved":"http://long.example/)"+std::string(300,'a')+R"(","codec":"MP3"},
+ {"name":"Радио Рекорд","url_resolved":"http://record.example/","codec":"mp3","bitrate":3200000,"language":"russian,english","countrycode":"RU","hls":false},
+ {"name":"No language","url_resolved":"http://ru.example/","countrycode":"RU","codec":"MP3","bitrate":1.5e2,"hls":null},
+ {"name":"lone \ud83c half","url_resolved":"http://half.example/","codec":"","tags":"a\nb"}
+])";
+  Found found[kMaxFound];StationJson j(found,kMaxFound);
+  for(unsigned char ch:json)assert(j.feed(ch));
+  assert(j.finished()&&j.count()==4);
+  assert(std::string(found[0].name)=="Jazz \"Radio\" é🎷"&&std::string(found[0].url)=="http://jazz.example/live");
+  assert(std::string(found[0].tags)=="jazz,smooth jazz"&&std::string(found[0].country)=="FR"&&found[0].bitrate==128&&!found[0].russian);
+  assert(std::string(found[1].name)=="Радио Рекорд"&&found[1].russian&&found[1].bitrate==65535);
+  assert(std::string(found[2].name)=="No language"&&found[2].russian&&found[2].bitrate==1);
+  assert(std::string(found[3].name)=="lone ? half"&&std::string(found[3].tags)=="a b");
+  // Only room for what was asked; anything past the array is ignored.
+  Found two[2];StationJson k(two,2);for(unsigned char ch:json+"garbage")assert(k.feed(ch));assert(k.finished()&&k.count()==2);
+  Found none[1];
+  for(const char* empty:{"[]"," [ ] "}){StationJson e(none,1);for(const char*q=empty;*q;++q)assert(e.feed(*q));assert(e.finished()&&!e.count());}
+  for(const char* bad:{"{}","[1]","[{]","[{\"a\" 1}]","[{\"a\":1,}]","[{\"a\":\"\\x\"}]","[{\"a\":\"\\u12g4\"}]","[,]","[{},]x"}){
+   StationJson e(none,1);bool ok=true;for(const char*q=bad;*q&&ok;++q)ok=e.feed(*q);assert(!ok||!e.finished());
+  }
+  // Cut off anywhere, it's never finished, so a short read can't pass as a whole answer.
+  for(size_t cut=0;cut<json.size();cut+=13){StationJson e(found,kMaxFound);bool ok=true;for(size_t i=0;i<cut&&ok;++i)ok=e.feed(json[i]);assert(!e.finished());}
+  // Random bytes and mutated answers stay inside their buffers.
+  uint32_t random=7;
+  for(int test=0;test<20000;++test){
+   StationJson e(found,kMaxFound);std::string m=json;
+   for(int k2=0;k2<4;++k2){random=random*1664525U+1013904223U;m[random%m.size()]=char(random>>24);}
+   for(unsigned char ch:m)if(!e.feed(ch))break;
+   assert(e.count()<=kMaxFound);for(size_t i=0;i<e.count();++i){assert(strlen(found[i].name)<sizeof(found[i].name)&&strlen(found[i].url)<sizeof(found[i].url));Url v;assert(parseUrl(found[i].url,v));}
+  }
+  for(int test=0;test<2000;++test){StationJson e(found,kMaxFound);for(int i=0;i<600;++i){random=random*1664525U+1013904223U;if(!e.feed(uint8_t(random>>24)))break;}}
+  // A search's answer must be JSON; a stream's must be MP3.
+  Headers jh;jh.json=true;assert(jh.line("HTTP/1.1 200 OK")==Error::None&&jh.line("Content-Type: application/json; charset=utf-8")==Error::None);
+  Headers mh;mh.json=true;assert(mh.line("HTTP/1.1 200 OK")==Error::None&&mh.line("Content-Type: audio/mpeg")==Error::Unsupported);
+  Headers ah;assert(ah.line("HTTP/1.1 200 OK")==Error::None&&ah.line("Content-Type: application/json")==Error::Unsupported);
+ }
  // Actual pinned decoder, not a decoder stub, on generated mono/stereo MP3.
  for(int file=1;file<argc;++file){std::ifstream in(argv[file],std::ios::binary);std::vector<uint8_t>data((std::istreambuf_iterator<char>(in)),{});assert(data.size()>2000);
   mp3dec_t decoder;mp3dec_init(&decoder);size_t pos=0,frames=0;long long energy=0;int16_t pcm[MINIMP3_MAX_SAMPLES_PER_FRAME];
@@ -59,7 +143,7 @@ int main(int argc,char**argv){
    if(n){assert(info.layer==3&&info.hz==44100&&info.channels==file&&n<=1152);++frames;for(int i=0;i<n*info.channels;++i)energy+=pcm[i]<0?-int(pcm[i]):pcm[i];}
   }assert(frames>30&&energy>10000);
  }
- puts("PASS actual radio URL/public-IP/HTTP/chunked/ICY parsers, malformed input and 20000 fuzz cases; pinned MP3 decoder mono/stereo fixtures (ASan/UBSan)");
+ puts("PASS actual radio URL/public-IP/HTTP/chunked/ICY parsers, song titles, search address and JSON answers, malformed input and fuzz cases; pinned MP3 decoder mono/stereo fixtures (ASan/UBSan)");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-radio-transport-') as d:

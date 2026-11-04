@@ -39,6 +39,9 @@
     handleTypingKey(upDown ? ';' : downDown ? '.' : leftDown ? ',' : '/', keys);
   } else if (gUiMode == UiMode::Files && (upDown || downDown || leftDown || rightDown)) {
     handleTypingKey((upDown || leftDown) ? ',' : '.', keys);
+  } else if (radioTakesArrows() && (upDown || downDown || leftDown || rightDown)) {
+    // Find and its results: the arrows move, so the letters can be typed or mean themselves.
+    handleTypingKey((upDown || leftDown) ? char(1) : char(2), keys);
   } else if ((gUiMode == UiMode::Minesweeper || gUiMode == UiMode::Snake || gUiMode == UiMode::Balloon || gUiMode == UiMode::BallCatch || gUiMode == UiMode::Radio || gUiMode == UiMode::VlcRemote) && (upDown || downDown || leftDown || rightDown)) {
     handleTypingKey(upDown ? 'w' : downDown ? 's' : leftDown ? 'a' : 'd', keys);
   } else if ((gUiMode == UiMode::Chess || gUiMode == UiMode::Checkers) && (upDown || downDown || leftDown || rightDown)) {

@@ -149,6 +149,13 @@ steps is silent. Sounds follow the notification volume.
 The status comes from the tools Claude really uses, so it needs the Claude Code bridge. With
 OpenClaw, or an older bridge, it stays on THINKING until the reply arrives.
 
+## Internet Radio
+
+Internet Radio is under Tab, Media. W and S change genre, A and D change station, and Enter
+plays or pauses. F finds stations by genre or name, and S in the results saves one to your list
+on the SD card. Del removes a station after you press Y. [Internet Radio](RADIO.md) has the
+details, including the file's format.
+
 ## NFC Notes
 
 NFC Notes is under Tab, Tools, and `/nfc` opens it. It needs the M5Stack NFC unit

@@ -1,6 +1,7 @@
 #include "internet_radio_transport.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <ctype.h>
 #include <atomic>
 // Upstream lieff/minimp3, CC0: vendor/minimp3.LICENSE.
@@ -95,7 +96,8 @@ Error Headers::line(const char* s) {
     if (hasType) return Error::Malformed;
     char* semi = strchr(value,';'); if (semi) *semi=0;
     for (char* p=value;*p;++p) *p=tolower(static_cast<unsigned char>(*p));
-    if (status == 200 && strcmp(value,"audio/mpeg") && strcmp(value,"audio/mp3")) return Error::Unsupported;
+    const bool audio = !strcmp(value,"audio/mpeg") || !strcmp(value,"audio/mp3");
+    if (status == 200 && (json ? strcmp(value,"application/json") != 0 : !audio)) return Error::Unsupported;
     hasType=true;
   } else if (!strcmp(name,"transfer-encoding")) {
     if (hasTransfer || strcasecmp(value,"chunked")) return Error::Malformed;
@@ -115,9 +117,25 @@ Body::Body(const Headers& h) : chunked_(h.chunked), bounded_(h.hasLength),
 }
 int Body::entity(uint8_t b) {
   if (!interval_) return 1;
-  if (metadata_) { --metadata_; if (!metadata_) audioLeft_=interval_; return 0; }
+  if (metadata_) {
+    // Titles come first in a block; the rest of a long block is counted, not kept.
+    if (metaUsed_ < sizeof(meta_)-1) meta_[metaUsed_++]=char(b);
+    if (!--metadata_) { audioLeft_=interval_; meta_[metaUsed_]=0; readTitle(); }
+    return 0;
+  }
   if (audioLeft_) { --audioLeft_; return 1; }
-  metadata_=unsigned(b)*16; if (!metadata_) audioLeft_=interval_; return 0;
+  metadata_=unsigned(b)*16; metaUsed_=0; if (!metadata_) audioLeft_=interval_; return 0;
+}
+void Body::readTitle() {
+  static const char kKey[]="StreamTitle='";
+  const char* p=strstr(meta_,kKey);  // A block without a title keeps the last one showing.
+  if (!p) return;
+  p+=sizeof(kKey)-1;
+  const char* end=strstr(p,"';");
+  size_t n=end ? size_t(end-p) : strlen(p);
+  if (!end && n && p[n-1]=='\'') --n;
+  cleanText(p,n,title_,sizeof(title_));
+  ++titles_;
 }
 int Body::feed(uint8_t b) {
   if (bad_ || ended_) { bad_=true; return -1; }
@@ -143,6 +161,248 @@ int Body::feed(uint8_t b) {
 bool Body::complete() const {
   return !bad_ && (!chunked_ || ended_) && (!bounded_ || !remaining_) && !metadata_ && (!interval_ || audioLeft_);
 }
+static size_t utf8Length(unsigned char c) {
+  return c < 0x80 ? 1 : (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : (c & 0xF8) == 0xF0 ? 4 : 0;
+}
+static bool validUtf8(const unsigned char* s, size_t n) {
+  for (size_t i = 0; i < n;) {
+    const size_t len = utf8Length(s[i]);
+    if (!len || (len == 2 && s[i] < 0xC2) || i + len > n) return false;
+    for (size_t k = 1; k < len; ++k) if ((s[i+k] & 0xC0) != 0x80) return false;
+    i += len;
+  }
+  return true;
+}
+size_t cleanText(const char* in, size_t n, char* out, size_t room) {
+  if (!out || !room) return 0;
+  const auto* s = reinterpret_cast<const unsigned char*>(in);
+  const bool utf8 = validUtf8(s, n);
+  size_t len = 0;
+  for (size_t i = 0; i < n; ++i) {
+    unsigned c = s[i];
+    if (utf8 && c >= 0x80) {
+      const size_t k = utf8Length(c);
+      if (len + k > room - 1) break;
+      memcpy(out + len, in + i, k); len += k; i += k - 1;
+      continue;
+    }
+    // Latin-1's control block 0x80-0x9F has no letters worth showing.
+    if (c < 0x20 || c == 0x7f || (c >= 0x80 && c < 0xA0)) c = ' ';
+    if (c < 0x80) {
+      if (len + 1 > room - 1) break;
+      if (c == ' ' && (!len || out[len-1] == ' ')) continue;  // No runs of spaces, none in front.
+      out[len++] = char(c);
+    } else {
+      if (len + 2 > room - 1) break;
+      out[len++] = char(0xC0 | (c >> 6)); out[len++] = char(0x80 | (c & 0x3F));
+    }
+  }
+  while (len && out[len-1] == ' ') --len;
+  out[len] = 0;
+  return len;
+}
+bool searchUrl(char* out, size_t room, bool byGenre, const char* text) {
+  if (!out || !room || !text) return false;
+  while (*text == ' ') ++text;
+  size_t n = strlen(text);
+  while (n && text[n-1] == ' ') --n;
+  if (!n || n > 64) return false;
+  int len = snprintf(out, room, "http://all.api.radio-browser.info/json/stations/search?%s=", byGenre ? "tag" : "name");
+  if (len <= 0 || size_t(len) >= room) return false;
+  size_t at = size_t(len);
+  static const char kHex[] = "0123456789ABCDEF";
+  for (size_t i = 0; i < n; ++i) {
+    const unsigned char c = static_cast<unsigned char>(text[i]);
+    const bool plain = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_' || c == '~';
+    if (at + (plain ? 1 : 3) >= room) return false;
+    if (plain) out[at++] = char(c);
+    else { out[at++] = '%'; out[at++] = kHex[c >> 4]; out[at++] = kHex[c & 15]; }
+  }
+  // Only what this player can play, most listened first. 30 leaves room for the duplicates.
+  static const char kRest[] = "&codec=MP3&is_https=false&hidebroken=true&order=clickcount&reverse=true&limit=30";
+  if (at + sizeof(kRest) > room || at + sizeof(kRest) > kUrlSize) return false;
+  memcpy(out + at, kRest, sizeof(kRest));
+  return true;
+}
+void StationJson::put(char c) {
+  if (!dst_) return;
+  if (dstLen_ + 1 < dstRoom_) dst_[dstLen_++] = c; else overflow_ = true;
+}
+void StationJson::emit(uint32_t cp) {
+  if (cp < 0x20 || cp == 0x7f) cp = ' ';
+  char b[4]; size_t n;
+  if (cp < 0x80) { b[0] = char(cp); n = 1; }
+  else if (cp < 0x800) { b[0] = char(0xC0 | (cp >> 6)); b[1] = char(0x80 | (cp & 0x3F)); n = 2; }
+  else if (cp < 0x10000) { b[0] = char(0xE0 | (cp >> 12)); b[1] = char(0x80 | ((cp >> 6) & 0x3F)); b[2] = char(0x80 | (cp & 0x3F)); n = 3; }
+  else { b[0] = char(0xF0 | (cp >> 18)); b[1] = char(0x80 | ((cp >> 12) & 0x3F)); b[2] = char(0x80 | ((cp >> 6) & 0x3F)); b[3] = char(0x80 | (cp & 0x3F)); n = 4; }
+  if (!dst_) return;
+  if (dstLen_ + n < dstRoom_) { memcpy(dst_ + dstLen_, b, n); dstLen_ += n; } else overflow_ = true;
+}
+// Inside a string, key or value. A lone half of a surrogate pair shows as '?', which every
+// font has, rather than a replacement character the renderer would go looking for.
+bool StationJson::text(uint8_t c, bool& closed) {
+  closed = false;
+  if (escape_ == 1) {
+    escape_ = 0;
+    if (c == 'u') { escape_ = 2; unit_ = 0; return true; }
+    if (high_) { emit('?'); high_ = 0; }
+    if (c == '"' || c == '\\' || c == '/') put(char(c));
+    else if (c == 'b' || c == 'f' || c == 'n' || c == 'r' || c == 't') put(' ');
+    else return fail();
+    return true;
+  }
+  if (escape_ >= 2) {
+    const int d = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+    if (d < 0) return fail();
+    unit_ = unit_ * 16 + unsigned(d);
+    if (++escape_ < 6) return true;
+    escape_ = 0;
+    if (high_) {
+      if (unit_ >= 0xDC00 && unit_ <= 0xDFFF) { emit(0x10000 + ((high_ - 0xD800) << 10) + (unit_ - 0xDC00)); high_ = 0; return true; }
+      emit('?'); high_ = 0;
+    }
+    if (unit_ >= 0xD800 && unit_ <= 0xDBFF) high_ = unit_;
+    else emit(unit_ >= 0xDC00 && unit_ <= 0xDFFF ? '?' : unit_);
+    return true;
+  }
+  if (c == '\\') { escape_ = 1; return true; }
+  if (high_) { emit('?'); high_ = 0; }
+  if (c == '"') { closed = true; return true; }
+  put(c < 0x20 ? ' ' : char(c));
+  return true;
+}
+void StationJson::startValue() {
+  dst_ = nullptr; dstRoom_ = 0;
+  switch (field_) {
+    case Field::Name: dst_ = cur_.name; dstRoom_ = sizeof(cur_.name); break;
+    case Field::Url: dst_ = cur_.url; dstRoom_ = sizeof(cur_.url); break;
+    case Field::Tags: dst_ = cur_.tags; dstRoom_ = sizeof(cur_.tags); break;
+    case Field::Country: dst_ = cur_.country; dstRoom_ = sizeof(cur_.country); break;
+    case Field::Language: dst_ = language_; dstRoom_ = sizeof(language_); break;
+    case Field::Codec: dst_ = codec_; dstRoom_ = sizeof(codec_); break;
+    default: break;
+  }
+  dstLen_ = 0; overflow_ = false; escape_ = 0; high_ = 0;
+}
+void StationJson::endValue() {
+  if (!dst_) return;
+  if (overflow_) {
+    // Cut short: drop a letter whose last bytes didn't fit.
+    size_t j = dstLen_;
+    while (j && (static_cast<unsigned char>(dst_[j-1]) & 0xC0) == 0x80) --j;
+    if (j && utf8Length(static_cast<unsigned char>(dst_[j-1])) > dstLen_ - (j - 1)) dstLen_ = j - 1;
+    if (field_ == Field::Url) urlTooLong_ = true;  // A cut address would play nothing.
+  }
+  dst_[dstLen_] = 0;
+  dst_ = nullptr;
+}
+void StationJson::endItem() {
+  phase_ = Phase::AfterItem;
+  expectItem_ = false;
+  char clean[sizeof(cur_.name)];
+  size_t n = cleanText(cur_.name, strlen(cur_.name), clean, sizeof(clean));
+  memcpy(cur_.name, clean, n + 1);
+  char tags[sizeof(cur_.tags)];
+  memcpy(cur_.tags, tags, cleanText(cur_.tags, strlen(cur_.tags), tags, sizeof(tags)) + 1);
+  Url url;
+  if (!n || urlTooLong_ || hls_ || count_ >= room_ || !parseUrl(cur_.url, url)) return;
+  if (codec_[0] && strcasecmp(codec_, "MP3")) return;
+  for (size_t i = 0; i < count_; ++i) if (!strcmp(out_[i].url, cur_.url)) return;
+  bool russian = false;
+  static const char kRussian[] = "russian";
+  for (size_t i = 0; !russian && language_[i]; ++i) {
+    size_t j = 0;
+    while (kRussian[j] && language_[i+j] && char(tolower(static_cast<unsigned char>(language_[i+j]))) == kRussian[j]) ++j;
+    russian = !kRussian[j];
+  }
+  if (!language_[0] && !strcmp(cur_.country, "RU")) russian = true;
+  cur_.russian = russian;
+  out_[count_++] = cur_;
+}
+bool StationJson::feed(uint8_t c) {
+  const bool space = c == ' ' || c == '\t' || c == '\r' || c == '\n';
+  switch (phase_) {
+    case Phase::Start:
+      if (space) return true;
+      if (c != '[') return fail();
+      phase_ = Phase::Item; return true;
+    case Phase::Item:
+      if (space) return true;
+      if (c == ']' && !expectItem_) { phase_ = Phase::Done; return true; }
+      if (c != '{') return fail();
+      cur_ = Found{}; language_[0] = codec_[0] = 0; hls_ = urlTooLong_ = expectKey_ = false;
+      phase_ = Phase::Key; return true;
+    case Phase::AfterItem:
+      if (space) return true;
+      if (c == ',') { expectItem_ = true; phase_ = Phase::Item; return true; }
+      if (c == ']') { phase_ = Phase::Done; return true; }
+      return fail();
+    case Phase::Key:
+      if (space) return true;
+      if (c == '}' && !expectKey_) { endItem(); return true; }
+      if (c != '"') return fail();
+      dst_ = key_; dstRoom_ = sizeof(key_); dstLen_ = 0; overflow_ = false; escape_ = 0; high_ = 0;
+      phase_ = Phase::KeyText; return true;
+    case Phase::KeyText: {
+      bool closed = false;
+      if (!text(c, closed)) return false;
+      if (!closed) return true;
+      key_[dstLen_] = 0; dst_ = nullptr;
+      field_ = overflow_ ? Field::None : !strcmp(key_, "name") ? Field::Name : !strcmp(key_, "url_resolved") ? Field::Url :
+        !strcmp(key_, "tags") ? Field::Tags : !strcmp(key_, "countrycode") ? Field::Country :
+        !strcmp(key_, "language") ? Field::Language : !strcmp(key_, "codec") ? Field::Codec :
+        !strcmp(key_, "bitrate") ? Field::Bitrate : !strcmp(key_, "hls") ? Field::Hls : Field::None;
+      phase_ = Phase::Colon; return true;
+    }
+    case Phase::Colon:
+      if (space) return true;
+      if (c != ':') return fail();
+      phase_ = Phase::Value; return true;
+    case Phase::Value:
+      if (space) return true;
+      if (c == '"') { startValue(); phase_ = Phase::ValueText; return true; }
+      if (c == '-' || (c >= '0' && c <= '9')) { number_ = c == '-' ? 0 : unsigned(c - '0'); unit_ = c == '-'; phase_ = Phase::Number; return true; }
+      if (c >= 'a' && c <= 'z') { unit_ = c; phase_ = Phase::Word; return true; }
+      if (c == '{' || c == '[') { depth_ = 1; nestedString_ = nestedEscape_ = false; phase_ = Phase::Nested; return true; }
+      return fail();
+    case Phase::ValueText: {
+      bool closed = false;
+      if (!text(c, closed)) return false;
+      if (closed) { endValue(); phase_ = Phase::AfterMember; }
+      return true;
+    }
+    case Phase::Number:
+      // unit_ says the integer part is over: a minus sign, a point or an exponent.
+      if (c >= '0' && c <= '9') { if (!unit_ && number_ < 1000000) number_ = number_ * 10 + unsigned(c - '0'); return true; }
+      if (c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-') { unit_ = 1; return true; }
+      if (field_ == Field::Bitrate) cur_.bitrate = uint16_t(number_ > 65535 ? 65535 : number_);
+      if (field_ == Field::Hls) hls_ = number_ != 0;
+      phase_ = Phase::AfterMember; return feed(c);
+    case Phase::Word:
+      if (c >= 'a' && c <= 'z') return true;
+      if (field_ == Field::Hls) hls_ = unit_ == 't';
+      phase_ = Phase::AfterMember; return feed(c);
+    case Phase::Nested:
+      if (nestedString_) {
+        if (nestedEscape_) nestedEscape_ = false;
+        else if (c == '\\') nestedEscape_ = true;
+        else if (c == '"') nestedString_ = false;
+        return true;
+      }
+      if (c == '"') nestedString_ = true;
+      else if (c == '{' || c == '[') { if (++depth_ > 32) return fail(); }
+      else if ((c == '}' || c == ']') && !--depth_) phase_ = Phase::AfterMember;
+      return true;
+    case Phase::AfterMember:
+      if (space) return true;
+      if (c == ',') { expectKey_ = true; phase_ = Phase::Key; return true; }
+      if (c == '}') { endItem(); return true; }
+      return fail();
+    case Phase::Done: return true;
+    case Phase::Bad: break;
+  }
+  return false;
+}
 } } // namespace internet_radio::detail
 
 #ifndef INTERNET_RADIO_HOST_TEST
@@ -160,10 +420,17 @@ namespace {
 constexpr uint8_t kChannel=7;
 constexpr size_t kInput=8192;
 constexpr uint32_t kIdleMs=5000, kHeaderMs=8000;
+constexpr uint32_t kSearchBytes=128*1024;  // 30 stations come to about 35 KB.
+enum class Job : uint8_t { Stream, Search };
 std::atomic<State> current{State::Idle};
 std::atomic<Error> failure{Error::None};
 std::atomic<bool> owned{false}, cancel{false};
 std::atomic<uint32_t> received{0};
+std::atomic<Job> job{Job::Stream};
+char nowTitle[128];  // Guarded by gate.
+// Search results outlive the search, so a found station can play while the list shows.
+Found* results=nullptr;
+std::atomic<size_t> resultCount{0};
 portMUX_TYPE gate=portMUX_INITIALIZER_UNLOCKED;
 char requested[detail::kUrlSize];
 // lwIP DNS callbacks may outlive a cancelled worker. Static storage deliberately
@@ -203,6 +470,7 @@ Error resolve(const char* host, IPAddress& ip) {
 struct Reader {
   WiFiClient& tcp; uint8_t buf[512]{}; size_t pos=0, count=0;
   uint32_t last=millis();
+  void reset() { pos=count=0; last=millis(); }
   int next() {
     for (;;) {
       if (cancel.load()) return -3;
@@ -241,7 +509,9 @@ Error sendRequest(WiFiClient& tcp, const char* data, size_t size) {
   }
   return Error::None;
 }
-Error stream(WiFiClient& tcp, mp3dec_t* decoder, uint8_t* input, int16_t* pcm[2]) {
+// Connects to the requested address, following up to three redirects, and leaves r at the
+// start of a 200 answer's body. Error::None with cancel set means it was stopped.
+Error open(WiFiClient& tcp, Reader& r, detail::Headers& h, bool json) {
   detail::Url url; if (!detail::parseUrl(requested,url)) return Error::InvalidUrl;
   for (unsigned redirect=0;redirect<=3 && !cancel.load();++redirect) {
     setState(State::Connecting);
@@ -250,21 +520,51 @@ Error stream(WiFiClient& tcp, mp3dec_t* decoder, uint8_t* input, int16_t* pcm[2]
     tcp.setTimeout(1);
     if (!tcp.connect(ip,url.port,600)) return Error::Connect;
     char request[768]; int n=snprintf(request,sizeof(request),
-      "GET %s HTTP/1.1\r\nHost: %s:%u\r\nUser-Agent: S1-ADV-Radio/1\r\nAccept: audio/mpeg\r\nAccept-Encoding: identity\r\nIcy-MetaData: 1\r\nConnection: close\r\n\r\n",url.path,url.host,url.port);
+      "GET %s HTTP/1.1\r\nHost: %s:%u\r\nUser-Agent: S1-ADV-Radio/1\r\nAccept: %s\r\nAccept-Encoding: identity\r\n%sConnection: close\r\n\r\n",
+      url.path,url.host,url.port,json?"application/json":"audio/mpeg",json?"":"Icy-MetaData: 1\r\n");
     if (n<=0 || size_t(n)>=sizeof(request)) return Error::Connect;
     e=sendRequest(tcp,request,n); if(e!=Error::None || cancel.load()) return e;
-    Reader r{tcp}; detail::Headers h; e=readHeaders(r,h);
+    r.reset(); h=detail::Headers{}; h.json=json; e=readHeaders(r,h);
     if(e!=Error::None || cancel.load()) return e;
-    if(h.status!=200) {
-      tcp.stop(); if(redirect==3) return Error::Redirect;
-      detail::Url next;
-      if (h.location[0]=='/' && h.location[1]!='/') {
-        char absolute[detail::kUrlSize]; int len=snprintf(absolute,sizeof(absolute),"http://%s:%u%s",url.host,url.port,h.location);
-        if(len<=0 || size_t(len)>=sizeof(absolute) || !detail::parseUrl(absolute,next)) return Error::Redirect;
-      } else if(!detail::parseUrl(h.location,next)) return Error::Redirect;
-      url=next; continue;
-    }
-    detail::Body body(h); size_t used=0; unsigned slot=0, junk=0;
+    if(h.status==200) return Error::None;
+    tcp.stop(); if(redirect==3) return Error::Redirect;
+    detail::Url next;
+    if (h.location[0]=='/' && h.location[1]!='/') {
+      char absolute[detail::kUrlSize]; int len=snprintf(absolute,sizeof(absolute),"http://%s:%u%s",url.host,url.port,h.location);
+      if(len<=0 || size_t(len)>=sizeof(absolute) || !detail::parseUrl(absolute,next)) return Error::Redirect;
+    } else if(!detail::parseUrl(h.location,next)) return Error::Redirect;
+    url=next;
+  }
+  return Error::None;
+}
+void showTitle(const char* text) {
+  portENTER_CRITICAL(&gate);
+  const size_t n=strnlen(text,sizeof(nowTitle)-1);
+  memcpy(nowTitle,text,n); nowTitle[n]=0;
+  portEXIT_CRITICAL(&gate);
+}
+Error search(WiFiClient& tcp) {
+  Reader r{tcp}; detail::Headers h;
+  Error e=open(tcp,r,h,true); if(e!=Error::None || cancel.load()) return e;
+  setState(State::Buffering);
+  detail::Body body(h); detail::StationJson json(results,kMaxFound);
+  uint32_t total=0;
+  while (!cancel.load() && !json.finished() && !body.done()) {
+    int b=r.next();
+    if (b<0) { if(b==-3) return Error::None; if(b==-2) return Error::Timeout; break; }
+    int kind=body.feed(uint8_t(b)); if(kind<0) return Error::Malformed;
+    if (kind==1 && (++total>kSearchBytes || !json.feed(uint8_t(b)))) return Error::Malformed;
+  }
+  if (cancel.load()) return Error::None;
+  if (!json.finished()) return Error::Malformed;
+  resultCount.store(json.count());
+  return Error::None;
+}
+Error stream(WiFiClient& tcp, mp3dec_t* decoder, uint8_t* input, int16_t* pcm[2]) {
+  {
+    Reader r{tcp}; detail::Headers h;
+    Error e=open(tcp,r,h,false); if(e!=Error::None || cancel.load()) return e;
+    detail::Body body(h); size_t used=0; unsigned slot=0, junk=0; uint32_t titles=0;
     bool played=false; uint32_t lastFrame=millis();
     mp3dec_init(decoder); setState(State::Buffering);
     while (!cancel.load()) {
@@ -294,6 +594,7 @@ Error stream(WiFiClient& tcp, mp3dec_t* decoder, uint8_t* input, int16_t* pcm[2]
         if (used>=4096) break;
       }
       if(cancel.load()) break;
+      if(body.titles()!=titles) { titles=body.titles(); showTitle(body.title()); }
       mp3dec_frame_info_t info{};
       int samples=mp3dec_decode_frame(decoder,input,used,pcm[slot],&info);
       if(info.frame_bytes<0 || size_t(info.frame_bytes)>used) return Error::Decode;
@@ -320,13 +621,17 @@ Error stream(WiFiClient& tcp, mp3dec_t* decoder, uint8_t* input, int16_t* pcm[2]
 }
 void worker(void*) {
   Error e=Error::None;
+  mp3dec_t* decoder=nullptr; uint8_t* input=nullptr; int16_t* pcm[2]={nullptr,nullptr};
+  if (job.load()==Job::Search) { WiFiClient tcp; e=search(tcp); tcp.stop(); }
+  else {
   // All active allocations, TCP and decoder lifetime are worker-owned.
-  auto* decoder=static_cast<mp3dec_t*>(heap_caps_malloc(sizeof(mp3dec_t),MALLOC_CAP_8BIT));
-  auto* input=static_cast<uint8_t*>(heap_caps_malloc(kInput,MALLOC_CAP_8BIT));
-  int16_t* pcm[2]={static_cast<int16_t*>(heap_caps_malloc(MINIMP3_MAX_SAMPLES_PER_FRAME*sizeof(int16_t),MALLOC_CAP_8BIT)),
-                   static_cast<int16_t*>(heap_caps_malloc(MINIMP3_MAX_SAMPLES_PER_FRAME*sizeof(int16_t),MALLOC_CAP_8BIT))};
+  decoder=static_cast<mp3dec_t*>(heap_caps_malloc(sizeof(mp3dec_t),MALLOC_CAP_8BIT));
+  input=static_cast<uint8_t*>(heap_caps_malloc(kInput,MALLOC_CAP_8BIT));
+  pcm[0]=static_cast<int16_t*>(heap_caps_malloc(MINIMP3_MAX_SAMPLES_PER_FRAME*sizeof(int16_t),MALLOC_CAP_8BIT));
+  pcm[1]=static_cast<int16_t*>(heap_caps_malloc(MINIMP3_MAX_SAMPLES_PER_FRAME*sizeof(int16_t),MALLOC_CAP_8BIT));
   if(!decoder || !input || !pcm[0] || !pcm[1]) e=Error::NoMemory;
   else { WiFiClient tcp; e=stream(tcp,decoder,input,pcm); tcp.stop(); }
+  }
   // Cancellation is nonblocking to the caller. Drain a single bounded MP3
   // frames naturally (at most two queued). If the speaker fails, retain buffers
   // and busy rather than free a possibly live pointer; never force-delete.
@@ -340,30 +645,58 @@ void worker(void*) {
   portEXIT_CRITICAL(&gate);
   vTaskDelete(nullptr);
 }
-} // anonymous
-bool start(const char* url) {
-  detail::Url parsed;
-  if(!detail::parseUrl(url,parsed)) {
-    portENTER_CRITICAL(&gate);
-    if(!owned.load()) {failure.store(Error::InvalidUrl);current.store(State::Error);}
-    portEXIT_CRITICAL(&gate);return false;
-  }
-  if(ESP.getFreeHeap()<65536 || heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)<24576) {
-    portENTER_CRITICAL(&gate);
-    if(!owned.load()) { failure.store(Error::NoMemory); current.store(State::Error); }
-    portEXIT_CRITICAL(&gate); return false;
-  }
+void refuse(Error e) {
+  portENTER_CRITICAL(&gate);
+  if(!owned.load()) { failure.store(e); current.store(State::Error); }
+  portEXIT_CRITICAL(&gate);
+}
+bool begin(const char* url, Job kind) {
+  if(ESP.getFreeHeap()<65536 || heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)<24576) { refuse(Error::NoMemory); return false; }
   portENTER_CRITICAL(&gate);
   if(owned.load()) {portEXIT_CRITICAL(&gate);return false;}
-  owned.store(true);cancel.store(false);failure.store(Error::None);received.store(0);
+  owned.store(true);cancel.store(false);failure.store(Error::None);received.store(0);job.store(kind);
   strcpy(requested,url);current.store(State::Connecting);
+  if(kind==Job::Stream) nowTitle[0]=0;
+  else resultCount.store(0);
   portEXIT_CRITICAL(&gate);
-  // ESP-IDF task stack size is bytes. minimp3 has sizeable decode scratch.
-  if(xTaskCreate(worker,"radio_stream",24576,nullptr,2,nullptr)!=pdPASS) {
-    portENTER_CRITICAL(&gate);failure.store(Error::TaskFailed);current.store(State::Error);owned.store(false);portEXIT_CRITICAL(&gate);
+  if(kind==Job::Search && !results) results=static_cast<Found*>(heap_caps_malloc(sizeof(Found)*kMaxFound,MALLOC_CAP_8BIT));
+  // ESP-IDF task stack size is bytes. minimp3 has sizeable decode scratch; a search hasn't.
+  if((kind==Job::Search && !results) ||
+     xTaskCreate(worker,kind==Job::Search?"radio_search":"radio_stream",kind==Job::Search?12288:24576,nullptr,2,nullptr)!=pdPASS) {
+    portENTER_CRITICAL(&gate);failure.store(results||kind==Job::Stream?Error::TaskFailed:Error::NoMemory);current.store(State::Error);owned.store(false);portEXIT_CRITICAL(&gate);
     return false;
   }
   return true;
+}
+} // anonymous
+bool start(const char* url) {
+  detail::Url parsed;
+  if(!detail::parseUrl(url,parsed)) { refuse(Error::InvalidUrl); return false; }
+  return begin(url,Job::Stream);
+}
+bool startSearch(bool byGenre, const char* text) {
+  char url[detail::kUrlSize];
+  if(!detail::searchUrl(url,sizeof(url),byGenre,text)) { refuse(Error::InvalidUrl); return false; }
+  return begin(url,Job::Search);
+}
+bool searching() { return owned.load() && job.load()==Job::Search; }
+size_t foundCount() { return searching() ? 0 : resultCount.load(); }
+const Found* found(size_t i) { return results && i<foundCount() ? &results[i] : nullptr; }
+void clearFound() {
+  portENTER_CRITICAL(&gate);
+  if(owned.load() && job.load()==Job::Search) { portEXIT_CRITICAL(&gate); return; }
+  Found* gone=results; results=nullptr; resultCount.store(0);
+  portEXIT_CRITICAL(&gate);
+  free(gone);
+}
+size_t title(char* out, size_t room) {
+  if(!out || !room) return 0;
+  portENTER_CRITICAL(&gate);
+  size_t n=strnlen(nowTitle,sizeof(nowTitle)-1);
+  if(n>room-1) { n=room-1; while(n && (static_cast<unsigned char>(nowTitle[n])&0xC0)==0x80) --n; }
+  memcpy(out,nowTitle,n); out[n]=0;
+  portEXIT_CRITICAL(&gate);
+  return n;
 }
 void stop() {portENTER_CRITICAL(&gate);if(owned.load()){cancel.store(true);current.store(State::Stopping);}portEXIT_CRITICAL(&gate);}
 bool busy(){return owned.load();}
