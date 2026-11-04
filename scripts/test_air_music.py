@@ -30,10 +30,11 @@ assert loop.index('serviceNfcNotes();') < loop.index('serviceAirMusic();')
 change = (parts / '024_main.cpp.inc').read_text()
 assert change.index('stopAirMusic();') < change.index('gUiMode = mode;')
 
-# Every launcher group must still fit, because a ninth item has nowhere to go.
+# Every launcher group must still fit, because a tenth item has nowhere to go. Favorites has
+# none of its own, so it doesn't match.
 menu = (parts / '004_main.cpp.inc').read_text()
 table = menu[menu.index('kLauncherGroups[kLauncherGroupCount] = {'):menu.index('Preferences gPrefs;')]
-groups = re.findall(r'rgb565_local\([^)]*\), (\d+),\s*\{(.*?)\}\}\}', table, re.S)
+groups = re.findall(r'rgb565_local\([^)]*\), (\d+),\s*\{\{(.*?)\}\}\}', table, re.S)
 assert len(groups) == 9
 for count, items in groups:
     assert int(count) == items.count('UiMode::') <= 9, (count, items)

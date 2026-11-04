@@ -3,7 +3,7 @@
 - Type a question and press Enter in chat.
 - Tap **Alt** on Pulse, AI Chat, the other assistant screens or [Say a rule](#lab) to start listening, then tap it again to send. Tapping it while Claude is talking stops the reply and listens. Esc cancels.
 - You can also hold **G0**, speak and release, or use **Ctrl+V** or double **Ctrl**.
-- **Tab** opens the app menu from Home, chat and Realtime. The arrow keys pick a row and switch group, and Enter opens. A letter jumps straight to a group: **A** AI Agent, **M** Media, **F** Focus, **T** Tools, **G** Games, **R** Arcade, **S** Settings, **Y** System, **L** Lab. The selected tab underlines its letter. **1-9** also jumps to a group, and **Ctrl+1-8** opens that row. The menu opens on what you last used, even after a restart.
+- **Tab** opens the app menu from Home, chat and Realtime. The arrow keys pick a row and switch tab, and Enter opens. A letter jumps straight to a tab: **V** Favorites, **A** AI Agent, **M** Media, **F** Focus, **T** Tools, **G** Games, **R** Arcade, **S** Settings, **Y** System, **L** Lab. The selected tab underlines its letter. **1-9** opens that favorite from any tab, and **Ctrl+1-9** opens that row of the tab you're on. The menu opens on what you last used, even after a restart. See [Favorites](#favorites).
 - **Ctrl+K** opens assistant commands. R selects Realtime, C AI Chat.
 - **Ctrl+U** on the Home clock installs an available update. An orange **NEW UPDATE / Ctrl+U** badge replaces READY until the newer firmware is installed. Without a candidate, Ctrl+U checks for updates.
 - **Ctrl+R** starts Realtime or commits the current speech turn. While awaiting a reply, it stops Realtime.
@@ -29,6 +29,20 @@ on your built device for current shortcuts. Specialized IR, RFID and sonar
 tools require compatible extra hardware; see the retained target documentation.
 Voice quality and response time depend on your bridge's STT/TTS configuration
 and the agent, network and provider latency.
+
+## Favorites
+
+Favorites is the menu's first tab, and holds up to nine apps from the other tabs, in your
+order. Press **Space** on any app to add it. It takes the next number, and a small star by its
+row number shows it's a favorite. Press Space again to take it off.
+
+Once an app is a favorite, its number opens it from any tab: Tab, then **3**, opens the third,
+wherever the menu opened. On the Favorites tab, **Fn** with up or down moves the selected app
+one place, and its number goes with it, so put the ones you use most on the keys you like.
+**Space** or **Del** there takes one off, and the ones below it move up a number. Each app keeps
+its own tab's colour, and Pomodoro, which is in Focus and in Settings, shows which one it is.
+
+Favorites are kept on the device by name, so they stay through updates and restarts.
 
 ## Wi-Fi
 
@@ -240,7 +254,7 @@ port, or play on the keyboard.
 
 ## Lab
 
-The Lab is its own tab in the app menu, and the 9 key jumps to it. Devices tests everything the
+The Lab is its own tab in the app menu, and the L key jumps to it. Devices tests everything the
 Cardputer can reach, Rules joins them together, like "if this, then that", and Sequences runs steps
 in order. The Grove port is only held while a Lab screen is open. For a tour with pictures, see [The Lab](LAB.md).
 

@@ -25,7 +25,7 @@ Put S1-ADV on it and you get a menu of more than 40 apps: an AI assistant that r
 <tr>
 <td width="33%"><img src="docs/assets/screens/pulse.png" alt="The Pulse screen: a spinning orb, a large clock, a CODING badge and Wi-Fi at full signal" width="100%"><br><sub><b>Pulse.</b> The clock, plus what Claude is doing right now.</sub></td>
 <td width="33%"><img src="docs/assets/screens/chat.png" alt="AI Chat showing a short conversation and a yellow Coding bar" width="100%"><br><sub><b>AI Chat.</b> Type or talk. Every kind of work has its own color and sound.</sub></td>
-<td width="33%"><img src="docs/assets/screens/menu.png" alt="The app menu open on the Arcade tab with Flappy Bird selected" width="100%"><br><sub><b>App menu.</b> Nine tabs, one letter key each.</sub></td>
+<td width="33%"><img src="docs/assets/screens/menu.png" alt="The app menu open on its Favorites tab, with Internet Radio, Tetris, AI Chat and Flappy Bird on keys 1 to 4" width="100%"><br><sub><b>App menu.</b> Ten tabs, one letter key each, and your favorites on the number keys.</sub></td>
 </tr>
 <tr>
 <td><img src="docs/assets/screens/lab-devices.png" alt="The Lab Devices list with live readings from an ultrasonic sensor, ENV III, joystick, Mini Angle and light sensor" width="100%"><br><sub><b>Lab: Devices.</b> Plug a part in and see it respond.</sub></td>
@@ -55,6 +55,7 @@ Put S1-ADV on it and you get a menu of more than 40 apps: an AI assistant that r
 
 | Tab | Key | Apps |
 | --- | --- | --- |
+| Favorites | V | Up to nine of the others, in your order: Space adds one, and 1-9 opens it from any tab |
 | AI Agent | A | Realtime, Pulse, AI Chat |
 | Media | M | Library, Folders, Voice Notes, Notes, Assets, Files, Internet Radio, Podcasts, VLC Remote |
 | Focus | F | Pomodoro, Alarm, Stopwatch, Calendar, Chess Mind, Chess, BrainFlow, KeyRush |
@@ -216,6 +217,7 @@ First, the keys. On the Cardputer, the arrows are the `;` `.` `,` `/` keys, and 
 | --- | --- |
 | **Tab** | Open the app menu |
 | **A letter** in the menu | Jump to a tab: **G** Games, **R** Arcade, **L** Lab and so on |
+| **Space**, then **1-9**, in the menu | Make an app a favorite, then open it by its number from any tab |
 | **Enter** / **Esc** | Open / go back |
 | **Alt** | Tap to talk, tap again to send |
 | **G0 button** | Hold to talk, release to send |

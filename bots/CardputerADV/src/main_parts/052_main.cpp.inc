@@ -109,17 +109,31 @@ const uint8_t* launcherItemIcon(const LauncherSubItem& item) {
   }
 }
 
+// Pomodoro is in Focus and in Settings, so on Favorites it needs its tab's name beside it.
+bool launcherLabelInTwoTabs(const char* label) {
+  int tabs = 0;
+  for (uint8_t g = 0; g < kLauncherGroupCount; ++g)
+    for (uint8_t i = 0; i < kLauncherGroups[g].count; ++i)
+      if (!strcmp(kLauncherGroups[g].items[i].label, label)) {
+        ++tabs;
+        break;
+      }
+  return tabs > 1;
+}
+
 // The menu fills the screen: a strip with one tab per group, where the selected tab widens to
-// hold its name, then five rows of that group. The canvas is 8-bit, so every colour here has to
-// stay distinct after RGB332 reduction. Dark tints do not survive it.
+// hold its name, then five rows of that group. Ten tabs leave the selected one room for its
+// name but not its icon too. The canvas is 8-bit, so every colour here has to stay distinct
+// after RGB332 reduction. Dark tints do not survive it.
 void renderLauncherOverlay() {
   if (!gLauncherVisible) {
     return;
   }
   auto& d = gCanvas;
   gLauncherSelection = clampValue<int>(gLauncherSelection, 0, kLauncherGroupCount - 1);
-  const LauncherGroup& group = kLauncherGroups[gLauncherSelection];
-  gLauncherSubSelection = clampValue<int>(gLauncherSubSelection, 0, group.count - 1);
+  const LauncherGroup& group = launcherGroup(gLauncherSelection);
+  const bool favorites = gLauncherSelection == kFavoritesGroup;
+  gLauncherSubSelection = group.count ? clampValue<int>(gLauncherSubSelection, 0, group.count - 1) : 0;
 
   static_assert(sizeof(launcher_icons::kGroups) / sizeof(launcher_icons::kGroups[0]) == kLauncherGroupCount,
                 "launcher_icons::kGroups needs one icon per group");
@@ -127,44 +141,62 @@ void renderLauncherOverlay() {
                 "launcher_shortcuts::kGroupLetters needs one letter per group");
   constexpr int16_t kScreenW = 240;
   constexpr int16_t kTabH = 21;
+  constexpr int16_t kTabPad = 6;
   constexpr int16_t kListY = 24;
   constexpr int16_t kRowH = 22;
   constexpr int kVisibleRows = 5;
   constexpr int16_t kRowNumberX = 223;
+  constexpr int16_t kMarkX = kRowNumberX - 12;
   const int16_t iconSize = launcher_icons::kSize;
   const uint16_t black = TFT_BLACK;
   const uint16_t white = TFT_WHITE;
   const uint16_t muted = rgb565_local(109, 109, 85);
   const uint16_t scrollTrack = rgb565_local(36, 36, 85);
+  const uint16_t star = kLauncherGroups[kFavoritesGroup].accent;
+  const uint16_t help = rgb565_local(182, 182, 170);  // Brighter than muted: these are sentences to read.
 
   d.fillScreen(black);
 
   d.setFont(&fonts::FreeSansBold9pt7b);
-  const int16_t selectedTabW = 27 + d.textWidth(group.title);
+  const int16_t selectedTabW = 2 * kTabPad + d.textWidth(group.title);
   const int16_t otherTabW = (kScreenW - selectedTabW) / (kLauncherGroupCount - 1);
   int16_t tabX = (kScreenW - selectedTabW - otherTabW * (kLauncherGroupCount - 1)) / 2;
   for (int i = 0; i < kLauncherGroupCount; ++i) {
-    const uint8_t* icon = launcher_icons::kGroups[i];
     if (i == gLauncherSelection) {
       d.fillRoundRect(tabX, 0, selectedTabW, kTabH, 6, group.accent);
-      d.drawBitmap(tabX + 3, 2, icon, iconSize, iconSize, black);
       d.setTextColor(black);
-      d.setCursor(tabX + 21, 3);
+      d.setCursor(tabX + kTabPad, 3);
       d.print(group.title);
       // The letter that jumps here, underlined the way a menu shows its shortcut.
       const int mark = launcher_shortcuts::letterPosition(group.title, i);
       if (mark >= 0) {
         const String title(group.title);
         const int16_t start = d.textWidth(title.substring(0, mark));
-        d.drawFastHLine(tabX + 21 + start, 18, d.textWidth(title.substring(0, mark + 1)) - start - 1, black);
+        d.drawFastHLine(tabX + kTabPad + start, 18, d.textWidth(title.substring(0, mark + 1)) - start - 1, black);
       }
       tabX += selectedTabW;
     } else {
-      d.drawBitmap(tabX + (otherTabW - iconSize) / 2, 2, icon, iconSize, iconSize, kLauncherGroups[i].accent);
+      d.drawBitmap(tabX + (otherTabW - iconSize) / 2, 2, launcher_icons::kGroups[i], iconSize, iconSize,
+                   kLauncherGroups[i].accent);
       tabX += otherTabW;
     }
   }
   d.drawFastHLine(0, kTabH + 1, kScreenW, group.accent);
+
+  if (!group.count) {
+    d.setFont(&fonts::FreeSansBold9pt7b);
+    d.setTextColor(white);
+    const char* heading = "No favorites yet";
+    d.setCursor((kScreenW - d.textWidth(heading)) / 2, 40);
+    d.print(heading);
+    d.setFont(&fonts::Font2);
+    d.setTextColor(help);
+    const char* lines[] = {"Space on any app adds it here,", "and its number opens it from", "any tab in the menu."};
+    for (int line = 0; line < 3; ++line) {
+      d.setCursor((kScreenW - d.textWidth(lines[line])) / 2, 68 + line * 18);
+      d.print(lines[line]);
+    }
+  }
 
   const int first = clampValue<int>(gLauncherSubSelection - kVisibleRows + 1, 0,
                                     max<int>(0, group.count - kVisibleRows));
@@ -174,16 +206,30 @@ void renderLauncherOverlay() {
     const bool selected = i == gLauncherSubSelection;
     const LauncherSubItem& item = group.items[i];
     const uint8_t* icon = launcherItemIcon(item);
+    // A favorite keeps its own tab's colour, so the list reads like the tabs it came from.
+    const int home = favorites ? gFavorites.refs[i].group : gLauncherSelection;
+    const bool marked = !favorites && gFavorites.find(gLauncherSelection, i) >= 0;
     if (selected) {
       d.fillRoundRect(1, y, 233, kRowH - 1, 6, group.accent);
     }
-    d.drawBitmap(7, y + 2, icon ? icon : launcher_icons::kGroups[gLauncherSelection], iconSize, iconSize,
-                 selected ? black : group.accent);
+    d.drawBitmap(7, y + 2, icon ? icon : launcher_icons::kGroups[home], iconSize, iconSize,
+                 selected ? black : kLauncherGroups[home].accent);
     d.setFont(&fonts::FreeSansBold9pt7b);
     d.setTextColor(selected ? black : white);
     d.setCursor(30, y + 3);
-    d.print(fitCurrentFontToWidth(item.label, kRowNumberX - 34));
-    // Ctrl+this number opens the row.
+    d.print(fitCurrentFontToWidth(item.label, (marked ? kMarkX - 4 : kRowNumberX) - 34));
+    if (favorites && launcherLabelInTwoTabs(item.label)) {
+      d.setFont(&fonts::Font2);
+      d.setTextColor(selected ? black : muted);
+      d.setCursor(d.getCursorX() + 6, y + 4);
+      d.print(fitCurrentFontToWidth(kLauncherGroups[home].title, kRowNumberX - 4 - d.getCursorX()));
+    }
+    // In its own tab, an app that is also a favorite has a star by its number.
+    if (marked) {
+      d.drawBitmap(kMarkX, y + 6, launcher_icons::kStarMark, launcher_icons::kMarkSize, launcher_icons::kMarkSize,
+                   selected ? black : star);
+    }
+    // This number opens the row: on its own on Favorites, from any tab, and with Ctrl elsewhere.
     d.setFont(&fonts::Font2);
     d.setTextColor(selected ? black : muted);
     d.setCursor(kRowNumberX, y + 3);
@@ -196,6 +242,27 @@ void renderLauncherOverlay() {
     d.fillRect(236, kListY, 3, trackH, scrollTrack);
     d.fillRect(236, kListY + (trackH - thumbH) * first / (group.count - kVisibleRows), 3, thumbH, group.accent);
   }
+
+  // Short lists have room to say how to change them.
+  if (favorites && group.count > 0 && group.count < kVisibleRows) {
+    d.setFont(&fonts::Font2);
+    d.setTextColor(rgb565_local(145, 145, 170));
+    const char* hint = "Fn+up/down moves  Space removes";
+    d.setCursor((kScreenW - d.textWidth(hint)) / 2, 117);
+    d.print(hint);
+  }
+
+  if (gLauncherNoticeUntilMs && static_cast<int32_t>(gLauncherNoticeUntilMs - millis()) > 0) {
+    d.setFont(&fonts::Font2);
+    const String notice = fitCurrentFontToWidth(gLauncherNotice.c_str(), 220);
+    d.fillRoundRect(4, 112, 232, 21, 6, white);
+    d.setTextColor(black);
+    d.setCursor((kScreenW - d.textWidth(notice)) / 2, 115);
+    d.print(notice);
+  } else {
+    gLauncherNoticeUntilMs = 0;
+  }
+  d.setFont(&fonts::Font2);
 }
 
 String batteryEtaText() {

@@ -156,8 +156,8 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
   if (keys.tab) {
     if (gLauncherVisible) {
       moveLauncherSubSelection(1);
-      const LauncherGroup& group = kLauncherGroups[gLauncherSelection];
-      setStatus(group.items[gLauncherSubSelection].label, 500);
+      const LauncherGroup& group = launcherGroup(gLauncherSelection);
+      if (group.count) setStatus(group.items[gLauncherSubSelection].label, 500);
     } else {
       gLauncherVisible = true;
       setStatus("Menu", 700);

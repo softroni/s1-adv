@@ -202,9 +202,15 @@ void loadDeviceSettings() {
   gDeviceSettings.meshRegion = s1_mesh::regionOrDefault(gPrefs.getUChar("mesh_reg", s1_mesh::kDefaultRegion));
   gDeviceSettings.meshPublicLocation = static_cast<uint8_t>(s1_mesh::sharingOrDefault(gPrefs.getUChar("mesh_loc", 0)));
   gDeviceSettings.units = static_cast<uint8_t>(units::fromSaved(gPrefs.getUChar("units", static_cast<uint8_t>(units::kDefault))));
-  // The menu can change between firmware versions, so what's saved is only a suggestion.
-  gLauncherSelection = min<int>(gPrefs.getUChar("menu_group", 0), kLauncherGroupCount - 1);
-  gLauncherSubSelection = min<int>(gPrefs.getUChar("menu_item", 0), kLauncherGroups[gLauncherSelection].count - 1);
+  launcher_favorites::read(gFavorites, kLauncherGroups, kLauncherGroupCount, gPrefs.getString("favs", "").c_str());
+  rebuildFavoritesTab();
+  // The menu can change between firmware versions, so what's saved is only a suggestion. Before
+  // Favorites was the first tab, menu_group counted from AI Agent.
+  uint8_t savedTab = gPrefs.getUChar("menu_tab", 0xff);
+  if (savedTab == 0xff) savedTab = static_cast<uint8_t>(min<int>(gPrefs.getUChar("menu_group", 0), kLauncherGroupCount - 2) + 1);
+  gLauncherSelection = min<int>(savedTab, kLauncherGroupCount - 1);
+  const int savedRows = launcherGroup(gLauncherSelection).count;
+  gLauncherSubSelection = savedRows ? min<int>(gPrefs.getUChar("menu_item", 0), savedRows - 1) : 0;
   gLauncherLastSub[gLauncherSelection] = gLauncherSubSelection;
   gPrefs.end();
   gDeviceSettings.minBatteryForUpdate = clampValue<uint8_t>(gDeviceSettings.minBatteryForUpdate, 5, 95);
@@ -261,8 +267,17 @@ void saveLauncherSelection() {
   savedGroup = gLauncherSelection;
   savedItem = gLauncherSubSelection;
   gPrefs.begin(kPrefsDeviceNs, false);
-  gPrefs.putUChar("menu_group", static_cast<uint8_t>(savedGroup));
+  gPrefs.putUChar("menu_tab", static_cast<uint8_t>(savedGroup));
   gPrefs.putUChar("menu_item", static_cast<uint8_t>(savedItem));
+  gPrefs.end();
+}
+
+// Written on every change, which is a deliberate key press each time.
+void saveFavorites() {
+  char text[384];
+  if (!launcher_favorites::write(gFavorites, kLauncherGroups, kLauncherGroupCount, text, sizeof(text))) return;
+  gPrefs.begin(kPrefsDeviceNs, false);
+  gPrefs.putString("favs", text);
   gPrefs.end();
 }
 

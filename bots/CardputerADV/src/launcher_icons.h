@@ -8,6 +8,24 @@ namespace launcher_icons {
 constexpr int16_t kSize = 16;
 
 // Groups
+constexpr uint8_t kStar[32] = {
+    0b00000001, 0b10000000,
+    0b00000001, 0b10000000,
+    0b00000011, 0b11000000,
+    0b00000011, 0b11000000,
+    0b00000111, 0b11100000,
+    0b11111111, 0b11111111,
+    0b01111111, 0b11111110,
+    0b00111111, 0b11111100,
+    0b00011111, 0b11111000,
+    0b00001111, 0b11110000,
+    0b00011111, 0b11111000,
+    0b00011111, 0b11111000,
+    0b00111110, 0b01111100,
+    0b00111100, 0b00111100,
+    0b01110000, 0b00001110,
+    0b01100000, 0b00000110,
+};
 constexpr uint8_t kRobot[32] = {
     0b00000000, 0b00000000,
     0b00000001, 0b10000000,
@@ -1235,6 +1253,19 @@ constexpr uint8_t kThermometer[32] = {
 };
 
 // Same order as kLauncherGroups.
-constexpr const uint8_t* kGroups[] = {kRobot, kMusic, kStopwatch, kWrench,
+constexpr const uint8_t* kGroups[] = {kStar, kRobot, kMusic, kStopwatch, kWrench,
                                       kGamepad, kJoystick, kGear, kChip, kLab};
+
+// 8x8, one byte per row: marks a row in its own tab that is also on Favorites.
+constexpr int16_t kMarkSize = 8;
+constexpr uint8_t kStarMark[8] = {
+    0b00010000,
+    0b00010000,
+    0b00111000,
+    0b11111110,
+    0b01111100,
+    0b00111000,
+    0b01101100,
+    0b01000100,
+};
 }  // namespace launcher_icons

@@ -11,7 +11,7 @@ parts = src / 'main_parts'
 for file, text in [
         ('001_main.cpp.inc', '#include "lab.h"'),
         ('001_main.cpp.inc', '#include "lab_gps.h"'),
-        ('001_main.cpp.inc', 'kLauncherGroupCount = 9'),
+        ('001_main.cpp.inc', 'kLauncherGroupCount = 10'),
         ('001_main.cpp.inc', '#include "lab_json.h"'),
         ('023_main.cpp.inc', 'lab::ruleFromJson(action, rule, labSequences(), labSequenceCount())'),
         ('023_main.cpp.inc', 'labOnceStart(lab::onceFromJson(action, once) ? &once : nullptr);'),
@@ -722,9 +722,9 @@ void testTables(){
   for(const SigInfo& s:kSigs)assert(s.key&&std::strlen(s.name)<=12);
   for(const OutInfo& o:kOuts)assert(o.key&&std::strlen(o.name)<=12);  // Both fit a flow box.
   for(const char* name:kDevNames)assert(std::strlen(name)<=13);
-  // The launcher's number keys reach the new tab, and the menu stays as it was without it.
-  {using namespace launcher_shortcuts;assert(resolve('9',false,9,2).kind==Kind::Group&&resolve('9',false,9,2).index==8);
-   assert(resolve('9',false,8,2).kind==Kind::None);assert(resolve('9',true,9,2).kind==Kind::None);}
+  // The launcher's L reaches the Lab, the last tab, and the menu stays as it was without it.
+  {using namespace launcher_shortcuts;assert(resolve('l',false,10,2,0).kind==Kind::Group&&resolve('L',false,10,2,0).index==9);
+   assert(resolve('l',false,9,2,0).kind==Kind::None);assert(resolve('l',true,10,2,0).kind==Kind::None);}
   for(const SigInfo& s:kSigs)assert(s.name&&s.lo<s.hi&&s.step>0&&s.step<=s.hi-s.lo);
   for(const OutInfo& o:kOuts)assert(o.name&&o.lo<o.hi&&o.step>0);
   std::map<uint8_t,int> seen;for(uint8_t a:kUnitAddresses)assert(++seen[a]==1&&a>=8&&a<0x78);

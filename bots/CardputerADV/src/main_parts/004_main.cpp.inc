@@ -98,7 +98,9 @@ struct KeyRushRuntime {
   uint32_t feedbackUntilMs = 0;
 };
 
+// Favorites has no apps of its own here: gFavoritesTab, below, holds the ones the owner picked.
 constexpr LauncherGroup kLauncherGroups[kLauncherGroupCount] = {
+    {"Favorites", "Your apps, in your order", rgb565_local(255, 255, 0), 0, {}},
     {"AI Agent", "Assistant and chat", rgb565_local(47, 227, 255), 3,
      {{"Realtime", UiMode::Home, true}, {"Pulse", UiMode::Home}, {"AI Chat", UiMode::ChatFull}}},
     {"Media", "Listen and capture", rgb565_local(88, 240, 141), 9,
@@ -125,6 +127,22 @@ constexpr LauncherGroup kLauncherGroups[kLauncherGroupCount] = {
     {"Lab", "Test devices and play rules", rgb565_local(182, 255, 0), 3,
      {{"Devices", UiMode::LabDevices}, {"Rules", UiMode::LabRules}, {"Sequences", UiMode::LabSequences}}},
 };
+static_assert(launcher_favorites::kMax == kLauncherMaxSubItems, "a favorite needs a row and a number key");
+
+// What's on the Favorites tab, saved as "favs", and the tab itself, rebuilt from it after every
+// change so the menu's code can treat it like any other tab.
+launcher_favorites::List gFavorites;
+LauncherGroup gFavoritesTab = kLauncherGroups[kFavoritesGroup];
+
+const LauncherGroup& launcherGroup(int group) {
+  return group == kFavoritesGroup ? gFavoritesTab : kLauncherGroups[group];
+}
+
+void rebuildFavoritesTab() {
+  gFavoritesTab.count = gFavorites.count;
+  for (uint8_t i = 0; i < gFavorites.count; ++i)
+    gFavoritesTab.items[i] = kLauncherGroups[gFavorites.refs[i].group].items[gFavorites.refs[i].item];
+}
 
 Preferences gPrefs;
 WebSocketsClient gWs;
@@ -222,6 +240,9 @@ int gChatVisibleRows = 0; // Measured by the last chat render; depends on text s
 int gLauncherSelection = 0;
 int gLauncherSubSelection = 0;
 uint8_t gLauncherLastSub[kLauncherGroupCount] = {};
+// Says what a key just did in the menu, over its bottom row for a moment. setStatus can't be seen there.
+String gLauncherNotice;
+uint32_t gLauncherNoticeUntilMs = 0;
 int gSelectedVoiceNote = 0;
 int gSelectedNote = 0;
 int gNoteScrollOffset = 0;

@@ -370,8 +370,8 @@ void setUiMode(UiMode mode) {
     initRfidLab(false);
   }
   if (gLauncherSelection >= 0 && gLauncherSelection < kLauncherGroupCount &&
-      gLauncherSubSelection >= 0 && gLauncherSubSelection < kLauncherGroups[gLauncherSelection].count &&
-      kLauncherGroups[gLauncherSelection].items[gLauncherSubSelection].mode == mode) {
+      gLauncherSubSelection >= 0 && gLauncherSubSelection < launcherGroup(gLauncherSelection).count &&
+      launcherGroup(gLauncherSelection).items[gLauncherSubSelection].mode == mode) {
     gLauncherLastSub[gLauncherSelection] = gLauncherSubSelection;
   } else if (!launcherKeepsPlaceFor(mode)) {
     syncLauncherToMode(mode);
@@ -382,16 +382,26 @@ void setUiMode(UiMode mode) {
   }
 }
 
+// The row a tab opens on: where it was left, or the top if that row has gone. An empty
+// Favorites tab has no rows, and sits on 0 so nothing reads before its list.
+int launcherRowFor(int group) {
+  const uint8_t count = launcherGroup(group).count;
+  return count ? clampValue<int>(gLauncherLastSub[group], 0, count - 1) : 0;
+}
+
+void showLauncherGroup(int group) {
+  gLauncherSelection = group;
+  gLauncherSubSelection = launcherRowFor(group);
+}
+
 void moveLauncherSelection(int delta) {
   gLauncherVisible = true;
-  gLauncherSelection = (gLauncherSelection + delta + kLauncherGroupCount) % kLauncherGroupCount;
-  uint8_t count = kLauncherGroups[gLauncherSelection].count;
-  gLauncherSubSelection = clampValue<int>(gLauncherLastSub[gLauncherSelection], 0, count - 1);
+  showLauncherGroup((gLauncherSelection + delta + kLauncherGroupCount) % kLauncherGroupCount);
 }
 
 void moveLauncherSubSelection(int delta) {
   gLauncherVisible = true;
-  uint8_t count = kLauncherGroups[gLauncherSelection].count;
+  uint8_t count = launcherGroup(gLauncherSelection).count;
   if (count <= 1) {
     moveLauncherSelection(delta);
     return;
@@ -402,10 +412,12 @@ void moveLauncherSubSelection(int delta) {
 
 void applyLauncherSelection() {
   gLauncherSelection = clampValue<int>(gLauncherSelection, 0, kLauncherGroupCount - 1);
-  uint8_t count = kLauncherGroups[gLauncherSelection].count;
+  uint8_t count = launcherGroup(gLauncherSelection).count;
+  if (!count) return;  // An empty Favorites tab.
   gLauncherSubSelection = clampValue<int>(gLauncherSubSelection, 0, count - 1);
   gLauncherLastSub[gLauncherSelection] = gLauncherSubSelection;
-  const LauncherSubItem& item = kLauncherGroups[gLauncherSelection].items[gLauncherSubSelection];
+  // A copy: opening an app can't change Favorites today, but the row is read after it opens.
+  const LauncherSubItem item = launcherGroup(gLauncherSelection).items[gLauncherSubSelection];
   UiMode target = item.mode;
   if (gMeshBusOwned && item.startRealtime) {setStatus("Esc exits Mesh for voice",1600);return;}
   if (gRecording) cancelRecordingDiscard();
@@ -420,6 +432,7 @@ void applyLauncherSelection() {
     gRealtimeScreenVisible = true;
     if (!gRealtimeActive) startRealtimeSession(true);
   }
-  syncLauncherToMode(target);
+  // Opened from Favorites, the menu stays there, so it comes back to the list it was used from.
+  if (gLauncherSelection != kFavoritesGroup) syncLauncherToMode(target);
   saveLauncherSelection();
 }

@@ -10,7 +10,7 @@ src = root / 'bots/CardputerADV/src'
 parts = src / 'main_parts'
 for file, text in [
         ('001_main.cpp.inc', '#include "ball_catch.h"'),
-        ('001_main.cpp.inc', 'kLauncherGroupCount = 9'),
+        ('001_main.cpp.inc', 'kLauncherGroupCount = 10'),
         ('004_main.cpp.inc', '{"Ball Catch", UiMode::BallCatch}'),
         ('004_main.cpp.inc', '{"Arcade", "Sensor and joystick games"'),
         ('022_main.cpp.inc', 'mode == "ball_catch"'),
@@ -94,10 +94,10 @@ void key(char k){Keyboard_Class::KeysState keys;keys.enter=k=='\n';assert(handle
 void aimAndDrop(Game&g,int offset=0){g.bomb=false;g.basketX=g.ballX+offset*kOne;g.drop();g.driftVx=0;}
 void land(Game&g){for(int i=0;i<400&&g.falling&&g.phase!=Phase::Over;++i){const int32_t b=g.basketX;g.step(0);g.basketX=b;}}
 int main(){
- // The launcher's number keys reach the new group, and nothing past it.
- {using namespace launcher_shortcuts;assert(resolve('8',false,8,4).kind==Kind::Group&&resolve('8',false,8,4).index==7);
-  assert(resolve('8',false,7,4).kind==Kind::None&&resolve('9',false,8,4).kind==Kind::None);
-  assert(resolve('8',true,8,8).kind==Kind::Submenu&&resolve('8',true,8,4).kind==Kind::InvalidSubmenu);}
+ // The launcher's R reaches Arcade, and Ctrl with a number its rows.
+ {using namespace launcher_shortcuts;assert(resolve('r',false,10,4,0).kind==Kind::Group&&resolve('r',false,10,4,0).index==6);
+  assert(resolve('r',false,6,4,0).kind==Kind::None);
+  assert(resolve('4',true,10,4,0).kind==Kind::Submenu&&resolve('5',true,10,4,0).kind==Kind::InvalidSubmenu);}
  // The ball slides and turns at both walls, and never leaves the screen.
  Game g;g.reset(0);assert(g.phase==Phase::Ready&&g.lives==kLives&&!g.falling&&g.ballY==kTrackY*kOne);
  bool left=false,right=false;

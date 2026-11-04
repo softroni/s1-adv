@@ -95,7 +95,7 @@ const evidence={
  coverage:{raw_equivalent_covered:summary.raw_equivalent_covered,raw_equivalence_artifact:docs,execution_counting_method:'disjoint',actual_executed_claim:summary.actual_executed_tests,
   executed_tests:{cartesian:baseline.reduced_executions,fuzz:baseline.fuzz_transitions,fixtures:baseline.fence_fixtures,mutation_programs:mutations.length,navigation:navigationChecks,launcher:launcherChecks,audio:audioChecks},
   navigation:{game_slots:navigationGameSlots,checks:navigationChecks,stack:'game -> BrainFlow menu -> launcher/Games',artifact:'tests/brainflow_navigation_test.cpp'},
-  launcher:{checks:launcherChecks,plain_digits:'1-7 select group',ctrl_digits:'Ctrl+1-6 opens submenu before plain digit',artifact:'tests/launcher_shortcuts_test.cpp'},
+  launcher:{checks:launcherChecks,plain_digits:'1-9 open favorites',ctrl_digits:'Ctrl+1-9 opens a row before plain digit',artifact:'tests/launcher_shortcuts_test.cpp'},
   audio:{checks:audioChecks,cues:['start','select','correct','wrong','finish'],guard:'suppressed during recording/playback/realtime/submitting/thinking',artifact:'tests/brainflow_audio_test.cpp'},
   reduced_exploration:{complete:true,states:baseline.states,transitions:baseline.transitions,artifact},
   pairwise:{complete:true,coverage_percent:100,artifact:model},critical_threewise:{complete:true,coverage_percent:100,dimensions:dimensions.map(x=>x[0]),artifact:model},

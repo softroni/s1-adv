@@ -14,43 +14,51 @@ int main() {
   assert(launcher_shortcuts::digitFromHid(0x27) == '0');
   assert(launcher_shortcuts::digitFromHid(0x04) == '\0');
   checks += 2;
-  for (char key = '1'; key <= '7'; ++key) {
-    const auto action = launcher_shortcuts::resolve(key, false, 7, 6);
-    assert(action.kind == Kind::Group);
+  // On its own, a digit opens that favorite, from any tab, and only if there is one.
+  for (char key = '1'; key <= '9'; ++key) {
+    const auto action = launcher_shortcuts::resolve(key, false, 10, 6, 9);
+    assert(action.kind == Kind::Favorite);
     assert(action.index == static_cast<unsigned>(key - '1'));
     checks += 2;
   }
-  for (char key = '1'; key <= '6'; ++key) {
-    const auto action = launcher_shortcuts::resolve(key, true, 7, 6);
+  assert(launcher_shortcuts::resolve('4', false, 10, 6, 3).kind == Kind::InvalidFavorite);
+  assert(launcher_shortcuts::resolve('4', false, 10, 6, 3).index == 3);
+  assert(launcher_shortcuts::resolve('1', false, 10, 6, 0).kind == Kind::InvalidFavorite);
+  assert(launcher_shortcuts::resolve('0', false, 10, 6, 9).kind == Kind::None);
+  checks += 4;
+  for (char key = '1'; key <= '9'; ++key) {
+    const auto action = launcher_shortcuts::resolve(key, true, 10, 9, 0);
     assert(action.kind == Kind::Submenu);
     assert(action.index == static_cast<unsigned>(key - '1'));
     checks += 2;
   }
 
-  // Ctrl has priority: Ctrl+3 opens submenu 3 and must never select group 3.
-  assert(launcher_shortcuts::resolve('3', true, 7, 6).kind == Kind::Submenu);
-  assert(launcher_shortcuts::resolve('6', true, 7, 3).kind == Kind::InvalidSubmenu);
-  assert(launcher_shortcuts::resolve('7', true, 7, 6).kind == Kind::InvalidSubmenu);
-  assert(launcher_shortcuts::resolve('8', false, 7, 6).kind == Kind::None);
+  // Ctrl has priority: Ctrl+3 opens row 3 of the tab on screen and never favorite 3.
+  assert(launcher_shortcuts::resolve('3', true, 10, 6, 9).kind == Kind::Submenu);
+  assert(launcher_shortcuts::resolve('6', true, 10, 3, 9).kind == Kind::InvalidSubmenu);
+  assert(launcher_shortcuts::resolve('7', true, 10, 6, 9).kind == Kind::InvalidSubmenu);
+  assert(launcher_shortcuts::resolve('9', true, 10, 8, 9).kind == Kind::InvalidSubmenu);
   checks += 4;
-  assert(launcher_shortcuts::resolve('7', true, 7, 7).kind == Kind::Submenu);
-  assert(launcher_shortcuts::resolve('7', true, 7, 7).index == 6);
+  assert(launcher_shortcuts::resolve('9', true, 10, 9, 0).kind == Kind::Submenu);
+  assert(launcher_shortcuts::resolve('9', true, 10, 9, 0).index == 8);
   checks += 2;
 
   // Letters jump to groups in menu order, in either case, and only for groups that exist.
-  const char letters[] = "amftgrsyl";
-  for (int group = 0; group < 9; ++group) {
-    assert(launcher_shortcuts::resolve(letters[group], false, 9, 6).kind == Kind::Group);
-    assert(launcher_shortcuts::resolve(letters[group], false, 9, 6).index == group);
-    assert(launcher_shortcuts::resolve(static_cast<char>(letters[group] - 'a' + 'A'), false, 9, 6).index == group);
-    assert(launcher_shortcuts::resolve(letters[group], true, 9, 6).kind == Kind::None);
+  const char letters[] = "vamftgrsyl";
+  for (int group = 0; group < 10; ++group) {
+    assert(launcher_shortcuts::resolve(letters[group], false, 10, 6, 0).kind == Kind::Group);
+    assert(launcher_shortcuts::resolve(letters[group], false, 10, 6, 0).index == group);
+    assert(launcher_shortcuts::resolve(static_cast<char>(letters[group] - 'a' + 'A'), false, 10, 6, 0).index == group);
+    assert(launcher_shortcuts::resolve(letters[group], true, 10, 6, 0).kind == Kind::None);
     checks += 4;
   }
-  assert(launcher_shortcuts::resolve('l', false, 8, 6).kind == Kind::None);
-  assert(launcher_shortcuts::resolve('w', false, 9, 6).kind == Kind::None);
-  assert(launcher_shortcuts::letterPosition("Arcade", 5) == 1 && launcher_shortcuts::letterPosition("System", 7) == 1);
-  assert(launcher_shortcuts::letterPosition("AI Agent", 0) == 0 && launcher_shortcuts::letterPosition("Nope", 99) == -1);
-  checks += 4;
+  assert(launcher_shortcuts::resolve('l', false, 9, 6, 0).kind == Kind::None);
+  assert(launcher_shortcuts::resolve('w', false, 10, 6, 0).kind == Kind::None);
+  assert(launcher_shortcuts::resolve(' ', false, 10, 6, 9).kind == Kind::None);
+  assert(launcher_shortcuts::letterPosition("Arcade", 6) == 1 && launcher_shortcuts::letterPosition("System", 8) == 1);
+  assert(launcher_shortcuts::letterPosition("AI Agent", 1) == 0 && launcher_shortcuts::letterPosition("Nope", 99) == -1);
+  assert(launcher_shortcuts::letterPosition("Favorites", 0) == 2);
+  checks += 6;
 
   std::cout << "launcher_shortcut_checks=" << checks << '\n';
 }

@@ -1,7 +1,8 @@
 void cycleCurrentAppScreen(int delta) {
   syncLauncherToMode(gUiMode);
   gLauncherVisible = false;
-  uint8_t count = kLauncherGroups[gLauncherSelection].count;
+  uint8_t count = launcherGroup(gLauncherSelection).count;
+  if (!count) return;
   gLauncherSubSelection = (gLauncherSubSelection + delta + count) % count;
   gLauncherLastSub[gLauncherSelection] = gLauncherSubSelection;
   applyLauncherSelection();
@@ -21,12 +22,15 @@ void togglePulseChatDisplay() {
   }
 }
 
+// Tab with an arrow opens the next tab's app. Favorites is passed over: its apps are all in
+// other tabs already, and an empty one has nothing to open.
 void switchLauncherGroupAndApply(int delta) {
   syncLauncherToMode(gUiMode);
   gLauncherVisible = false;
-  gLauncherSelection = (gLauncherSelection + delta + kLauncherGroupCount) % kLauncherGroupCount;
-  uint8_t count = kLauncherGroups[gLauncherSelection].count;
-  gLauncherSubSelection = clampValue<int>(gLauncherLastSub[gLauncherSelection], 0, count - 1);
+  int group = gLauncherSelection;
+  do group = (group + delta + kLauncherGroupCount) % kLauncherGroupCount;
+  while (group == kFavoritesGroup);
+  showLauncherGroup(group);
   applyLauncherSelection();
 }
 

@@ -431,6 +431,62 @@ void submitInput() {
   maybeStartNextTextTurn();
 }
 
+void launcherNotice(const String& text) {
+  gLauncherNotice = text;
+  gLauncherNoticeUntilMs = millis() + 1600;
+}
+
+void favoritesChanged() {
+  rebuildFavoritesTab();
+  saveFavorites();
+}
+
+// Del, or Space, on the Favorites tab. The rows below move up a number.
+void removeLauncherFavorite() {
+  const int row = gLauncherSubSelection;
+  if (row < 0 || row >= gFavorites.count) return;
+  const String label = gFavoritesTab.items[row].label;
+  gFavorites.removeAt(static_cast<uint8_t>(row));
+  favoritesChanged();
+  gLauncherSubSelection = gFavorites.count ? min<int>(row, gFavorites.count - 1) : 0;
+  gLauncherLastSub[kFavoritesGroup] = gLauncherSubSelection;
+  launcherNotice(label + " left Favorites");
+}
+
+// Space on any other tab: the app joins Favorites with the next number, or leaves it again.
+void toggleLauncherFavorite() {
+  if (gLauncherSelection == kFavoritesGroup) {
+    if (gFavorites.count) removeLauncherFavorite();
+    else launcherNotice("Space on any app adds it here");
+    return;
+  }
+  const LauncherGroup& group = launcherGroup(gLauncherSelection);
+  if (gLauncherSubSelection < 0 || gLauncherSubSelection >= group.count) return;
+  const uint8_t tab = static_cast<uint8_t>(gLauncherSelection), row = static_cast<uint8_t>(gLauncherSubSelection);
+  const String label = group.items[row].label;
+  const int at = gFavorites.find(tab, row);
+  if (at >= 0) {
+    gFavorites.removeAt(static_cast<uint8_t>(at));
+    launcherNotice(label + " left Favorites");
+  } else if (gFavorites.add(tab, row)) {
+    launcherNotice(label + " is favorite " + String(gFavorites.count));
+  } else {
+    launcherNotice("Favorites is full at 9");
+    return;
+  }
+  favoritesChanged();
+}
+
+// Fn with up or down on the Favorites tab. The app swaps places with its neighbour, and so
+// numbers with it, and stays selected. Nothing happens past either end.
+void moveLauncherFavorite(int delta) {
+  const int row = gLauncherSubSelection;
+  if (row < 0 || !gFavorites.move(static_cast<uint8_t>(row), delta)) return;
+  favoritesChanged();
+  gLauncherSubSelection = row + delta;
+  gLauncherLastSub[kFavoritesGroup] = gLauncherSubSelection;
+}
+
 void handleLauncherKey(char key, const Keyboard_Class::KeysState& keys) {
   char shortcutKey = key;
   if (keys.ctrl) {
@@ -442,9 +498,9 @@ void handleLauncherKey(char key, const Keyboard_Class::KeysState& keys) {
       }
     }
   }
-  const uint8_t submenuCount = kLauncherGroups[gLauncherSelection].count;
+  const uint8_t submenuCount = launcherGroup(gLauncherSelection).count;
   const auto shortcut = launcher_shortcuts::resolve(
-      shortcutKey, keys.ctrl, kLauncherGroupCount, submenuCount);
+      shortcutKey, keys.ctrl, kLauncherGroupCount, submenuCount, gFavorites.count);
   if (shortcut.kind == launcher_shortcuts::Kind::Submenu) {
     gLauncherSubSelection = shortcut.index;
     gLauncherLastSub[gLauncherSelection] = shortcut.index;
@@ -452,18 +508,42 @@ void handleLauncherKey(char key, const Keyboard_Class::KeysState& keys) {
     return;
   }
   if (shortcut.kind == launcher_shortcuts::Kind::InvalidSubmenu) {
-    setStatus("No item " + String(shortcut.index + 1), 700);
+    launcherNotice(String("No row ") + String(shortcut.index + 1) + " here");
+    return;
+  }
+  if (shortcut.kind == launcher_shortcuts::Kind::Favorite) {
+    gLauncherSelection = kFavoritesGroup;
+    gLauncherSubSelection = shortcut.index;
+    applyLauncherSelection();
+    return;
+  }
+  if (shortcut.kind == launcher_shortcuts::Kind::InvalidFavorite) {
+    launcherNotice(gFavorites.count ? String("No favorite ") + String(shortcut.index + 1)
+                                    : String("No favorites yet. Space adds one"));
     return;
   }
   if (shortcut.kind == launcher_shortcuts::Kind::Group) {
-    gLauncherSelection = shortcut.index;
-    uint8_t count = kLauncherGroups[gLauncherSelection].count;
-    gLauncherSubSelection = clampValue<int>(gLauncherLastSub[gLauncherSelection], 0, count - 1);
+    showLauncherGroup(shortcut.index);
     return;
   }
   if (keys.enter || key == '\n' || key == '\r') {
     applyLauncherSelection();
     return;
+  }
+  if (key == ' ' && !keys.ctrl) {
+    toggleLauncherFavorite();
+    return;
+  }
+  if (gLauncherSelection == kFavoritesGroup) {
+    if (keys.del || key == '\b') {
+      removeLauncherFavorite();
+      return;
+    }
+    // Fn leaves the arrow keys' characters as they are, so it's seen here.
+    if (keys.fn && (key == ';' || key == '.')) {
+      moveLauncherFavorite(key == ';' ? -1 : 1);
+      return;
+    }
   }
   // Letters jump to a group, so only the arrow keys move.
   if (key == ';') {
