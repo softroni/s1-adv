@@ -11,6 +11,9 @@ export const LAB_RULE_POLICY =
   "stick_x and stick_y (-100 to 100), and motion and stick_button, which are on or off. " +
   "From the GPS, with a fix: speed (km/h), heading (degrees, 0 north and 90 east, only while moving), and " +
   "spot_distance (meters from the spot the owner saved on the GPS screen, so near means under, like 30). " +
+  "Values in a rule are always in those units, whatever units the owner reads. The device state says which they read: " +
+  "for US units, take what they say in F, inches, feet or mph and convert it (80 F is 27, 12 inches is 30, 20 mph is " +
+  "32, 100 feet is 30), and when you talk to them about a value, give it in their units. " +
   "There is also spoken, which is on or off: saying the rule's name while rules play turns it on, and saying it " +
   "again turns it off, so for something like \"when I say movie time\" name the rule Movie time. " +
   "A test is under or over with a value, on or off for the on or off sensors, or changes. " +
@@ -92,6 +95,8 @@ export const LAB_ONCE_POLICY =
   "\"do\":[{\"output\":\"strip_color\",\"set\":0}]}]]] " +
   "or, for a plain action, [[cardputer_actions:[{\"type\":\"lab.once\",\"do\":[{\"output\":\"led\",\"set\":120}]}]]] " +
   "or, for a reading alone, [[cardputer_actions:[{\"type\":\"lab.once\",\"read\":[\"temperature\",\"humidity\"]}]]]. " +
+  "Values are in the sensor units the rules use, converted from the owner's units as for a rule, and the device's " +
+  "report of the result is already in the owner's units. " +
   "read lists up to 3 sensors to report. when is up to 3 lines, the same as a rule's but only under, over, on or " +
   "off, and any false when all must be true. Only write when for an if they actually said, so a plain action like " +
   "turn the led green has no when at all. do is up to 3 lines to run if when is true, or always if there's no " +

@@ -348,6 +348,8 @@ uint16_t gBatteryEtaMinutes = 0;
 bool gBatteryDrainKnown = false;
 FocusSettings gFocusSettings;
 DeviceSettings gDeviceSettings;
+// What the owner reads: US or metric. Stored values never change with it.
+units::System displayUnits() { return units::fromSaved(gDeviceSettings.units); }
 AlarmSettings gAlarmSettings;
 FocusRuntime gFocus;
 AssetManifestSummary gAssetManifest;

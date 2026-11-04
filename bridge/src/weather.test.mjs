@@ -176,3 +176,18 @@ test("old weather at a position beats none, and the list stays bounded", async (
   for (let i = 0; i < 20; ++i) await service.reportAt({ latitude: i, longitude: i });
   assert.ok(service.reports.size <= 8);
 });
+
+test("a device set to metric gets Celsius and km/h, kept apart from Fahrenheit", async () => {
+  const fake = fakeFetch();
+  const service = new WeatherService({ fetchImpl: fake.impl });
+  await service.report("Salem, MA");
+  await service.report("Salem, MA", { metric: true });
+  await service.reportAt({ latitude: 42.51, longitude: -70.9 }, { metric: true });
+  const forecasts = fake.calls.filter(url => url.includes("forecast")).map(url => new URL(url).searchParams);
+  assert.equal(forecasts.length, 3);
+  assert.deepEqual(forecasts.map(q => [q.get("temperature_unit"), q.get("wind_speed_unit")]),
+    [["fahrenheit", "mph"], ["celsius", "kmh"], ["celsius", "kmh"]]);
+  assert.equal(fake.calls.filter(url => url.includes("geocoding")).length, 1, "the town is looked up once for both");
+  await service.report("Salem, MA", { metric: true });
+  assert.equal(fake.calls.length, 4);
+});

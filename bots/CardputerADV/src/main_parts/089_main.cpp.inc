@@ -30,14 +30,16 @@ void servicePulseGps(uint32_t now) {
 }
 
 String weatherQuery(uint32_t now) {
+  // Fahrenheit and mph unless the owner reads metric.
+  const char* unitsQuery = displayUnits() == units::System::Metric ? "&units=metric" : "";
   if (weather_gps::usable(gWeatherHere, now)) {
     char text[48];
     weather_gps::query(text, sizeof(text), gWeatherHere);
     gWeatherAsking = gWeatherHere;
-    return String(text);
+    return String(text) + unitsQuery;
   }
   gWeatherAsking = weather_gps::Spot{};
-  return "place=" + urlEncodePathSegment(gDeviceSettings.weatherPlace);
+  return "place=" + urlEncodePathSegment(gDeviceSettings.weatherPlace) + unitsQuery;
 }
 
 // The weather that just arrived is for wherever it was asked about.

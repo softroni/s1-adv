@@ -382,10 +382,13 @@ test("the weather route answers the device, and only the device", async t => {
   assert.equal(seen.length, before + 1);
   assert.ok(seen.at(-1).includes("latitude=42.51") && seen.at(-1).includes("longitude=-70.9") && !seen.at(-1).includes("42.5083"));
   assert.equal((await at("lat=42.51&lon=-70.90", {})).status, 401);
+  assert.equal((await at("lat=42.51&lon=-70.90&units=metric")).status, 200);
+  assert.ok(seen.at(-1).includes("temperature_unit=celsius") && seen.at(-1).includes("wind_speed_unit=kmh"));
+  assert.ok((await get("Salem, MA")).ok && seen.filter(item => item.includes("temperature_unit=fahrenheit")).length >= 1);
   for (const bad of ["lat=42.51", "lon=-70.9", "lat=95&lon=0", "lat=abc&lon=1", "lat=&lon="]) {
     const response = await at(bad);
     assert.equal(response.status, 400, bad);
     assert.match(await response.text(), /invalid_position/u);
   }
-  assert.equal(seen.length, before + 1, "a bad position reaches no service");
+  assert.equal(seen.length, before + 2, "a bad position reaches no service");
 });

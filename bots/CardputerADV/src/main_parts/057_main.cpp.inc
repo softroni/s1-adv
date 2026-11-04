@@ -72,6 +72,8 @@ String settingValue(uint8_t index) {
       return gDeviceSettings.weatherPlace;
     case kMeshRegionSetting:
       return s1_mesh::regionName(gDeviceSettings.meshRegion);
+    case kUnitsSetting:
+      return units::name(displayUnits());
     default:
       return "-";
   }

@@ -121,12 +121,18 @@ void labSeqAskBack();
 
 // --- Words ------------------------------------------------------------------------------------
 String labNumberText(int value, const char* unit, const char* degree) {
-  String text = String(value);
-  if (strcmp(unit, "deg") == 0) return text + degree;
-  if (strcmp(unit, "C") == 0) return text + degree + "C";
-  if (strcmp(unit, "%") == 0) return text + "%";
-  if (unit[0]) return text + " " + unit;
-  return text;
+  char text[32];
+  units::readingText(text, sizeof(text), value, unit, degree, displayUnits());
+  return String(text);
+}
+// A number on a scale, as the owner reads it, with no unit.
+int labShownNumber(Sig sig, int value) { return lab::shownNumber(sig, value, displayUnits()); }
+// The ENV III's temperature to a tenth, in the owner's degrees.
+String labTempTenthsText(int celsiusTenths) {
+  char text[16];
+  const bool us = displayUnits() == units::System::US;
+  units::tenthsText(text, sizeof(text), us ? units::fahrenheitTenths(celsiusTenths) : celsiusTenths);
+  return String(text) + (us ? "`F" : "`C");
 }
 // Font 0 has its degree sign at 0xF8. Font 2 and Font 4 print one for a backtick.
 String labValueText(Sig sig, int value, const char* degree = "`") {
@@ -356,7 +362,11 @@ String labDevValue(Dev dev) {
   };
   switch (dev) {
     case Dev::Ultrasonic: return number(Sig::Distance);
-    case Dev::Env: return gLabInputs.get(Sig::Humidity).live ? String(gLabTempTenths / 10) + "` " + number(Sig::Humidity) : String("--");
+    case Dev::Env: {
+      const int degrees = displayUnits() == units::System::US ? units::rounded(units::fahrenheitTenths(gLabTempTenths) / 10.0)
+                                                              : gLabTempTenths / 10;
+      return gLabInputs.get(Sig::Humidity).live ? String(degrees) + "` " + number(Sig::Humidity) : String("--");
+    }
     case Dev::Joystick:
       return String("x") + String(gLabInputs.get(Sig::StickX).value) + " y" + String(gLabInputs.get(Sig::StickY).value);
     case Dev::Knob: return number(Sig::Knob);
@@ -458,8 +468,7 @@ void renderLabUltrasonic() {
 void renderLabEnv() {
   labDrawAnswering(Dev::Env);
   if (gLabInputs.get(Sig::Humidity).live) {
-    const int tenths = gLabTempTenths < 0 ? -gLabTempTenths : gLabTempTenths;
-    labTextAt(&fonts::Font4, 6, 24, String(gLabTempTenths < 0 ? "-" : "") + String(tenths / 10) + "." + String(tenths % 10) + "`C", TFT_WHITE);
+    labTextAt(&fonts::Font4, 6, 24, labTempTenthsText(gLabTempTenths), TFT_WHITE);
     labTextAt(&fonts::Font4, 130, 24, labValueText(Sig::Humidity, gLabInputs.get(Sig::Humidity).value), kLabCyan);
     labTextAt(&fonts::Font0, 6, 54, "TEMPERATURE", kLabMuted);
     labTextAt(&fonts::Font0, 130, 54, "HUMIDITY", kLabMuted);
@@ -699,7 +708,10 @@ void renderLabGps() {
     return;
   }
   labStat(6, 24, "SATELLITES", String(fix.satellites));
-  labStat(100, 24, "SPEED", fix.valid ? String(fix.speedKmhE1 / 10) + "." + String(fix.speedKmhE1 % 10) + " km/h" : String("--"));
+  const bool us = displayUnits() == units::System::US;
+  char speed[24];
+  units::tenthsText(speed, sizeof(speed), us ? units::mphTenths(fix.speedKmhE1) : fix.speedKmhE1);
+  labStat(100, 24, "SPEED", fix.valid ? String(speed) + (us ? " mph" : " km/h") : String("--"));
   const auto coordinate = [](int32_t e5) -> String {
     const int32_t size = e5 < 0 ? -e5 : e5;
     String tail = String(size % 100000);
@@ -719,8 +731,9 @@ void renderLabGps() {
     labLoadSpot();
     if (gLabSpot.set) {
       const int32_t m = lab_gps::metersBetween(gLabSpot.latE5, gLabSpot.lonE5, fix.latE5, fix.lonE5);
-      away = m >= lab_gps::kFarMeters ? String("32+ km") : m >= 1000 ? String(m / 1000) + "." + String(m % 1000 / 100) + " km"
-                                                                    : String(m) + " m";
+      char text[24];
+      units::distanceText(text, sizeof(text), m, displayUnits(), m >= lab_gps::kFarMeters);
+      away = text;
     }
     labStat(120, 92, "FROM SPOT", noting ? gLabUi.spotNote : away, noting ? kLabAmber : TFT_WHITE);
   }
@@ -1264,7 +1277,7 @@ void renderLabWizard() {
     const lab::Cond& cond = labWizardCond();
     const lab::SigInfo& info = lab::info(cond.sig);
     labTextAt(&fonts::Font2, 4, 20, String("Show me: ") + info.name, kLabCyan);
-    labTextCenter(&fonts::Font6, 120, 36, String(cond.value), TFT_WHITE);
+    labTextCenter(&fonts::Font6, 120, 36, String(labShownNumber(cond.sig, cond.value)), TFT_WHITE);
     const int position = lab::mapRange(cond.value, info.lo, info.hi, 0, 100);
     labBar(8, 87, 224, 9, position, kLabCyan);
     d.fillRect(8 + 224 * position / 100 - 1, 84, 3, 15, TFT_WHITE);
@@ -1923,6 +1936,7 @@ String labDescribe(bool withDiary) {
     const lab::Reading& reading = gLabSeen.get(static_cast<Sig>(i));
     if (reading.live) text.add(" ").add(lab::kSigs[i].key).add("=").add(reading.value);
   }
+  text.add("\nowner reads ").add(displayUnits() == units::System::US ? "US units (F, inches, feet, mph)" : "metric units");
   text.add(gLabPlaying ? "\nrules are playing" : "\nrules are not playing");
   if (gLabUi.view == LabView::Device) {
     const LabUi& ui = gLabUi;
@@ -1959,11 +1973,13 @@ String labAskContext() { return labDescribe(true); }
 // nothing has been read yet, so it says nothing rather than something wrong.
 String labChatContext() {
   if (!gLabBookRead) return String();
-  const size_t chars = lab::chatChars(gLabBook.count, gLabSeqs, gLabSeqCount) + (gLabOnceText[0] ? lab::kOnceTextChars + 16 : 0);
+  constexpr size_t kUnitsLine = 48;
+  const size_t chars = lab::chatChars(gLabBook.count, gLabSeqs, gLabSeqCount) + kUnitsLine + (gLabOnceText[0] ? lab::kOnceTextChars + 16 : 0);
   std::unique_ptr<char[]> buffer(new (std::nothrow) char[chars]);
   if (!buffer) return String();
   lab::Text text(buffer.get(), chars);
   lab::chatState(gLabBook.rules, gLabBook.count, gLabSeqs, gLabSeqCount, text);
+  text.add("owner reads ").add(displayUnits() == units::System::US ? "US units (F, inches, feet, mph)" : "metric units").add("\n");
   if (gLabOnceText[0]) text.add("last check: ").add(gLabOnceText).add("\n");  // So a follow-up has the number.
   return String(buffer.get());
 }

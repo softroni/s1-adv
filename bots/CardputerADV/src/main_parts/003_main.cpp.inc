@@ -268,6 +268,7 @@ struct DeviceSettings {
   String updateChannel = "dev";
   String audioLanguage = "en";
   uint8_t meshRegion = s1_mesh::kDefaultRegion;
+  uint8_t units = static_cast<uint8_t>(units::kDefault);
 };
 
 const char* textSizeName(uint8_t size) {

@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "pbhub.h"
+#include "units.h"
 
 namespace lab {
 // --- What can be read -----------------------------------------------------------------------
@@ -579,9 +580,9 @@ constexpr Recipe kRecipes[kRecipeCount] = {
      follow(Out::Servo, Sig::Tilt), false, {}},
     {"Dark lamp", "Dark room turns the smartLamp on", 10000, {Sig::Light, Op::Below, 20},
      setTo(Out::LampPower, 1), false, {}},
-    {"Hot room", "Over 28 C turns the TCL AC on", 30000, {Sig::Temperature, Op::Above, 28},
+    {"Hot room", "A hot room turns the TCL AC on", 30000, {Sig::Temperature, Op::Above, 28},
      setTo(Out::AcTcl, 1), false, {}},
-    {"Speed beep", "Over 25 km/h, the speaker beeps", 1000, {Sig::Speed, Op::Above, 25},
+    {"Speed beep", "Going fast, the speaker beeps", 1000, {Sig::Speed, Op::Above, 25},
      setTo(Out::Tone, 1200), false, {}},
     {"Near the spot", "Near your saved spot: green LED", 2000, {Sig::SpotDistance, Op::Below, 30},
      setTo(Out::Led, 120), false, {}},
@@ -1431,28 +1432,49 @@ inline const char* hueWord(int hue) {
   }
   return nullptr;
 }
-inline void onceValue(Sig sig, int value, Text& out) {
+// A reading's number as the owner reads it, and the word for its unit. Stored values never change.
+inline int shownNumber(Sig sig, int value, units::System system) {
+  if (system != units::System::US) return value;
+  const char* unit = info(sig).unit;
+  if (strcmp(unit, "C") == 0) return units::fahrenheit(value);
+  if (strcmp(unit, "cm") == 0) return units::inches(value);
+  if (strcmp(unit, "km/h") == 0) return units::mph(value);
+  if (strcmp(unit, "m") == 0) return units::feet(value);
+  return value;
+}
+inline const char* shownUnit(Sig sig, units::System system) {
+  const char* unit = info(sig).unit;
+  if (system != units::System::US) return unit;
+  if (strcmp(unit, "C") == 0) return "F";
+  if (strcmp(unit, "cm") == 0) return "in";
+  if (strcmp(unit, "km/h") == 0) return "mph";
+  if (strcmp(unit, "m") == 0) return "ft";
+  return unit;
+}
+inline void onceValue(Sig sig, int value, Text& out, units::System system) {
   const SigInfo& s = info(sig);
   out.add(s.name).add(" ");
-  if (s.onOff) out.add(value ? "on" : "off");
-  else out.add(value).add(s.unit[0] && s.unit[0] != '%' ? " " : "").add(s.unit);
+  if (s.onOff) { out.add(value ? "on" : "off"); return; }
+  const char* unit = shownUnit(sig, system);
+  out.add(shownNumber(sig, value, system)).add(unit[0] && unit[0] != '%' ? " " : "").add(unit);
 }
 // "Knob 67%, over 50. Humidity 40%." The numbers are the real ones, not Claude's account of them.
-inline void onceReadings(const Once& once, const Inputs& inputs, Text& out) {
+inline void onceReadings(const Once& once, const Inputs& inputs, Text& out, units::System system = units::System::Metric) {
   bool first = true;
   for (uint8_t i = 0; i < once.conds; ++i, first = false) {
     const Cond& cond = once.cond[i];
     const Reading& reading = inputs.get(cond.sig);
-    onceValue(cond.sig, reading.value, out.add(first ? "" : "; "));
+    onceValue(cond.sig, reading.value, out.add(first ? "" : "; "), system);
     if (info(cond.sig).onOff) continue;
-    out.add(condHolds(cond, inputs, 0) ? ", " : ", not ").add(cond.op == Op::Above ? "over " : "under ").add(cond.value);
+    out.add(condHolds(cond, inputs, 0) ? ", " : ", not ").add(cond.op == Op::Above ? "over " : "under ")
+        .add(shownNumber(cond.sig, cond.value, system));
   }
   for (uint8_t i = 0; i < once.reads; ++i) {
     bool shown = false;
     for (uint8_t c = 0; c < once.conds; ++c) shown = shown || once.cond[c].sig == once.read[i];
     for (uint8_t r = 0; r < i; ++r) shown = shown || once.read[r] == once.read[i];
     if (shown) continue;
-    onceValue(once.read[i], inputs.get(once.read[i]).value, out.add(first ? "" : "; "));
+    onceValue(once.read[i], inputs.get(once.read[i]).value, out.add(first ? "" : "; "), system);
     first = false;
   }
   if (!first) out.add(".");

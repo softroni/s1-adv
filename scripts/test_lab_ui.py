@@ -14,6 +14,7 @@ code = r'''
 #include "balloon.h"
 #include "lab.h"
 #include "lab_gps.h"
+#include "units.h"
 #include "launcher_icons.h"
 #include <algorithm>
 #include <cassert>
@@ -259,6 +260,9 @@ struct SerialClass { std::string data; size_t at = 0; bool open = false; int buf
   void setRxBufferSize(int n) { buffer = n; }
   void begin(int b, int, int r, int t) { baud = b; rx = r; tx = t; open = true; }
   void end() { open = false; } int available() { return int(data.size() - at); } int read() { return data[at++]; } } Serial1;
+// What the owner reads, from Settings > Device > Units. US unless a scene says otherwise.
+units::System gShownUnits = units::System::US;
+units::System displayUnits() { return gShownUnits; }
 // NVS, kept in memory: what the Lab keeps on the device rather than on the SD card.
 std::map<std::string, std::map<std::string, int32_t>> gNvs; bool gNvsWritable = true;
 struct Preferences { std::string ns; bool ro = true;
@@ -412,7 +416,7 @@ void testDevices() {
   // Bright reads low on the analog unit, so it's flipped by default.
   assert(gLabInputs.get(Sig::Light).value == 0);
   gHubUnit.analog[ports(lab::Part::Light)] = 500; run(300); assert(gLabInputs.get(Sig::Light).value == 50);
-  show("devices"); assert(gCanvas.shows("Ultrasonic") && gCanvas.shows("24 cm") && gCanvas.shows("4 ON THE PORT") == false);
+  show("devices"); assert(gCanvas.shows("Ultrasonic") && gCanvas.shows("9 in") && gCanvas.shows("4 ON THE PORT") == false);
   assert(gCanvas.shows("5 ON THE PORT"));
   // The list scrolls over everything, and wraps both ways.
   for (int i = 0; i < lab::kDevCount; ++i) { key(DOWN); show("scroll"); assert(gLabUi.devRow == (i + 1) % lab::kDevCount); }
@@ -475,7 +479,7 @@ void testDevices() {
   esc(); assert(gHubUnit.written[relay][0] == 0 && gHubUnit.written[relay][1] == 0);
 
   // The sensor screens, each shaped like its unit.
-  pickDevice(Dev::Env); run(1200); show("env"); assert(gCanvas.shows("24.4") && gCanvas.shows("41%")); esc();
+  pickDevice(Dev::Env); run(1200); show("env"); assert(gCanvas.shows("75.9") && gCanvas.shows("41%")); esc();
   pickDevice(Dev::Joystick); run(100); show("joystick"); assert(gCanvas.shows("37")); gUnits.stickButton = 0; run(100); show("joystick-pressed"); assert(gCanvas.shows("Pressed")); gUnits.stickButton = 1; esc();
   gHubUnit.analog[ports(lab::Part::Knob)] = 660; pickDevice(Dev::Knob); run(100); show("knob"); assert(gCanvas.shows("67%"));
   gHubUnit.analog[ports(lab::Part::Knob)] = 1400; run(100); show("knob-turning"); assert(gCanvas.shows("Yes"));
@@ -495,7 +499,7 @@ void testDevices() {
   pickDevice(Dev::Gps); show("gps-silent"); assert(gCanvas.shows("Nothing from the GPS"));
   gpsLine("GNGGA,123519,4230.5000,N,07054.0000,W,1,08,0.9,180.0,M,0,M,,"); run(30); show("gps-searching"); assert(gCanvas.shows("SEARCHING") && gCanvas.shows("8"));
   gpsLine("GNRMC,123519,A,4230.5000,N,07054.0000,W,10.0,084.4,230394,,,A"); run(30); show("gps-fixed");
-  assert(gCanvas.shows("42.50833") && gCanvas.shows("-70.90000") && gCanvas.shows("18.5 km/h"));
+  assert(gCanvas.shows("42.50833") && gCanvas.shows("-70.90000") && gCanvas.shows("11.5 mph"));
   assert(gLabInputs.get(Sig::Satellites).value == 8);
   esc();
 
@@ -525,7 +529,7 @@ void testPages() {
   // Pages wrap both ways, and a part's screen always opens on its first page.
   key(LEFT); assert(gLabUi.page == 2); key(RIGHT); assert(gLabUi.page == 0);
   gUnits.um = 300000; run(300);
-  flip("page-parking", "PARKING"); assert(gCanvas.shows("30 cm") && gCanvas.shows("Getting close") && gCanvas.shows("B sound"));
+  flip("page-parking", "PARKING"); assert(gCanvas.shows("12 in") && gCanvas.shows("Getting close") && gCanvas.shows("B sound"));
   assert(!tone()); key('b'); gUnits.um = 100000; run(300); int tones = 0; { bool was = false; for (int i = 0; i < 100; ++i) { run(10); tones += tone() && !was; was = tone(); } } assert(tones >= 5);
   gUnits.um = 60000; run(300); show("page-parking-near"); assert(gCanvas.shows("Stop!") && gCanvas.shows("B quiet") && gCanvas.shows("SOUND ON")); key('b'); assert(!tone());
   gUnits.um = 0; run(300); renderLabUi(); assert(gCanvas.shows("Nothing in range")); gUnits.um = 240000; run(300);
@@ -833,7 +837,7 @@ void testSay() {
   key(ENTER); assert(!gRecording && gThinking); run(50); show("say-writing"); assert(gCanvas.shows("Claude is writing it"));
   key(ENTER); assert(gVoiceTaps == taps + 2);  // A press while it's writing does nothing.
   lab::Draft d; d.name("Wave red"); d.addCond("distance", "under", 30); d.addSet("strip_color", 0); d.addFollow("servo", "knob", false); assert(d.usable());
-  gThinking = false; labOfferRule(d.rule); run(50); assert(gLabUi.view == LabView::Offer); show("offer"); assert(gCanvas.shows("Claude wrote this") && gCanvas.shows("Distance under 30 cm") && gCanvas.shows("Servo follows Knob"));
+  gThinking = false; labOfferRule(d.rule); run(50); assert(gLabUi.view == LabView::Offer); show("offer"); assert(gCanvas.shows("Claude wrote this") && gCanvas.shows("Distance under 12 in") && gCanvas.shows("Servo follows Knob"));
   // Nothing is saved or driven by arriving. Esc drops it.
   const int count = gLabBook.count; assert(!gLabPlaying); esc(); assert(gLabUi.view == LabView::Rules && gLabBook.count == count);
   // Enter saves it, as an ordinary rule.
@@ -892,9 +896,9 @@ void testSay() {
     key(ENTER); assert(gLabUi.view == LabView::Say && labAskOnScreen()); show("ask"); assert(gCanvas.shows("What's your question?") && gCanvas.shows("What can I make with these parts?"));
     gRecording = true; show("ask-listening"); assert(gCanvas.shows("Ask about your parts and rules."));
     gRecording = false; gThinking = true; show("ask-working"); assert(gCanvas.shows("Claude is looking") && gCanvas.shows("LOOKING")); gThinking = false;
-    { VoiceToolAnswer a; a.ok = true; a.heard = "why didn't my rule fire"; a.reply = "Distance is 42 cm and Wave red needs under 30. Move closer, or say change it to 50."; labAskAnswered(a); }
-    assert(std::string(gQueuedVoiceReplySpeech).find("Distance is 42") == 0); gQueuedVoiceReplySpeech = "";
-    show("ask-answer"); assert(gCanvas.shows("Distance is 42") && gCanvas.shows("Heard: why didn't my rule fire") && gCanvas.shows("ALT ask again"));
+    { VoiceToolAnswer a; a.ok = true; a.heard = "why didn't my rule fire"; a.reply = "Distance is 17 inches and Wave red needs under 12. Move closer, or say change it to 20."; labAskAnswered(a); }
+    assert(std::string(gQueuedVoiceReplySpeech).find("Distance is 17") == 0); gQueuedVoiceReplySpeech = "";
+    show("ask-answer"); assert(gCanvas.shows("Distance is 17") && gCanvas.shows("Heard: why didn't my rule fire") && gCanvas.shows("ALT ask again"));
     esc(); assert(gLabUi.view == LabView::Rules);
     // A reason it couldn't answer shows, but nothing is read aloud.
     gLabUi.view = LabView::Devices; assert(labAskOnScreen());
@@ -1470,7 +1474,9 @@ void testChat() {
   // Read at boot, it can tell the chat what's saved with the Lab shut and nothing on the bus.
   labReadBook(); assert(!gLabOpen);
   { const std::string said = labChatContext(); assert(said.find("saved rules:\n") == 0 && said.find("saved sequences:\nHello: led set 240") != std::string::npos && said.find("; hold ") != std::string::npos && !gLabOpen); }
-  { lab::Book kept = gLabBook; const uint8_t seqs = gLabSeqCount; gLabBook.count = 0; gLabSeqCount = 0; assert(labChatContext() == "saved rules: none\nsaved sequences: none\n"); gLabBook = kept; gLabSeqCount = seqs; }
+  { lab::Book kept = gLabBook; const uint8_t seqs = gLabSeqCount; gLabBook.count = 0; gLabSeqCount = 0; assert(labChatContext() == "saved rules: none\nsaved sequences: none\nowner reads US units (F, inches, feet, mph)\n");
+    gShownUnits = units::System::Metric; assert(labChatContext() == "saved rules: none\nsaved sequences: none\nowner reads metric units\n");
+    gShownUnits = units::System::US; gLabBook = kept; gLabSeqCount = seqs; }
 
   // A change names its rule, from anywhere, and goes through the same screen as a spoken one.
   setUiMode(UiMode::LabRules); run(1500);
@@ -1641,7 +1647,7 @@ void testOnce() {
   { onceOnGrove(); const int opens = gAirSensor.opens; assert(onceAsk(onceDo(Out::Led, 120)) == "LED set to green."); assert(gLed.g > 0 && gAirSensor.opens == opens); }
   // I2C units are found the way the Lab finds them, and two readings make one report.
   { onceOnGrove(); gLabBook.direct = lab::Direct{}; plugOnly({0x44}); lab::Once once; once.reads = 2; once.read[0] = Sig::Temperature; once.read[1] = Sig::Humidity;
-    const std::string said = onceAsk(once); assert(said.find("Temperature ") == 0 && said.find(" C; Humidity ") != std::string::npos && said.back() == '.'); }
+    const std::string said = onceAsk(once); assert(said.find("Temperature ") == 0 && said.find(" F; Humidity ") != std::string::npos && said.back() == '.'); }
   // Nothing plugged in means no answer, and no guess from a floating wire.
   { onceOnGrove(); gGrove.held = false; const lab::Once once = onceOver(50, Out::StripColor, 0); const int frames = gGrove.frames;
     assert(onceAsk(once, 5000) == "No reading from Knob. Nothing changed."); assert(gGrove.frames == frames && gGrove.ledsLit == 0); }
@@ -1853,15 +1859,15 @@ void testGpsReadings() {
   run(30); assert(gLabInputs.get(Sig::SpotDistance).live && gLabInputs.get(Sig::SpotDistance).value == 0);
   // A thousandth of a degree north is 111 m.
   gpsLine("GNRMC,123520,A,4230.5600,N,07054.0000,W,10.0,000.0,230394,,,A"); run(2100); show("gps");
-  assert(gLabInputs.get(Sig::SpotDistance).value == 111 && gCanvas.shows("111 m") && gCanvas.shows("0` N"));
+  assert(gLabInputs.get(Sig::SpotDistance).value == 111 && gCanvas.shows("364 ft") && gCanvas.shows("0` N"));
   // Standing still, a GPS still names a direction, and it wanders, so there's no heading.
   gpsLine("GNRMC,123521,A,4230.5600,N,07054.0000,W,0.5,211.0,230394,,,A"); run(30); renderLabUi();
   assert(!gLabInputs.get(Sig::Heading).live && gLabInputs.get(Sig::Speed).value == 1 && gCanvas.shows("still"));
   gpsLine("GNRMC,123521,A,4230.5600,N,07054.0000,W,20.0,,230394,,,A"); run(30); assert(!gLabInputs.get(Sig::Heading).live);
   // Far away reads as the most a reading can hold.
   gpsLine("GNRMC,123522,A,4300.0000,N,07054.0000,W,0.0,,230394,,,A"); run(30); renderLabUi();
-  assert(gLabInputs.get(Sig::SpotDistance).value == lab_gps::kFarMeters && gCanvas.shows("32+ km"));
-  gpsLine("GNRMC,123522,A,4231.5000,N,07054.0000,W,0.0,,230394,,,A"); run(30); renderLabUi(); assert(gCanvas.shows("1.8 km"));
+  assert(gLabInputs.get(Sig::SpotDistance).value == lab_gps::kFarMeters && gCanvas.shows("19.9+ mi"));
+  gpsLine("GNRMC,123522,A,4231.5000,N,07054.0000,W,0.0,,230394,,,A"); run(30); renderLabUi(); assert(gCanvas.shows("1.2 mi"));
   // The saved spot comes back after a restart.
   gLabSpot = LabSpot{}; gLabSpotLoaded = false; run(30); assert(gLabSpot.set && gLabSpot.latE5 == 4250833);
   // Losing the fix loses every reading that needs one, and S says why it can't save.
@@ -1875,12 +1881,15 @@ void testGpsReadings() {
   gpsLine("GNRMC,123525,A,4230.5000,N,07054.0000,W,10.0,000.0,230394,,,A"); key('s'); run(2100);
   gpsLine("GNGGA,123526,4230.5600,N,07054.0000,W,1,08,0.9,180.0,M,0,M,,");
   gpsLine("GNRMC,123526,A,4230.5600,N,07054.0000,W,10.0,000.0,230394,,,A"); run(30); show("doc-gps");
-  assert(gCanvas.shows("111 m") && gCanvas.shows("0` N") && gCanvas.shows("18.5 km/h"));
+  assert(gCanvas.shows("364 ft") && gCanvas.shows("0` N") && gCanvas.shows("11.5 mph"));
+  // Metric shows the same readings as they're kept.
+  gShownUnits = units::System::Metric; renderLabUi();
+  assert(gCanvas.shows("111 m") && gCanvas.shows("18.5 km/h")); gShownUnits = units::System::US;
   esc();
   // Speed from another screen opens the GPS for it, and like tilt leaves the port alone.
   { onceOnGrove(); const int opens = gAirSensor.opens, bus = gUnits.commands; Serial1.open = false;
     gpsLine("GNRMC,123519,A,4230.5000,N,07054.0000,W,10.0,084.4,230394,,,A");
-    assert(onceAsk(onceRead(Sig::Speed)) == "Speed 19 km/h."); assert(gAirSensor.opens == opens && gUnits.commands == bus && gGrove.frames == 0);
+    assert(onceAsk(onceRead(Sig::Speed)) == "Speed 12 mph."); assert(gAirSensor.opens == opens && gUnits.commands == bus && gGrove.frames == 0);
     assert(!Serial1.open); }
   // Pulse shares the GPS port for its weather: the Lab letting go doesn't close it under Pulse,
   // and only the last one out closes it.
@@ -1889,7 +1898,7 @@ void testGpsReadings() {
   setUiMode(UiMode::LabDevices); run(100); assert(Serial1.open && gGpsHolders == (kGpsForPulse | kGpsForLab));
   setUiMode(UiMode::Home); run(100); assert(Serial1.open && gGpsHolders == kGpsForPulse);
   { onceOnGrove(); gpsHold(kGpsForPulse); gpsLine("GNRMC,123530,A,4230.5000,N,07054.0000,W,10.0,084.4,230394,,,A");
-    assert(onceAsk(onceRead(Sig::Speed)) == "Speed 19 km/h.");
+    assert(onceAsk(onceRead(Sig::Speed)) == "Speed 12 mph.");
     assert(Serial1.open && gGpsHolders == kGpsForPulse); }
   gpsRelease(kGpsForPulse); assert(!Serial1.open && !gGpsHolders);
   gpsRelease(kGpsForPulse); assert(!gGpsHolders);

@@ -137,8 +137,8 @@ void renderLabGraphPage(Dev dev) {
       d.fillRect(x, y, 2, height, kLabGraph);
       d.fillRect(x, y, 2, 2, kLabCyan);
     }
-    labTextRight(&fonts::Font0, 26, kTop, info.onOff ? String("on") : String(ceilValue), kLabSoft);
-    labTextRight(&fonts::Font0, 26, kTop + kHeight - 8, info.onOff ? String("off") : String(floorValue), kLabSoft);
+    labTextRight(&fonts::Font0, 26, kTop, info.onOff ? String("on") : String(labShownNumber(sig, ceilValue)), kLabSoft);
+    labTextRight(&fonts::Font0, 26, kTop + kHeight - 8, info.onOff ? String("off") : String(labShownNumber(sig, floorValue)), kLabSoft);
   }
   labKeys(labPageKeys(dev == Dev::Env ? "T other reading  R reset" : "R reset  ESC back"));
 }
@@ -150,7 +150,7 @@ void renderLabParking() {
   const lab::Reading& reading = gLabInputs.get(Sig::Distance);
   const int cm = reading.live ? reading.value : 999;
   const uint16_t tone = cm < lab::kParkingStopCm ? kLabRed : cm < lab::kParkingCloseCm ? kLabAmber : kLabGreen;
-  labTextAt(&fonts::Font4, 6, 23, reading.live ? String(cm) + " cm" : String("--"), TFT_WHITE);
+  labTextAt(&fonts::Font4, 6, 23, reading.live ? labValueText(Sig::Distance, cm) : String("--"), TFT_WHITE);
   labTextRight(&fonts::FreeSansBold9pt7b, 234, 27, reading.live ? lab::parkingWord(cm) : "Nothing in range", tone);
   constexpr int kBars = 12;
   const int lit = reading.live ? lab::mapRange(cm, 100, 5, 0, kBars) : 0;

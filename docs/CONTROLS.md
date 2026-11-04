@@ -84,10 +84,16 @@ the device. It restarts once it has joined.
 Press Tab and open Settings, then pick a section. Up and down move through the rows, and longer
 lists scroll. Left and right change a value, and Enter toggles it or opens it.
 
+Device → **Units** is US (°F, inches, mph, feet) unless you switch it to Metric (°C, centimeters,
+km/h, meters). It changes what the Lab, Sonar, the GPS screen and Pulse's weather show, and the
+units Claude answers in. Saved Lab rules mean the same either way. Switching fetches the weather
+again.
+
 ## Weather on Pulse
 
 When nothing is happening, the Pulse screen shows the date and the weather where the orb usually
-sits: temperature, conditions, today's high and low, the chance of rain, and the place. The orb
+sits: temperature, conditions, today's high and low, the chance of rain, and the place. Temperatures
+are °F, or °C with Settings, Device, Units set to Metric. The orb
 comes back as soon as the assistant is doing something.
 
 Weather loads about 30 seconds after the device starts and connects, then every 30 minutes. If a

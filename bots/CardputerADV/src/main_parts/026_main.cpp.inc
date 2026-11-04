@@ -200,6 +200,7 @@ void loadDeviceSettings() {
   gDeviceSettings.weatherPlace = gPrefs.getString("wx_place", weather_view::kDefaultPlace);
   if (!weather_view::validPlace(gDeviceSettings.weatherPlace.c_str())) gDeviceSettings.weatherPlace = weather_view::kDefaultPlace;
   gDeviceSettings.meshRegion = s1_mesh::regionOrDefault(gPrefs.getUChar("mesh_reg", s1_mesh::kDefaultRegion));
+  gDeviceSettings.units = static_cast<uint8_t>(units::fromSaved(gPrefs.getUChar("units", static_cast<uint8_t>(units::kDefault))));
   // The menu can change between firmware versions, so what's saved is only a suggestion.
   gLauncherSelection = min<int>(gPrefs.getUChar("menu_group", 0), kLauncherGroupCount - 1);
   gLauncherSubSelection = min<int>(gPrefs.getUChar("menu_item", 0), kLauncherGroups[gLauncherSelection].count - 1);
@@ -247,6 +248,7 @@ void saveDeviceSettings() {
   gPrefs.putString("aud_lang", gDeviceSettings.audioLanguage);
   gPrefs.putString("wx_place", gDeviceSettings.weatherPlace);
   gPrefs.putUChar("mesh_reg", gDeviceSettings.meshRegion);
+  gPrefs.putUChar("units", gDeviceSettings.units);
   gPrefs.end();
 }
 

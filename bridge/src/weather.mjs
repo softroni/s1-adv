@@ -121,15 +121,17 @@ export class WeatherService {
     return place;
   }
 
-  async fetchReport(key, text) {
-    return this.forecast(await this.place(key, text));
+  async fetchReport(key, text, metric) {
+    return this.forecast(await this.place(key, text), metric);
   }
 
-  async forecast(place) {
+  // Fahrenheit and mph, or Celsius and km/h for a device set to metric.
+  async forecast(place, metric = false) {
     const query = new URLSearchParams({ latitude: place.latitude, longitude: place.longitude,
       current: "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,is_day,wind_speed_10m",
       daily: "temperature_2m_max,temperature_2m_min,precipitation_probability_max",
-      temperature_unit: "fahrenheit", wind_speed_unit: "mph", timezone: "auto", forecast_days: "1" });
+      temperature_unit: metric ? "celsius" : "fahrenheit", wind_speed_unit: metric ? "kmh" : "mph",
+      timezone: "auto", forecast_days: "1" });
     const { current, daily } = await getJson(this.fetchImpl, `${this.forecastUrl}?${query}`);
     return { place: place.name, ...weatherCondition(current?.weather_code, current?.is_day !== 0),
       temp: reading(current?.temperature_2m), feels: reading(current?.apparent_temperature),
@@ -138,18 +140,18 @@ export class WeatherService {
       rain: reading(daily?.precipitation_probability_max?.[0] ?? 0) };
   }
 
-  async report(text) {
+  async report(text, { metric = false } = {}) {
     const key = comparable(text);
-    return this.cached(key, () => this.fetchReport(key, text));
+    return this.cached(`${key}${metric ? "|metric" : ""}`, () => this.fetchReport(key, text, metric));
   }
 
   // Weather at a GPS position, with no city to look up. Its key can't match a city's, which
   // only ever holds letters and digits.
-  async reportAt(position) {
+  async reportAt(position, { metric = false } = {}) {
     const at = parseCoordinates(String(position?.latitude), String(position?.longitude));
     if (!at) throw Object.assign(new Error("invalid_position"), { code: "invalid_position" });
-    const key = `gps:${at.latitude.toFixed(2)},${at.longitude.toFixed(2)}`;
-    return this.cached(key, () => this.forecast({ name: HERE, ...at }));
+    const key = `gps:${at.latitude.toFixed(2)},${at.longitude.toFixed(2)}${metric ? "|metric" : ""}`;
+    return this.cached(key, () => this.forecast({ name: HERE, ...at }, metric));
   }
 
   async cached(key, fetcher) {

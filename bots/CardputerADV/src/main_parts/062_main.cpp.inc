@@ -399,6 +399,11 @@ void drawSonarSourceTag(const char* title, uint16_t bg) {
   d.print(sonarOnUnit() ? "M5 UNIT" : "HC-SR04");
 }
 
+// The distance as the owner reads it: whole inches, or whole centimeters.
+String sonarShownDistance(float cm) {
+  const int shown = static_cast<int>(lroundf(cm));
+  return String(displayUnits() == units::System::US ? units::inches(shown) : shown);
+}
 void renderSonarRadarView(uint32_t nowMs, bool fresh, uint16_t accent) {
   auto& d = gCanvas;
   const uint16_t bg = rgb565_local(2, 7, 10);
@@ -484,19 +489,19 @@ void renderSonarRadarView(uint32_t nowMs, bool fresh, uint16_t accent) {
   d.setTextColor(muted, panel);
   d.setTextDatum(middle_center);
   d.drawString("FWD", radarCenterX, 34);
-  d.drawString("200cm", radarCenterX, 117);
+  d.drawString(displayUnits() == units::System::US ? "79in" : "200cm", radarCenterX, 117);
   d.setTextDatum(top_left);
 
   d.fillRoundRect(118, 38, 108, 68, 9, panel2);
   d.drawRoundRect(118, 38, 108, 68, 9, rgb565_local(30, 48, 57));
-  String distanceText = fresh ? String(static_cast<int>(lroundf(gSonar.filteredCm))) : "--";
+  String distanceText = fresh ? sonarShownDistance(gSonar.filteredCm) : "--";
   d.setFont(&fonts::Font6);
   d.setTextColor(text, panel2);
   d.setTextDatum(middle_center);
   d.drawString(distanceText, 164, 57);
   d.setFont(&fonts::Font2);
   d.setTextColor(muted, panel2);
-  d.drawString("cm", 205, 64);
+  d.drawString(displayUnits() == units::System::US ? "in" : "cm", 205, 64);
   d.setTextDatum(top_left);
 
   // The panel holds 16 characters a line, so each line has one long item.
@@ -580,14 +585,14 @@ void renderSonarUi() {
 
   d.fillRoundRect(62, 38, 164, 44, 9, panel2);
   d.drawRoundRect(62, 38, 164, 44, 9, rgb565_local(30, 48, 57));
-  String distanceText = fresh ? String(static_cast<int>(lroundf(gSonar.filteredCm))) : "--";
+  String distanceText = fresh ? sonarShownDistance(gSonar.filteredCm) : "--";
   d.setFont(&fonts::Font6);
   d.setTextColor(text, panel2);
   d.setTextDatum(middle_center);
   d.drawString(distanceText, 139, 59);
   d.setFont(&fonts::Font2);
   d.setTextColor(muted, panel2);
-  d.drawString("cm", 202, 67);
+  d.drawString(displayUnits() == units::System::US ? "in" : "cm", 202, 67);
   d.setTextDatum(top_left);
 
   d.setFont(&fonts::Font0);

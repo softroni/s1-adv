@@ -9,7 +9,7 @@ With Claude connected, you can also [talk to it](#talk-to-it): say a rule, chang
 <table>
 <tr>
 <td width="33%"><img src="assets/lab/devices.png" alt="The Devices list with live readings from five parts" width="100%"><br><sub><b>1. Test a part.</b> See that it works before you build on it.</sub></td>
-<td width="33%"><img src="assets/lab/step-show.png" alt="A rule step where a slider sets a distance of 50 cm" width="100%"><br><sub><b>2. Build a rule.</b> Answer a few questions, or show it with your hand.</sub></td>
+<td width="33%"><img src="assets/lab/step-show.png" alt="A rule step where a slider sets a distance of 20 inches" width="100%"><br><sub><b>2. Build a rule.</b> Answer a few questions, or show it with your hand.</sub></td>
 <td width="33%"><img src="assets/lab/flow-firing.png" alt="A rule firing, with a knob driving an LED strip and a servo" width="100%"><br><sub><b>3. Play it.</b> Watch the signal travel from sensor to output.</sub></td>
 </tr>
 </table>
@@ -101,7 +101,7 @@ The dot beside each device tells you what the Lab knows:
 
 <table>
 <tr>
-<td width="33%"><img src="assets/lab/ultrasonic.png" alt="Ultrasonic screen showing 41 cm and a chart of the last 30 seconds" width="100%"><br><sub><b>Ultrasonic.</b> Live distance and the last 30 seconds. R resets the lowest and highest.</sub></td>
+<td width="33%"><img src="assets/lab/ultrasonic.png" alt="Ultrasonic screen showing 16 inches and a chart of the last 30 seconds" width="100%"><br><sub><b>Ultrasonic.</b> Live distance and the last 30 seconds. R resets the lowest and highest.</sub></td>
 <td width="33%"><img src="assets/lab/env.png" alt="ENV III screen showing temperature and humidity" width="100%"><br><sub><b>ENV III.</b> Breathe on it and watch the humidity jump.</sub></td>
 <td width="33%"><img src="assets/lab/joystick.png" alt="Joystick 2 screen showing the stick position and its button" width="100%"><br><sub><b>Joystick 2.</b> The stick's position and its button. If the dot goes the wrong way, <b>D</b> sets its directions.</sub></td>
 </tr>
@@ -118,7 +118,7 @@ The dot beside each device tells you what the Lab knows:
 <tr>
 <td><img src="assets/lab/hub.png" alt="I/O hub screen listing what's on each port" width="100%"><br><sub><b>I/O hub.</b> What's on each port, and its firmware.</sub></td>
 <td><img src="assets/lab/tilt.png" alt="Tilt screen showing 30 degrees" width="100%"><br><sub><b>Tilt.</b> Built in. Tip the Cardputer to see it move.</sub></td>
-<td><img src="assets/lab/gps.png" alt="GPS screen with satellites, speed, position, heading north and 111 m from the saved spot" width="100%"><br><sub><b>LoRa Cap GPS.</b> Satellites, position, speed, heading, and how far you are from your spot. S saves the spot, M opens Mesh.</sub></td>
+<td><img src="assets/lab/gps.png" alt="GPS screen with satellites, speed, position, heading north and 364 feet from the saved spot" width="100%"><br><sub><b>LoRa Cap GPS.</b> Satellites, position, speed, heading, and how far you are from your spot. S saves the spot, M opens Mesh.</sub></td>
 </tr>
 <tr>
 <td><img src="assets/lab/led.png" alt="Cardputer LED screen, on and green" width="100%"><br><sub><b>Cardputer LED.</b> Built in. Left and right change the color, and Space turns it off or on. The screen goes to full brightness while it's lit.</sub></td>
@@ -151,7 +151,7 @@ Most parts have more than one page. The dots under the title show where you are.
 <tr>
 <td width="33%"><img src="assets/lab/dashboard.png" alt="The Dashboard, with a live value and small graph for six sensors" width="100%"><br><sub><b>Dashboard.</b> Press <b>D</b> on Devices to see everything live, with its last minute.</sub></td>
 <td width="33%"><img src="assets/lab/graph.png" alt="A full-screen graph of distance with low, average and high" width="100%"><br><sub><b>Graph.</b> The last 30 seconds, scaled to what it saw, with low, average and high. On the ENV III, <b>T</b> swaps temperature and humidity.</sub></td>
-<td width="33%"><img src="assets/lab/parking.png" alt="A parking sensor at 6 cm, with every bar lit and the word Stop" width="100%"><br><sub><b>Ultrasonic: parking.</b> Bars fill as you get closer. <b>B</b> adds beeps that speed up.</sub></td>
+<td width="33%"><img src="assets/lab/parking.png" alt="A parking sensor at 2 inches, with every bar lit and the word Stop" width="100%"><br><sub><b>Ultrasonic: parking.</b> Bars fill as you get closer. <b>B</b> adds beeps that speed up.</sub></td>
 </tr>
 <tr>
 <td width="33%"><img src="assets/lab/comfort.png" alt="A map of temperature and humidity with a dot inside a green box" width="100%"><br><sub><b>ENV III: comfort.</b> A dot on a map of the room, and whether it feels right.</sub></td>
@@ -183,7 +183,7 @@ A rule has three pieces: what to **watch**, what to **do**, and how long to **ke
 <tr>
 <td width="33%"><img src="assets/lab/step-watch.png" alt="What should it watch, with Distance selected" width="100%"><br><sub><b>1. What to watch.</b> Each sensor shows its live reading.</sub></td>
 <td width="33%"><img src="assets/lab/step-when.png" alt="Distance: goes under, goes over, changes at all" width="100%"><br><sub><b>2. When it counts.</b> Under a value, over it, or any change.</sub></td>
-<td width="33%"><img src="assets/lab/step-show.png" alt="Show me: Distance, set to 50 cm" width="100%"><br><sub><b>3. Show it.</b> Put your hand where you want it and press Enter, or nudge the number. Space goes back to the live reading.</sub></td>
+<td width="33%"><img src="assets/lab/step-show.png" alt="Show me: Distance, set to 20 inches" width="100%"><br><sub><b>3. Show it.</b> Put your hand where you want it and press Enter, or nudge the number. Space goes back to the live reading.</sub></td>
 </tr>
 <tr>
 <td><img src="assets/lab/step-more.png" alt="Anything else to watch, with That's all selected" width="100%"><br><sub><b>4. Anything else?</b> Watch up to 3 things, then choose whether any or all must be true.</sub></td>
@@ -224,13 +224,17 @@ Relays, lamp power and the air conditioners are simply on or off, so they can on
 
 You can save up to 8 rules.
 
+### Units
+
+The Lab shows US units: °F, inches, mph and feet. To see °C, centimeters, km/h and meters, press Tab, open **Settings**, then **Device**, and set **Units** to **Metric**. Underneath, rules keep their numbers in metric, so switching only changes what you see, and a rule you saved before means the same afterwards. Claude is told which you read, so it answers in your units and converts when it writes a rule. A rule's number still moves in metric steps, so in °F it goes up one or two degrees at a time, and a distance an inch or two.
+
 ### GPS readings
 
 With the Cap LoRa-1262 fitted and a fix, which needs the sky, rules can use three more readings besides **Satellites**:
 
-- **Speed**, in km/h.
-- **Heading**, the way you're moving: 0 is north, 90 east, 180 south and 270 west. A GPS standing still still names a direction, and it wanders, so Heading only reads above 3 km/h.
-- **From spot**, how many metres you are from a spot you saved. Stand where you want it, open **LoRa Cap GPS** in Devices and press **S**. Pressing S again somewhere else moves it. Beyond 32 km it reads 32000.
+- **Speed**, in mph, or km/h with metric [units](#units).
+- **Heading**, the way you're moving: 0 is north, 90 east, 180 south and 270 west. A GPS standing still still names a direction, and it wanders, so Heading only reads above 3 km/h (2 mph).
+- **From spot**, how far you are from a spot you saved, in feet, or meters with metric units. Stand where you want it, open **LoRa Cap GPS** in Devices and press **S**. Pressing S again somewhere else moves it. It stops counting at 32 km (20 miles).
 
 With no fix, none of the three reads, so a rule waits rather than acting on an old position. The spot stays on the Cardputer: it isn't in the Lab's file on the SD card, and Claude only ever sees the distance. Rules only run while the Lab is open, so take the Cardputer along with rules playing.
 
@@ -251,8 +255,8 @@ Open **Recipes** from the Rules list. Enter adds one, and it's then a rule like 
 | Fan for damp | Humid air closes relay 1 | ENV III, relays |
 | Tilt to servo | Tip the Cardputer to turn the servo | Servo |
 | Dark lamp | Dark room turns the smartLamp on | Light, smartLamp |
-| Hot room | Over 28 °C turns the TCL AC on | ENV III, TCL air conditioner |
-| Speed beep | Over 25 km/h, the speaker beeps | Cap LoRa-1262 |
+| Hot room | A hot room, over 82 °F (28 °C), turns the TCL AC on | ENV III, TCL air conditioner |
+| Speed beep | Going fast, over 16 mph (25 km/h), the speaker beeps | Cap LoRa-1262 |
 | Near the spot | Near your saved spot: green LED | Cap LoRa-1262, with a [spot saved](#gps-readings) |
 
 **Air theremin** is the cheapest place to start, because it needs one sensor and uses the Cardputer's own speaker.

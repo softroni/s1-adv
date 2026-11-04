@@ -1394,7 +1394,7 @@ void labOnceRead(uint32_t now) {
   uint8_t count = 0;
   const lab::SeqStep* steps = labOnceSteps(count);
   lab::Text text(gLabOnceText, sizeof(gLabOnceText));
-  lab::onceReadings(gLabOnce, gLabInputs, text);
+  lab::onceReadings(gLabOnce, gLabInputs, text, displayUnits());
   for (uint8_t i = 0; i < count; ++i) {
     const lab::Part part = lab::partOf(steps[i].out);
     if (part == lab::Part::None || labPartReady(part)) continue;

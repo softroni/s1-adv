@@ -6524,8 +6524,9 @@ async function main() {
         json(res, 400, { error: byPosition ? "invalid_position" : "invalid_place" });
         return;
       }
+      const options = { metric: url.searchParams.get("units") === "metric" };
       try {
-        json(res, 200, await (position ? runtime.weather.reportAt(position) : runtime.weather.report(place)));
+        json(res, 200, await (position ? runtime.weather.reportAt(position, options) : runtime.weather.report(place, options)));
       } catch (error) {
         console.warn(`[weather] failed: ${String(error.code || error.message || error).slice(0, 120)}`);
         json(res, error.code === "unknown_place" ? 404 : 503, { error: error.code || "weather_unavailable", retryable: error.code !== "unknown_place" });

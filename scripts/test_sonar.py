@@ -36,6 +36,7 @@ code = r'''
 #include "sonar.h"
 #include "air_music.h"
 #include "lab.h"
+#include "units.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
@@ -76,6 +77,8 @@ String operator+(const char* a, const String& b) { return String(std::string(a) 
 uint32_t nowUs = 5000000;
 uint32_t micros() { return nowUs; }
 uint32_t millis() { return nowUs / 1000; }
+units::System gUnits = units::System::Metric;  // The checks below read centimeters; US has its own.
+units::System displayUnits() { return gUnits; }
 void delayMicroseconds(uint32_t) {}
 
 // The EXT header: G4 sends the HC-SR04's trigger and G6 hears its echo through an interrupt.
@@ -386,7 +389,11 @@ int main() {
   assert(gCanvas.find("--") && infoLine() == "waiting  |  M5 unit on Grove");
   after(sonar::kUnitMeasureMs);
   assert(Wire.reads == 1 && fabsf(gSonar.filteredCm - 123.4f) < 0.01f && gSonar.state == SonarProximityState::Clear);
-  assert(infoLine() == "M5 ultrasonic unit on Grove" && gCanvas.find("123"));
+  assert(infoLine() == "M5 ultrasonic unit on Grove" && gCanvas.find("123") && gCanvas.find("cm"));
+  // In US units the same 123 cm reads 48 inches, on both views.
+  gUnits = units::System::US; render(SonarViewMode::Proximity); assert(gCanvas.find("48") && gCanvas.find("in") && !gCanvas.find("123"));
+  render(SonarViewMode::Radar); assert(gCanvas.find("48") && gCanvas.find("79in") && !gCanvas.find("200cm"));
+  gUnits = units::System::Metric;
   render(SonarViewMode::Radar);
   assert(gCanvas.find("on Grove") && !gCanvas.find("10 Hz"));
   // Readings past the HC-SR04's 4 m still count, to the unit's 4.5 m.

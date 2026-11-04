@@ -167,6 +167,7 @@ void adjustCurrentSetting(int delta) {
     case kMeshRegionSetting:
       gDeviceSettings.meshRegion = s1_mesh::stepRegion(gDeviceSettings.meshRegion, delta);
       break;
+    case kUnitsSetting: toggleCurrentSetting(); return;
     default:
       break;
   }
@@ -253,6 +254,13 @@ void toggleCurrentSetting() {
       return;
     case kMeshRegionSetting:
       gDeviceSettings.meshRegion = s1_mesh::stepRegion(gDeviceSettings.meshRegion, 1);
+      break;
+    case kUnitsSetting:
+      gDeviceSettings.units = static_cast<uint8_t>(displayUnits() == units::System::US ? units::System::Metric : units::System::US);
+      // Pulse's weather numbers carry no unit, so the old ones would read wrong: fetch it again.
+      gWeather = WeatherReport();
+      gWeatherNote = "Getting weather";
+      gWeatherSchedule.reset();
       break;
     default:
       break;

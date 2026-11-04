@@ -771,6 +771,12 @@ void testOnce() {
   in.set(Sig::Motion, 1, 0); in.set(Sig::Temperature, 24, 0); in.set(Sig::Tilt, -3, 0); in.set(Sig::Distance, 40, 0);
   Once on; on.conds = 1; setOnOff(on.cond[0], true); on.cond[0].sig = Sig::Motion; assert(says(on, in) == "Motion on.");
   Once some; some.reads = 3; some.read[0] = Sig::Temperature; some.read[1] = Sig::Tilt; some.read[2] = Sig::Distance; assert(says(some, in) == "Temperature 24 C; Tilt -3 deg; Distance 40 cm.");
+  // In US units the same readings, and the numbers tested against, are said the owner's way.
+  const auto saysUs = [](const Once& once, const Inputs& inputs) { static char line[kOnceTextChars]; Text text(line, sizeof(line)); onceReadings(once, inputs, text, units::System::US); return std::string(line); };
+  assert(saysUs(some, in) == "Temperature 75 F; Tilt -3 deg; Distance 16 in.");
+  Once hot; hot.conds = 1; hot.cond[0] = {Sig::Temperature, Op::Above, 27}; assert(saysUs(hot, in) == "Temperature 75 F, not over 81.");
+  in.set(Sig::Speed, 40, 0); Once fast; fast.reads = 1; fast.read[0] = Sig::Speed; assert(saysUs(fast, in) == "Speed 25 mph." && says(fast, in) == "Speed 40 km/h.");
+  assert(saysUs(knob, in) == says(knob, in));
   // Something tested and also listed is said once.
   Once twice; twice.conds = 1; twice.cond[0] = {Sig::Knob, Op::Above, 50}; twice.reads = 3; twice.read[0] = Sig::Knob; twice.read[1] = Sig::Tilt; twice.read[2] = Sig::Tilt; assert(says(twice, in) == "Knob 67%, over 50; Tilt -3 deg.");
   const auto did = [](std::initializer_list<SeqStep> steps) { static char line[kOnceTextChars]; Text text(line, sizeof(line)); onceDone(steps.begin(), static_cast<uint8_t>(steps.size()), text); return std::string(line); };
@@ -782,6 +788,7 @@ void testOnce() {
   Inputs far; far.set(Sig::Temperature, -10, 0); far.set(Sig::StickPress, 0, 0); far.set(Sig::Satellites, 32, 0); far.set(Sig::Humidity, 100, 0); far.set(Sig::Distance, 450, 0); far.set(Sig::StickX, -100, 0);
   Once full; full.conds = 3; for (auto& cond : full.cond) cond = {Sig::Temperature, Op::Below, -10}; full.cond[1].sig = Sig::Humidity; full.cond[1].value = 50; full.cond[2].sig = Sig::Distance; full.cond[2].value = 100;
   full.reads = 3; full.read[0] = Sig::StickPress; full.read[1] = Sig::Satellites; full.read[2] = Sig::StickX;
+  { static char us[kOnceTextChars]; Text t(us, sizeof(us)); onceReadings(full, far, t, units::System::US); assert(t.room() > 0); }
   static char line[kOnceTextChars]; Text text(line, sizeof(line)); onceReadings(full, far, text); text.add(" "); const SeqStep longest[3] = {{SeqKind::Set, Out::StripBright, 100}, {SeqKind::Set, Out::StripLength, 30}, {SeqKind::Set, Out::Servo, 180}}; onceDone(longest, 3, text); assert(text.room() > 0);
   // The Lab's hub range: a number before it's been turned means nothing.
   AnalogRange range; assert(!range.learned()); range.percent(2000); assert(!range.learned()); range.percent(1500); assert(!range.learned()); range.percent(300); assert(!range.learned()); range.percent(100); assert(range.learned());
