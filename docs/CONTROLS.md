@@ -178,9 +178,11 @@ region's band, and with Enter, a count of the Meshtastic packets heard on a pres
 In the chat, Enter sends to whoever the box at the bottom names. Left and Right change who:
 the public channel, the private channel or a contact. Ctrl+N lists people (Enter saves a radio as a contact, Del
 removes one), Ctrl+O reads a message, Ctrl+L shares your location and Ctrl+H opens Help,
-where 1 to 4 send a ready message with your location to every contact until one of their
-radios has it. Esc closes what's open, then stops the radio. The region is Settings, Device,
-Mesh region. [Mesh](MESH.md) has the details.
+where 1 to 4 send a ready message with your location to every contact and the private
+channel (C leaves it out) until one of their radios has it. Esc closes what's open, then
+stops the radio. The region is Settings, Device, Mesh region, and Settings, Device, Public
+location says how much of where you are the public channel gets: off (the default), rough
+(within about 3 km) or exact. [Mesh](MESH.md) has the details.
 
 ## Air Music
 
@@ -472,6 +474,9 @@ there is no topic browser or topic creation/switching.
 Device Settings → Clock format switches between 12h AM/PM (default) and 24h.
 Device Settings → Mesh region picks the Meshtastic region Mesh uses, US (906.875 MHz) unless
 changed. Left and Right step through the list in [Mesh](MESH.md#region).
+Device Settings → Public location says how much of where you are Mesh puts on the public
+channel: off (the default), rough (within about 3 km) or exact. Contacts and the private
+channel always get it exactly. [Mesh](MESH.md#public-location) explains.
 Display Settings → Text size switches chat and voice replies between Small, Medium
 and Large.
 Ordinary voice keeps the original REC graphics during capture and THINK until the

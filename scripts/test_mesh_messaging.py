@@ -253,17 +253,53 @@ void help() {
   assert(n == sizeof(want) && !memcmp(pos, want, n));
   assert(!encodePosition(pos, 17, 0, 0, 0));
 
+  // The public channel's share: off says nothing about where, rough is Meshtastic's 13 bits,
+  // moved to the middle of its box the way the firmware does, in the text and the pin alike.
+  assert(roughE7(425191200, 13) == 424935424 && roughE7(-708964500, 13) == -709099520 && roughE7(5, 32) == 5);
+  composeHelp(out, sizeof(out), 0, w, 1000, Sharing::Rough);
+  assert(std::string(out) == "Out of gas. Please come and get me. Location within 3 km: https://maps.google.com/?q=42.49,-70.91");
+  composeHelp(out, sizeof(out), 1, w, 1000 + 12 * 60000, Sharing::Rough);
+  assert(std::string(out) == "Car trouble. I need help. Location 12 min ago, within 3 km: https://maps.google.com/?q=42.49,-70.91");
+  composeHelp(out, sizeof(out), 0, w, 1000, Sharing::Off); assert(std::string(out) == "Out of gas. Please come and get me.");
+  composeHelp(out, sizeof(out), 2, Where{}, 0, Sharing::Off); assert(std::string(out) == "My phone is dead. Reply here.");
+  composeHelp(out, sizeof(out), 2, Where{}, 0, Sharing::Rough); assert(std::string(out) == "My phone is dead. Reply here. No GPS fix.");
+  assert(!composeLocation(out, sizeof(out), w, 2000, Sharing::Off) && !out[0]);
+  composeLocation(out, sizeof(out), w, 2000, Sharing::Rough);
+  assert(std::string(out) == "My location. Location within 3 km: https://maps.google.com/?q=42.49,-70.91");
+  // Checked once against mesh.proto with protoc too: the same spot, precision_bits 13.
+  const uint8_t wantRough[] = {0x0D, 0x00, 0x00, 0x54, 0x19, 0x15, 0x00, 0x00, 0xBC, 0xD5,
+                               0x28, 0x02, 0x98, 0x01, 0x09, 0xB8, 0x01, 0x0D};
+  assert(encodePosition(pos, sizeof(pos), 4251912, -7089645, 9, kRoughBits) == sizeof(wantRough) && !memcmp(pos, wantRough, sizeof(wantRough)));
+  assert(!encodePosition(pos, sizeof(pos), 0, 0, 0, 0) && !encodePosition(pos, sizeof(pos), 0, 0, 0, 33));
+  // Anywhere on Earth, rough is never more than half its box from the real spot, and never the spot itself.
+  std::mt19937 rng(3);
+  for (int i = 0; i < 100000; ++i) {
+    const int32_t lat = int32_t(rng() % 18000001) - 9000000, lon = int32_t(rng() % 36000001) - 18000000;
+    for (int32_t e5 : {lat, lon}) {
+      const int64_t d = int64_t(roughE7(e5 * 100, kRoughBits)) - int64_t(e5) * 100;
+      assert(d >= -(int64_t(1) << 18) && d <= (int64_t(1) << 18));
+    }
+    assert(roughE5(lat) / 100000 <= 90 && roughE5(lat) / 100000 >= -90);
+  }
+  formatDegrees(d, sizeof(d), -4, 2); assert(std::string(d) == "0.00");
+  formatDegrees(d, sizeof(d), -7090995, 2); assert(std::string(d) == "-70.91");
+  formatDegrees(d, sizeof(d), 18000000, 2); assert(std::string(d) == "180.00");
+  assert(sharingOrDefault(0) == Sharing::Off && sharingOrDefault(2) == Sharing::Exact && sharingOrDefault(9) == Sharing::Off);
+  assert(std::string(sharingName(Sharing::Rough)) == "rough");
+
   Help h; assert(!h.due(0, true));
   h.start(0, 100); assert(h.due(100, true) && !h.due(100, false) && h.repeating());
-  h.seq[0] = 5; h.seq[kContacts] = 6; h.roundSent(100);
+  assert(h.alsoPrivate && !h.alsoPublic);  // The private channel is on unless C turns it off.
+  h.seq[0] = 5; h.seq[kHelpPrivateSlot] = 7; h.seq[kHelpPublicSlot] = 6; h.roundSent(100);
   assert(!h.due(100 + kHelpRepeatMs - 1, true) && h.due(100 + kHelpRepeatMs, true));
   assert(h.nextInMs(100 + 60000) == kHelpRepeatMs - 60000);
   h.delivered(6); assert(h.repeating());      // The public channel's "heard" isn't a person.
+  h.delivered(7); assert(h.repeating());      // Nor is the private channel's.
   h.delivered(99); assert(h.repeating());
   h.delivered(5); assert(!h.repeating() && h.stop == HelpStop::Confirmed && !h.due(UINT32_MAX, true));
   h.start(1, 200); h.roundSent(200); h.replied(false, false, 300); assert(h.repeating());
   h.replied(false, true, 300); assert(h.stop == HelpStop::Replied);
-  h.start(1, 200); h.roundSent(200); h.replied(true, false, 300); assert(h.stop == HelpStop::Replied);
+  h.start(1, 200); h.roundSent(200); h.replied(true, false, 300); assert(h.stop == HelpStop::Replied);  // A contact or the private channel.
   h.start(kHelpOkChoice, 0); assert(!h.repeating() && h.due(0, true));
   h.roundSent(0); assert(h.stop == HelpStop::Ok && !h.due(kHelpRepeatMs, true));
   h.start(9, 0); assert(h.choice == 0);
@@ -280,4 +316,4 @@ with tempfile.TemporaryDirectory(prefix='s1-mesh-messaging-') as directory:
     subprocess.run([str(p / 'messaging')], check=True)
 print('PASS Mesh messaging: contacts saved and loaded whole or not at all, short names, the outbox one at a time with '
       'delivered, relayed, not confirmed, no answer and refusals, history across a restart, Help text with the map '
-      'link and fix age, the Position packet, and when Help repeats and stops (ASan/UBSan)')
+      'link and fix age, off, rough and exact for the public channel, the Position packet at full and rough precision, and when Help repeats and stops (ASan/UBSan)')

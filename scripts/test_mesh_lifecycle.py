@@ -120,7 +120,7 @@ struct FakeMesh {
  void onReceivePKI(bool(*)(uint32_t,uint8_t*)){}
  void update(){assert(gMeshBusOwned&&!gSdReady);++updates;}
 };
-struct {uint8_t meshRegion=1;}gDeviceSettings;
+struct {uint8_t meshRegion=1;uint8_t meshPublicLocation=0;}gDeviceSettings;
 namespace s1_mesh {
 constexpr int kInitPending=-32768;
 inline const char* regionName(uint8_t){return "US";}
@@ -257,8 +257,12 @@ void mesh_features() {
  // Removing a contact moves Enter back to the public channel.
  assert(handleMeshKey('n',ctrl)&&s.state.nodeSel==0&&handleMeshKey('\b',del)&&!s.contacts.count&&s.state.target==0);
  assert(handleMeshEscape());
- // Ctrl+L: nothing without a fix, and the public channel asks twice.
+ // Ctrl+L: off for the public channel until Settings says otherwise, nothing without a fix, and
+ // the public channel asks twice.
  const size_t before=s.mesh.sent.size();
+ assert(gDeviceSettings.meshPublicLocation==0&&s.state.target==0);
+ assert(handleMeshKey('l',ctrl)&&gMeshNotice.find("location off")!=std::string::npos&&!s.outbox.queued());
+ gDeviceSettings.meshPublicLocation=2;
  assert(handleMeshKey('l',ctrl)&&gMeshNotice.find("No GPS")!=std::string::npos&&!s.outbox.queued());
  fakeWhere.known=true;fakeWhere.latE5=4251912;fakeWhere.lonE5=-7089645;fakeWhere.atMs=clockMs;fakeWhere.satellites=8;
  serviceMeshMode();
@@ -267,14 +271,33 @@ void mesh_features() {
  serviceMeshMode();assert(s.mesh.sent.size()==before+1&&s.mesh.sent.back().port==3&&!s.mesh.sent.back().wantAck);
  s.mesh.tx=false;serviceMeshMode();serviceMeshMode();
  assert(s.mesh.sent.back().port==1&&s.mesh.sent.back().data.find("maps.google.com/?q=42.51912,-70.89645")!=std::string::npos);
+ assert(uint8_t(s.mesh.sent[before].data.back())==32);  // precision_bits: exact.
  s.mesh.pendingAck=false;s.mesh.tx=false;serviceMeshMode();
+ // Rough: the pin says 13 bits, and the text gives the box's middle, without the real spot.
+ gDeviceSettings.meshPublicLocation=1;
+ assert(handleMeshKey('l',ctrl)&&gMeshNotice.find("3 km")!=std::string::npos&&handleMeshKey('l',ctrl)&&s.outbox.queued()==2);
+ serviceMeshMode();assert(s.mesh.sent.back().port==3&&uint8_t(s.mesh.sent.back().data.back())==13&&s.mesh.sent.back().to==s1_mesh::kBroadcast);
+ s.mesh.tx=false;serviceMeshMode();serviceMeshMode();
+ assert(s.mesh.sent.back().data=="My location. Location within 3 km: https://maps.google.com/?q=42.49,-70.91");
+ s.mesh.pendingAck=false;s.mesh.tx=false;serviceMeshMode();
+ // The private channel gets it exactly, on its own channel, without asking, whatever the setting.
+ gDeviceSettings.meshPublicLocation=0;strcpy(s.privateChannel.name,"Family");s.privateChannel.keyLength=32;
+ s.state.target=s1_mesh::kTargetPrivate;
+ assert(handleMeshKey('l',ctrl)&&s.outbox.queued()==2);
+ serviceMeshMode();assert(s.mesh.sent.back().port==3&&s.mesh.sent.back().secondary&&uint8_t(s.mesh.sent.back().data.back())==32);
+ s.mesh.tx=false;serviceMeshMode();serviceMeshMode();
+ assert(s.mesh.sent.back().secondary&&s.mesh.sent.back().data.find("?q=42.51912,-70.89645")!=std::string::npos);
+ s.mesh.pendingAck=false;s.mesh.tx=false;serviceMeshMode();
+ // With the channel gone, its target refuses rather than fall back to the public channel.
+ s.privateChannel=s1_mesh::PrivateChannel{};
+ assert(handleMeshKey('l',ctrl)&&!s.outbox.queued()&&gMeshNotice.find("No private")!=std::string::npos);s.state.target=0;
  // Help: to every contact, then again in five minutes until a contact's radio has it.
  s.contacts.add(77,"Alex",key);s.contacts.add(99,"Sam",key);
  assert(handleMeshKey('h',ctrl)&&s.state.helpView&&handleMeshKey('p',plain)&&s.help.alsoPublic&&handleMeshKey('p',plain));
  assert(handleMeshKey('1',plain)&&s.help.on&&s.help.repeating());
  const size_t start=s.mesh.sent.size();serviceMeshMode();
  assert(s.help.rounds==1&&s.mesh.sent.size()==start+1&&s.mesh.sent.back().to==77);
- assert(s.mesh.sent.back().data.rfind("Out of gas.",0)==0&&!s.help.seq[s1_mesh::kContacts]);
+ assert(s.mesh.sent.back().data.rfind("Out of gas.",0)==0&&!s.help.seq[s1_mesh::kHelpPublicSlot]&&!s.help.seq[s1_mesh::kHelpPrivateSlot]);
  s.outbox.routing(77,s.outbox.currentId(),0,sink);s.mesh.pendingAck=false;s.mesh.tx=false;serviceMeshMode();
  assert(s.mesh.sent.back().to==99);
  // The session's own sink is what Help hears from: Sam's radio doesn't answer, Alex's did.
@@ -309,6 +332,37 @@ void mesh_features() {
  assert(handleMeshKey('n',plain)&&gMeshNaming);
  for(int i=0;i<60;++i)handleMeshKey('z',plain);
  assert(strlen(gMeshNameInput)==s1_mesh::kNameBytes);handleMeshEscape();
+ // Help with a private channel and no contacts: it goes there, exactly, unless C leaves it out.
+ // The public channel, with P, gets only what Settings allows.
+ active();{
+  auto& t=*gMeshSession;const auto npos=std::string::npos;
+  strcpy(t.privateChannel.name,"Family");t.privateChannel.keyLength=32;
+  fakeWhere.known=true;fakeWhere.latE5=4251912;fakeWhere.lonE5=-7089645;fakeWhere.atMs=clockMs;fakeWhere.satellites=8;
+  serviceMeshMode();
+  assert(handleMeshKey('h',ctrl)&&t.help.alsoPrivate&&!t.help.alsoPublic&&handleMeshKey('p',plain)&&t.help.alsoPublic);
+  gDeviceSettings.meshPublicLocation=1;
+  assert(handleMeshKey('2',plain));serviceMeshMode();
+  assert(t.help.seq[s1_mesh::kHelpPrivateSlot]&&t.help.seq[s1_mesh::kHelpPublicSlot]);
+  assert(t.mesh.sent.back().secondary&&t.mesh.sent.back().data=="Car trouble. I need help. Location: https://maps.google.com/?q=42.51912,-70.89645");
+  t.mesh.pendingAck=false;t.mesh.tx=false;serviceMeshMode();serviceMeshMode();
+  assert(!t.mesh.sent.back().secondary&&t.mesh.sent.back().data.find("within 3 km: https://maps.google.com/?q=42.49,-70.91")!=npos);
+  // Off: the public one says nothing about where, and the private one is still exact.
+  t.mesh.pendingAck=false;t.mesh.tx=false;serviceMeshMode();
+  gDeviceSettings.meshPublicLocation=0;clockMs+=s1_mesh::kHelpRepeatMs;serviceMeshMode();assert(t.help.rounds==2);
+  assert(t.mesh.sent.back().secondary&&t.mesh.sent.back().data.find("42.51912")!=npos);
+  t.mesh.pendingAck=false;t.mesh.tx=false;serviceMeshMode();serviceMeshMode();
+  assert(!t.mesh.sent.back().secondary&&t.mesh.sent.back().data=="Car trouble. I need help.");
+  t.mesh.pendingAck=false;t.mesh.tx=false;serviceMeshMode();
+  // C leaves the private channel out. With P off too, there's nobody else, so it goes public.
+  assert(handleMeshKey('c',plain)&&!t.help.alsoPrivate&&handleMeshKey('p',plain)&&!t.help.alsoPublic);
+  assert(handleMeshKey('1',plain));serviceMeshMode();
+  assert(!t.help.seq[s1_mesh::kHelpPrivateSlot]&&t.help.seq[s1_mesh::kHelpPublicSlot]&&!t.mesh.sent.back().secondary);
+  t.mesh.pendingAck=false;t.mesh.tx=false;serviceMeshMode();
+  // C with no private channel says so.
+  t.privateChannel=s1_mesh::PrivateChannel{};assert(handleMeshKey('c',plain)&&!t.help.alsoPrivate&&gMeshNotice.find("No private")!=npos);
+  assert(handleMeshEscape()&&handleMeshEscape()&&handleMeshEscape());
+ }
+ restored();fakeWhere=s1_mesh::Where{};gDeviceSettings.meshPublicLocation=0;
 }
 void completeWorker(){assert(workerPending);workerFunction(workerArg);assert(!workerPending);}
 void active(){reset();startMeshMode();assert(gMeshBusOwned&&!gSdReady&&!gStorageReady&&workerPending);completeWorker();serviceMeshMode();assert(updates==1);}
@@ -397,4 +451,4 @@ with tempfile.TemporaryDirectory(prefix='s1-mesh-mode-') as directory:
                     '-fsanitize=address,undefined','-fno-omit-frame-pointer',
                     '-I'+str(ROOT/'bots/CardputerADV/src'),str(cpp),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)
-print('PASS actual Mesh lifecycle: busy/heap/NVS/Cap/task failures, cancellation during init, SD exclusivity and rollback, app guards, bounded send, the outbox one at a time, contacts and direct messages, Help repeating until delivered and warning before Esc, Ctrl+L asking twice for public, the name editor, Scan sharing all of it without identity, mesh or sending, and no worker use-after-free (ASan/UBSan)')
+print('PASS actual Mesh lifecycle: busy/heap/NVS/Cap/task failures, cancellation during init, SD exclusivity and rollback, app guards, bounded send, the outbox one at a time, contacts and direct messages, Help repeating until delivered and warning before Esc, Ctrl+L off, rough or exact for public and asking twice, exact on the private channel, Help on the private channel unless C, the name editor, Scan sharing all of it without identity, mesh or sending, and no worker use-after-free (ASan/UBSan)')

@@ -92,7 +92,8 @@ radio uses out of the box.
   these keys in two halves, taking turns.
 - A message for you is labelled `Sam > you`. One on the public channel shows
   only who sent it. Public messages are public: anyone with a Meshtastic radio
-  in range can read them.
+  in range can read them, and radios with an internet link upload what they
+  hear, so a public message can end up on maps such as meshmap.net.
 - The history holds the last eight messages and sixteen radios heard. The
   messages are kept on internal flash, so they're still there after Mesh closes
   or the Cardputer restarts. The radios heard aren't.
@@ -172,13 +173,20 @@ Each message ends with where you are, as a map link most phones open:
 two minutes says how old it is, and with no fix in the last hour it says
 `No GPS fix.` The GPS needs open sky. Indoors it may never get a fix.
 
-- It goes to every contact as a direct message. With no contacts saved, it goes
-  to the public channel instead. **P** sends it to the public channel as well,
-  where anyone in range can read it, location included.
+- It goes to every contact as a direct message, and to the
+  [private channel](#private-channel) if there is one. **C** leaves the private
+  channel out, or puts it back. With nobody else to send to, it goes to the
+  public channel instead. **P** sends it to the public channel as well.
+- Contacts and the private channel get exactly where you are. The public channel
+  gets only what [Public location](#public-location) allows, which is nothing
+  unless you change it.
+- The `To:` line says who the next one goes to, and how much the public channel
+  gets: `To: Sam, #Family, public (rough)`.
 - 1, 2 and 3 repeat every five minutes until one contact's radio says a message
-  arrived, a contact writes back, or anyone sends you a direct message. Talk on
-  the public channel doesn't stop it. The screen shows each contact's latest
-  message, and when it goes again.
+  arrived, a contact or anyone on the private channel writes back, or anyone
+  sends you a direct message. Talk on the public channel doesn't stop it, and a
+  channel message can only ever be heard, never confirmed. The screen shows each
+  contact's latest message, then the channels', and when it goes again.
 - 4 goes once and ends Help. Pressing another number changes the message.
 - Esc goes back to the chat and leaves Help running. The chat's top line then
   says `Help on, again in 4:12`.
@@ -191,9 +199,34 @@ the device's own screen-off time, if Settings → Display → Auto screen off is
 ## Sharing a location
 
 Ctrl+L sends where the GPS puts you to whoever Enter sends to: a Meshtastic
-position, which puts you on their app's map, and a text with the map link. To
-the public channel, everyone in range sees it, so it asks for a second Ctrl+L
-within four seconds first. With no fix, it says so and sends nothing.
+position, which puts you on their app's map, and a text with the map link. With
+no fix, it says so and sends nothing.
+
+- A contact gets it exactly, encrypted to their radio.
+- The private channel gets it exactly, on that channel only.
+- The public channel gets only what [Public location](#public-location) allows.
+  When that's on, it asks for a second Ctrl+L within four seconds first.
+
+Before 0.2.279, Ctrl+L with the private channel picked sent the map pin to the
+public channel at full precision, and only the text to the private channel.
+
+### Public location
+
+Settings → Device → **Public location** decides how much of where you are goes
+on the public channel, from Ctrl+L or from Help. Left and Right, or Enter, step
+through:
+
+| Setting | The public channel gets |
+| --- | --- |
+| off (the default) | Nothing: Ctrl+L refuses, and Help sends its message without the location |
+| rough | A spot within about 3 km: `Location within 3 km: https://maps.google.com/?q=42.49,-70.91`, and a map pin the Meshtastic app draws as a box |
+| exact | Exactly where you are, as contacts get it |
+
+Rough is how Meshtastic does it: each coordinate keeps its top 13 bits and moves
+to the middle of the box that leaves, about 5.8 km from south to north. The
+real spot is anywhere in that box, so it's within about 3 km of the one sent.
+Anyone near you hears the public channel, and radios with an internet link
+upload it, so the spot can end up on maps like meshmap.net.
 
 ## Your name
 
@@ -237,8 +270,8 @@ The name and key are kept in the Cardputer's own flash with Mesh's other
 settings: never on the SD card, in a log or anywhere else. Anyone who sees the
 key can read the channel. As with every Meshtastic channel, who sent a message
 isn't hidden, only what it says. A change takes effect the next time the radio
-starts. Help still goes to contacts, and to the public channel when asked, not
-to the private channel.
+starts. Since 0.2.279, [Help](#help) goes to the private channel too unless you
+turn it off, and [Ctrl+L](#sharing-a-location) sends it your exact location.
 
 This needs a small change to libmeshtastic-leaf, which held one channel at a
 time; see [Source and licensing](#source-and-licensing).

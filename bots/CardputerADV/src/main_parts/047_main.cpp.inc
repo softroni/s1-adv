@@ -167,6 +167,13 @@ void adjustCurrentSetting(int delta) {
     case kMeshRegionSetting:
       gDeviceSettings.meshRegion = s1_mesh::stepRegion(gDeviceSettings.meshRegion, delta);
       break;
+    case kMeshLocationSetting: {
+      // Off, rough, exact, and round again; Left goes the other way.
+      const uint8_t was = static_cast<uint8_t>(s1_mesh::sharingOrDefault(gDeviceSettings.meshPublicLocation));
+      gDeviceSettings.meshPublicLocation = static_cast<uint8_t>(
+          (was + (delta >= 0 ? 1 : s1_mesh::kSharingCount - 1)) % s1_mesh::kSharingCount);
+      break;
+    }
     case kUnitsSetting: toggleCurrentSetting(); return;
     default:
       break;
@@ -254,6 +261,10 @@ void toggleCurrentSetting() {
       return;
     case kMeshRegionSetting:
       gDeviceSettings.meshRegion = s1_mesh::stepRegion(gDeviceSettings.meshRegion, 1);
+      break;
+    case kMeshLocationSetting:
+      gDeviceSettings.meshPublicLocation = static_cast<uint8_t>(
+          (static_cast<uint8_t>(s1_mesh::sharingOrDefault(gDeviceSettings.meshPublicLocation)) + 1) % s1_mesh::kSharingCount);
       break;
     case kUnitsSetting:
       gDeviceSettings.units = static_cast<uint8_t>(displayUnits() == units::System::US ? units::System::Metric : units::System::US);

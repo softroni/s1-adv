@@ -319,6 +319,8 @@ String settingLabel(uint8_t index) {
       return "Weather city";
     case kMeshRegionSetting:
       return "Mesh region";
+    case kMeshLocationSetting:
+      return "Public location";
     case kUnitsSetting:
       return "Units";
     default:

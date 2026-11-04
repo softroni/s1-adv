@@ -227,17 +227,34 @@ bool meshQueueText(s1_mesh::RadioSession& s,uint8_t target,const char* text,uint
   return true;
 }
 
-// One Help round: the message with where the GPS last had a fix, to every contact, and to the
-// public channel as well when asked or when there's nobody else to send it to.
+// Who a Help round goes to: every contact, the private channel unless C turned it off, and the
+// public channel when P asks for it or there's nobody else to send to.
+struct MeshHelpPlan {bool privateChannel=false,publicChannel=false;};
+MeshHelpPlan meshHelpPlan(const s1_mesh::RadioSession& s) {
+  MeshHelpPlan plan;
+  plan.privateChannel=s.privateChannel.set() && s.help.alsoPrivate;
+  plan.publicChannel=s.help.alsoPublic || (!s.contacts.count && !plan.privateChannel);
+  return plan;
+}
+// One Help round. Contacts and the private channel are people you chose, so they get exactly
+// where the GPS last had a fix. The public channel gets what Settings > Device > Public location
+// allows, since anyone in range hears it and radios with internet put it on public maps.
 void meshHelpRound(s1_mesh::RadioSession& s,uint32_t now) {
+  const auto plan=meshHelpPlan(s);
+  const auto sharing=s1_mesh::sharingOrDefault(gDeviceSettings.meshPublicLocation);
   char text[s1_mesh::kTextBytes+1];
   s1_mesh::composeHelp(text,sizeof(text),s.help.choice,s.where,now);
   s.help.seq={};
   for(size_t i=0;i<s.contacts.count;++i) {uint32_t seq=0;if(meshQueueText(s,uint8_t(i+1),text,&seq))s.help.seq[i]=seq;}
-  if(s.help.alsoPublic || !s.contacts.count) {uint32_t seq=0;if(meshQueueText(s,0,text,&seq))s.help.seq[s1_mesh::kContacts]=seq;}
+  if(plan.privateChannel) {uint32_t seq=0;if(meshQueueText(s,s1_mesh::kTargetPrivate,text,&seq))s.help.seq[s1_mesh::kHelpPrivateSlot]=seq;}
+  if(plan.publicChannel) {
+    s1_mesh::composeHelp(text,sizeof(text),s.help.choice,s.where,now,sharing);
+    uint32_t seq=0;if(meshQueueText(s,0,text,&seq))s.help.seq[s1_mesh::kHelpPublicSlot]=seq;
+  }
   s.help.roundSent(now);
-  logf("[MESH] help round=%u choice=%u contacts=%u public=%d fix=%d",unsigned(s.help.rounds),unsigned(s.help.choice),
-    unsigned(s.contacts.count),s.help.seq[s1_mesh::kContacts]!=0,s1_mesh::usable(s.where,now));
+  logf("[MESH] help round=%u choice=%u contacts=%u private=%d public=%d public_location=%s fix=%d",unsigned(s.help.rounds),
+    unsigned(s.help.choice),unsigned(s.contacts.count),s.help.seq[s1_mesh::kHelpPrivateSlot]!=0,
+    s.help.seq[s1_mesh::kHelpPublicSlot]!=0,s1_mesh::sharingName(sharing),s1_mesh::usable(s.where,now));
 }
 
 // What Chat does on every pass once the radio is up.
@@ -305,7 +322,7 @@ void meshHandlePacket(const libmeshtastic_leaf::MeshPacket& packet) {
       m->to=packet.header.to;m->direct=packet.isPKI;s.historyDirty=true;
       m->privateChannel=!packet.isPKI && packet.channelIndex==1;
       const bool toMe=packet.header.to==me,contact=s.contacts.find(packet.header.from)!=nullptr;
-      s.help.replied(contact,toMe,now);
+      s.help.replied(contact || m->privateChannel,toMe,now);
       // The private channel is only the people who share its key, so it's worth a chime too.
       if(toMe || contact || m->privateChannel) {meshWakeScreen();meshChime(true);}
     }
@@ -356,22 +373,31 @@ bool meshSendInput() {
 }
 
 // Ctrl+L: where the GPS has the Cardputer, as a map pin for a Meshtastic app and as text with a
-// map link, to whoever Enter sends to. Everyone hears the public channel, so that asks twice.
+// map link, to whoever Enter sends to. A contact and the private channel get it exactly. The public
+// channel gets it only as Settings > Device > Public location allows, and asks twice first.
 void meshShareLocation() {
   if(!meshReady())return;
   auto& s=*gMeshSession;const uint32_t now=millis();
+  const uint8_t target=s.state.target;
+  if(target==s1_mesh::kTargetPrivate && !s.privateChannel.set()) {gMeshNotice="No private channel";gMeshNoticeUntilMs=now+2000;return;}
+  const bool privateChannel=target==s1_mesh::kTargetPrivate;
+  const auto* contact=privateChannel?nullptr:meshTargetContact(s,target);
+  const bool publicChannel=!privateChannel && !contact;
+  const auto sharing=publicChannel?s1_mesh::sharingOrDefault(gDeviceSettings.meshPublicLocation):s1_mesh::Sharing::Exact;
+  if(sharing==s1_mesh::Sharing::Off) {gMeshNotice="Public location off: Settings";gMeshNoticeUntilMs=now+2500;return;}
   if(!s1_mesh::usable(s.where,now)) {gMeshNotice="No GPS fix yet: needs open sky";gMeshNoticeUntilMs=now+2500;return;}
-  const auto* contact=meshTargetContact(s,s.state.target);
-  if(!contact && (!s.publicLocationMs || now-s.publicLocationMs>=kMeshPublicLocationMs)) {
+  if(publicChannel && (!s.publicLocationMs || now-s.publicLocationMs>=kMeshPublicLocationMs)) {
     s.publicLocationMs=max<uint32_t>(now,1);
-    gMeshNotice="Everyone hears it: C-L again";gMeshNoticeUntilMs=now+kMeshPublicLocationMs;return;
+    gMeshNotice=sharing==s1_mesh::Sharing::Rough?"Public, within 3 km: C-L again":"Public, exact spot: C-L again";
+    gMeshNoticeUntilMs=now+kMeshPublicLocationMs;return;
   }
   s.publicLocationMs=0;
   s1_mesh::Outgoing pin;pin.to=contact?contact->id:s1_mesh::kBroadcast;pin.pki=contact!=nullptr;pin.reliable=false;
-  pin.port=s1_mesh::kPortPosition;if(contact)memcpy(pin.key,contact->key,32);
-  pin.len=uint8_t(s1_mesh::encodePosition(pin.data,sizeof(pin.data),s.where.latE5,s.where.lonE5,s.where.satellites));
-  char text[s1_mesh::kTextBytes+1];s1_mesh::composeLocation(text,sizeof(text),s.where,now);
-  if(s.outbox.queued()+2>s1_mesh::kOutbox || !s.outbox.push(pin) || !meshQueueText(s,s.state.target,text)) {
+  pin.channel=privateChannel?1:0;pin.port=s1_mesh::kPortPosition;if(contact)memcpy(pin.key,contact->key,32);
+  pin.len=uint8_t(s1_mesh::encodePosition(pin.data,sizeof(pin.data),s.where.latE5,s.where.lonE5,s.where.satellites,
+    sharing==s1_mesh::Sharing::Rough?s1_mesh::kRoughBits:s1_mesh::kExactBits));
+  char text[s1_mesh::kTextBytes+1];s1_mesh::composeLocation(text,sizeof(text),s.where,now,sharing);
+  if(s.outbox.queued()+2>s1_mesh::kOutbox || !s.outbox.push(pin) || !meshQueueText(s,target,text)) {
     gMeshNotice="Outbox full; wait a moment";gMeshNoticeUntilMs=now+2000;return;
   }
   gMeshNotice="Location queued";gMeshNoticeUntilMs=now+2000;
@@ -432,6 +458,11 @@ bool meshHelpKey(char key,const Keyboard_Class::KeysState& keys) {
     return true;
   }
   if(lower=='p') {s.help.alsoPublic=!s.help.alsoPublic;return true;}
+  if(lower=='c') {
+    if(s.privateChannel.set())s.help.alsoPrivate=!s.help.alsoPrivate;
+    else {gMeshNotice="No private channel yet";gMeshNoticeUntilMs=millis()+2000;}
+    return true;
+  }
   return true;
 }
 
@@ -574,6 +605,21 @@ String meshGpsLine(uint32_t now) {
   return meshGpsHearing(now)?String("GPS: no fix yet, needs open sky"):String("GPS: not heard");
 }
 
+// "To: Sam, Jo, #Family, public (rough)": who the next Help round goes to, with how much of the
+// location the public channel gets.
+String meshHelpTo(const s1_mesh::RadioSession& s) {
+  const auto plan=meshHelpPlan(s);
+  String to="To: ";bool first=true;
+  auto add=[&](const String& who){if(!first)to+=", ";to+=who;first=false;};
+  for(size_t i=0;i<s.contacts.count;++i)add(meshNodeName(s.contacts.list[i].id));
+  if(plan.privateChannel)add(meshPrivateName());
+  if(plan.publicChannel) {
+    const auto sharing=s1_mesh::sharingOrDefault(gDeviceSettings.meshPublicLocation);
+    add(String("public")+(sharing==s1_mesh::Sharing::Off?" (no location)":sharing==s1_mesh::Sharing::Rough?" (rough)":" (exact)"));
+  }
+  return to;
+}
+
 void renderMeshHelpUi() {
   auto& d=gCanvas;auto& s=*gMeshSession;const uint32_t now=millis();
   const uint16_t bg=rgb565_local(3,8,14),muted=rgb565_local(130,145,155),cyan=rgb565_local(47,227,255);
@@ -581,17 +627,13 @@ void renderMeshHelpUi() {
   d.setFont(&fonts::Font0);d.setTextColor(s1_mesh::usable(s.where,now)?green:rgb565_local(255,136,64),bg);
   d.setCursor(8,44);d.print(meshClip(meshGpsLine(now),224));
   if(!s.help.on) {
-    String to="To: ";
-    if(!s.contacts.count)to+="public channel (no contacts)";
-    else for(size_t i=0;i<s.contacts.count;++i) {if(i)to+=", ";to+=meshNodeName(s.contacts.list[i].id);}
-    if(s.contacts.count && s.help.alsoPublic)to+=", public";
-    d.setTextColor(muted,bg);d.setCursor(8,56);d.print(meshClip(to,224));
+    d.setTextColor(muted,bg);d.setCursor(8,56);d.print(meshClip(meshHelpTo(s),224));
     d.setFont(&fonts::Font2);d.setTextColor(TFT_WHITE,bg);
     for(uint8_t c=0;c<s1_mesh::kHelpChoices;++c) {
       d.setCursor(c%2?124:8,70+int(c/2)*18);d.print(String(int(c+1))+" ");d.print(meshClip(s1_mesh::helpLabel(c),96));
     }
     d.setFont(&fonts::Font0);d.setTextColor(cyan,bg);d.setCursor(8,127);
-    d.print(s.help.alsoPublic?"1-4 send  P public: on  Esc chat":"1-4 send  P public: off  Esc chat");return;
+    d.print(s.privateChannel.set()?"1-4 send P public C channel Esc chat":"1-4 send  P public  Esc chat");return;
   }
   String head=s1_mesh::helpLabel(s.help.choice);
   if(s.help.rounds>1)head+=String(", try ")+String(int(s.help.rounds));
@@ -606,20 +648,26 @@ void renderMeshHelpUi() {
       state=s.help.rounds && s.outbox.idle()?String("Again in ")+meshClock(s.help.nextInMs(now)):String("Sending...");
       stateColor=red;break;
   }
-  d.setTextColor(stateColor,bg);d.setCursor(8,73);d.print(meshClip(state,224));
-  int y=85;
-  for(size_t i=0;i<=s1_mesh::kContacts && y<=115;++i) {
+  d.setTextColor(stateColor,bg);d.setCursor(8,72);d.print(meshClip(state,224));
+  // A row for each message this round: contacts, then the channels. Five fit; past that, a count.
+  size_t total=0,shown=0;
+  for(const uint32_t seq:s.help.seq)if(seq)++total;
+  int y=83;
+  for(size_t i=0;i<s1_mesh::kHelpSlots;++i) {
     if(!s.help.seq[i])continue;
+    if(shown==4 && total>5) {d.setTextColor(muted,bg);d.setCursor(8,y);d.print(String("+")+String(int(total-4))+" more");break;}
     const auto* m=s.state.bySeq(s.help.seq[i]);
-    const String who=i<s1_mesh::kContacts?meshNodeName(s.contacts.list[i].id):String("Public");
+    const String who=i<s1_mesh::kContacts?meshNodeName(s.contacts.list[i].id):
+      i==s1_mesh::kHelpPrivateSlot?meshPrivateName():String("Public");
     String what=m?String(s1_mesh::deliveryLabel(m->status,m->direct)):String("-");
     if(m && m->status==s1_mesh::Delivery::Failed)what=String("failed: ")+s1_mesh::failureLabel(m->reason);
     d.setTextColor(TFT_WHITE,bg);d.setCursor(8,y);d.print(meshClip(who,96));
     d.setTextColor(m && m->status==s1_mesh::Delivery::Delivered?green:muted,bg);
-    d.setCursor(108,y);d.print(meshClip(what,124));y+=10;
+    d.setCursor(108,y);d.print(meshClip(what,124));y+=9;++shown;
   }
   d.setTextColor(cyan,bg);d.setCursor(8,127);
-  d.print(s.help.repeating()?"1-4 change  P public  Esc chat":"1-4 send again  Esc chat");
+  d.print(!s.help.repeating()?"1-4 send again  Esc chat":s.privateChannel.set()?"1-4 change P public C channel Esc":
+    "1-4 change  P public  Esc chat");
 }
 
 void renderMeshUi() {

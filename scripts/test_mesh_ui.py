@@ -11,6 +11,7 @@ render=source[source.index('String meshClip('):source.rindex('} // namespace')]
 globals_=source[source.index('namespace {')+len('namespace {'):source.index('bool handleMeshEscape(')]
 target=source[source.index('const s1_mesh::Contact* meshTargetContact('):source.index('// Puts a text in the outbox')]
 people=source[source.index('struct MeshPerson'):source.index('void meshSaveContact(')]
+plan=source[source.index('struct MeshHelpPlan'):source.index('// One Help round.')]
 code=r'''
 #include "mesh_contacts.h"
 #include "mesh_help.h"
@@ -68,7 +69,7 @@ struct RadioSession {State state;std::atomic<int>initResult{0};uint8_t region=1;
 inline const char* regionName(uint8_t c){return c==1?"US":"UA_868";}
 inline float regionFrequency(uint8_t c){return c==1?906.875f:868.375f;}
 }
-struct {uint8_t meshRegion=1;}gDeviceSettings;
+struct {uint8_t meshRegion=1;uint8_t meshPublicLocation=0;}gDeviceSettings;
 int scanRenders=0;
 void renderRadioScanUi(s1_mesh::RadioSession&){++scanRenders;}
 // The private channel's own screen is part 091, tested on its own; here only that Mesh hands over.
@@ -83,7 +84,7 @@ struct {int32_t level=-1;}gBatterySnapshot;
 bool gpsHeard=false;bool meshGpsHearing(uint32_t){return gpsHeard;}
 void meshSavedName(char* l,char* s){strcpy(l,"WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW");strcpy(s,"WWWW");}
 uint32_t gMeshNoticeUntilMs=0;
-'''+globals_+target+people+render+r'''
+'''+globals_+target+plan+people+render+r'''
 int main() {
  using namespace s1_mesh;
  (void)kMeshStopConfirmMs;(void)kMeshPublicLocationMs;  // The keys' timers, not the screens'.
@@ -143,17 +144,28 @@ int main() {
  for(int32_t level:{-1,5,100})for(bool heard:{false,true})for(int fix=0;fix<3;++fix) {
   gBatterySnapshot.level=level;gpsHeard=heard;clockMs=10000000;
   gMeshSession->where=Where{};if(fix){gMeshSession->where.known=true;gMeshSession->where.satellites=12;gMeshSession->where.atMs=clockMs-(fix==1?1000:30*60000);}
-  for(bool pub:{false,true}){gMeshSession->help=Help{};gMeshSession->help.alsoPublic=pub;renderMeshUi();assert(!gCanvas.clipped);}
+  for(bool pub:{false,true})for(bool priv:{false,true})for(uint8_t share=0;share<3;++share) {
+   gMeshSession->help=Help{};gMeshSession->help.alsoPublic=pub;gMeshSession->help.alsoPrivate=priv;
+   gDeviceSettings.meshPublicLocation=share;renderMeshUi();assert(!gCanvas.clipped);
+  }
  }
- assert(gCanvas.printed.count("Help")&&gCanvas.printed.count("To: public channel (no contacts)")&&gCanvas.printed.count("GPS: not heard"));
+ // Who it goes to, and how much the public channel would get.
+ assert(gCanvas.printed.count("Help")&&gCanvas.printed.count("GPS: not heard"));
+ assert(gCanvas.printed.count("To: public (no location)")&&gCanvas.printed.count("To: #ElevenChars"));
+ assert(gCanvas.printed.count("To: #ElevenChars, public (rough)")&&gCanvas.printed.count("To: public (exact)"));
+ assert(gCanvas.printed.count("1-4 send P public C channel Esc chat"));
+ {const auto keep=gMeshSession->privateChannel;gMeshSession->privateChannel=PrivateChannel{};gMeshSession->help=Help{};renderMeshUi();
+  assert(gCanvas.printed.count("1-4 send  P public  Esc chat"));gMeshSession->privateChannel=keep;}
  for(uint32_t c=1;c<=kContacts;++c){std::string name(39,'W');gMeshSession->contacts.add(c,name.c_str(),key);}
  renderMeshUi();
  auto& h=gMeshSession->help;
  for(uint8_t choice=0;choice<kHelpChoices;++choice)for(int stop=0;stop<4;++stop)for(int round:{1,12}) {
   h.start(choice,clockMs);h.alsoPublic=true;h.rounds=uint16_t(round);h.roundMs=clockMs;h.stop=HelpStop(stop);
-  for(size_t i=0;i<=kContacts;++i){h.seq[i]=uint32_t(i+1);}
+  // All six: four contacts, the private channel and the public one, so the last row counts.
+  for(size_t i=0;i<kHelpSlots;++i){h.seq[i]=uint32_t(i+1);}
   renderMeshUi();assert(!gCanvas.clipped);
-  h.seq[2]=0;h.seq[0]=777;renderMeshUi();
+  if(stop==0)assert(gCanvas.printed.count("+2 more")&&gCanvas.printed.count("1-4 change P public C channel Esc"));
+  h.seq[2]=0;h.seq[0]=777;renderMeshUi();assert(!gCanvas.printed.count("+1 more")&&gCanvas.printed.count("#ElevenChars"));
  }
  assert(gCanvas.printed.count("Arrived. Stopped repeating")&&gCanvas.printed.count("Again in 5:00"));
  // While Help repeats, the chat's top line says so.
@@ -172,4 +184,4 @@ with tempfile.TemporaryDirectory(prefix='s1-mesh-ui-') as directory:
                     '-fsanitize=address,undefined','-fno-omit-frame-pointer',
                     '-I'+str(ROOT/'bots/CardputerADV/src'),str(p/'ui.cpp'),'-o',str(p/'ui')],check=True)
     subprocess.run([str(p/'ui')],check=True)
-print('PASS actual Mesh renderer: 240x135 bounds, both region names at their longest, the running radio region shown, a scan session handed to the scanner screen, startup/failure/empty, 16 nodes, every history/page, every delivery state, every send target, the People list, Help choosing and sending, the name editor, long ASCII/Cyrillic/emoji and clip-state restoration (ASan/UBSan)')
+print('PASS actual Mesh renderer: 240x135 bounds, both region names at their longest, the running radio region shown, a scan session handed to the scanner screen, startup/failure/empty, 16 nodes, every history/page, every delivery state, every send target, the People list, Help choosing and sending to contacts, the private channel and the public one with each location setting, the name editor, long ASCII/Cyrillic/emoji and clip-state restoration (ASan/UBSan)')
