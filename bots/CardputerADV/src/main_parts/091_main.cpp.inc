@@ -35,6 +35,7 @@ const s1_mesh::PrivateChannel& meshChannelSaved() {
   memset(bytes, 0, sizeof(bytes));
   return gMeshChannel;
 }
+void meshChannelApplyLive();
 bool meshChannelStore() {
   uint8_t bytes[s1_mesh::kChannelSavedBytes];
   s1_mesh::saveChannel(gMeshChannel, bytes);
@@ -47,6 +48,7 @@ bool meshChannelStore() {
   }
   memset(bytes, 0, sizeof(bytes));
   logf("[MESH] private channel saved=%d set=%d", saved, gMeshChannel.set());  // Never the key.
+  if (saved) meshChannelApplyLive();
   return saved;
 }
 void meshChannelRandom(uint8_t* out, size_t length) { esp_fill_random(out, length); }
@@ -103,6 +105,17 @@ void meshLoadPrivateChannel(s1_mesh::RadioSession& session) {
                                                    session.privateChannel.name);
   if (!ok) session.privateChannel = s1_mesh::PrivateChannel{};
   logf("[MESH] private channel on=%d", ok);
+}
+
+// A running radio takes a saved change at once: the second channel shares the public one's frequency,
+// so nothing has to restart. Removing it moves the chat's target back to the public channel.
+void meshChannelApplyLive() {
+  if (!gMeshSession || gMeshSession->initResult.load(std::memory_order_acquire) != 0) return;
+  auto& s = *gMeshSession;
+  meshLoadPrivateChannel(s);
+  if (s.privateChannel.set()) return;
+  s.mesh.clearSecondaryChannel();
+  if (s.state.target == s1_mesh::kTargetPrivate) s.state.target = 0;
 }
 
 void meshChannelOpen() {

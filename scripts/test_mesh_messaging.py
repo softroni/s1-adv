@@ -216,7 +216,7 @@ void history() {
   w.bySeq(1)->id = 77; assert(w.byPacket(77) == w.bySeq(1));
   // A received repeat is still dropped.
   assert(w.message(5, 9, false, reinterpret_cast<const uint8_t*>("x"), 1) && !w.message(5, 9, false, reinterpret_cast<const uint8_t*>("y"), 1));
-  static_assert(sizeof(State) < 4096, "bounded mode-only state");
+  static_assert(sizeof(State) < 9216, "bounded mode-only state: 30 messages of up to 200 bytes");
 }
 
 void help() {

@@ -6,7 +6,7 @@
 
 // Fixed bounds: remote packets cannot grow the node list, history or composer.
 namespace s1_mesh {
-constexpr size_t kNodes = 16, kMessages = 8, kTextBytes = 200;
+constexpr size_t kNodes = 16, kMessages = 30, kTextBytes = 200;
 constexpr uint32_t kBroadcast = 0xFFFFFFFFu;
 
 // What became of a message this Cardputer sent. A received message stays at Received.

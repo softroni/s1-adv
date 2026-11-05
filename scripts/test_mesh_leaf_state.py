@@ -13,7 +13,7 @@ CODE=r'''
 #include <string>
 using namespace s1_mesh;
 int main() {
-  static_assert(sizeof(State)<4096,"bounded mode-only state");
+  static_assert(sizeof(State)<9216,"bounded mode-only state: 30 messages of up to 200 bytes");
   State s;
   assert(!s.hear(0,0,-40) && !s.hear(UINT32_MAX,0,-40));
   for(uint32_t i=1;i<=16;++i)assert(s.hear(i,i,-90));
@@ -28,9 +28,10 @@ int main() {
   wrap.hear(17,5,-100);
   for(const auto& n:wrap.nodes)assert(n.id!=1);
   for(uint32_t i=0;i<1000;++i)s.message(10,i,false,reinterpret_cast<const uint8_t*>("hi"),2);
-  assert(s.messageCount==8 && s.messages.front().id==992 && s.messages.back().id==999);
+  // The newest kMessages are kept, oldest first.
+  assert(s.messageCount==kMessages && s.messages.front().id==1000-kMessages && s.messages.back().id==999);
   s.message(10,999,false,reinterpret_cast<const uint8_t*>("duplicate"),9);
-  assert(s.messageCount==8 && std::string(s.messages.back().text)=="hi");
+  assert(s.messageCount==kMessages && std::string(s.messages.back().text)=="hi");
   s.message(11,999,false,reinterpret_cast<const uint8_t*>("another sender"),14);
   assert(s.messages.back().from==11);
   assert(s.append("hello ") && s.append(u8"Привет"));

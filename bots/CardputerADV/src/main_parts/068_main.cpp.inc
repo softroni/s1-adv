@@ -1,4 +1,5 @@
-// Meshtastic leaf mode owns EXT SPI while active. No radio at ordinary boot.
+// Meshtastic leaf mode owns EXT SPI while active. No radio at ordinary boot. Opening Mesh starts the
+// radio and closing it stops it, so every Mesh screen runs on top of a radio that's hearing.
 namespace {
 bool gMeshNaming = false, gMeshOpenHelp = false;
 char gMeshNameInput[s1_mesh::kNameBytes + 1] = {};
@@ -6,9 +7,14 @@ char gMeshNameInput[s1_mesh::kNameBytes + 1] = {};
 enum class MeshStartRow : uint8_t { Chat, Help, Scan, Name, Private };
 constexpr uint8_t kMeshStartRows = 5;
 uint8_t gMeshStartRow = 0;
+// Which Mesh screen is up: the first screen, the chat (with People, Help and a message opened over
+// it), or Radio Scan. The radio is the same under all three.
+enum class MeshView : uint8_t { Hub, Chat, Live };
+MeshView gMeshView = MeshView::Hub;
+bool gMeshHelpFromHub = false;  // Help opened from the first screen goes back there.
 // A start waiting for a background check (an update check, the weather or the inbox) or the start-up
-// services to finish. They end by themselves, so the radio starts once they have; Esc stops waiting.
-bool gMeshStartWaiting = false, gMeshStartWaitScan = false, gMeshStartWaitHelp = false;
+// services to finish. They end by themselves, so the radio starts once they have.
+bool gMeshStartWaiting = false;
 // For Mesh's sounds: whether this radio has come up (so stopping it says so), and when the GPS last
 // had a fix (so finding one says so, but a fix lost under a tree for a moment doesn't).
 bool gMeshRadioUp = false, gMeshFixHeard = false;
@@ -25,29 +31,45 @@ constexpr uint32_t kMeshStopConfirmMs = 4000;
 // Ctrl+L on the public channel asks once more, since everyone hears it.
 constexpr uint32_t kMeshPublicLocationMs = 4000;
 
-// Esc goes back one step: out of whatever is open, then listening back to the sweep, then the radio
-// off and back to Mesh's first screen. Only Esc on the first screen leaves Mesh.
+// The chat list is on the screen, so a message arriving there is seen.
+bool meshSeeingChat() {
+  if(gUiMode!=UiMode::Mesh || gMeshView!=MeshView::Chat || gMeshNaming || gMeshChannelSetup || !gMeshSession)return false;
+  const auto& st=gMeshSession->state;
+  return !st.helpView && !st.nodeView && !st.detailView;
+}
+void meshChatSeen() {if(gMeshSession)gMeshSession->unread=0;}
+
+// Esc goes back one step: out of whatever is open, a borrowed radio back to the chat, the chat or
+// Radio Scan back to the first screen. Only the first screen leaves Mesh, which turns the radio
+// off, so it asks once first.
 bool handleMeshEscape() {
   if(gUiMode!=UiMode::Mesh || gLauncherVisible)return false;
   if(gMeshNaming) {gMeshNaming=false;return true;}
-  if(!gMeshSession && meshChannelEscape())return true;
-  if(!gMeshSession && gMeshStartWaiting) {gMeshStartWaiting=false;gMeshNotice="";return true;}
+  if(meshChannelEscape())return true;
   if(gMeshSession) {
     auto& s=*gMeshSession;auto& st=s.state;
-    if(st.detailView) {st.detailView=false;return true;}
-    if(st.helpView) {st.helpView=false;return true;}
-    if(st.nodeView) {st.nodeView=false;return true;}
-    if(s.use==s1_mesh::Use::Scan && s.initResult.load(std::memory_order_acquire)==0 && !gMeshCancelStart &&
-       handleRadioScanEscape(s))return true;
-    if(s.help.repeating() && (!s.stopAskedMs || millis()-s.stopAskedMs>=kMeshStopConfirmMs)) {
+    const bool ready=s.initResult.load(std::memory_order_acquire)==0 && !gMeshCancelStart;
+    if(ready && handleRadioScanEscape(s))return true;
+    if(gMeshView==MeshView::Chat) {
+      if(st.detailView) {st.detailView=false;meshChatSeen();return true;}
+      if(st.nodeView) {st.nodeView=false;meshChatSeen();return true;}
+      if(st.helpView) {
+        st.helpView=false;
+        if(gMeshHelpFromHub)gMeshView=MeshView::Hub;else meshChatSeen();
+        gMeshHelpFromHub=false;return true;
+      }
+      gMeshView=MeshView::Hub;return true;
+    }
+    if(gMeshView==MeshView::Live) {gMeshView=MeshView::Hub;return true;}
+    if(ready && (!s.stopAskedMs || millis()-s.stopAskedMs>=kMeshStopConfirmMs)) {
       s.stopAskedMs=max<uint32_t>(millis(),1);
-      gMeshNotice="Help is on. Esc again ends it";gMeshNoticeUntilMs=millis()+kMeshStopConfirmMs;
+      gMeshNotice=s.help.repeating()?"Help is on. Esc again ends it":"Esc again turns the radio off";
+      gMeshNoticeUntilMs=millis()+kMeshStopConfirmMs;
       meshSound(s1_mesh::Sound::Ask);
       return true;
     }
-    stopMeshMode(false);
-    return true;
   }
+  gMeshStartWaiting=false;
   if(stopMeshMode(true))setUiMode(UiMode::Home);
   return true;
 }
@@ -149,7 +171,8 @@ bool stopMeshMode(bool goHome) {
   }
   if(gMeshSession && gMeshSession->readyReported)logf("[MESH] session min_heap=%u min_largest=%u",
     unsigned(gMeshSession->lowHeap),unsigned(gMeshSession->lowLargest));
-  if(gMeshSession && gMeshSession->use==s1_mesh::Use::Chat && gMeshSession->historyDirty)meshWriteHistory(gMeshSession->state);
+  if(gMeshSession && gMeshSession->initResult.load(std::memory_order_acquire)==0 && gMeshSession->historyDirty)
+    meshWriteHistory(gMeshSession->state);
   meshGps(false);
   gMeshSession.reset(); // Clears the IRQ callback and sleeps before SD resumes.
   digitalWrite(kRfidCsPin,HIGH);
@@ -164,7 +187,7 @@ bool stopMeshMode(bool goHome) {
   return true;
 }
 
-void startMeshMode(s1_mesh::Use use) {
+void startMeshMode() {
   const bool openHelp=gMeshOpenHelp;gMeshOpenHelp=false;
   if(gMeshBusOwned)return;
   // Each way it can't start says why, with the same knock.
@@ -172,7 +195,7 @@ void startMeshMode(s1_mesh::Use use) {
   if(const char* why=meshStartBlocker()) {gMeshStartWaiting=false;refuse(why);return;}
   if(meshStartWaitsFor()) {
     // Back from Home, an update check or the weather has often just begun. Waiting beats a refusal.
-    gMeshStartWaiting=true;gMeshStartWaitScan=use==s1_mesh::Use::Scan;gMeshStartWaitHelp=openHelp;
+    gMeshStartWaiting=true;gMeshOpenHelp=openHelp;
     if(gInboxHttpBusy)gInboxCancelRequested=true;  // One not sent yet is dropped, and asked again later.
     gMeshNotice="Finishing a background check";gMeshNoticeUntilMs=0;
     return;
@@ -183,23 +206,20 @@ void startMeshMode(s1_mesh::Use use) {
     refuse("Not enough free RAM");return;
   }
   // Busy/heap failures leave SD and radio untouched.
-  gMeshSession.reset(new(std::nothrow) s1_mesh::RadioSession(gSdSpi,gDeviceSettings.meshRegion,use));
+  gMeshSession.reset(new(std::nothrow) s1_mesh::RadioSession(gSdSpi,gDeviceSettings.meshRegion));
   if(!gMeshSession) {refuse("Not enough free RAM");return;}
   gMeshRadioUp=false;gMeshFixHeard=false;memset(gMeshPinged,0,sizeof(gMeshPinged));
   gMeshNotice="Preparing radio...";render();
-  // Scan never sends, so it needs no identity and writes nothing to NVS.
-  if(use==s1_mesh::Use::Chat && !loadMeshIdentity(*gMeshSession)) {
+  if(!loadMeshIdentity(*gMeshSession)) {
     gMeshSession.reset();refuse("Identity storage failed");return;
   }
-  if(use==s1_mesh::Use::Chat) {
-    // The name it announces, who it can message, and what was said before it last stopped.
-    meshLoadProfile(*gMeshSession);
-    meshLoadPrivateChannel(*gMeshSession);
-    meshLoadHistory(gMeshSession->state);
-    for(size_t i=0;i<gMeshSession->state.messageCount;++i)
-      gMeshSession->nextSeq=max<uint32_t>(gMeshSession->nextSeq,gMeshSession->state.messages[i].seq+1);
-    gMeshSession->state.helpView=openHelp;
-  }
+  // The name it announces, who it can message, and what was said before it last stopped.
+  meshLoadProfile(*gMeshSession);
+  meshLoadPrivateChannel(*gMeshSession);
+  meshLoadHistory(gMeshSession->state);
+  for(size_t i=0;i<gMeshSession->state.messageCount;++i)
+    gMeshSession->nextSeq=max<uint32_t>(gMeshSession->nextSeq,gMeshSession->state.messages[i].seq+1);
+  gMeshSession->state.helpView=openHelp;
   if(!meshEnableCap()) {
     gMeshSession.reset();refuse("Cap-1262 not detected");return;
   }
@@ -389,6 +409,15 @@ void meshHandlePacket(const libmeshtastic_leaf::MeshPacket& packet) {
       const bool toMe=packet.header.to==me,contact=s.contacts.find(packet.header.from)!=nullptr;
       const bool helpWasOn=s.help.repeating();
       s.help.replied(contact || m->privateChannel,toMe,now);
+      // Anywhere else in Mesh, it's counted on the first screen's Chat row and said at the bottom.
+      if(!meshSeeingChat()) {
+        if(s.unread<999)++s.unread;
+        const auto* from=state.node(packet.header.from);
+        char who[s1_mesh::kNameBytes+16];
+        if(from && from->name[0])snprintf(who,sizeof(who),"Message from %s",from->name);
+        else snprintf(who,sizeof(who),"Message from !%08lx",static_cast<unsigned long>(packet.header.from));
+        gMeshNotice=who;gMeshNoticeUntilMs=now+4000;
+      }
       // The private channel is only the people who share its key, so it's worth a sound too. Talk on
       // the public channel stays quiet.
       if(toMe || contact || m->privateChannel) {
@@ -415,29 +444,33 @@ void serviceMeshMode() {
   auto& session=*gMeshSession;
   session.lowHeap=std::min(session.lowHeap,uint32_t(ESP.getFreeHeap()));
   session.lowLargest=std::min(session.lowLargest,uint32_t(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
-  if(session.use==s1_mesh::Use::Scan) {serviceRadioScan(session);return;}
+  // Lent to Radio Scan: only the scan runs, and the chat waits for its radio back.
+  if(session.scanning) {serviceRadioScan(session);meshScreenService(millis(),false);return;}
   if(!session.readyReported) {
     session.readyReported=true;
-    logf("[MESH] ready %s LongFast %.3fMHz node=!%08lx tx=%ddBm contacts=%u heap=%u largest=%u",s1_mesh::regionName(session.region),
+    session.line.reset(millis());  // Radio Scan's clock counts from here.
+    logf("[MESH] ready %s LongFast %.3fMHz node=!%08lx tx=%ddBm contacts=%u session=%u heap=%u largest=%u",s1_mesh::regionName(session.region),
       double(s1_mesh::regionFrequency(session.region)),static_cast<unsigned long>(session.mesh.getNodeNum()),
-      int(s1_mesh::kTxPowerDbm),unsigned(session.contacts.count),unsigned(session.lowHeap),unsigned(session.lowLargest));
+      int(s1_mesh::kTxPowerDbm),unsigned(session.contacts.count),unsigned(sizeof(session)),unsigned(session.lowHeap),unsigned(session.lowLargest));
   }
   session.mesh.onReceive(meshHandlePacket);
   session.mesh.onReceivePKI(meshKeyFor);
+  session.mesh.onHeard(meshHeard);
   session.mesh.update();
+  serviceRadioLive(session,millis());
   meshServiceMessaging(session,millis());
   if(!gMeshNoticeUntilMs || int32_t(millis()-gMeshNoticeUntilMs)>=0)gMeshNotice="Listening / SD paused";
 }
 
 bool meshReady() {
-  return gMeshSession && gMeshSession->use==s1_mesh::Use::Chat &&
-    gMeshSession->initResult.load(std::memory_order_acquire)==0 && !gMeshCancelStart;
+  return gMeshSession && gMeshSession->initResult.load(std::memory_order_acquire)==0 && !gMeshCancelStart &&
+    !gMeshSession->scanning;
 }
 
 bool meshSendInput() {
   if(!gMeshSession || gMeshSession->initResult.load(std::memory_order_acquire)!=0 || gMeshCancelStart)return false;
   auto& s=*gMeshSession;
-  if(s.use!=s1_mesh::Use::Chat)return false;  // Scan only listens.
+  if(s.scanning)return false;  // Lent to Radio Scan, which never sends.
   if(!s.state.input[0])return true;
   if(!meshQueueText(s,s.state.target,s.state.input)) {
     gMeshNotice="Outbox full; wait a moment";gMeshNoticeUntilMs=millis()+2000;meshSound(s1_mesh::Sound::Nope);return false;
@@ -557,6 +590,11 @@ bool meshNameKey(char key,const Keyboard_Class::KeysState& keys) {
   if(keys.enter || key=='\r' || key=='\n') {
     char clean[s1_mesh::kNameBytes+1];s1_mesh::cleanName(clean,sizeof(clean),gMeshNameInput);
     const bool saved=meshSaveName(clean);
+    // A running radio takes it at once and says who it is again.
+    if(saved && gMeshSession && gMeshSession->initResult.load(std::memory_order_acquire)==0) {
+      auto& s=*gMeshSession;meshSavedName(s.longName,s.shortName);
+      s.mesh.setOwner(s.longName,s.shortName);s.announce=true;
+    }
     gMeshNotice=saved?"Name saved":"Couldn't save the name";gMeshNoticeUntilMs=millis()+2000;
     meshSound(saved?s1_mesh::Sound::Saved:s1_mesh::Sound::Nope);
     gMeshNaming=false;return true;
@@ -593,29 +631,41 @@ void serviceMeshStartWait() {
   if(!gMeshStartWaiting)return;
   if(gUiMode!=UiMode::Mesh || gMeshBusOwned || gMeshSession) {gMeshStartWaiting=false;return;}
   if(meshStartWaitsFor())return;
-  gMeshStartWaiting=false;gMeshOpenHelp=gMeshStartWaitHelp;
-  startMeshMode(gMeshStartWaitScan?s1_mesh::Use::Scan:s1_mesh::Use::Chat);
+  gMeshStartWaiting=false;startMeshMode();
 }
 
+// Opening Mesh starts its radio, so it's hearing from the first screen on.
+void beginMesh() {
+  gMeshView=MeshView::Hub;gMeshHelpFromHub=false;gMeshStartWaiting=false;
+  startMeshMode();
+}
+
+// A row opens its screen over the running radio. With no radio, because it couldn't start, it tries
+// again; Name and Private channel don't need it.
 void meshOpenStartRow(MeshStartRow row) {
-  gMeshStartWaiting=false;  // Another row picked replaces a start that was waiting.
   gMeshStartRow=uint8_t(row);
+  auto* s=gMeshSession.get();
   switch(row) {
-    case MeshStartRow::Chat: startMeshMode(s1_mesh::Use::Chat);break;
-    case MeshStartRow::Help: gMeshOpenHelp=true;startMeshMode(s1_mesh::Use::Chat);break;
-    case MeshStartRow::Scan: startMeshMode(s1_mesh::Use::Scan);break;
-    case MeshStartRow::Name: meshOpenName();break;
-    case MeshStartRow::Private: meshChannelOpen();break;
+    case MeshStartRow::Chat: gMeshView=MeshView::Chat;meshChatSeen();break;
+    case MeshStartRow::Help:
+      gMeshView=MeshView::Chat;gMeshHelpFromHub=true;
+      if(s) {s->state.helpView=true;s->state.nodeView=false;s->state.detailView=false;}
+      else gMeshOpenHelp=true;
+      break;
+    case MeshStartRow::Scan: gMeshView=MeshView::Live;break;
+    case MeshStartRow::Name: meshOpenName();return;
+    case MeshStartRow::Private: meshChannelOpen();return;
   }
+  if(!s && !gMeshStartWaiting)startMeshMode();
 }
 
 bool handleMeshKey(char key,const Keyboard_Class::KeysState& keys) {
   if(keys.ctrl && (key=='r'||key=='R'||key=='v'||key=='V')) {setStatus("Esc exits Mesh for voice",1600);return true;}
   const char lower=char(tolower(static_cast<unsigned char>(key)));
   if(keys.ctrl && lower!='n' && lower!='o' && lower!='l' && lower!='h')return false;
-  if(gMeshNaming && !gMeshSession)return meshNameKey(key,keys);
-  if(gMeshChannelSetup && !gMeshSession)return meshChannelKey(key,keys);
-  if(!gMeshSession) {
+  if(gMeshNaming)return meshNameKey(key,keys);
+  if(gMeshChannelSetup)return meshChannelKey(key,keys);
+  if(!gMeshSession || gMeshView==MeshView::Hub) {
     if(keys.ctrl)return true;
     const char arrow=meshArrow(key,keys,false);
     if(arrow==1 || arrow==2) {
@@ -631,16 +681,16 @@ bool handleMeshKey(char key,const Keyboard_Class::KeysState& keys) {
     else if(lower=='n')meshOpenStartRow(MeshStartRow::Name);
     return true;
   }
-  if(gMeshSession->use==s1_mesh::Use::Scan) {
+  if(gMeshView==MeshView::Live) {
     if(keys.ctrl)return false;
     if(gMeshSession->initResult.load(std::memory_order_acquire)==0)handleRadioScanKey(key,keys);
     return true;
   }
   auto& s=*gMeshSession;auto& state=s.state;
   if(state.helpView)return meshHelpKey(key,keys);
-  if(keys.ctrl && lower=='h') {state.helpView=true;state.nodeView=false;state.detailView=false;return true;}
-  if(keys.ctrl && lower=='n') {state.nodeView=!state.nodeView;state.detailView=false;return true;}
-  if(keys.ctrl && lower=='o') {state.detailView=!state.detailView;state.nodeView=false;return true;}
+  if(keys.ctrl && lower=='h') {state.helpView=true;state.nodeView=false;state.detailView=false;gMeshHelpFromHub=false;return true;}
+  if(keys.ctrl && lower=='n') {state.nodeView=!state.nodeView;state.detailView=false;if(!state.nodeView)meshChatSeen();return true;}
+  if(keys.ctrl && lower=='o') {state.detailView=!state.detailView;state.nodeView=false;if(!state.detailView)meshChatSeen();return true;}
   if(keys.ctrl && lower=='l') {meshShareLocation();return true;}
   // The chat has a text box, so its arrows need Fn. People and a message opened have none, so Up and
   // Down move there without it; Left and Right, which change who the box sends to, always need it.
@@ -662,16 +712,17 @@ bool handleMeshKey(char key,const Keyboard_Class::KeysState& keys) {
   if(keys.del || key=='\b') {state.erase();return true;}
   if(key>=32 && key<127) {
     const String text=translateInputChar(key);
-    state.append(text.c_str());state.detailView=false;state.nodeView=false;
+    state.append(text.c_str());state.detailView=false;state.nodeView=false;meshChatSeen();
   }
   return true;
 }
 
 bool handleMeshHostCommand(const String& line) {
   if(!line.startsWith("mesh."))return false;
+  // Opening Mesh starts the radio; start and scan open the chat or Radio Scan over it.
   if(line=="mesh.open")setUiMode(UiMode::Mesh);
-  else if(line=="mesh.start") {setUiMode(UiMode::Mesh);if(gUiMode==UiMode::Mesh)startMeshMode(s1_mesh::Use::Chat);}
-  else if(line=="mesh.scan") {setUiMode(UiMode::Mesh);if(gUiMode==UiMode::Mesh)startMeshMode(s1_mesh::Use::Scan);}
+  else if(line=="mesh.start") {setUiMode(UiMode::Mesh);if(gUiMode==UiMode::Mesh)meshOpenStartRow(MeshStartRow::Chat);}
+  else if(line=="mesh.scan") {setUiMode(UiMode::Mesh);if(gUiMode==UiMode::Mesh)meshOpenStartRow(MeshStartRow::Scan);}
   else if(line=="mesh.stop") {if(stopMeshMode(true))setUiMode(UiMode::Home);}
   else if(line=="mesh.nodes") {if(gMeshSession)gMeshSession->state.nodeView=true;}
   else if(line=="mesh.status") {
@@ -680,11 +731,11 @@ bool handleMeshHostCommand(const String& line) {
       gMeshSession?gMeshSession->initResult.load():s1_mesh::kInitPending,gSdReady,unsigned(ESP.getFreeHeap()),
       unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)),
       unsigned(gMeshSession?gMeshSession->state.nodeCount:0),unsigned(gMeshSession?gMeshSession->state.messageCount:0));
-    if(gMeshSession && gMeshSession->use==s1_mesh::Use::Chat)
+    if(gMeshSession)
       logf("[MESH] contacts=%u outbox=%u busy=%d help=%d round=%u stop=%u fix=%d",unsigned(gMeshSession->contacts.count),
         unsigned(gMeshSession->outbox.queued()),gMeshSession->outbox.busy(),gMeshSession->help.on,unsigned(gMeshSession->help.rounds),
         unsigned(gMeshSession->help.stop),s1_mesh::usable(gMeshSession->where,millis()));
-    if(gMeshSession && gMeshSession->use==s1_mesh::Use::Scan)logRadioScanStatus(*gMeshSession);
+    if(gMeshSession)logRadioScanStatus(*gMeshSession);
   }
   return true;
 }
@@ -833,6 +884,17 @@ void meshKeys(const String& text,uint16_t color) {
 void meshBanner(const String& text,uint16_t fill) {
   MeshInk ink;gCanvas.fillRoundRect(2,117,236,18,6,fill);meshTextFit(8,118,text,224,ink.ink);
 }
+// A notice at the bottom, while there is one: anything but the steady state lines.
+bool meshNoticeShowing() {
+  if(gMeshNotice.isEmpty() || gMeshNotice=="Listening / SD paused" || gMeshNotice=="Radio off / SD ready")return false;
+  return !gMeshNoticeUntilMs || int32_t(millis()-gMeshNoticeUntilMs)<0;
+}
+// The bottom line: a notice while there is one, else the keys.
+void meshFoot(const String& keys) {
+  MeshInk ink;
+  if(meshNoticeShowing())meshBanner(gMeshNotice,ink.orange);
+  else meshKeys(keys,ink.muted);
+}
 // --- end of Mesh drawing -------------------------------------------------------------------------
 
 String meshNodeName(uint32_t id) {
@@ -893,16 +955,6 @@ String meshHelpTo(const s1_mesh::RadioSession& s) {
 }
 
 // A notice shows until its time runs out; one with no time stays until the next.
-bool meshNoticeShowing() {
-  if(gMeshNotice.isEmpty() || gMeshNotice=="Listening / SD paused" || gMeshNotice=="Radio off / SD ready")return false;
-  return !gMeshNoticeUntilMs || int32_t(millis()-gMeshNoticeUntilMs)<0;
-}
-// The bottom line: a notice while there is one, else the keys.
-void meshFoot(const String& keys) {
-  MeshInk ink;
-  if(meshNoticeShowing())meshBanner(gMeshNotice,ink.orange);
-  else meshKeys(keys,ink.muted);
-}
 // "40s ago", "12 min ago", "3 h ago", "2 days ago".
 String meshAgo(uint32_t ms) {
   const uint32_t s=ms/1000;
@@ -955,7 +1007,7 @@ void renderMeshHelpUi() {
       meshText(x+12-meshWidth(number)/2,y+4,number,ink.ink);
       meshText(x+25,y+4,meshFit(s1_mesh::helpLabel(c),88),ink.white);
     }
-    meshFoot(s.privateChannel.set()?"1-4 send  P public  C channel":"1-4 send  P public  Esc chat");
+    meshFoot(s.privateChannel.set()?"1-4 send  P public  C channel":"1-4 send  P public  Esc back");
     return;
   }
   String head=s1_mesh::helpLabel(s.help.choice);
@@ -992,23 +1044,32 @@ void renderMeshHelpUi() {
     meshText(112,y,meshFit(what,120),m && m->status==s1_mesh::Delivery::Delivered?ink.green:ink.muted);
     y+=15;++shown;
   }
-  meshFoot(!s.help.repeating()?"1-4 send again  Esc chat":s.privateChannel.set()?"1-4 change  P public  C channel":
-    "1-4 change  P public  Esc chat");
+  meshFoot(!s.help.repeating()?"1-4 send again  Esc back":s.privateChannel.set()?"1-4 change  P public  C channel":
+    "1-4 change  P public  Esc back");
 }
 
 String meshBand(uint8_t region) {return String(s1_mesh::regionName(region))+" / LongFast";}
 
 // The first screen: what Mesh can do, as a list like the menu's, each row with its own key.
+// The radio runs under it, so the band chip is green once it's hearing, the Chat row counts what came
+// in while the chat wasn't showing, and Radio Scan's row how many radios it has heard.
 void meshRenderStart(uint8_t region) {
   MeshInk ink;auto& d=gCanvas;
-  meshHead("Mesh",ink.accent,meshBand(region),ink.muted);
+  const auto* s=gMeshSession.get();
+  const bool hearing=s && s->initResult.load(std::memory_order_acquire)==0;
+  meshHead("Mesh",ink.accent,meshBand(region),hearing?ink.accent:ink.muted);
   char longName[s1_mesh::kNameBytes+1],shortName[5];meshSavedName(longName,shortName);
-  char frequency[16];snprintf(frequency,sizeof(frequency),"%.3f MHz",double(s1_mesh::regionFrequency(region)));
+  char chat[16],radios[16]="";
+  if(hearing && s->unread)snprintf(chat,sizeof(chat),"%u new",unsigned(s->unread));
+  else snprintf(chat,sizeof(chat),"%.3f MHz",double(s1_mesh::regionFrequency(region)));
+  if(hearing && s->heard.nodeCount)
+    snprintf(radios,sizeof(radios),"%u%s radio%s",unsigned(s->heard.nodeCount),s->heard.moreNodes?"+":"",
+             s->heard.nodeCount==1 && !s->heard.moreNodes?"":"s");
   struct Row {const char* label;String value;const char* key;const char* about;};
   const Row rows[kMeshStartRows]={
-    {"Chat",String(frequency),"","Region: Settings > Device"},
+    {"Chat",String(chat),"","Region: Settings > Device"},
     {"Help",String(),"H","Ready messages with where you are"},
-    {"Radio Scan",String(),"S","Listens for radios, sends nothing"},
+    {"Radio Scan",String(radios),"S","What the radio hears, live"},
     {"Your name",String(longName),"N","What others see on the mesh"},
     {"Private channel",meshChannelLabel(),"C","Only your group can read it"},
   };
@@ -1020,23 +1081,23 @@ void meshRenderStart(uint8_t region) {
     if(rows[i].key[0])meshTextRight(232,y+1,rows[i].key,chosen?ink.ink:ink.muted);
     if(!rows[i].value.isEmpty()) {
       const int right=rows[i].key[0]?214:232,left=8+meshWidth(rows[i].label)+12;
-      meshTextRight(right,y+1,meshFit(rows[i].value,right-left),chosen?ink.ink:ink.muted);
+      const bool news=i==0 && hearing && s->unread;
+      meshTextRight(right,y+1,meshFit(rows[i].value,right-left),chosen?ink.ink:news?ink.green:ink.muted);
     }
   }
   meshFoot(rows[picked].about);
 }
 
-// While the radio starts, before the chat or the scanner can show anything.
+// While the radio starts, before the chat or Radio Scan can show anything.
 void meshRenderStarting(uint8_t region,bool scanning) {
   MeshInk ink;
   meshHead(scanning?"Radio Scan":"Mesh",ink.accent,meshBand(region),ink.muted);
   meshBoldCenter(40,"Starting the radio",ink.white);
   char channel[40];
-  if(scanning)snprintf(channel,sizeof(channel),"Listening only, nothing sent");
-  else snprintf(channel,sizeof(channel),"Public channel, %.3f MHz",double(s1_mesh::regionFrequency(region)));
+  snprintf(channel,sizeof(channel),"Public channel, %.3f MHz",double(s1_mesh::regionFrequency(region)));
   meshTextCenter(64,channel,ink.muted);
   if(!gMeshNotice.isEmpty())meshTextCenter(84,gMeshNotice,ink.orange);
-  meshKeys("Esc cancel",ink.muted);
+  meshKeys("Esc back",ink.muted);
 }
 
 void meshRenderName() {
@@ -1136,19 +1197,14 @@ void meshRenderChat(const s1_mesh::RadioSession& session) {
 }
 
 void renderMeshUi() {
-  const bool ready=gMeshSession && gMeshSession->initResult.load(std::memory_order_acquire)==0;
-  const bool scanning=gMeshSession && gMeshSession->use==s1_mesh::Use::Scan;
-  if(scanning && ready) {renderRadioScanUi(*gMeshSession);return;}
+  if(gMeshChannelSetup) {renderMeshChannelUi();return;}
+  if(gMeshNaming) {meshRenderName();return;}
   // A running radio keeps the region it started with, so show that one.
   const uint8_t region=gMeshSession?uint8_t(gMeshSession->region):gDeviceSettings.meshRegion;
-  if(!ready) {
-    if(gMeshSession)meshRenderStarting(region,scanning);
-    else if(gMeshChannelSetup)renderMeshChannelUi();
-    else if(gMeshNaming)meshRenderName();
-    else meshRenderStart(region);
-    return;
-  }
-  const auto& session=*gMeshSession;
+  if(!gMeshSession || gMeshView==MeshView::Hub) {meshRenderStart(region);return;}
+  if(gMeshSession->initResult.load(std::memory_order_acquire)!=0) {meshRenderStarting(region,gMeshView==MeshView::Live);return;}
+  auto& session=*gMeshSession;
+  if(gMeshView==MeshView::Live) {renderRadioScanUi(session);return;}
   if(session.state.helpView)renderMeshHelpUi();
   else if(session.state.nodeView)meshRenderPeople(session);
   else if(session.state.detailView && session.state.messageCount)meshRenderMessage(session);

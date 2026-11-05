@@ -21,6 +21,7 @@ code=r'''
 #include "mesh_outbox.h"
 #include "mesh_private_channel.h"
 #include "mesh_sounds.h"
+#include "radio_scan.h"
 #include <cassert>
 #include <cctype>
 using std::max;using std::min;
@@ -120,6 +121,8 @@ struct FakeMesh {
  uint32_t sendNodeInfo(){++nodeInfos;return 1;}
  void onReceive(void(*)(const libmeshtastic_leaf::MeshPacket&)){}
  void onReceivePKI(bool(*)(uint32_t,uint8_t*)){}
+ bool heardSet=false;void onHeard(void(*f)(const uint8_t*,size_t,float,float)){heardSet=f!=nullptr;}
+ std::string owner;void setOwner(const char* l,const char* s){owner=std::string(l)+"/"+s;}
  void update(){assert(gMeshBusOwned&&!gSdReady);++updates;}
 };
 struct {uint8_t meshRegion=1;uint8_t meshPublicLocation=0;}gDeviceSettings;
@@ -127,17 +130,17 @@ namespace s1_mesh {
 constexpr int kInitPending=-32768;
 inline const char* regionName(uint8_t){return "US";}
 inline float regionFrequency(uint8_t){return 906.875f;}
-enum class Use:uint8_t{Chat,Scan};
 constexpr int8_t kTxPowerDbm=20;
 struct RadioSession {
  FakeMesh mesh;State state;std::atomic<int>initResult{kInitPending};
- bool readyReported=false;uint32_t lowHeap=UINT32_MAX,lowLargest=UINT32_MAX;uint8_t region;Use use;
+ bool readyReported=false;uint32_t lowHeap=UINT32_MAX,lowLargest=UINT32_MAX;uint8_t region;
+ bool scanning=false;s1_scan::Listen heard;s1_scan::Strip line;uint32_t sampleAt=0;uint16_t unread=0;
  Contacts contacts;Outbox outbox;Help help;Where where;uint32_t nextSeq=1;
  char longName[kNameBytes+1]="S1-ADV";char shortName[5]="S1";
  bool historyDirty=false,announce=false;uint32_t savedMs=0,publicLocationMs=0,stopAskedMs=0;
  PrivateChannel privateChannel;
  // The radio starts on whatever region Settings holds at that moment.
- RadioSession(Spi&,uint8_t saved,Use purpose):region(saved),use(purpose){assert(saved==gDeviceSettings.meshRegion);++live;}
+ RadioSession(Spi&,uint8_t saved):region(saved){assert(saved==gDeviceSettings.meshRegion);++live;}
  ~RadioSession(){assert(!workerPending);--live;}
  int initialize(){assert(gMeshBusOwned&&!gSdReady);return initError;}
 };
@@ -153,13 +156,15 @@ void render(){++renders;}
 template<class...T>void logf(const char*,T...){ }
 void setStatus(const String&,int){}
 struct Keyboard_Class {struct KeysState {bool ctrl=false,enter=false,del=false,fn=false;};};
-int scanServices=0,scanKeys=0;
-void serviceRadioScan(s1_mesh::RadioSession& s){assert(gMeshBusOwned&&!gSdReady&&s.use==s1_mesh::Use::Scan);++scanServices;}
+// Part 087, Radio Scan: the live view runs on the chat's radio; a sweep or another preset borrows it.
+int scanServices=0,scanKeys=0,liveServices=0,scanEscapes=0;
+void serviceRadioScan(s1_mesh::RadioSession& s){assert(gMeshBusOwned&&!gSdReady&&s.scanning);++scanServices;}
+void serviceRadioLive(s1_mesh::RadioSession& s,uint32_t){assert(!s.scanning);++liveServices;}
+void meshHeard(const uint8_t*,size_t,float,float){}
 bool handleRadioScanKey(char,const Keyboard_Class::KeysState&){++scanKeys;return true;}
-// Part 087's Esc: listening steps back to the sweep; from the sweep it's Mesh's to stop the radio.
-bool scanListening=false;int scanEscapes=0;
-bool handleRadioScanEscape(s1_mesh::RadioSession&){++scanEscapes;if(!scanListening)return false;scanListening=false;return true;}
-void startMeshMode(s1_mesh::Use use=s1_mesh::Use::Chat);
+// Esc gives a borrowed radio back; on the chat's own channel it's Mesh's.
+bool handleRadioScanEscape(s1_mesh::RadioSession& s){++scanEscapes;if(!s.scanning)return false;s.scanning=false;return true;}
+void startMeshMode();
 String translateInputChar(char c){return String(1,c);}
 void meshHandlePacket(const libmeshtastic_leaf::MeshPacket&){}
 // Part 090's hardware: the GPS, NVS, LittleFS, the speaker and the screen.
@@ -203,6 +208,7 @@ code+=r'''
 void reset() {
  assert(!gMeshBusOwned&&!workerPending&&live==0);
  gUiMode=UiMode::Mesh;gSdReady=true;gStorageReady=true;gLittleFsReady=true;gMeshStartWaiting=false;
+ gMeshView=MeshView::Hub;gMeshHelpFromHub=false;gMeshNaming=false;gMeshNotice="";
  ESP.free=128000;largest=64000;gCanvasSpriteActive=true;taskSucceeds=sdSucceeds=true;initError=0;
  m5::In_I2C={};m5::Ex_I2C={};m5::Ex_I2C.enabled=false;
  m5::In_I2C.reg[3]=0xaa;m5::In_I2C.reg[5]=0x54;m5::In_I2C.reg[7]=0xff;
@@ -212,6 +218,7 @@ void reset() {
 void completeWorker();
 void active();
 void restored();
+void leave();
 void mesh_sounds();
 // Contacts, direct messages, Help, the name and sharing a location, through the keys.
 void mesh_features() {
@@ -331,7 +338,11 @@ void mesh_features() {
  s.mesh.pendingAck=false;s.mesh.tx=true;serviceMeshMode();s.mesh.tx=false;clockMs+=s1_mesh::kLastTryWaitMs;serviceMeshMode();
  assert(s.state.bySeq(s.help.seq[1])->status==s1_mesh::Delivery::NoAnswer);
  // A Help that's on warns before Esc turns the radio off.
- assert(handleMeshEscape()&&!s.state.helpView&&handleMeshEscape()&&gMeshBusOwned&&gMeshNotice.find("Help is on")!=std::string::npos);
+ // Esc closes Help, then the chat goes back to the first screen with the radio still on and Help still
+ // repeating. Leaving from there asks first, saying Help would end.
+ assert(handleMeshEscape()&&!s.state.helpView&&gMeshView==MeshView::Chat&&handleMeshEscape()&&gMeshView==MeshView::Hub&&gMeshBusOwned);
+ assert(handleMeshEscape()&&gMeshBusOwned&&gMeshNotice.find("Help is on")!=std::string::npos);
+ gMeshView=MeshView::Chat;
  clockMs+=s1_mesh::kHelpRepeatMs;serviceMeshMode();assert(s.help.rounds==2);
  // Delivered through the session's sink ends it, with a chime.
  const int rang=chimes;serviceMeshMode();
@@ -342,13 +353,14 @@ void mesh_features() {
  s.mesh.pendingAck=false;s.mesh.tx=false;
  for(int i=0;i<200&&!s.outbox.idle();++i){s.mesh.pendingAck=false;s.mesh.tx=false;clockMs+=40000;serviceMeshMode();}
  serviceMeshMode();assert(!s.announce&&s.mesh.nodeInfos==1);
- assert(handleMeshEscape());restored();assert(gUiMode==UiMode::Mesh&&!gpsOn&&handleMeshEscape()&&gUiMode==UiMode::Home);
+ s.stopAskedMs=0;leave();assert(!gpsOn);
  fakeWhere=s1_mesh::Where{};
  // H on the start screen starts the radio on Help.
  reset();assert(handleMeshKey('H',plain)&&gMeshBusOwned&&gMeshSession->state.helpView&&profileLoads>0&&historyLoads>0);
  completeWorker();serviceMeshMode();assert(gpsOn);
  assert(handleMeshKey('5',plain)&&!gMeshSession->help.on);  // Only 1 to 4.
- assert(handleMeshEscape()&&!gMeshSession->state.helpView&&handleMeshEscape());restored();
+ // Opened from the first screen, Help goes back there.
+ assert(gMeshHelpFromHub&&handleMeshEscape()&&!gMeshSession->state.helpView&&gMeshView==MeshView::Hub);leave();
  // N on the start screen: the name others see. Esc leaves it as it was.
  reset();assert(handleMeshKey('n',plain)&&gMeshNaming&&!gMeshBusOwned&&!gMeshNameInput[0]);
  for(char c:std::string("Al x"))handleMeshKey(c,plain);
@@ -387,9 +399,9 @@ void mesh_features() {
   t.mesh.pendingAck=false;t.mesh.tx=false;serviceMeshMode();
   // C with no private channel says so.
   t.privateChannel=s1_mesh::PrivateChannel{};assert(handleMeshKey('c',plain)&&!t.help.alsoPrivate&&gMeshNotice.find("No private")!=npos);
-  assert(handleMeshEscape()&&handleMeshEscape()&&handleMeshEscape());
+  assert(handleMeshEscape()&&!t.state.helpView);t.stopAskedMs=0;leave();
  }
- restored();fakeWhere=s1_mesh::Where{};gDeviceSettings.meshPublicLocation=0;
+ fakeWhere=s1_mesh::Where{};gDeviceSettings.meshPublicLocation=0;
 }
 // What Mesh sounds like, event by event, through the same keys and service loop.
 void mesh_sounds() {
@@ -444,8 +456,8 @@ void mesh_sounds() {
  sounds.clear();sink.status(s.help.seq[0],s1_mesh::Delivery::Heard,0,0);sink.status(s.help.seq[0],s1_mesh::Delivery::NoAnswer,0,0);assert(sounds.empty());
  for(int i=0;i<200&&!s.outbox.idle();++i){s.mesh.pendingAck=false;s.mesh.tx=false;clockMs+=40000;serviceMeshMode();}
  clockMs+=s1_mesh::kHelpRepeatMs;serviceMeshMode();assert(s.help.rounds>=2&&heard(S::HelpRound));
- // Esc while it repeats asks first; then their radio has it, and it climbs.
- assert(handleMeshEscape()&&handleMeshEscape()&&sounds.back()==S::Ask&&gMeshBusOwned);
+ // Leaving while it repeats asks first; then their radio has it, and it climbs.
+ assert(handleMeshEscape()&&handleMeshEscape()&&gMeshView==MeshView::Hub&&handleMeshEscape()&&sounds.back()==S::Ask&&gMeshBusOwned);
  sounds.clear();sink.status(s.help.seq[0],s1_mesh::Delivery::Delivered,0,0);assert(only(S::HelpAnswered)&&!s.help.repeating());
  // Off says so on the way out.
  sounds.clear();assert(handleMeshEscape());restored();assert(only(S::Off));
@@ -462,14 +474,18 @@ void mesh_sounds() {
   assert(!meshFirstPing(55)&&meshFirstPing(66)&&!meshFirstPing(66));
   sounds.clear();assert(handleMeshKey('\n',enter)&&only(S::Nope));  // Already one.
   sounds.clear();assert(handleMeshKey('\b',del)&&!t.contacts.count&&only(S::Removed));
-  assert(handleMeshEscape()&&handleMeshEscape());restored();
+  assert(handleMeshEscape()&&!t.state.nodeView);leave();
  }
  // The name saved clicks up.
  reset();assert(handleMeshKey('n',plain));handleMeshKey('A',plain);sounds.clear();assert(handleMeshKey('\n',enter)&&only(S::Saved));
  savedName.clear();
 }
 void completeWorker(){assert(workerPending);workerFunction(workerArg);assert(!workerPending);}
-void active(){reset();startMeshMode();assert(gMeshBusOwned&&!gSdReady&&!gStorageReady&&workerPending);completeWorker();serviceMeshMode();assert(updates==1);}
+void active(){reset();startMeshMode();assert(gMeshBusOwned&&!gSdReady&&!gStorageReady&&workerPending);completeWorker();serviceMeshMode();
+ assert(updates==1&&liveServices>0&&gMeshSession->mesh.heardSet);gMeshView=MeshView::Chat;}
+// Leaving from the first screen: it asks, then a second Esc in time stops the radio and goes Home.
+void leave(){gMeshView=MeshView::Hub;assert(handleMeshEscape()&&gMeshBusOwned&&gMeshNotice.find("Esc again")!=std::string::npos);
+ assert(handleMeshEscape());restored();assert(gUiMode==UiMode::Home);}
 void restored(){assert(!gMeshBusOwned&&gSdReady&&gStorageReady&&live==0&&sdBegins==1);assert(m5::In_I2C.reg[3]==0xaa&&m5::In_I2C.reg[5]==0x54&&m5::In_I2C.reg[7]==0xff);}
 int main() {
  synthStopOk=false;startRealtimeSession(true);assert(realtimeStarts==0);synthStopOk=true;
@@ -512,14 +528,34 @@ int main() {
  active();gMeshSession->state.detailView=true;assert(handleMeshEscape());
  assert(!gMeshSession->state.detailView&&gMeshBusOwned&&sdBegins==0);
  gLauncherVisible=true;assert(!handleMeshEscape()&&gMeshBusOwned);gLauncherVisible=false;
- assert(handleMeshEscape());restored();assert(gUiMode==UiMode::Mesh&&handleMeshEscape()&&gUiMode==UiMode::Home&&!handleMeshEscape());
- // Esc while the radio starts cancels it and stays in Mesh.
- reset();startMeshMode();assert(handleMeshEscape()&&workerPending&&live==1&&sdBegins==0);
- completeWorker();serviceMeshMode();restored();assert(gUiMode==UiMode::Mesh);
+ // The chat goes back to the first screen with the radio on; leaving asks once, then goes Home.
+ assert(handleMeshEscape()&&gMeshView==MeshView::Hub&&gMeshBusOwned&&sdBegins==0);
+ assert(handleMeshEscape()&&gMeshBusOwned&&gMeshNotice=="Esc again turns the radio off"&&gUiMode==UiMode::Mesh);
+ assert(handleMeshEscape());restored();assert(gUiMode==UiMode::Home&&!handleMeshEscape());
+ // A second Esc long after the first asks again rather than leaving.
+ active();gMeshView=MeshView::Hub;assert(handleMeshEscape()&&gMeshBusOwned);
+ clockMs+=kMeshStopConfirmMs;assert(handleMeshEscape()&&gMeshBusOwned);assert(handleMeshEscape());restored();
+ // Esc while the radio starts: from the chat it goes back to the first screen; there it cancels
+ // the start and leaves.
+ reset();startMeshMode();gMeshView=MeshView::Chat;assert(handleMeshEscape()&&gMeshView==MeshView::Hub&&workerPending&&live==1);
+ assert(handleMeshEscape()&&workerPending&&live==1&&sdBegins==0);
+ completeWorker();serviceMeshMode();restored();assert(gUiMode==UiMode::Home);
+ // Opening Mesh starts its radio, on the first screen.
+ reset();gMeshView=MeshView::Chat;beginMesh();assert(gMeshView==MeshView::Hub&&gMeshBusOwned&&live==1&&workerPending);
+ completeWorker();serviceMeshMode();leave();
+ // One that can't start says why there, and Enter on Chat tries again.
+ reset();gPlaybackActive=true;beginMesh();assert(!live&&gMeshNotice=="Stop what's playing first");gPlaybackActive=false;
+ {Keyboard_Class::KeysState enter;enter.enter=true;gMeshStartRow=0;assert(handleMeshKey('\n',enter)&&live==1&&gMeshView==MeshView::Chat);}
+ completeWorker();serviceMeshMode();leave();
+ // The name, saved while the radio runs, goes out at once.
+ active();gMeshView=MeshView::Hub;{Keyboard_Class::KeysState plain,enter;enter.enter=true;
+  assert(handleMeshKey('n',plain)&&gMeshNaming&&gMeshBusOwned);for(char c:std::string("Jo B"))handleMeshKey(c,plain);
+  assert(handleMeshKey('\n',enter)&&!gMeshNaming&&gMeshSession->mesh.owner=="Jo B/S1"&&gMeshSession->announce);}
+ savedName.clear();nameSaves=0;leave();
  active();
  for(size_t i=0;i<s1_mesh::kOutbox;++i){assert(gMeshSession->state.append("m")&&meshSendInput());}
  assert(gMeshSession->state.append("hello"));assert(!meshSendInput());
- assert(gMeshSession->state.messageCount==s1_mesh::kMessages&&std::string(gMeshSession->state.input)=="hello");
+ assert(gMeshSession->state.messageCount==s1_mesh::kOutbox&&std::string(gMeshSession->state.input)=="hello");
  assert(gMeshSession->state.messages[0].outgoing&&gMeshSession->state.messages[0].status==s1_mesh::Delivery::Waiting);
  const int writes=historyWrites;
  for(int i=0;i<50;++i){serviceMeshMode();}
@@ -535,24 +571,36 @@ int main() {
  mesh_features();
  mesh_sounds();
  active();sdSucceeds=false;stopMeshMode(false);assert(!gMeshBusOwned&&!gSdReady&&gStorageReady&&!live);assert(activeVoiceFs()==&LittleFS);assert(activeNotesFs()==&LittleFS);
- // Scan: S on the start screen. Same bus handoff and guards, no identity written, no mesh run,
- // no sending, and Esc stops it the same way.
+ // Radio Scan: S opens it over the chat's own radio, which is the same session the chat has, so the
+ // identity is loaded, the mesh runs, and the live view reads it as it goes.
  reset();Keyboard_Class::KeysState plain;assert(handleMeshKey('s',plain));
- assert(gMeshBusOwned&&live==1&&workerPending&&gMeshSession->use==s1_mesh::Use::Scan&&nvWrites==0);
+ assert(gMeshBusOwned&&live==1&&workerPending&&gMeshView==MeshView::Live);
  assert(handleMeshKey('x',plain)&&scanKeys==0);  // Keys wait until the radio is ready.
- completeWorker();serviceMeshMode();assert(scanServices==1&&updates==0);
- assert(handleMeshKey('x',plain)&&scanKeys==1&&!gMeshSession->state.input[0]);
+ completeWorker();const int lives=liveServices;serviceMeshMode();assert(updates==1&&liveServices==lives+1&&scanServices==0);
+ assert(handleMeshKey('x',plain)&&scanKeys==1&&!gMeshSession->state.input[0]);  // Radio Scan's keys, not the chat's.
  plain.ctrl=true;assert(!handleMeshKey('n',plain)&&!gMeshSession->state.nodeView);plain.ctrl=false;
- assert(gMeshSession->state.append("hi")&&!meshSendInput()&&gMeshSession->state.messageCount==0);
  setUiMode(UiMode::Files);assert(gUiMode==UiMode::Mesh&&gMeshBusOwned);
- // Esc steps back: listening to the sweep with the radio still on, then the radio off and Mesh's
- // first screen, then Home.
- scanListening=true;assert(handleMeshEscape()&&!scanListening&&gMeshBusOwned&&gMeshSession);
- assert(handleMeshEscape()&&scanEscapes==2);restored();assert(gUiMode==UiMode::Mesh&&!gMeshSession);
- // S again straight away starts it again: nothing is left in the way.
- assert(handleMeshKey('s',plain)&&gMeshBusOwned&&gMeshSession->use==s1_mesh::Use::Scan);
- completeWorker();serviceMeshMode();assert(handleMeshEscape()&&!gMeshBusOwned&&gSdReady&&live==0&&sdBegins==2);
- assert(handleMeshEscape()&&gUiMode==UiMode::Home);
+ // Borrowed for a sweep or another preset: only the scan runs, the mesh waits, and nothing sends.
+ gMeshSession->scanning=true;serviceMeshMode();assert(scanServices==1&&updates==1&&liveServices==lives+1);
+ assert(!meshReady()&&gMeshSession->state.append("hi")&&!meshSendInput()&&gMeshSession->mesh.sent.empty());
+ gMeshSession->state.erase();gMeshSession->state.erase();
+ // Esc gives the radio back first, then Radio Scan goes back to the first screen, radio still on.
+ const int escapes=scanEscapes;
+ assert(handleMeshEscape()&&!gMeshSession->scanning&&gMeshView==MeshView::Live&&gMeshBusOwned);
+ assert(handleMeshEscape()&&gMeshView==MeshView::Hub&&gMeshBusOwned&&scanEscapes==escapes+2);
+ // S again straight away opens it on the same radio: nothing restarts.
+ assert(handleMeshKey('s',plain)&&gMeshView==MeshView::Live&&live==1&&taskCreates==1);
+ serviceMeshMode();assert(updates==2);
+ // So do the chat and Help: one radio under all of them.
+ gMeshView=MeshView::Hub;{Keyboard_Class::KeysState enter;enter.enter=true;gMeshStartRow=0;
+  assert(handleMeshKey('\n',enter)&&gMeshView==MeshView::Chat&&live==1&&taskCreates==1);}
+ gMeshView=MeshView::Hub;assert(handleMeshKey('h',plain)&&gMeshView==MeshView::Chat&&gMeshSession->state.helpView&&taskCreates==1);
+ assert(handleMeshEscape()&&gMeshView==MeshView::Hub);
+ // A message counted while the chat isn't showing is cleared when it is.
+ gMeshSession->unread=3;assert(!meshSeeingChat());gMeshView=MeshView::Chat;assert(meshSeeingChat());
+ gMeshView=MeshView::Hub;gMeshStartRow=0;{Keyboard_Class::KeysState enter;enter.enter=true;assert(handleMeshKey('\n',enter)&&!gMeshSession->unread);}
+ gMeshSession->unread=2;gMeshSession->state.nodeView=true;assert(!meshSeeingChat()&&handleMeshEscape()&&!gMeshSession->unread);
+ leave();
  // A background check running when the radio is asked for: Mesh waits for it rather than refusing,
  // drops it if it hasn't been sent, and starts by itself once it's done.
  const auto npos=std::string::npos;
@@ -562,29 +610,30 @@ int main() {
  serviceMeshStartWait();assert(!live&&gMeshStartWaiting);
  assert(handleMeshKey('.',plain)&&gMeshStartWaiting&&gMeshNotice.find("background check")!=npos);  // Moving keeps it.
  gInboxHttpBusy=false;gInboxCancelRequested=false;serviceMeshStartWait();
- assert(!gMeshStartWaiting&&live==1&&gMeshBusOwned&&gMeshSession->use==s1_mesh::Use::Scan);
- completeWorker();serviceMeshMode();assert(handleMeshEscape());restored();
+ assert(!gMeshStartWaiting&&live==1&&gMeshBusOwned&&gMeshView==MeshView::Live);
+ completeWorker();serviceMeshMode();leave();
  // The start-up services too, and Help waits as Help.
  reset();gBootBackgroundActive=true;assert(handleMeshKey('h',plain)&&gMeshStartWaiting&&!live);
- gBootBackgroundActive=false;serviceMeshStartWait();assert(live==1&&gMeshSession->use==s1_mesh::Use::Chat&&gMeshSession->state.helpView);
- completeWorker();serviceMeshMode();assert(handleMeshEscape()&&handleMeshEscape());restored();
- // Esc stops waiting, and nothing starts after.
- reset();gInboxHttpBusy=true;startMeshMode();assert(gMeshStartWaiting&&handleMeshEscape()&&!gMeshStartWaiting&&gUiMode==UiMode::Mesh);
+ gBootBackgroundActive=false;serviceMeshStartWait();assert(live==1&&gMeshSession->state.helpView&&gMeshView==MeshView::Chat);
+ completeWorker();serviceMeshMode();assert(handleMeshEscape()&&gMeshView==MeshView::Hub);leave();
+ // Esc on the first screen stops waiting and leaves, and nothing starts after.
+ reset();gInboxHttpBusy=true;startMeshMode();assert(gMeshStartWaiting&&handleMeshEscape()&&!gMeshStartWaiting&&gUiMode==UiMode::Home);
  gInboxHttpBusy=false;serviceMeshStartWait();assert(!live&&!gMeshBusOwned);
- // Leaving Mesh drops it, and so does picking a row that doesn't start the radio.
+ // Leaving Mesh drops it. The name editor doesn't: the radio still starts underneath it.
  gInboxHttpBusy=true;startMeshMode();gUiMode=UiMode::Home;gInboxHttpBusy=false;serviceMeshStartWait();assert(!live&&!gMeshStartWaiting);
- gUiMode=UiMode::Mesh;gInboxHttpBusy=true;startMeshMode();assert(handleMeshKey('n',plain)&&!gMeshStartWaiting&&gMeshNaming);
- assert(handleMeshEscape());gInboxHttpBusy=false;serviceMeshStartWait();assert(!live);
+ gUiMode=UiMode::Mesh;gInboxHttpBusy=true;startMeshMode();assert(handleMeshKey('n',plain)&&gMeshStartWaiting&&gMeshNaming);
+ gInboxHttpBusy=false;serviceMeshStartWait();assert(live==1&&gMeshNaming);
+ assert(handleMeshEscape()&&!gMeshNaming);completeWorker();serviceMeshMode();leave();
  // Something you're doing is refused, saying what to finish; a background check alongside it doesn't wait.
- gInboxHttpBusy=true;gRecording=true;startMeshMode();assert(!live&&!gMeshStartWaiting&&gMeshNotice=="Finish recording first");
+ reset();gInboxHttpBusy=true;gRecording=true;startMeshMode();assert(!live&&!gMeshStartWaiting&&gMeshNotice=="Finish recording first");
  gRecording=false;gInboxHttpBusy=false;
  gThinking=true;startMeshMode();assert(!live&&gMeshNotice=="Wait for Claude's reply");gThinking=false;
  gRealtimeActive=true;startMeshMode();assert(!live&&gMeshNotice=="End the voice chat first");gRealtimeActive=false;
  gOtaApplyInProgress=true;startMeshMode();assert(!live&&gMeshNotice=="Wait for the update to finish");gOtaApplyInProgress=false;
  gPlaybackActive=true;startMeshMode();assert(!live&&gMeshNotice=="Stop what's playing first");gPlaybackActive=false;
- // A scan whose radio fails to start is stopped before the scanner ever runs.
- reset();const int served=scanServices;initError=-19;handleMeshKey('S',plain);assert(gMeshSession->use==s1_mesh::Use::Scan);
- completeWorker();serviceMeshMode();restored();assert(scanServices==served&&gMeshNotice.find("-19")!=std::string::npos);
+ // A radio that fails to start is stopped before Radio Scan or the chat ever runs.
+ reset();const int served=liveServices;initError=-19;handleMeshKey('S',plain);assert(gMeshView==MeshView::Live);
+ completeWorker();serviceMeshMode();restored();assert(liveServices==served&&gMeshNotice.find("-19")!=std::string::npos);
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-mesh-mode-') as directory:
@@ -593,4 +642,4 @@ with tempfile.TemporaryDirectory(prefix='s1-mesh-mode-') as directory:
                     '-fsanitize=address,undefined','-fno-omit-frame-pointer',
                     '-I'+str(ROOT/'bots/CardputerADV/src'),str(cpp),'-o',str(exe)],check=True)
     subprocess.run([str(exe)],check=True)
-print('PASS actual Mesh lifecycle: busy/heap/NVS/Cap/task failures, cancellation during init, SD exclusivity and rollback, app guards, bounded send, the outbox one at a time, contacts and direct messages, Help repeating until delivered and warning before Esc, Ctrl+L off, rough or exact for public and asking twice, exact on the private channel, Help on the private channel unless C, the name editor, Scan sharing all of it without identity, mesh or sending, Esc stepping back to the first screen and only from there Home, a start waiting out a background check, what each refusal says, and no worker use-after-free (ASan/UBSan)')
+print('PASS actual Mesh lifecycle: busy/heap/NVS/Cap/task failures, cancellation during init, SD exclusivity and rollback, app guards, bounded send, the outbox one at a time, contacts and direct messages, Help repeating until delivered and warning before Esc, Ctrl+L off, rough or exact for public and asking twice, exact on the private channel, Help on the private channel unless C, the name editor and a name applied while running, opening Mesh starting the radio, one radio under the chat, Help and Radio Scan, the radio borrowed for a scan with the mesh and sending stopped, unread messages, Esc stepping back to the first screen and leaving only from there after asking, a start waiting out a background check, what each refusal says, and no worker use-after-free (ASan/UBSan)')

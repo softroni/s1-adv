@@ -124,8 +124,24 @@ struct Heard {
   uint32_t from = 0, at = 0;
   int16_t rssi = 0, snrTenths = 0;
   int8_t hops = -1;
-  bool publicChannel = false;
+  bool publicChannel = false, privateChannel = false;
 };
+// A packet as Radio Scan lists it, from the header alone, or false when it's too short to be
+// Meshtastic. privateHash is the private channel's hash, or -1 when there's none.
+inline bool describe(const uint8_t* bytes, size_t length, uint32_t now, float rssi, float snr, uint8_t publicHash,
+                     int16_t privateHash, Heard& heard) {
+  Header header;
+  if (!parseHeader(bytes, length, header)) return false;
+  heard = Heard{};
+  heard.from = header.from;
+  heard.at = now;
+  heard.rssi = dbmFrom(rssi);
+  heard.snrTenths = std::isfinite(snr) ? int16_t(std::lround(std::max(-99.9f, std::min(99.9f, snr)) * 10.0f)) : 0;
+  heard.hops = hopsTaken(header);
+  heard.publicChannel = header.channel == publicHash;
+  heard.privateChannel = !heard.publicChannel && privateHash >= 0 && header.channel == uint8_t(privateHash);
+  return true;
+}
 constexpr size_t kRecent = 4, kNodes = 32;
 // What listening has picked up: the newest packets first, a count of senders, and damaged ones.
 struct Listen {

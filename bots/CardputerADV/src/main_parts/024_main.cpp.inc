@@ -343,6 +343,7 @@ void setUiMode(UiMode mode) {
   if (modeChanged && mode == UiMode::VlcRemote) beginVlcRemote();
   if (modeChanged && mode == UiMode::ChessMind) beginChessMind();
   if (modeChanged && mode == UiMode::PocketSynth) beginPocketSynth();
+  if (modeChanged && mode == UiMode::Mesh) beginMesh();  // Its radio runs for as long as it's open.
   if (modeChanged && mode == UiMode::Ota && !gOtaBootApplyMode) {
     // Let the new screen paint before its bounded manifest request.
     gPendingOtaCheckAction = true;

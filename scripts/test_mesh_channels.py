@@ -56,12 +56,15 @@ struct FakePhy : PhysicalLayer {
   std::vector<std::vector<uint8_t>> sent;
   std::vector<uint8_t> incoming;
   void (*irq)(void) = nullptr;
+  int16_t readResult = 0;  // RADIOLIB_ERR_CRC_MISMATCH for a damaged packet.
+  int standbys = 0, tunes = 0, receives = 0;
   int16_t sleep() override { return 0; }
-  int16_t startReceive() override { return 0; }
+  int16_t standby() override { ++standbys; return 0; }
+  int16_t startReceive() override { ++receives; return 0; }
   int16_t startTransmit(const uint8_t* d, size_t n, uint8_t) override { sent.emplace_back(d, d + n); return 0; }
   int16_t finishTransmit() override { return 0; }
-  int16_t readData(uint8_t* d, size_t n) override { memcpy(d, incoming.data(), n < incoming.size() ? n : incoming.size()); return 0; }
-  int16_t setFrequency(float) override { return 0; }
+  int16_t readData(uint8_t* d, size_t n) override { memcpy(d, incoming.data(), n < incoming.size() ? n : incoming.size()); return readResult; }
+  int16_t setFrequency(float) override { ++tunes; return 0; }
   int16_t setOutputPower(int8_t) override { return 0; }
   int16_t checkOutputPower(int8_t p, int8_t* c) override { if (c) *c = p; return 0; }
   int16_t setSyncWord(uint8_t*, size_t) override { return 0; }
@@ -99,6 +102,9 @@ bool lookup(uint32_t node, uint8_t out[32]) {
 }
 std::vector<MeshPacket> got;
 void onPacket(const MeshPacket& p) { got.push_back(p); }
+struct Heard { size_t len; uint8_t channel; float rssi; };
+std::vector<Heard> heard;
+void onHeard(const uint8_t* bytes, size_t len, float rssi, float) { heard.push_back({len, len > 13 ? bytes[13] : uint8_t(0), rssi}); }
 // Sends whatever the node queued, and returns the frame that went on the air.
 std::vector<uint8_t> air(Node& n) {
   const size_t before = n.phy.sent.size();
@@ -161,6 +167,28 @@ int main() {
   assert(a.mesh.sendTextPKI("just you", b.mesh.getNodeNum(), b.pub)); f = air(a);
   got.clear(); hear(b, f); assert(got.size() == 1 && text(got[0]) == "just you" && got[0].isPKI);
   got.clear(); hear(c, f); assert(got.empty());
+  // Every packet read is reported as heard, before anything decides what to do with it: one this
+  // radio can't read, one it has heard already, and a damaged one with no bytes.
+  c.mesh.onHeard(onHeard); c.mesh.clearSecondaryChannel();
+  assert(a.mesh.sendTextOnSecondary("not for c")); f = air(a);
+  heard.clear(); got.clear(); hear(c, f); hear(c, f);
+  assert(got.empty() && heard.size() == 2 && heard[0].len == f.size() && heard[0].channel == a.mesh.getSecondaryChannelHash() && heard[0].rssi == -90);
+  c.phy.readResult = RADIOLIB_ERR_CRC_MISMATCH; hear(c, f); c.phy.readResult = 0;
+  assert(heard.size() == 3 && heard[2].len == 0);
+  // Lent, the radio is the application's: the interrupt is off and update() leaves it alone.
+  c.mesh.lendRadio(); assert(c.mesh.radioLent() && c.phy.irq == nullptr);
+  assert(a.mesh.sendText("while lent")); f = air(a);
+  c.phy.incoming = f; got.clear(); heard.clear();
+  for (int i = 0; i < 5; ++i) { gNow += 10; c.mesh.update(); }
+  assert(got.empty() && heard.empty());
+  // Taken back: tuned again, interrupt back, receiving, and it hears as before.
+  const int tunes = c.phy.tunes, receives = c.phy.receives, standbys = c.phy.standbys;
+  assert(c.mesh.resumeRadio() && !c.mesh.radioLent() && c.phy.irq != nullptr);
+  assert(c.phy.tunes == tunes + 1 && c.phy.receives == receives + 1 && c.phy.standbys == standbys + 1);
+  assert(a.mesh.sendText("back again")); f = air(a);
+  got.clear(); hear(c, f); assert(got.size() == 1 && text(got[0]) == "back again" && heard.size() == 1);
+  // A mesh that never began has nothing to take back.
+  libmeshtastic_leaf::libmeshtastic_leaf idle; assert(!idle.resumeRadio());
   puts("PASS");
 }
 '''
@@ -196,4 +224,5 @@ with tempfile.TemporaryDirectory(prefix='s1-mesh-channels-') as directory:
     result = subprocess.run([str(p / 'loop')], check=True, capture_output=True, text=True)
     assert result.stdout.strip() == 'PASS', result.stdout
 print('PASS Mesh channels, real library: public as channel 0, private encrypted on the air and channel 1 only with its '
-      'key, a wrong key unreadable, 16 and 32 byte keys, clearing it, public again after private, a reliable private send retried as the same frame until it is heard repeated, and a direct message alongside')
+      'key, a wrong key unreadable, 16 and 32 byte keys, clearing it, public again after private, a reliable private send retried as the same frame until it is heard repeated, a direct message alongside, '
+      'every packet reported as heard (unreadable, repeated and damaged ones too), and the radio lent and taken back')

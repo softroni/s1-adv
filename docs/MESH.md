@@ -13,18 +13,28 @@ sends it again every five minutes until one of their radios has it. It's meant
 for when your phone is dead or has no signal and someone you know has a
 Meshtastic radio.
 
-Attach the antenna before powering the Cap. The first screen is a list, like
-the menu's: Up and Down pick a row, Enter opens it, and the line at the bottom
-says what the row picked does. Each row also has its own key, which opens it
-straight away:
+Attach the antenna before powering the Cap. Since 0.2.303 the radio comes on
+as soon as Mesh opens and stays on until you leave Mesh, so every Mesh screen
+runs on top of a radio that's hearing and saving messages: the first screen,
+the chat, People, Help, Radio Scan, your name and the private channel. Only the
+sweep and listening with another preset in [Radio Scan](#radio-scan) pause the
+chat, and the screen says so in red. Before 0.2.303 the first screen, the name
+and the private channel all had the radio off.
+
+The first screen is a list, like the menu's: Up and Down pick a row, Enter opens
+it, and the line at the bottom says what the row picked does. Each row also has
+its own key, which opens it straight away. The band in the top bar turns green
+once the radio is hearing.
 
 | Row | Key | What it does |
 | --- | --- | --- |
-| Chat | Enter | Starts the radio and opens the chat. The row shows the channel's frequency |
-| Help | H | Starts the radio and opens [Help](#help) |
-| Radio Scan | S | [Radio Scan](#radio-scan), which only listens |
+| Chat | Enter | Opens the chat. The row shows the channel's frequency, or in green how many messages came in while the chat wasn't on the screen |
+| Help | H | Opens [Help](#help) |
+| Radio Scan | S | [Radio Scan](#radio-scan): what the radio hears, live. The row shows how many radios it has heard |
 | Your name | N | [Your name](#your-name) on the mesh, shown in the row |
 | Private channel | C | Sets up the [private channel](#private-channel), shown in the row |
+
+![Mesh's first screen with the radio on: three new messages and two radios heard](assets/screens/mesh-first-screen.png)
 
 The Cardputer's own arrow keys are `;` `.` `,` and `/`, and they send those
 characters, not arrows. Where Mesh has nothing to type into (the first screen,
@@ -41,28 +51,32 @@ were before. A notice, such as "Location queued" or "Outbox full", shows on
 orange at the bottom in place of the keys until it's done.
 
 Esc goes back one step at a time. It closes whatever is open (a message, People
-or Help), takes Radio Scan from listening back to the sweep, and then stops the
-radio and goes back to this first screen. Only Esc on the first screen returns
-Home. Before 0.2.302, Esc with the radio on went straight Home. While Help is
-repeating, the first Esc only warns, and a second within four seconds stops the
-radio. Cancelling during radio initialization waits for the worker to finish
-before releasing the radio or restoring SD.
+or Help), gives a radio Radio Scan borrowed back to the chat, and takes the chat
+or Radio Scan back to this first screen, with the radio still on. Help opened
+from the first screen goes back there. Esc on the first screen leaves Mesh,
+which turns the radio off, so it asks first: the bottom line says "Esc again
+turns the radio off", or "Help is on. Esc again ends it" while Help repeats, and
+a second Esc within four seconds leaves. Until 0.2.302, Esc with the radio on
+went straight Home, and in 0.2.302 it turned the radio off on the way back to
+this screen. Esc while the radio is still starting leaves at once; that waits
+for the worker to finish before releasing the radio or restoring SD.
 
 The radio can't start while the Cardputer checks for updates, the weather or
 messages in the background. Since 0.2.302 those checks don't start while any
-Mesh screen is open. One may already be running when you start the radio, for
+Mesh screen is open. One may already be running when you open Mesh, for
 example straight after coming from Home. The bottom line then says "Finishing a
-background check" and the radio starts by itself once it's done. Esc stops
-waiting. Before 0.2.302 Mesh refused with "Finish current task first", which
-happened most often just after leaving the radio, when the checks that had
-waited all ran at once. Anything else in the way is named instead: "Stop the
-radio or podcast first", "Wait for Claude's reply", "Finish recording first",
-"End the voice chat first", "Wait for the update to finish" or "Stop what's
-playing first".
+background check" and the radio starts by itself once it's done. Before 0.2.302
+Mesh refused with "Finish current task first", which happened most often just
+after leaving the radio, when the checks that had waited all ran at once.
+Anything else in the way is named instead, and the radio stays off until you
+pick Chat, Help or Radio Scan again: "Stop the radio or podcast first", "Wait
+for Claude's reply", "Finish recording first", "End the voice chat first", "Wait
+for the update to finish" or "Stop what's playing first".
 
 ## Shared hardware
 
-Mesh exclusively owns the shared SPI bus while active. SD-dependent audio,
+Mesh exclusively owns the shared SPI bus while it's open, since its radio is on
+the whole time. SD-dependent audio,
 voice, notes, files, assets and NES applications are temporarily unavailable.
 RFID and Sonar also conflict with the Cap's GPIOs. Exit Mesh before using these
 applications. Selecting another non-conflicting application stops Mesh first.
@@ -83,8 +97,8 @@ internal flash (LittleFS), never on the SD card.
 Mesh uses Meshtastic's US region unless you pick another: LongFast public
 channel, 906.875 MHz, 250 kHz, SF11, CR4/5. Pick yours in Settings → Device →
 **Mesh region** with Left and Right (Enter steps forward too). The Mesh screen
-shows the region and its channel before you start the radio, and a running
-radio keeps the region it started with until you leave Mesh.
+shows the region and its channel, and the radio keeps the region it started
+with until you leave Mesh, so a change takes effect the next time you open it.
 
 The list holds the Meshtastic regions inside the band M5Stack rates the Cap for,
 868 to 923 MHz (the AS923 channels), all on their LongFast channel:
@@ -133,9 +147,14 @@ radio uses out of the box.
   only who sent it. Public messages are public: anyone with a Meshtastic radio
   in range can read them, and radios with an internet link upload what they
   hear, so a public message can end up on maps such as meshmap.net.
-- The history holds the last eight messages and sixteen radios heard. The
+- The history holds the last 30 messages and sixteen radios heard. The
   messages are kept on internal flash, so they're still there after Mesh closes
-  or the Cardputer restarts. The radios heard aren't.
+  or the Cardputer restarts. The radios heard aren't. Until 0.2.303 it held
+  eight messages.
+- A message that arrives while you're on another Mesh screen, such as People,
+  Help or Radio Scan, shows as "Message from Sam" at the bottom for a few
+  seconds, and the first screen's Chat row counts it, in green, until you open
+  the chat. It also makes its usual sound.
 - Transmit power is 20 dBm, the most M5Stack rates the Cap for. Until 0.2.275
   it was 10 dBm. The library applies regional airtime accounting and carrier
   sensing. These software settings don't certify an antenna or regulatory
@@ -227,8 +246,9 @@ two minutes says how old it is, and with no fix in the last hour it says
   channel message can only ever be heard, never confirmed. The screen shows each
   contact's latest message, then the channels', and when it goes again.
 - 4 goes once and ends Help. Pressing another number changes the message.
-- Esc goes back to the chat and leaves Help running. The chat's top line then
-  says `Help on, again in 4:12`.
+- Esc goes back to where Help was opened from, the chat or the first screen,
+  and leaves Help running. The chat's top line then says `Help on, again in
+  4:12`. Leaving Mesh would end it, so Esc on the first screen says so first.
 
 To save the battery while you wait, the screen turns off 30 seconds after the
 last key while Help repeats. Any key brings it back, and so does a message for
@@ -272,8 +292,9 @@ upload it, so the spot can end up on maps like meshmap.net.
 N on the first screen edits the name other radios show for this Cardputer, up to
 39 bytes. Enter saves it and Esc leaves it as it was. Meshtastic's short name is
 made from it: the initials of two words or more, or the first four letters of
-one. Left empty, it's `S1-ADV` and `S1`, as before 0.2.275. A new name goes out
-the next time the radio starts.
+one. Left empty, it's `S1-ADV` and `S1`, as before 0.2.275. Since 0.2.303 a new
+name goes out at once: the radio announces it straight away. Before, it waited
+until the radio next started.
 
 ## Private channel
 
@@ -282,7 +303,8 @@ as your family's. It runs alongside the public channel on the same frequency,
 the way the Meshtastic app adds a secondary channel, so public messages, direct
 messages and their receipts all carry on. Mesh holds one.
 
-Set it up with **C** on Mesh's first screen, while the radio is off:
+Set it up with **C** on Mesh's first screen. Since 0.2.303 the radio stays on
+while you do:
 
 - **N** names it: up to 11 letters, digits, spaces, `-` or `_`. Every radio on it
   uses exactly the same name.
@@ -308,8 +330,10 @@ public channel: "heard nearby" once another radio repeats it.
 The name and key are kept in the Cardputer's own flash with Mesh's other
 settings: never on the SD card, in a log or anywhere else. Anyone who sees the
 key can read the channel. As with every Meshtastic channel, who sent a message
-isn't hidden, only what it says. A change takes effect the next time the radio
-starts. Since 0.2.279, [Help](#help) goes to the private channel too unless you
+isn't hidden, only what it says. A change takes effect at once, without the
+radio restarting, and removing the channel moves the chat back to the public
+channel if that's where it was sending. Before 0.2.303 a change waited until
+the radio next started. Since 0.2.279, [Help](#help) goes to the private channel too unless you
 turn it off, and [Ctrl+L](#sharing-a-location) sends it your exact location.
 
 This needs a small change to libmeshtastic-leaf, which held one channel at a
@@ -317,13 +341,30 @@ time; see [Source and licensing](#source-and-licensing).
 
 ## Radio Scan
 
-Press S on the Mesh screen instead of Enter. Radio Scan never transmits, needs
-no identity and writes nothing, and it takes the bus from the SD card exactly as
-Mesh does, so the same apps wait until you leave. Esc goes back: from listening
-to the sweep, and from the sweep to Mesh's first screen, with the radio off.
+Press S on the Mesh screen. Radio Scan never transmits. Since 0.2.303 it opens
+**live** on the chat's own channel, through the chat's own radio: it counts
+every packet that radio reads, including ones the chat can't open, and shows
+the channel's signal, while the chat carries on receiving and saving messages
+underneath. The top bar's chip says `US live`. Before 0.2.303, Radio Scan
+turned the chat off and had a radio of its own.
 
-It opens on a **sweep** of your region's band (Settings → Device → Mesh region),
-one 250 kHz channel at a time. US is 902 to 928 MHz in 104 steps. A region
+The sweep and listening with another preset have to move the radio off the
+chat's channel, so they borrow it, and anything sent to you meanwhile is
+missed. The bar turns red and its chip says **Chat paused**, and borrowing
+clicks twice down; giving it back clicks twice up. Radio Scan won't borrow the
+radio while Help is repeating ("Not while Help is on") or while a message is
+still going out ("Wait: a message is going out").
+
+- **Enter** borrows the radio for a sweep of the band. Enter again, or Esc,
+  gives it back.
+- **Up** and **Down** borrow it to listen with another preset: MediumFast,
+  MediumSlow, LongModerate, ShortFast and ShortSlow. Round to LongFast again,
+  or Esc, gives it back. Some local meshes use another preset, but the chat
+  only ever talks on LongFast.
+- **Esc** on the live view goes back to the first screen, with the radio on.
+
+The **sweep** reads your region's band (Settings → Device → Mesh region), one
+250 kHz channel at a time. US is 902 to 928 MHz in 104 steps. A region
 narrower than 8 MHz, such as EU_868, is shown 8 MHz wide around its band.
 
 - Each bar is the latest reading on that channel, from -130 dBm at the bottom
@@ -333,29 +374,30 @@ narrower than 8 MHz, such as EU_868, is shown 8 MHz wide around its band.
 - **Floor** is the middle reading of the band, roughly the background noise.
   **Top** is the strongest recent reading and its channel.
 
+![Radio Scan's sweep on a borrowed radio: the red bar says the chat is paused](assets/screens/radio-scan-paused.png)
+
 A LongFast packet lasts about a second and most meshes are quiet between
 packets, so a sweep shows bursts rather than a steady signal. Other devices
 share the band too, so a burst isn't necessarily Meshtastic.
 
-Enter switches to **listening**. It tunes to one preset's default public channel
-with Meshtastic's sync word and counts the packets it hears, whoever sent them
-and whatever channel they're on. Up and Down change the preset: LongFast,
-MediumFast, MediumSlow, LongModerate, ShortFast and ShortSlow. If LongFast stays
-quiet, try the others, because some local meshes use another preset. Each
-preset starts counting afresh, and Enter goes back to the sweep.
+**Listening**, live on LongFast or borrowed on another preset, counts the
+packets the radio hears, whoever sent them and whatever channel they're on.
+The live view counts from when the radio came on; each other preset starts
+counting afresh.
 
 - The top lines count packets, the senders they came from (up to 32, then
   `32+`) and **garbled** ones: too short to be Meshtastic, or damaged on the way.
 - Each row is a packet, newest first: the sender's node ID, its signal strength
   and SNR, how many hops it made (`direct`, a number, or `hops ?` from older
-  firmware), and `pub` when it's on that preset's default public channel or
-  `other` for any other channel, which is often a private one.
+  firmware), and `pub` when it's on that preset's default public channel,
+  `priv` when it's on your [private channel](#private-channel) (live only), or
+  `other` for any other channel, which is often someone else's private one.
 While it listens, it shows how it's going, so a quiet channel doesn't look like
 a stuck radio:
 
 - The top line has the preset and its channel, and on the right how long it has
-  listened there: `4:12`, then `1:04:12` after an hour. Another preset starts
-  again at `0:00`.
+  listened there: `4:12`, then `1:04:12` after an hour. Live, that's since the
+  radio came on; another preset starts again at `0:00`.
 - **Noise** is the channel's background level, the middle of the last minute's
   readings. On the right is when it last heard something, with how many were
   garbled, or `Nothing yet`.
@@ -374,16 +416,18 @@ a stuck radio:
 - Meshtastic radios send on their own now and then, even when nobody types, so
   give it about half an hour before deciding nobody is in range.
 
-![Radio Scan listening on a quiet channel after two and a half minutes: the white line, and a rise where something else sent](assets/screens/radio-scan-listen-quiet.png)
-![Radio Scan after three packets and a garbled one: a short chart with their marks, and the packets under it](assets/screens/radio-scan-listen-heard.png)
+![Radio Scan live on a quiet channel after two and a half minutes: the white line, and a rise where something else sent](assets/screens/radio-scan-listen-quiet.png)
+![Radio Scan live after three packets and a garbled one: a short chart with their marks, and the packets under it, one on the private channel](assets/screens/radio-scan-listen-heard.png)
 
-- Only the 16-byte header every Meshtastic packet sends unencrypted is read.
-  Nothing is decrypted or shown as text, and nothing heard is ever treated as
-  an instruction. Reading messages is what Mesh chat (Enter) is for.
+- Only the 16-byte header every Meshtastic packet sends unencrypted is read for
+  these counts. Nothing is decrypted or shown as text here, and nothing heard is
+  ever treated as an instruction. Reading messages is what Mesh chat is for.
 
-If the radio stops answering, the screen says so and Radio Scan stops using it.
-While listening, it notices from the chart's readings within about half a
-second.
+If a borrowed radio stops answering, the screen says so and Radio Scan stops
+using it; borrowed and listening, it notices from the chart's readings within
+about half a second. Esc then gives it back to the chat. A radio that won't go
+back to the chat is turned off, and the first screen says "Radio stopped
+answering".
 
 ## Sounds
 
@@ -432,14 +476,18 @@ writes them as WAV files to listen to. The lifecycle test checks which sound eac
 key and delivery state makes. `test_mesh_messaging.py` checks contacts, the outbox's
 delivery states, the history kept across a restart, Help's text and when it
 repeats, and the position message, whose bytes were checked against
-Meshtastic's own `mesh.proto` with `protoc`. `test_radio_scan.py` runs Radio Scan's sums, service loop, live chart, keys
-and screen against a pretend radio that has no way to transmit. `test_mesh_private_channel.py`
+Meshtastic's own `mesh.proto` with `protoc`. `test_radio_scan.py` runs Radio Scan's sums, its live view on the chat's radio,
+borrowing the radio and giving it back, the live chart, keys and screen against a
+pretend radio that has no way to transmit. `test_mesh_private_channel.py`
 checks channel names, keys in base64 both ways, new keys and what's saved, and
 `test_mesh_private_ui.py` runs the setup screen's keys, its QR code and its
 storage, and checks the key never reaches a log. `test_mesh_channels.py` builds
 the patched library itself on a computer and passes real packets between three
 copies: public, private, a wrong key, a reliable private send and a direct
-message alongside. It and `test_mesh_region.py`, which checks the region list,
+message alongside, every packet reported as heard, and the radio lent and taken
+back. The lifecycle test checks that opening Mesh starts the radio, that the
+chat, Help and Radio Scan share it, that nothing sends while it's borrowed, the
+unread count, a name applied while it runs, and Esc asking before it leaves. It and `test_mesh_region.py`, which checks the region list,
 channels and scan presets against the library's own table, run after a firmware
 build. Lifecycle tests use controlled hardware mocks and include
 worker cancellation, partial initialization, SD restoration and app guards.
@@ -449,9 +497,10 @@ of the private channel, direct messages, delivery states, Help or positions has
 been tried with a second radio yet.
 
 USB commands: `mesh.open`, `mesh.start`, `mesh.scan`, `mesh.status`, `mesh.nodes`, `mesh.stop`.
-During the chat, `mesh.status` adds a line with the contacts, the outbox, Help and
-whether there's a fix. During Radio Scan, it adds a line with the sweep's floor and
-top and the listening counts.
+`mesh.open` opens Mesh, which starts the radio; `mesh.start` and `mesh.scan` open
+the chat or Radio Scan over it. With the radio on, `mesh.status` adds a line with
+the contacts, the outbox, Help and whether there's a fix, one with the borrowed
+radio's sweep and listening counts, and one with the live counts and noise.
 They do not send a test chat message. Serial logs report successful radio init,
 session heap minima and SD restoration. No private keys are logged.
 
@@ -465,7 +514,8 @@ The GPL text is included in `third_party/libmeshtastic-leaf/LICENSE`.
 Complete S1 source and build instructions are in this repository.
 libmeshtastic-leaf commit `bd542d6e77aa7b9507dcc8d153f6dad0c35a8c17`, with its
 protobuf submodule and generated sources, is in
-`bots/CardputerADV/lib/libmeshtastic-leaf`, changed to add a secondary channel;
+`bots/CardputerADV/lib/libmeshtastic-leaf`, changed to add a secondary channel, to
+report every packet heard, and to lend the radio and take it back;
 `S1-ADV-PATCHES.md` there lists every change. The other dependencies are fetched
 by `bots/CardputerADV/platformio.ini`: RadioLib 7.7.1, Nanopb 0.4.92, and
 Crypto commit `591ff9a690e8168ccb7a36abde8d7783e448d395`. Source links and notices:

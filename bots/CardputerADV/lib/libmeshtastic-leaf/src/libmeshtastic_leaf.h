@@ -75,6 +75,23 @@ public:
   void onReceive(PacketCallback callback);
   bool isTransmitting() const;
 
+  // S1-ADV patch: every packet the radio reads, before duplicates are filtered
+  // or anything is decrypted, with its signal. The bytes are still encrypted
+  // and untrusted; a packet whose CRC failed comes with none (length 0). For
+  // counting what's on the air. The callback mustn't call back into the mesh.
+  typedef void (*HeardCallback)(const uint8_t *bytes, size_t len, float rssi,
+                                float snr);
+  void onHeard(HeardCallback callback) { heardCallback_ = callback; }
+
+  // S1-ADV patch: lend the radio to the application, which may retune it, and
+  // take it back. Lending stops the receive interrupt; don't call update() or
+  // send while it's lent. resumeRadio() puts the modem, frequency, sync word,
+  // preamble, power and interrupt back as begin() left them and listens again.
+  // False when the radio refuses, or begin() never succeeded.
+  void lendRadio();
+  bool resumeRadio();
+  bool radioLent() const { return lent_; }
+
   // Why the last send was refused. Cleared by the next send.
   SendResult getLastSendResult() const { return lastSendResult_; }
 
@@ -161,6 +178,8 @@ private:
   MeshCryptoPKI pki_;
   PKIKeyLookup pkiKeyLookup_;
   PacketCallback receiveCallback_;
+  HeardCallback heardCallback_ = nullptr;  // S1-ADV patch
+  bool lent_ = false;                       // S1-ADV patch
   bool initialized_;
 
   uint8_t rxBuffer_[MAX_LORA_PAYLOAD_LEN];

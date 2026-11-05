@@ -70,7 +70,7 @@ int main(){
  // Nothing saved (or a value from other firmware) is US; a saved region is used as saved.
  const struct {int saved,region;float frequency;} cases[]={{1,1,906.875f},{12,12,923.875f},{0,1,906.875f},{255,1,906.875f},{3,3,869.525f}};
  for(const auto& c:cases)for(failure=0;failure<=5;++failure){
-  step=0;wanted=c.frequency;wantedRegion=c.region;s1_mesh::RadioSession session(spi,uint8_t(c.saved),s1_mesh::Use::Chat);
+  step=0;wanted=c.frequency;wantedRegion=c.region;s1_mesh::RadioSession session(spi,uint8_t(c.saved));
   assert(session.region==c.region);
   assert(session.module.spi==&spi&&session.module.spiConfig.timeout==250);
   assert(session.initResult.load()==s1_mesh::kInitPending);
@@ -78,25 +78,14 @@ int main(){
   if(!failure)assert(!e&&step==5);
   else assert(e==(failure==5?-1:-19)&&step==failure);
  }
- // Chat leaves sleeping to the mesh. Scan sets the radio up the same way, never starts the mesh,
- // and puts the chip to sleep itself when it ends, but only after a start that worked.
+ // The mesh puts the chip to sleep when it ends; the session never does it itself.
  assert(sleeps==0);
- for(failure=0;failure<=4;++failure){
-  step=0;sleeps=0;meshBegins=0;wanted=906.875f;wantedRegion=1;
-  {
-   s1_mesh::RadioSession session(spi,1,s1_mesh::Use::Scan);
-   const int e=session.initialize();session.initResult.store(e);
-   if(!failure)assert(!e&&step==4);else assert(e==-19&&step==failure);
-   assert(!meshBegins&&!sleeps);
-  }
-  assert(sleeps==(failure==0?1:0));
- }
  // The name saved for Mesh is the one the radio announces.
  step=0;failure=0;wanted=906.875f;wantedRegion=1;wantedLong="Alex Car";wantedShort="AC";
- {s1_mesh::RadioSession session(spi,1,s1_mesh::Use::Chat);strcpy(session.longName,"Alex Car");strcpy(session.shortName,"AC");assert(!session.initialize());}
+ {s1_mesh::RadioSession session(spi,1);strcpy(session.longName,"Alex Car");strcpy(session.shortName,"AC");assert(!session.initialize());}
  wantedLong="S1-ADV";wantedShort="S1";
  // A session freed while init is still pending (the lifecycle never does this) doesn't touch the bus.
- sleeps=0;{s1_mesh::RadioSession session(spi,1,s1_mesh::Use::Scan);}assert(!sleeps);
+ sleeps=0;{s1_mesh::RadioSession session(spi,1);}assert(!sleeps);
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-mesh-radio-') as directory:
@@ -105,4 +94,4 @@ with tempfile.TemporaryDirectory(prefix='s1-mesh-radio-') as directory:
     subprocess.run([os.environ.get('CXX','c++'),'-std=c++17','-Wall','-Wextra','-Werror',
                     '-I'+str(p),'-I'+str(ROOT/'bots/CardputerADV/src'),str(p/'radio.cpp'),'-o',str(p/'radio')],check=True)
     subprocess.run([str(p/'radio')],check=True)
-print('PASS actual Cap setup: SPI identity/pins, bounded BUSY timeout, TCXO, RF switch, CRC, saved region (US when unset) on LongFast at 20 dBm with the saved name, starting on that region channel, every initialization error propagated, and Scan never starting the mesh but sleeping the chip when done')
+print('PASS actual Cap setup: SPI identity/pins, bounded BUSY timeout, TCXO, RF switch, CRC, saved region (US when unset) on LongFast at 20 dBm with the saved name, starting on that region channel, every initialization error propagated, and one kind of session, which starts the mesh every time')

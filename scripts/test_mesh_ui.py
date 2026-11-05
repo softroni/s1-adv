@@ -19,6 +19,7 @@ code=r'''
 #include "mesh_leaf_state.h"
 #include "mesh_outbox.h"
 #include "mesh_private_channel.h"
+#include "radio_scan.h"
 #include <algorithm>
 #include <atomic>
 #include <cassert>
@@ -68,15 +69,16 @@ struct Canvas {
 }gCanvas;
 namespace s1_mesh {
 constexpr int kInitPending=-32768;
-enum class Use:uint8_t{Chat,Scan};
 struct FakeMesh {uint32_t getNodeNum()const{return 42;}};
-struct RadioSession {State state;std::atomic<int>initResult{0};uint8_t region=1;Use use=Use::Chat;
- FakeMesh mesh;Contacts contacts;Outbox outbox;Help help;Where where;PrivateChannel privateChannel;};
+struct RadioSession {State state;std::atomic<int>initResult{0};uint8_t region=1;
+ FakeMesh mesh;Contacts contacts;Outbox outbox;Help help;Where where;PrivateChannel privateChannel;
+ bool scanning=false;s1_scan::Listen heard;uint16_t unread=0;};
 // UA_868 is as long as a region's name gets.
 inline const char* regionName(uint8_t c){return c==1?"US":"UA_868";}
 inline float regionFrequency(uint8_t c){return c==1?906.875f:868.375f;}
 }
 struct {uint8_t meshRegion=1;uint8_t meshPublicLocation=0;}gDeviceSettings;
+enum class UiMode{Home,Mesh};UiMode gUiMode=UiMode::Mesh;
 int scanRenders=0;
 void renderRadioScanUi(s1_mesh::RadioSession&){++scanRenders;}
 // The private channel's own screen is part 091, tested on its own; here only that Mesh hands over.
@@ -111,16 +113,35 @@ int main() {
  gMeshNotice="";gMeshNoticeUntilMs=0;
  // C's setup screen takes over the first screen while it's open.
  gMeshChannelSetup=true;renderMeshUi();assert(channelRenders==1);gMeshChannelSetup=false;
- // A running radio shows the region it started with, not one picked since.
+ // A running radio shows the region it started with, not one picked since, on every screen over it.
  gMeshSession=std::make_unique<s1_mesh::RadioSession>();gMeshSession->region=15;gDeviceSettings.meshRegion=1;gMeshBusOwned=true;gSdReady=false;gCanvas.printed.clear();
- for(int init:{0,s1_mesh::kInitPending,-19}) {gMeshSession->initResult=init;renderMeshUi();assert(!gCanvas.clipped);}
+ for(MeshView view:{MeshView::Hub,MeshView::Chat})for(int init:{0,s1_mesh::kInitPending,-19}) {
+  gMeshView=view;gMeshSession->initResult=init;renderMeshUi();assert(!gCanvas.clipped);}
  assert(gCanvas.printed.count("UA_868 / LongFast")&&!gCanvas.printed.count("US / LongFast"));
- // A scan session: its start screen while the radio starts, then the scanner's own screen.
- gMeshSession->use=s1_mesh::Use::Scan;gCanvas.printed.clear();
+ // The first screen over a running radio: what came in while the chat wasn't showing, and how many
+ // radios it has heard, at their longest.
+ gMeshView=MeshView::Hub;gMeshSession->initResult=0;gCanvas.printed.clear();
+ for(uint16_t unread:{0,1,999})for(uint32_t radios:{0u,1u,32u})for(uint8_t row=0;row<kMeshStartRows;++row) {
+  gMeshSession->unread=unread;gMeshSession->heard=s1_scan::Listen{};
+  for(uint32_t n=0;n<radios;++n){s1_scan::Heard h;h.from=n+1;gMeshSession->heard.heard(h);}
+  if(radios==32){s1_scan::Heard h;h.from=999;gMeshSession->heard.heard(h);}
+  gMeshStartRow=row;renderMeshUi();assert(!gCanvas.clipped);
+ }
+ assert(gCanvas.printed.count("999 new")&&gCanvas.printed.count("1 new")&&gCanvas.printed.count("32+ radios")&&gCanvas.printed.count("1 radio"));
+ assert(gCanvas.printed.count("What the radio hears, live"));
+ // Still starting, the first screen has no counts.
+ gMeshSession->initResult=s1_mesh::kInitPending;gCanvas.printed.clear();renderMeshUi();assert(!gCanvas.printed.count("999 new"));
+ gMeshSession->unread=0;gMeshSession->heard=s1_scan::Listen{};gMeshStartRow=0;
+ // Radio Scan: its start screen while the radio starts, then its own screen over the running radio.
+ gMeshView=MeshView::Live;gCanvas.printed.clear();
  for(int init:{s1_mesh::kInitPending,-19}){gMeshSession->initResult=init;renderMeshUi();assert(!gCanvas.clipped&&!scanRenders);}
- assert(gCanvas.printed.count("Radio Scan")&&gCanvas.printed.count("Listening only, nothing sent")&&gCanvas.printed.count("Starting the radio"));
+ assert(gCanvas.printed.count("Radio Scan")&&gCanvas.printed.count("Public channel, 868.375 MHz")&&gCanvas.printed.count("Starting the radio"));
+ assert(gCanvas.printed.count("Esc back"));
  gMeshSession->initResult=0;renderMeshUi();assert(scanRenders==1);
- gMeshSession->use=s1_mesh::Use::Chat;gMeshSession->initResult=0;
+ // Name and the private channel open over the running radio too.
+ gMeshNaming=true;gCanvas.printed.clear();renderMeshUi();assert(scanRenders==1&&gCanvas.printed.count("Your name"));gMeshNaming=false;
+ gMeshChannelSetup=true;renderMeshUi();assert(channelRenders==2);gMeshChannelSetup=false;
+ gMeshView=MeshView::Chat;gMeshSession->initResult=0;
  gMeshSession->initResult=0;auto& s=gMeshSession->state;
  for(uint32_t n=1;n<=16;++n){auto* p=s.hear(n,UINT32_MAX-n,int16_t(n%2?-32768:32767));memset(p->name,'W',40);p->name[40]=0;}
  for(unsigned type=0;type<3;++type) {
@@ -176,7 +197,7 @@ int main() {
  assert(gCanvas.printed.count("To: #ElevenChars, public (rough)")&&gCanvas.printed.count("To: public (exact)"));
  assert(gCanvas.printed.count("1-4 send  P public  C channel"));
  {const auto keep=gMeshSession->privateChannel;gMeshSession->privateChannel=PrivateChannel{};gMeshSession->help=Help{};renderMeshUi();
-  assert(gCanvas.printed.count("1-4 send  P public  Esc chat"));gMeshSession->privateChannel=keep;}
+  assert(gCanvas.printed.count("1-4 send  P public  Esc back"));gMeshSession->privateChannel=keep;}
  for(uint32_t c=1;c<=kContacts;++c){std::string name(39,'W');gMeshSession->contacts.add(c,name.c_str(),key);}
  renderMeshUi();
  auto& h=gMeshSession->help;
@@ -187,7 +208,7 @@ int main() {
   renderMeshUi();assert(!gCanvas.clipped);
   {auto keep=gCanvas.printed;gCanvas.printed.clear();renderMeshUi();
    // I'm OK goes once, so it has nothing to change.
-   if(stop==0)assert(gCanvas.printed.count("+3 more")&&gCanvas.printed.count(h.repeating()?"1-4 change  P public  C channel":"1-4 send again  Esc chat"));
+   if(stop==0)assert(gCanvas.printed.count("+3 more")&&gCanvas.printed.count(h.repeating()?"1-4 change  P public  C channel":"1-4 send again  Esc back"));
    h.seq[2]=0;h.seq[0]=777;gCanvas.printed.clear();renderMeshUi();assert(gCanvas.printed.count("+2 more"));
    // Four fit whole: two contacts and both channels.
    h.seq[1]=0;gCanvas.printed.clear();renderMeshUi();assert(!gCanvas.printed.count("+1 more")&&!gCanvas.printed.count("+2 more")&&gCanvas.printed.count("#ElevenChars"));
@@ -198,7 +219,7 @@ int main() {
  s.helpView=false;h.start(0,clockMs);h.rounds=1;h.roundMs=clockMs;gMeshNotice="Listening / SD paused";renderMeshUi();
  assert(gCanvas.printed.count("Help on, again in 5:00"));
  // The start screen with the name, and the name editor, empty and full.
- gMeshSession.reset();gMeshBusOwned=false;gMeshNotice="";renderMeshUi();
+ gMeshSession.reset();gMeshBusOwned=false;gMeshNotice="";gMeshView=MeshView::Hub;renderMeshUi();
  gMeshNaming=true;for(const char* typed:{"","Alex Car","WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"}){strcpy(gMeshNameInput,typed);renderMeshUi();}
  assert(gCanvas.printed.count("Short name: AC")&&gCanvas.printed.count("Short name: S1"));
  assert(gCanvas.calls>500);
@@ -210,4 +231,4 @@ with tempfile.TemporaryDirectory(prefix='s1-mesh-ui-') as directory:
                     '-fsanitize=address,undefined','-fno-omit-frame-pointer',
                     '-I'+str(ROOT/'bots/CardputerADV/src'),str(p/'ui.cpp'),'-o',str(p/'ui')],check=True)
     subprocess.run([str(p/'ui')],check=True)
-print('PASS actual Mesh renderer: 240x135 bounds, both region names at their longest, the running radio region shown, a scan session handed to the scanner screen, startup/failure/empty, 16 nodes, every history/page, every delivery state, every send target, the People list, Help choosing and sending to contacts, the private channel and the public one with each location setting, the name editor, long ASCII/Cyrillic/emoji and clip-state restoration (ASan/UBSan)')
+print('PASS actual Mesh renderer: 240x135 bounds, both region names at their longest, the running radio region shown, the first screen over a running radio with new messages and radios heard at their longest, Radio Scan, the name and the private channel over it, startup/failure/empty, 16 nodes, every history/page, every delivery state, every send target, the People list, Help choosing and sending to contacts, the private channel and the public one with each location setting, the name editor, long ASCII/Cyrillic/emoji and clip-state restoration (ASan/UBSan)')

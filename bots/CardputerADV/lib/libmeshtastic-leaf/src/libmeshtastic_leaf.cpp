@@ -690,7 +690,7 @@ void libmeshtastic_leaf::setCarrierSense(bool enabled, uint8_t cwMin,
 }
 
 void libmeshtastic_leaf::update() {
-  if (!initialized_ || phy_ == nullptr) {
+  if (!initialized_ || phy_ == nullptr || lent_) {  // S1-ADV patch: lent_
     return;
   }
 
@@ -712,7 +712,17 @@ void libmeshtastic_leaf::update() {
       len = sizeof(rxBuffer_);
     }
 
-    if (len > 0 && phy_->readData(rxBuffer_, len) == RADIOLIB_ERR_NONE) {
+    // S1-ADV patch: read first, so a packet nothing below accepts is still
+    // reported as heard, and one whose CRC failed is reported without bytes.
+    const int16_t read =
+        len > 0 ? phy_->readData(rxBuffer_, len) : RADIOLIB_ERR_UNKNOWN;
+    if (heardCallback_ != nullptr &&
+        (read == RADIOLIB_ERR_NONE || read == RADIOLIB_ERR_CRC_MISMATCH)) {
+      heardCallback_(rxBuffer_, read == RADIOLIB_ERR_NONE ? len : 0,
+                     phy_->getRSSI(), phy_->getSNR());
+    }
+
+    if (len > 0 && read == RADIOLIB_ERR_NONE) {
       rxLen_ = len;
       lastRssi_ = phy_->getRSSI();
       lastSnr_ = phy_->getSNR();
@@ -736,6 +746,31 @@ void libmeshtastic_leaf::update() {
 
     phy_->startReceive();
   }
+}
+
+// S1-ADV patch: the radio lent to the application and taken back.
+void libmeshtastic_leaf::lendRadio() {
+  if (phy_ != nullptr) {
+    phy_->clearPacketReceivedAction();
+  }
+  radioIrqFlag = false;
+  lent_ = true;
+}
+
+bool libmeshtastic_leaf::resumeRadio() {
+  if (!initialized_ || phy_ == nullptr) {
+    return false;
+  }
+  if (phy_->standby() != RADIOLIB_ERR_NONE || !applyRfConfig()) {
+    return false;
+  }
+  radioIrqFlag = false;
+  phy_->setPacketReceivedAction(onRadioIrq);
+  if (phy_->startReceive() != RADIOLIB_ERR_NONE) {
+    return false;
+  }
+  lent_ = false;
+  return true;
 }
 
 bool libmeshtastic_leaf::available() const { return rxPending_; }

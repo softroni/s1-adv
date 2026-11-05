@@ -73,10 +73,14 @@ struct Canvas{int font=0,x=0,y=0;std::set<std::string> printed;std::vector<std::
  void drawBitmap(int a,int b,const uint8_t*,int w,int h,int){box(a,b,w,h);}
  std::string qr;void qrcode(const char*t,int a,int b,int w,int,bool margin){assert(a>=0&&b>=0&&a+w<=240&&b+w<=135&&margin);qr=t;}
 }gCanvas;
-// What the radio session is told when Mesh starts.
-namespace libmeshtastic_leaf{struct Fake{int calls=0;bool ok=true;uint8_t key[32]={};size_t len=0;std::string name;
- bool setSecondaryChannel(const uint8_t*k,size_t n,const char*nm){++calls;memcpy(key,k,n);len=n;name=nm;return ok;}};}
-namespace s1_mesh{struct RadioSession{libmeshtastic_leaf::Fake mesh;PrivateChannel privateChannel;};}
+// What the radio session is told when Mesh starts, and when the channel changes while it runs.
+namespace libmeshtastic_leaf{struct Fake{int calls=0,clears=0;bool ok=true,secondary=false;uint8_t key[32]={};size_t len=0;std::string name;
+ bool setSecondaryChannel(const uint8_t*k,size_t n,const char*nm){++calls;memcpy(key,k,n);len=n;name=nm;secondary=ok;return ok;}
+ void clearSecondaryChannel(){++clears;secondary=false;}};}
+namespace s1_mesh{struct RadioSession{libmeshtastic_leaf::Fake mesh;PrivateChannel privateChannel;std::atomic<int>initResult{0};
+ struct{uint8_t target=0;}state;};}
+std::unique_ptr<s1_mesh::RadioSession> gMeshSession;
+String gMeshNotice;uint32_t gMeshNoticeUntilMs=0;  // The notice line, part of Mesh's shared drawing.
 std::vector<s1_mesh::Sound> sounds;void meshSound(s1_mesh::Sound s){sounds.push_back(s);}
 ''' + drawing + r'''
 ''' + part + r'''
@@ -142,6 +146,18 @@ int main(){
  // A key typed first, then the name, saves once both are there.
  key('k');type(typedKey.c_str());enter();assert(shows("Now N to give it a name")&&!gNvs.count("privch"));
  key('n');type("Club");enter();assert(gNvs.count("privch"));
+ // A running radio takes each saved change at once, with nothing restarted.
+ gMeshSession=std::make_unique<RadioSession>();
+ key('n');for(int i=0;i<4;++i)meshChannelKey('\b',delKey);type("Band");enter();
+ assert(gMeshSession->mesh.calls==1&&gMeshSession->mesh.name=="Band"&&gMeshSession->privateChannel.set()&&gMeshSession->mesh.secondary);
+ sounds.clear();key('g');key('g');assert(gMeshSession->mesh.calls==2&&!memcmp(gMeshSession->mesh.key,gMeshChannel.key,32));
+ // Removed while the chat sends to it: the radio drops it, and the chat sends to the public channel.
+ gMeshSession->state.target=kTargetPrivate;key('x');key('x');
+ assert(!gMeshSession->privateChannel.set()&&!gMeshSession->mesh.secondary&&gMeshSession->mesh.clears==1&&gMeshSession->state.target==0);
+ // A radio still starting is left for its own start to load.
+ gMeshSession->initResult=-32768;key('k');type(typedKey.c_str());enter();key('n');type("Club");enter();
+ assert(gNvs.count("privch")&&gMeshSession->mesh.calls==2);
+ gMeshSession.reset();
  // Storage that won't take it says so.
  gNvsWritable=false;key('n');for(int i=0;i<4;++i)meshChannelKey('\b',delKey);type("Club2");sounds.clear();enter();assert(shows("Couldn't save it"));gNvsWritable=true;
  assert(sounds.size()==1&&sounds[0]==Sound::Nope);

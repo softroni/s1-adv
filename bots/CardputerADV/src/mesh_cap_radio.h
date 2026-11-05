@@ -14,8 +14,9 @@ namespace s1_mesh {
 constexpr int kInitPending = -32768;
 // The most M5 rates the Cap for. Meshtastic's US limit is 30 dBm, so this is well inside it.
 constexpr int8_t kTxPowerDbm = 20;
-// Chat joins the mesh and sends. Scan only listens, so it never starts the mesh at all.
-enum class Use : uint8_t { Chat, Scan };
+// The radio while Mesh is open. It joins the mesh as soon as Mesh opens and leaves only when Mesh
+// closes, so every Mesh screen runs on top of it. Radio Scan reads the chat's own channel through it,
+// and borrows it (scanning) only to sweep the band or listen with another preset.
 struct RadioSession {
   Module module;
   SX1262 radio;
@@ -25,8 +26,13 @@ struct RadioSession {
   bool readyReported=false;
   uint32_t lowHeap=UINT32_MAX, lowLargest=UINT32_MAX;
   const RegionCode region;
-  const Use use;
-  s1_scan::Scanner scan;
+  s1_scan::Scanner scan;  // The sweep and the other presets, while it's borrowed.
+  bool scanning = false;  // Lent to Radio Scan: the chat hears nothing until it's back.
+  // Everything the chat's radio hears, readable or not, and its channel's signal, for Radio Scan.
+  s1_scan::Listen heard;
+  s1_scan::Strip line;
+  uint32_t sampleAt = 0;
+  uint16_t unread = 0;    // Messages that came in while the chat wasn't on the screen.
   // Chat's side: who to message, what's going out, Help, and where the GPS last had a fix.
   Contacts contacts;
   Outbox outbox;
@@ -39,14 +45,9 @@ struct RadioSession {
   bool historyDirty = false;
   bool announce = false;  // A radio said it lacks this one's key, so say who this is again.
   uint32_t savedMs = 0, publicLocationMs = 0, stopAskedMs = 0;
-  RadioSession(SPIClass& spi,uint8_t savedRegion,Use purpose)
-    :module(5,4,3,6,spi),radio(&module),region(regionOrDefault(savedRegion)),use(purpose) {
+  RadioSession(SPIClass& spi,uint8_t savedRegion)
+    :module(5,4,3,6,spi),radio(&module),region(regionOrDefault(savedRegion)) {
     module.spiConfig.timeout=250; // A missing/busy chip cannot stall the UI task.
-  }
-  // The mesh puts the chip to sleep when it ends. Scan never started it, so sleep the chip here,
-  // before the SD card gets the bus back. The lifecycle only frees a session once init returned.
-  ~RadioSession() {
-    if(use==Use::Scan && initResult.load(std::memory_order_acquire)==0) radio.sleep();
   }
   int initialize() {
     // mesh.begin() sets the modem again, but start on the region's own channel: RadioLib only
@@ -57,7 +58,6 @@ struct RadioSession {
     if((e=radio.setDio2AsRfSwitch(true)))return e;
     if((e=radio.setCurrentLimit(140.0f)))return e;
     if((e=radio.setCRC(2)))return e;
-    if(use==Use::Scan)return 0;
     libmeshtastic_leaf::MeshConfig cfg;
     cfg.radio.region=region;
     cfg.radio.preset=libmeshtastic_leaf::PRESET_LONG_FAST;
@@ -67,4 +67,6 @@ struct RadioSession {
     return mesh.begin(cfg,&radio) ? 0 : RADIOLIB_ERR_UNKNOWN;
   }
 };
+// One allocation while Mesh opens, and the start needs a 24 KB free block, so keep well under it.
+static_assert(sizeof(RadioSession) < 20 * 1024, "the Mesh session must fit the start's free-memory check");
 } // namespace s1_mesh

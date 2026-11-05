@@ -1,7 +1,8 @@
-// Radio Scan, inside Mesh: the Cap's radio, listening only. A sweep reads signal strength across
-// the region's band; listening tunes one preset's channel and counts the Meshtastic packets it
-// hears, which works without the channel's key because the first 16 bytes aren't encrypted.
-// Nothing here transmits. Starting, stopping and the bus handoff are Mesh's, in 068.
+// Radio Scan, inside Mesh. It opens live on the chat's own channel: every packet the chat's radio
+// reads, counted from the first 16 bytes, which aren't encrypted, and the channel's signal, while
+// the chat carries on. To sweep the region's band or listen with another preset it borrows the
+// radio, and the chat hears nothing until it's back. Nothing here transmits. Starting, stopping and
+// the bus handoff are Mesh's, in 068.
 namespace {
 constexpr uint8_t kScanIrqPin = 4;            // The Cap's DIO1, as wired in mesh_cap_radio.h.
 constexpr uint8_t kScanPointsPerService = 6;  // A slice of a pass per loop, so keys and the screen keep up.
@@ -81,15 +82,8 @@ void scanReadPacket(s1_mesh::RadioSession& s, uint32_t now) {
   const size_t length = std::min(r.getPacketLength(), sizeof(bytes));
   const float rssi = r.getRSSI(), snr = r.getSNR();
   const int e = r.readData(bytes, sizeof(bytes));
-  s1_scan::Header header;
-  if (e == RADIOLIB_ERR_NONE && s1_scan::parseHeader(bytes, length, header)) {
-    s1_scan::Heard heard;
-    heard.from = header.from;
-    heard.at = now;
-    heard.rssi = s1_scan::dbmFrom(rssi);
-    heard.snrTenths = std::isfinite(snr) ? int16_t(lroundf(std::max(-99.9f, std::min(99.9f, snr)) * 10.0f)) : 0;
-    heard.hops = s1_scan::hopsTaken(header);
-    heard.publicChannel = header.channel == s.scan.publicHash;
+  s1_scan::Heard heard;
+  if (e == RADIOLIB_ERR_NONE && s1_scan::describe(bytes, length, now, rssi, snr, s.scan.publicHash, -1, heard)) {
     listen.heard(heard);
     s.scan.strip.note(now, s1_scan::kPacketMark);
     meshPacketTick(heard.rssi);  // A tick a packet, higher the stronger it came in.
@@ -102,17 +96,10 @@ void scanReadPacket(s1_mesh::RadioSession& s, uint32_t now) {
                           r.startReceive() == RADIOLIB_ERR_NONE);
 }
 
+// Only while the radio is borrowed: the sweep, or listening with another preset.
 void serviceRadioScan(s1_mesh::RadioSession& s) {
   auto& scan = s.scan;
   const uint32_t now = millis();
-  if (!scan.started) {
-    scan.started = true;
-    scan.fadeAt = now;
-    scanCounted(scan, scanSweepOn(s));
-    logf("[MESH] scan ready %s %.3f-%.3f MHz points=%u heap=%u largest=%u", s1_mesh::regionName(s.region),
-         double(scan.plan.start), double(scan.plan.end()), unsigned(scan.plan.points), unsigned(s.lowHeap),
-         unsigned(s.lowLargest));
-  }
   if (scan.failures >= kScanGiveUp) return;
   if (scan.listening) {
     if (digitalRead(kScanIrqPin) == HIGH) scanReadPacket(s, now);
@@ -138,41 +125,134 @@ void serviceRadioScan(s1_mesh::RadioSession& s) {
   }
 }
 
-// Esc steps back: listening goes back to the sweep. From the sweep it's Mesh's to stop the radio.
-bool handleRadioScanEscape(s1_mesh::RadioSession& s) {
-  auto& scan = s.scan;
-  if (!scan.listening || scan.failures >= kScanGiveUp) return false;
-  scanCounted(scan, scanSweepOn(s));
+// Radio Scan borrows the chat's radio only to sweep or listen with another preset, and the chat hears
+// nothing meanwhile. So it won't while Help repeats or a message is still on its way out.
+bool scanLend(s1_mesh::RadioSession& s) {
+  if (s.scanning) return true;
+  const char* why = nullptr;
+  if (s.help.repeating()) why = "Not while Help is on";
+  else if (!s.outbox.idle() || s.mesh.isTransmitting() || s.mesh.hasPendingAck()) why = "Wait: a message is going out";
+  if (why) {
+    gMeshNotice = why;
+    gMeshNoticeUntilMs = millis() + 2500;
+    meshSound(s1_mesh::Sound::Nope);
+    return false;
+  }
+  s.mesh.lendRadio();
+  s.scanning = true;
+  s.scan.failures = 0;
+  s.scan.listening = false;
+  s.scan.fadeAt = millis();
+  meshSound(s1_mesh::Sound::Removed);  // Two clicks down: the chat's off for now.
+  logf("[MESH] chat paused for Radio Scan");
   return true;
 }
 
+// The radio back to the chat, tuned as the library had it. If it won't go back, the radio stops,
+// and this says false: nothing may use the session after that.
+bool scanReturn(s1_mesh::RadioSession& s) {
+  if (!s.scanning) return true;
+  s.scanning = false;
+  s.scan.listening = false;
+  if (!s.mesh.resumeRadio()) {
+    logf("[MESH] chat radio did not come back");
+    stopMeshMode(false);
+    gMeshNotice = "Radio stopped answering";
+    gMeshNoticeUntilMs = 0;
+    meshSound(s1_mesh::Sound::Failed);
+    return false;
+  }
+  meshSound(s1_mesh::Sound::Saved);  // Two clicks up: the chat's back on.
+  logf("[MESH] chat back on");
+  return true;
+}
+
+// Esc gives a borrowed radio back to the chat. On the chat's own channel, Esc is Mesh's: back to the
+// first screen.
+bool handleRadioScanEscape(s1_mesh::RadioSession& s) {
+  if (!s.scanning) return false;
+  scanReturn(s);
+  return true;
+}
+
+// On the chat's channel, Enter sweeps the band and Up/Down listen with another preset, both on the
+// borrowed radio. Enter in the sweep, or Up/Down round to LongFast again, give it back.
 bool handleRadioScanKey(char key, const Keyboard_Class::KeysState& keys) {
   if (!gMeshSession) return false;
   auto& s = *gMeshSession;
   auto& scan = s.scan;
-  if (scan.failures >= kScanGiveUp) return true;
+  if (s.scanning && scan.failures >= kScanGiveUp) return true;  // Only Esc, which gives it back.
   if (keys.enter || key == '\r' || key == '\n') {
-    scanCounted(scan, scan.listening ? scanSweepOn(s) : scanListenOn(s));
+    if (s.scanning && !scan.listening) {
+      scanReturn(s);
+      return true;
+    }
+    if (!scanLend(s)) return true;
+    scanCounted(scan, scanSweepOn(s));
+    logf("[MESH] scan sweep %s %.3f-%.3f MHz points=%u", s1_mesh::regionName(s.region), double(scan.plan.start),
+         double(scan.plan.end()), unsigned(scan.plan.points));
     return true;
   }
   const bool back = key == 1 || key == ';' || key == ',', ahead = key == 2 || key == '.' || key == '/';
-  if (scan.listening && (back || ahead)) {
-    scan.preset = uint8_t((scan.preset + (back ? s1_mesh::kScanPresetCount - 1 : 1)) % s1_mesh::kScanPresetCount);
-    scanCounted(scan, scanListenOn(s));
+  if (!back && !ahead) return true;
+  if (s.scanning && !scan.listening) return true;  // The sweep has no presets.
+  const uint8_t at = s.scanning ? scan.preset : 0;  // 0 is LongFast, the chat's own.
+  const uint8_t next = uint8_t((at + (back ? s1_mesh::kScanPresetCount - 1 : 1)) % s1_mesh::kScanPresetCount);
+  if (!next) {
+    scanReturn(s);
+    return true;
   }
+  if (!scanLend(s)) return true;
+  scan.preset = next;
+  scanCounted(scan, scanListenOn(s));
   return true;
+}
+
+// While the chat has the radio: its channel's signal for the live view, read between the library's
+// own work. Nothing is read while it sends, when a reading would only be its own signal.
+void serviceRadioLive(s1_mesh::RadioSession& s, uint32_t now) {
+  if (!s.mesh.isTransmitting() && uint32_t(now - s.sampleAt) >= s1_scan::kListenSampleMs) {
+    s.sampleAt = now;
+    const int16_t dbm = s1_scan::dbmFrom(s.radio.getRSSI(false));
+    if (dbm != s1_scan::kNone) s.line.add(now, dbm);
+  }
+  s.line.advance(now);
+}
+
+bool meshLiveShowing() {
+  return gUiMode == UiMode::Mesh && gMeshView == MeshView::Live && !gMeshNaming && !gMeshChannelSetup;
+}
+
+// Every packet the chat's radio reads, readable or not, counted for the live view from its header
+// alone. The chat reads the ones it can by itself; nothing here is ever acted on.
+void meshHeard(const uint8_t* bytes, size_t length, float rssi, float snr) {
+  if (!gMeshSession) return;
+  auto& s = *gMeshSession;
+  const uint32_t now = millis();
+  const int16_t privateHash = s.mesh.hasSecondaryChannel() ? int16_t(s.mesh.getSecondaryChannelHash()) : int16_t(-1);
+  s1_scan::Heard heard;
+  if (length && s1_scan::describe(bytes, length, now, rssi, snr, s.mesh.getChannelHash(), privateHash, heard)) {
+    s.heard.heard(heard);
+    s.line.note(now, s1_scan::kPacketMark);
+    if (meshLiveShowing()) meshPacketTick(heard.rssi);
+  } else {
+    s.heard.damagedPacket(now);
+    s.line.note(now, s1_scan::kGarbledMark);
+  }
 }
 
 void logRadioScanStatus(s1_mesh::RadioSession& s) {
   const auto& scan = s.scan;
   const uint8_t top = scan.sweep.strongest(scan.plan);
-  logf("[MESH] scan listening=%d preset=%s passes=%lu floor=%d top=%d top_mhz=%.3f packets=%lu nodes=%u "
+  logf("[MESH] scan lent=%d listening=%d preset=%s passes=%lu floor=%d top=%d top_mhz=%.3f packets=%lu nodes=%u "
        "damaged=%lu failures=%u",
-       scan.listening, s1_mesh::scanPresetName(scan.preset), static_cast<unsigned long>(scan.sweep.passes),
+       s.scanning, scan.listening, s1_mesh::scanPresetName(scan.preset), static_cast<unsigned long>(scan.sweep.passes),
        int(scan.sweep.floor(scan.plan)), top < scan.plan.points ? int(scan.sweep.peak[top]) : 0,
        top < scan.plan.points ? double(scan.plan.frequency(top)) : 0.0,
        static_cast<unsigned long>(scan.listen.packets), unsigned(scan.listen.nodeCount),
        static_cast<unsigned long>(scan.listen.damaged), unsigned(scan.failures));
+  logf("[MESH] live packets=%lu nodes=%u damaged=%lu noise=%d", static_cast<unsigned long>(s.heard.packets),
+       unsigned(s.heard.nodeCount), static_cast<unsigned long>(s.heard.damaged), int(s.line.noise()));
 }
 
 int scanChartY(int16_t dbm, int top, int bottom) {
@@ -218,7 +298,7 @@ void renderScanSweep(s1_mesh::RadioSession& s, const MeshInk& ink) {
     meshText(8, 100, text, ink.muted);
     meshTextRight(232, 100, strongest, ink.white);
   }
-  meshKeys("Enter listen for packets  Esc back", ink.muted);
+  meshFoot("Enter or Esc: back to the chat");
 }
 
 // How long it has listened: "4:12", or "1:04:12" after an hour.
@@ -256,17 +336,16 @@ void scanDrawStrip(const s1_scan::Strip& strip, int top, int bottom, const MeshI
   d.drawFastVLine(kLeft + strip.head * kBar + kBar - 1, top, bottom - top + 1, TFT_WHITE);
 }
 
-void renderScanListen(s1_mesh::RadioSession& s, const MeshInk& ink) {
+// Listening, on the chat's channel or another preset's: how long, what came, the noise, the chart and
+// the latest packets.
+void renderScanListen(const s1_scan::Listen& listen, const s1_scan::Strip& strip, const char* preset, double mhz,
+                      const MeshInk& ink) {
   auto& d = gCanvas;
-  const auto& listen = s.scan.listen;
-  const auto& strip = s.scan.strip;
   const uint32_t now = millis();
   char text[64], clock[16];
   // The preset and its channel, and on the right how long it's listened there.
   scanClock(now - strip.since, clock, sizeof(clock));
   const int clockWidth = meshWidth(clock);
-  const char* preset = s1_mesh::scanPresetName(s.scan.preset);
-  const double mhz = double(s1_mesh::scanPresetFrequency(s.region, s.scan.preset));
   snprintf(text, sizeof(text), "%s  %.3f MHz", preset, mhz);
   if (meshWidth(text) + clockWidth + 8 > 224) snprintf(text, sizeof(text), "%s  %.3f", preset, mhz);
   meshTextFit(8, kMeshTop, text, 224 - clockWidth - 8, ink.muted);
@@ -318,23 +397,34 @@ void renderScanListen(s1_mesh::RadioSession& s, const MeshInk& ink) {
       else if (h.hops == 0) snprintf(text, sizeof(text), "direct");
       else snprintf(text, sizeof(text), "%d hop%s", int(h.hops), h.hops == 1 ? "" : "s");
       d.setCursor(160, y); d.print(text);
-      d.setTextColor(h.publicChannel ? ink.green : ink.muted, ink.bg); d.setCursor(200, y); d.print(h.publicChannel ? "pub" : "other");
+      // Its channel: the public one, the private one this Cardputer shares, or another.
+      d.setTextColor(h.publicChannel ? ink.green : h.privateChannel ? ink.amber : ink.muted, ink.bg);
+      d.setCursor(200, y);
+      d.print(h.publicChannel ? "pub" : h.privateChannel ? "priv" : "other");
     }
   }
-  meshKeys("Enter sweep  \x18\x19 preset  Esc back", ink.muted);
+  meshFoot("Enter sweep  \x18\x19 preset  Esc back");
 }
 
+// Live on the chat's channel while the chat runs; borrowed, the bar turns red and says the chat is
+// paused, since it hears nothing until Esc gives the radio back.
 void renderRadioScanUi(s1_mesh::RadioSession& s) {
   MeshInk ink;
-  const String tag = String(s1_mesh::regionName(s.region)) + (s.scan.listening ? " listen" : " sweep");
-  meshHead("Radio Scan", ink.accent, tag, ink.muted);
+  if (!s.scanning) {
+    meshHead("Radio Scan", ink.accent, String(s1_mesh::regionName(s.region)) + " live", ink.muted);
+    renderScanListen(s.heard, s.line, s1_mesh::scanPresetName(0), double(s1_mesh::regionFrequency(s.region)), ink);
+    return;
+  }
+  meshHead("Radio Scan", ink.red, "Chat paused", ink.red);
   if (s.scan.failures >= kScanGiveUp) {
     meshBoldCenter(44, "Radio not answering", ink.white);
     meshTextCenter(68, "Esc, check the Cap, then try again", ink.muted);
     meshKeys("Esc back", ink.muted);
     return;
   }
-  if (s.scan.listening) renderScanListen(s, ink);
+  if (s.scan.listening)
+    renderScanListen(s.scan.listen, s.scan.strip, s1_mesh::scanPresetName(s.scan.preset),
+                     double(s1_mesh::scanPresetFrequency(s.region, s.scan.preset)), ink);
   else renderScanSweep(s, ink);
 }
 }  // namespace
