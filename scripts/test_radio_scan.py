@@ -121,6 +121,7 @@ void meshSound(s1_mesh::Sound s){sounds.push_back(s);}
 namespace {  // As in 005: declared in the same unnamed namespace the part defines them in.
 void serviceRadioScan(s1_mesh::RadioSession& session);
 bool handleRadioScanKey(char key, const Keyboard_Class::KeysState& keys);
+bool handleRadioScanEscape(s1_mesh::RadioSession& session);
 void renderRadioScanUi(s1_mesh::RadioSession& session);
 void logRadioScanStatus(s1_mesh::RadioSession& session);
 }
@@ -135,6 +136,8 @@ static void render(){renderRadioScanUi(*gMeshSession);}
 static bool printedStarting(const std::string& p){for(const auto& t:gCanvas.printed)if(t.rfind(p,0)==0)return true;return false;}
 static void enter(){Keyboard_Class::KeysState k;k.enter=true;assert(handleRadioScanKey('\n',k));}
 static void key(char c){Keyboard_Class::KeysState k;assert(handleRadioScanKey(c,k));}
+// Listening's service loop over simulated time, a reading every 20 ms as the firmware does.
+static void listenFor(uint32_t ms){auto&s=*gMeshSession;for(uint32_t t=0;t<ms;t+=10){gNow+=10;serviceRadioScan(s);}}
 static void sweepOnce(){auto&s=*gMeshSession;const uint32_t passes=s.scan.sweep.passes;
  for(int i=0;i<200&&s.scan.sweep.passes==passes;++i)serviceRadioScan(s);assert(s.scan.sweep.passes==passes+1);}
 
@@ -172,17 +175,44 @@ int main(){
  enter();assert(s.scan.listening&&s.radio.receiving&&s.radio.sync==0x2B&&s.radio.preamble==16);
  assert(s.radio.sf==7&&s.radio.bw==250.0f&&s.radio.cr==5&&std::fabs(s.radio.freq-906.875f)<1e-3);
  const uint8_t pub=uint8_t(std::strlen("LongFast"));assert(s.scan.publicHash==pub);
- render();assert(gCanvas.printed.count("Listening...")&&gCanvas.printed.count("Nothing yet on this preset"));
+ // The live chart starts with listening: a clock at 0:00, and the channel's noise from the first reading.
+ render();assert(gCanvas.printed.count("Listening...")&&gCanvas.printed.count("Nothing yet")&&gCanvas.printed.count("0:00"));
+ assert(s.scan.strip.since==gNow&&s.scan.strip.head==0);
  // Nothing is read until DIO1 says a packet arrived.
  const int reads=s.radio.reads;for(int i=0;i<5;++i)serviceRadioScan(s);assert(s.radio.reads==reads);
+ render();assert(printedStarting("Noise -119"));
+ {
+  // A column every half second, each the strongest reading in it, read about every 20 ms.
+  auto& st=s.scan.strip;listenFor(3000);
+  assert(st.head==6&&!st.wrapped&&st.peak[0]==-119&&st.mean[5]==-119&&st.noise()==-119&&s.scan.failures==0);
+  assert(st.shown(0)&&st.shown(6)&&!st.shown(7));
+  render();assert(gCanvas.printed.count("0:03")&&printedStarting("Noise -119"));
+  // A second of signal on the channel shows as a rise there, and doesn't move the noise.
+  s.radio.signalAt=906.875f;listenFor(1000);s.radio.signalAt=0;listenFor(500);
+  assert(st.peak[6]==-72&&st.peak[7]==-72&&st.peak[st.head]==-119&&st.noise()==-119);
+  // Past the right edge it starts again at the left, leaving a gap ahead of the newest column.
+  listenFor(kStripColumnMs*kStripColumns);
+  assert(st.wrapped&&st.shown(st.head)&&!st.shown(uint8_t((st.head+1)%kStripColumns))&&
+         !st.shown(uint8_t((st.head+kStripGap)%kStripColumns))&&st.shown(uint8_t((st.head+kStripGap+1)%kStripColumns)));
+  render();assert(gCanvas.printed.count("1:00"));
+  // Unserved longer than the chart holds, it starts the chart afresh but keeps counting time.
+  const uint32_t began=st.since;st.advance(gNow+kStripColumnMs*(kStripColumns+2));
+  assert(st.head==0&&!st.wrapped&&st.since==began&&st.peak[1]==kNone);
+  gNow+=kStripColumnMs*(kStripColumns+2);listenFor(600);assert(st.head==1&&st.noise()==-119);
+ }
  auto arrive=[&](Packet p){s.radio.packets.push_back(p);dio1=HIGH;serviceRadioScan(s);assert(dio1==LOW&&s.radio.receiving);};
  ticks.clear();arrive(packet(0xa1b2c3d4,(3<<5)|1,pub));assert(ticks.size()==1&&ticks[0]==-90);  // A tick, at its strength.
+ assert(s.scan.strip.mark[s.scan.strip.head]==kPacketMark);  // ...and a mark on the chart.
  auto& l=s.scan.listen;
  assert(l.packets==1&&l.nodeCount==1&&l.recent[0].from==0xa1b2c3d4&&l.recent[0].hops==2&&l.recent[0].publicChannel);
  assert(l.recent[0].rssi==-90&&l.recent[0].snrTenths==50);
  Packet bad=packet(0x11,0,pub);bad.result=RADIOLIB_ERR_CRC_MISMATCH;arrive(bad);
  Packet tiny;tiny.bytes={1,2,3};arrive(tiny);
- assert(l.packets==1&&l.damaged==2&&ticks.size()==1);  // Broken ones don't tick.
+ assert(s.scan.strip.mark[s.scan.strip.head]==kPacketMark);  // A packet outranks a garbled one in its column.
+ listenFor(500);{Packet late=packet(0x11,0,pub);late.result=RADIOLIB_ERR_CRC_MISMATCH;arrive(late);}
+ assert(s.scan.strip.mark[s.scan.strip.head]==kGarbledMark);
+ assert(l.packets==1&&l.damaged==3&&ticks.size()==1);  // Broken ones don't tick.
+ render();assert(gCanvas.printed.count("1 packet, 1 node"));
  // Extremes still fit on the screen: a weak, noisy packet seven hops out on another channel.
  Packet far=packet(0xffffffff,(7<<5),99);far.rssi=-200;far.snr=-120;arrive(far);
  Packet odd2=packet(0x22,0,pub);odd2.rssi=0;arrive(odd2);
@@ -191,13 +221,25 @@ int main(){
  for(uint32_t n=0;n<40;++n)arrive(packet(1000+n,(2<<5)|1,pub));
  assert(l.nodeCount==kNodes&&l.moreNodes&&l.recentCount==kRecent&&l.recent[0].from==1039&&l.recent[3].from==1036);
  l.packets=4000000000u;gNow+=3600000;render();
- assert(gCanvas.printed.count("99999+ packets, 32+ nodes")&&gCanvas.printed.count("2 garbled  last 60m ago"));
- assert(gCanvas.printed.count("!0000040f")&&gCanvas.printed.count("direct")==0&&gCanvas.printed.count("1 hop"));
+ // The line shortens to fit: here, with widths wider than the real font's, down to when.
+ assert(gCanvas.printed.count("99999+ packets, 32+ nodes")&&gCanvas.printed.count("Noise -119")&&gCanvas.printed.count("60m ago"));
+ // The clock: minutes and seconds, then hours after the first.
+ {char c[16];scanClock(0,c,sizeof(c));assert(!std::strcmp(c,"0:00"));scanClock(65999,c,sizeof(c));assert(!std::strcmp(c,"1:05"));
+  scanClock(3599000,c,sizeof(c));assert(!std::strcmp(c,"59:59"));scanClock(3725000,c,sizeof(c));assert(!std::strcmp(c,"1:02:05"));
+  scanClock(gNow-s.scan.strip.since,c,sizeof(c));assert(gCanvas.printed.count(c)&&std::strlen(c)==7);}
+ // The latest three packets, under a short chart.
+ assert(gCanvas.printed.count("!0000040f")&&gCanvas.printed.count("!0000040d")&&!gCanvas.printed.count("!0000040c"));
+ assert(gCanvas.printed.count("direct")==0&&gCanvas.printed.count("1 hop"));
  // Up/Down change preset, wrapping both ways, and start counting afresh on the new channel.
  key(2);assert(s.scan.preset==1&&s.scan.listen.packets==0&&std::fabs(s.radio.freq-907.875f)<1e-3&&s.radio.receiving);
  key(';');key(',');assert(s.scan.preset==5);key('.');key('/');assert(s.scan.preset==1);
  key(1);key(1);key(1);key(1);assert(s.scan.preset==3&&s.radio.bw==125.0f);render();
- // Enter goes back to sweeping, with a fresh chart and the sweep's receiver width.
+ // Esc goes back to sweeping, with a fresh chart and the sweep's receiver width; from the sweep, it's
+ // Mesh's to stop the radio.
+ assert(handleRadioScanEscape(s)&&!s.scan.listening&&s.radio.bw==250.0f&&s.scan.sweep.passes==0);
+ assert(!handleRadioScanEscape(s)&&!s.scan.listening);
+ // Enter does the same.
+ enter();assert(s.scan.listening&&s.scan.preset==3&&s.scan.strip.head==0);
  enter();assert(!s.scan.listening&&s.radio.bw==250.0f&&s.scan.sweep.passes==0);sweepOnce();
  // Status for USB.
  logRadioScanStatus(s);assert(logs.back().find("[MESH] scan listening=0 preset=LongModerate passes=1")==0);
@@ -215,6 +257,13 @@ int main(){
  // Giving up knocks once, not on every pass after.
  size_t knocks=0;for(auto q:sounds)knocks+=q==s1_mesh::Sound::Failed;assert(knocks==1);
  render();assert(gCanvas.printed.count("Radio not answering"));
+ // Listening notices a radio that stops answering too, from its readings, and says so.
+ gMeshSession=std::make_unique<s1_mesh::RadioSession>();auto& q=*gMeshSession;
+ serviceRadioScan(q);enter();listenFor(200);assert(q.scan.listening&&q.scan.failures==0);
+ q.radio.broken=true;sounds.clear();listenFor(1000);
+ assert(q.scan.failures==kScanGiveUp&&sounds.size()==1&&sounds[0]==s1_mesh::Sound::Failed);
+ render();assert(gCanvas.printed.count("Radio not answering")&&gCanvas.printed.count("Esc back"));
+ assert(!handleRadioScanEscape(q));  // Esc there stops the radio.
  // One good reading clears the count.
  gMeshSession=std::make_unique<s1_mesh::RadioSession>();auto& c=*gMeshSession;
  c.radio.broken=true;serviceRadioScan(c);assert(c.scan.failures>0);c.radio.broken=false;serviceRadioScan(c);assert(c.scan.failures==0);
@@ -230,5 +279,6 @@ with tempfile.TemporaryDirectory(prefix='s1-radio-scan-') as directory:
     subprocess.run([str(p / 'scan')], check=True)
 print('PASS Radio Scan: US plan on the LongFast grid, narrow regions widened, every point tuned in order without '
       'recalibrating, floor/top/fading peaks, Meshtastic listen setup, packets read only on DIO1, header/hops/channel, '
-      'garbled and short packets, bounded nodes and history, preset wrap, a dead radio given up on, 240x135 bounds '
+      'garbled and short packets, bounded nodes and history, preset wrap, the live chart while '
+      'listening (columns, peaks, noise, marks, wrapping with a gap, a clock), Esc back to the sweep, a dead radio given up on, 240x135 bounds '
       '(ASan/UBSan), and no way to transmit')

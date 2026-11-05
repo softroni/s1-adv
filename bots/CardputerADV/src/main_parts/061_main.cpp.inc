@@ -418,6 +418,7 @@ void loop() {
     if (millis()-gLastRenderMs>=33U) { render(); gLastRenderMs=millis(); }
     delay(1); return;
   }
+  serviceMeshStartWait();
   if (gMeshBusOwned) {
     serviceMeshMode();
     if (gMeshBusOwned) {

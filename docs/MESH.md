@@ -40,11 +40,25 @@ messages in other scripts, and emoji, are drawn in the 12-pixel font, as they
 were before. A notice, such as "Location queued" or "Outbox full", shows on
 orange at the bottom in place of the keys until it's done.
 
-Esc closes whatever is open (a message, People or Help) and then stops the
-radio and returns Home. While Help is repeating, the first Esc only warns, and
-a second within four seconds stops the radio. Cancelling during radio
-initialization waits for the worker to finish before releasing the radio or
-restoring SD.
+Esc goes back one step at a time. It closes whatever is open (a message, People
+or Help), takes Radio Scan from listening back to the sweep, and then stops the
+radio and goes back to this first screen. Only Esc on the first screen returns
+Home. Before 0.2.302, Esc with the radio on went straight Home. While Help is
+repeating, the first Esc only warns, and a second within four seconds stops the
+radio. Cancelling during radio initialization waits for the worker to finish
+before releasing the radio or restoring SD.
+
+The radio can't start while the Cardputer checks for updates, the weather or
+messages in the background. Since 0.2.302 those checks don't start while any
+Mesh screen is open. One may already be running when you start the radio, for
+example straight after coming from Home. The bottom line then says "Finishing a
+background check" and the radio starts by itself once it's done. Esc stops
+waiting. Before 0.2.302 Mesh refused with "Finish current task first", which
+happened most often just after leaving the radio, when the checks that had
+waited all ran at once. Anything else in the way is named instead: "Stop the
+radio or podcast first", "Wait for Claude's reply", "Finish recording first",
+"End the voice chat first", "Wait for the update to finish" or "Stop what's
+playing first".
 
 ## Shared hardware
 
@@ -305,7 +319,8 @@ time; see [Source and licensing](#source-and-licensing).
 
 Press S on the Mesh screen instead of Enter. Radio Scan never transmits, needs
 no identity and writes nothing, and it takes the bus from the SD card exactly as
-Mesh does, so the same apps wait until you leave. Esc stops it.
+Mesh does, so the same apps wait until you leave. Esc goes back: from listening
+to the sweep, and from the sweep to Mesh's first screen, with the radio off.
 
 It opens on a **sweep** of your region's band (Settings → Device → Mesh region),
 one 250 kHz channel at a time. US is 902 to 928 MHz in 104 steps. A region
@@ -335,11 +350,40 @@ preset starts counting afresh, and Enter goes back to the sweep.
   and SNR, how many hops it made (`direct`, a number, or `hops ?` from older
   firmware), and `pub` when it's on that preset's default public channel or
   `other` for any other channel, which is often a private one.
+While it listens, it shows how it's going, so a quiet channel doesn't look like
+a stuck radio:
+
+- The top line has the preset and its channel, and on the right how long it has
+  listened there: `4:12`, then `1:04:12` after an hour. Another preset starts
+  again at `0:00`.
+- **Noise** is the channel's background level, the middle of the last minute's
+  readings. On the right is when it last heard something, with how many were
+  garbled, or `Nothing yet`.
+- The chart is the channel's signal on the sweep's scale, a column every half
+  second, holding the last 56 seconds. The **white line** is where it's writing
+  now. It moves right and starts again at the left, with a small gap ahead of
+  it, so it moves even when nothing is heard. If it moves, the radio is
+  listening.
+- A **rise** is something sending on the channel. A **green mark** at the top
+  means a Meshtastic packet came in then, and an **orange** one a garbled one.
+  A rise with no mark is something else on the channel, or a packet too damaged
+  to read. A mark with no rise is normal: LoRa reads packets weaker than the
+  noise, which the chart can't show.
+- Once a packet has arrived, the chart gets shorter and the latest three
+  packets show under it.
+- Meshtastic radios send on their own now and then, even when nobody types, so
+  give it about half an hour before deciding nobody is in range.
+
+![Radio Scan listening on a quiet channel after two and a half minutes: the white line, and a rise where something else sent](assets/screens/radio-scan-listen-quiet.png)
+![Radio Scan after three packets and a garbled one: a short chart with their marks, and the packets under it](assets/screens/radio-scan-listen-heard.png)
+
 - Only the 16-byte header every Meshtastic packet sends unencrypted is read.
   Nothing is decrypted or shown as text, and nothing heard is ever treated as
   an instruction. Reading messages is what Mesh chat (Enter) is for.
 
 If the radio stops answering, the screen says so and Radio Scan stops using it.
+While listening, it notices from the chart's readings within about half a
+second.
 
 ## Sounds
 
@@ -388,7 +432,7 @@ writes them as WAV files to listen to. The lifecycle test checks which sound eac
 key and delivery state makes. `test_mesh_messaging.py` checks contacts, the outbox's
 delivery states, the history kept across a restart, Help's text and when it
 repeats, and the position message, whose bytes were checked against
-Meshtastic's own `mesh.proto` with `protoc`. `test_radio_scan.py` runs Radio Scan's sums, service loop, keys
+Meshtastic's own `mesh.proto` with `protoc`. `test_radio_scan.py` runs Radio Scan's sums, service loop, live chart, keys
 and screen against a pretend radio that has no way to transmit. `test_mesh_private_channel.py`
 checks channel names, keys in base64 both ways, new keys and what's saved, and
 `test_mesh_private_ui.py` runs the setup screen's keys, its QR code and its

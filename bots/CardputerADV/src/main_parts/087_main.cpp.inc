@@ -45,6 +45,8 @@ bool scanListenOn(s1_mesh::RadioSession& s) {
   const auto modem = s1_mesh::scanPresetModem(scan.preset);
   scan.listening = true;
   scan.listen.reset();
+  scan.strip.reset(millis());  // Its chart and its clock start again with each preset.
+  scan.sampleAt = 0;
   scan.publicHash = scanPublicHash(scan.preset);
   int e = r.standby();
   if (e == RADIOLIB_ERR_NONE) e = r.setBandwidth(modem.bw);
@@ -89,10 +91,12 @@ void scanReadPacket(s1_mesh::RadioSession& s, uint32_t now) {
     heard.hops = s1_scan::hopsTaken(header);
     heard.publicChannel = header.channel == s.scan.publicHash;
     listen.heard(heard);
+    s.scan.strip.note(now, s1_scan::kPacketMark);
     meshPacketTick(heard.rssi);  // A tick a packet, higher the stronger it came in.
     // Heard packets are counted and shown, never read as an instruction.
   } else if (e == RADIOLIB_ERR_NONE || e == RADIOLIB_ERR_CRC_MISMATCH) {
     listen.damagedPacket(now);  // Too short for Meshtastic, or broken on the way.
+    s.scan.strip.note(now, s1_scan::kGarbledMark);
   }
   scanCounted(s.scan, (e == RADIOLIB_ERR_NONE || e == RADIOLIB_ERR_CRC_MISMATCH) &&
                           r.startReceive() == RADIOLIB_ERR_NONE);
@@ -112,6 +116,15 @@ void serviceRadioScan(s1_mesh::RadioSession& s) {
   if (scan.failures >= kScanGiveUp) return;
   if (scan.listening) {
     if (digitalRead(kScanIrqPin) == HIGH) scanReadPacket(s, now);
+    else if (uint32_t(now - scan.sampleAt) >= s1_scan::kListenSampleMs) {
+      // The channel's signal for the live chart. Reading it leaves the radio receiving, and a radio
+      // that stops answering reads as nothing, so listening notices that the way the sweep does.
+      scan.sampleAt = now;
+      const int16_t dbm = s1_scan::dbmFrom(s.radio.getRSSI(false));
+      scanCounted(scan, dbm != s1_scan::kNone);
+      scan.strip.add(now, dbm);
+    }
+    scan.strip.advance(now);
     return;
   }
   for (uint8_t i = 0; i < kScanPointsPerService && scan.failures < kScanGiveUp; ++i) {
@@ -123,6 +136,14 @@ void serviceRadioScan(s1_mesh::RadioSession& s) {
     scan.sweep.fade(scan.plan, 1);
     scan.fadeAt = now;
   }
+}
+
+// Esc steps back: listening goes back to the sweep. From the sweep it's Mesh's to stop the radio.
+bool handleRadioScanEscape(s1_mesh::RadioSession& s) {
+  auto& scan = s.scan;
+  if (!scan.listening || scan.failures >= kScanGiveUp) return false;
+  scanCounted(scan, scanSweepOn(s));
+  return true;
 }
 
 bool handleRadioScanKey(char key, const Keyboard_Class::KeysState& keys) {
@@ -197,16 +218,59 @@ void renderScanSweep(s1_mesh::RadioSession& s, const MeshInk& ink) {
     meshText(8, 100, text, ink.muted);
     meshTextRight(232, 100, strongest, ink.white);
   }
-  meshKeys("Enter listen for packets  Esc stop", ink.muted);
+  meshKeys("Enter listen for packets  Esc back", ink.muted);
+}
+
+// How long it has listened: "4:12", or "1:04:12" after an hour.
+void scanClock(uint32_t ms, char* out, size_t size) {
+  const unsigned long seconds = ms / 1000;
+  if (seconds < 3600) snprintf(out, size, "%lu:%02lu", seconds / 60, seconds % 60);
+  else snprintf(out, size, "%lu:%02lu:%02lu", seconds / 3600, seconds / 60 % 60, seconds % 60);
+}
+
+// Listening's live chart, on the sweep's scale. A white line the chart's height shows where it's
+// writing now and moves right, with a gap ahead of it, so the chart moves even on a quiet channel. A
+// packet that came in marks its column green, a garbled one orange: at the top of a tall chart, the
+// whole column of a short one.
+void scanDrawStrip(const s1_scan::Strip& strip, int top, int bottom, const MeshInk& ink) {
+  auto& d = gCanvas;
+  constexpr int kLeft = 8, kBar = 2;
+  const bool tall = bottom - top >= 24;
+  if (tall)
+    for (int16_t dbm : {int16_t(-120), int16_t(-100), int16_t(-80)})
+      d.drawFastHLine(kLeft, scanChartY(dbm, top, bottom), kBar * s1_scan::kStripColumns, rgb565_local(28, 36, 44));
+  const uint16_t fill = rgb565_local(30, 150, 175);
+  for (uint8_t i = 0; i < s1_scan::kStripColumns; ++i) {
+    if (!strip.shown(i)) continue;
+    const int x = kLeft + i * kBar;
+    if (strip.peak[i] != s1_scan::kNone) {
+      const int y = scanChartY(strip.peak[i], top, bottom);
+      d.fillRect(x, y, kBar, bottom - y + 1, fill);
+    }
+    if (strip.mark[i]) {
+      const uint16_t mark = strip.mark[i] == s1_scan::kPacketMark ? ink.green : ink.orange;
+      if (tall) d.fillRect(x, top, kBar, 4, mark);
+      else d.fillRect(x, top, kBar, bottom - top + 1, mark);
+    }
+  }
+  d.drawFastVLine(kLeft + strip.head * kBar + kBar - 1, top, bottom - top + 1, TFT_WHITE);
 }
 
 void renderScanListen(s1_mesh::RadioSession& s, const MeshInk& ink) {
   auto& d = gCanvas;
   const auto& listen = s.scan.listen;
-  char text[64];
-  snprintf(text, sizeof(text), "%s  %.3f MHz", s1_mesh::scanPresetName(s.scan.preset),
-           double(s1_mesh::scanPresetFrequency(s.region, s.scan.preset)));
-  meshTextFit(8, kMeshTop, text, 224, ink.muted);
+  const auto& strip = s.scan.strip;
+  const uint32_t now = millis();
+  char text[64], clock[16];
+  // The preset and its channel, and on the right how long it's listened there.
+  scanClock(now - strip.since, clock, sizeof(clock));
+  const int clockWidth = meshWidth(clock);
+  const char* preset = s1_mesh::scanPresetName(s.scan.preset);
+  const double mhz = double(s1_mesh::scanPresetFrequency(s.region, s.scan.preset));
+  snprintf(text, sizeof(text), "%s  %.3f MHz", preset, mhz);
+  if (meshWidth(text) + clockWidth + 8 > 224) snprintf(text, sizeof(text), "%s  %.3f", preset, mhz);
+  meshTextFit(8, kMeshTop, text, 224 - clockWidth - 8, ink.muted);
+  meshTextRight(232, kMeshTop, clock, ink.white);
   if (!listen.packets) meshBoldFit(8, 38, "Listening...", 224, ink.white);
   else {
     constexpr uint32_t kMostShown = 99999;  // Keeps the line on the screen however long it listens.
@@ -216,33 +280,48 @@ void renderScanListen(s1_mesh::RadioSession& s, const MeshInk& ink) {
              listen.nodeCount == 1 && !listen.moreNodes ? "" : "s");
     meshBoldFit(8, 38, text, 224, ink.white);
   }
-  if (!listen.packets && !listen.damaged) snprintf(text, sizeof(text), "Nothing yet on this preset");
-  else {
-    const uint32_t ago = (millis() - listen.lastAt) / 1000;
-    if (ago < 600) snprintf(text, sizeof(text), "%lu garbled  last %lus ago", static_cast<unsigned long>(listen.damaged),
-                            static_cast<unsigned long>(ago));
-    else snprintf(text, sizeof(text), "%lu garbled  last %lum ago", static_cast<unsigned long>(listen.damaged),
-                  static_cast<unsigned long>(ago / 60));
+  // The channel's noise on the left, and on the right what it has heard and when, shortened to fit.
+  const int16_t noise = strip.noise();
+  const unsigned long garbled = listen.damaged;
+  char left[24], right[48], ago[16];
+  if (noise == s1_scan::kNone) snprintf(left, sizeof(left), "Noise ...");
+  else snprintf(left, sizeof(left), "Noise %d dBm", int(noise));
+  const uint32_t seconds = (now - listen.lastAt) / 1000;
+  if (seconds < 600) snprintf(ago, sizeof(ago), "%lus", static_cast<unsigned long>(seconds));
+  else snprintf(ago, sizeof(ago), "%lum", static_cast<unsigned long>(seconds / 60));
+  if (!listen.packets && !garbled) snprintf(right, sizeof(right), "Nothing yet");
+  else if (garbled) snprintf(right, sizeof(right), "%lu garbled  last %s ago", garbled, ago);
+  else snprintf(right, sizeof(right), "last %s ago", ago);
+  const auto fits = [&] { return meshWidth(left) + meshWidth(right) + 10 <= 224; };
+  if (!fits() && noise != s1_scan::kNone) snprintf(left, sizeof(left), "Noise %d", int(noise));
+  if (!fits() && garbled) snprintf(right, sizeof(right), "%lu garbled  %s ago", garbled, ago);
+  if (!fits()) snprintf(right, sizeof(right), "%s ago", ago);
+  meshText(8, 57, left, ink.muted);
+  meshTextRight(232, 57, right, ink.muted);
+  // Before any packet the chart has the room; after, a short one sits over the latest three.
+  if (!listen.recentCount) {
+    scanDrawStrip(strip, 76, 113, ink);
+  } else {
+    scanDrawStrip(strip, 75, 84, ink);
+    // The packets themselves stay in Font0: five columns don't fit in anything bigger.
+    d.setFont(&fonts::Font0);
+    for (size_t i = 0; i < std::min<size_t>(listen.recentCount, 3); ++i) {
+      const auto& h = listen.recent[i];
+      const int y = 88 + int(i) * 11;
+      d.setTextColor(TFT_WHITE, ink.bg); d.setCursor(8, y);
+      snprintf(text, sizeof(text), "!%08lx", static_cast<unsigned long>(h.from)); d.print(text);
+      if (h.rssi == s1_scan::kNone) snprintf(text, sizeof(text), "?dBm");
+      else snprintf(text, sizeof(text), "%ddBm", int(h.rssi));
+      d.setTextColor(ink.muted, ink.bg); d.setCursor(108 - d.textWidth(text), y); d.print(text);
+      snprintf(text, sizeof(text), "%+.1fdB", double(h.snrTenths) / 10.0); d.setCursor(114, y); d.print(text);
+      if (h.hops < 0) snprintf(text, sizeof(text), "hops ?");
+      else if (h.hops == 0) snprintf(text, sizeof(text), "direct");
+      else snprintf(text, sizeof(text), "%d hop%s", int(h.hops), h.hops == 1 ? "" : "s");
+      d.setCursor(160, y); d.print(text);
+      d.setTextColor(h.publicChannel ? ink.green : ink.muted, ink.bg); d.setCursor(200, y); d.print(h.publicChannel ? "pub" : "other");
+    }
   }
-  meshTextFit(8, 57, text, 224, ink.muted);
-  // The packets themselves stay in Font0: five columns don't fit in anything bigger.
-  d.setFont(&fonts::Font0);
-  for (size_t i = 0; i < listen.recentCount; ++i) {
-    const auto& h = listen.recent[i];
-    const int y = 75 + int(i) * 11;
-    d.setTextColor(TFT_WHITE, ink.bg); d.setCursor(8, y);
-    snprintf(text, sizeof(text), "!%08lx", static_cast<unsigned long>(h.from)); d.print(text);
-    if (h.rssi == s1_scan::kNone) snprintf(text, sizeof(text), "?dBm");
-    else snprintf(text, sizeof(text), "%ddBm", int(h.rssi));
-    d.setTextColor(ink.muted, ink.bg); d.setCursor(108 - d.textWidth(text), y); d.print(text);
-    snprintf(text, sizeof(text), "%+.1fdB", double(h.snrTenths) / 10.0); d.setCursor(114, y); d.print(text);
-    if (h.hops < 0) snprintf(text, sizeof(text), "hops ?");
-    else if (h.hops == 0) snprintf(text, sizeof(text), "direct");
-    else snprintf(text, sizeof(text), "%d hop%s", int(h.hops), h.hops == 1 ? "" : "s");
-    d.setCursor(160, y); d.print(text);
-    d.setTextColor(h.publicChannel ? ink.green : ink.muted, ink.bg); d.setCursor(200, y); d.print(h.publicChannel ? "pub" : "other");
-  }
-  meshKeys("Enter sweep  \x18\x19 preset  Esc stop", ink.muted);
+  meshKeys("Enter sweep  \x18\x19 preset  Esc back", ink.muted);
 }
 
 void renderRadioScanUi(s1_mesh::RadioSession& s) {
@@ -252,7 +331,7 @@ void renderRadioScanUi(s1_mesh::RadioSession& s) {
   if (s.scan.failures >= kScanGiveUp) {
     meshBoldCenter(44, "Radio not answering", ink.white);
     meshTextCenter(68, "Esc, check the Cap, then try again", ink.muted);
-    meshKeys("Esc stop", ink.muted);
+    meshKeys("Esc back", ink.muted);
     return;
   }
   if (s.scan.listening) renderScanListen(s, ink);

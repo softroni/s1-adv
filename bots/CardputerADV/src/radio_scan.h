@@ -153,6 +153,88 @@ struct Listen {
   }
 };
 
+// Listening's live chart: the one channel's signal, a column every half second. It's written left
+// to right and starts again at the left, as a heart monitor's is, so the newest column visibly moves
+// even when the channel is quiet. A mark says a packet, or a garbled one, came in during a column.
+constexpr uint8_t kStripColumns = 112;     // two pixels each across the chart
+constexpr uint32_t kStripColumnMs = 500;   // so the chart holds the last 56 seconds
+constexpr uint8_t kStripGap = 2;           // columns left blank ahead of the newest, once it wraps
+constexpr uint32_t kListenSampleMs = 20;   // a LongFast packet lasts about a second: many readings each
+enum StripMark : uint8_t { kNoMark = 0, kGarbledMark = 1, kPacketMark = 2 };  // a packet outranks garbled
+struct Strip {
+  int16_t peak[kStripColumns];  // the strongest reading in each column, or kNone
+  int16_t mean[kStripColumns];  // each finished column's average, for the noise
+  uint8_t mark[kStripColumns];
+  uint8_t head = 0;             // the column being written now
+  bool wrapped = false;         // whether the head has been all the way across yet
+  uint32_t since = 0;           // when listening on this preset began
+  uint32_t columnAt = 0;        // when the head column began
+  int32_t sum = 0;              // the head column's readings so far
+  uint16_t count = 0;
+  Strip() { reset(0); }
+  void reset(uint32_t now) {
+    std::fill(peak, peak + kStripColumns, kNone);
+    std::fill(mean, mean + kStripColumns, kNone);
+    std::fill(mark, mark + kStripColumns, uint8_t(kNoMark));
+    head = 0;
+    wrapped = false;
+    since = columnAt = now;
+    sum = 0;
+    count = 0;
+  }
+  // Moves the head on for the time that has passed, finishing each column it leaves.
+  void advance(uint32_t now) {
+    uint32_t columns = (now - columnAt) / kStripColumnMs;
+    if (!columns) return;
+    if (columns > kStripColumns) {  // Away longer than the chart holds: start it again, same clock.
+      const uint32_t began = since;
+      reset(now);
+      since = began;
+      return;
+    }
+    while (columns--) {
+      mean[head] = count ? int16_t(std::lround(double(sum) / count)) : kNone;
+      sum = 0;
+      count = 0;
+      if (++head >= kStripColumns) {
+        head = 0;
+        wrapped = true;
+      }
+      peak[head] = mean[head] = kNone;
+      mark[head] = kNoMark;
+      columnAt += kStripColumnMs;
+    }
+  }
+  void add(uint32_t now, int16_t dbm) {
+    advance(now);
+    if (dbm == kNone) return;
+    if (peak[head] == kNone || dbm > peak[head]) peak[head] = dbm;
+    sum += dbm;
+    ++count;
+  }
+  void note(uint32_t now, StripMark what) {
+    advance(now);
+    if (what > mark[head]) mark[head] = what;
+  }
+  // Whether a column has something to draw: the head always, and behind it whatever's been written,
+  // except the gap just ahead of the head that shows where it's going next.
+  bool shown(uint8_t i) const {
+    if (i >= kStripColumns) return false;
+    if (i == head) return true;
+    if (!wrapped) return i < head;
+    return uint8_t((i + kStripColumns - head) % kStripColumns) > kStripGap;
+  }
+  // The noise on this channel: the middle of the columns' averages, so a few packets don't move it.
+  int16_t noise() const {
+    int16_t sorted[kStripColumns];
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < kStripColumns; ++i) if (i != head && mean[i] != kNone) sorted[n++] = mean[i];
+    if (!n) return count ? int16_t(std::lround(double(sum) / count)) : kNone;
+    std::nth_element(sorted, sorted + n / 2, sorted + n);
+    return sorted[n / 2];
+  }
+};
+
 // What the scanner is doing. It lives in the radio session, so it goes when the radio does.
 struct Scanner {
   bool started = false, listening = false;
@@ -161,7 +243,8 @@ struct Scanner {
   Plan plan;
   Sweep sweep;
   Listen listen;
-  uint32_t fadeAt = 0;
+  Strip strip;
+  uint32_t fadeAt = 0, sampleAt = 0;
   uint16_t failures = 0;  // radio calls in a row that failed
 };
 }  // namespace s1_scan

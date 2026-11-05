@@ -499,6 +499,8 @@ bool handleMeshEscape();
 void startMeshMode(s1_mesh::Use use = s1_mesh::Use::Chat);
 void serviceRadioScan(s1_mesh::RadioSession& session);
 bool handleRadioScanKey(char key, const Keyboard_Class::KeysState& keys);
+bool handleRadioScanEscape(s1_mesh::RadioSession& session);
+void serviceMeshStartWait();
 void renderRadioScanUi(s1_mesh::RadioSession& session);
 void logRadioScanStatus(s1_mesh::RadioSession& session);
 void servicePulseGps(uint32_t now);

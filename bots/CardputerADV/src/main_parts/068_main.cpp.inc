@@ -6,6 +6,9 @@ char gMeshNameInput[s1_mesh::kNameBytes + 1] = {};
 enum class MeshStartRow : uint8_t { Chat, Help, Scan, Name, Private };
 constexpr uint8_t kMeshStartRows = 5;
 uint8_t gMeshStartRow = 0;
+// A start waiting for a background check (an update check, the weather or the inbox) or the start-up
+// services to finish. They end by themselves, so the radio starts once they have; Esc stops waiting.
+bool gMeshStartWaiting = false, gMeshStartWaitScan = false, gMeshStartWaitHelp = false;
 // For Mesh's sounds: whether this radio has come up (so stopping it says so), and when the GPS last
 // had a fix (so finding one says so, but a fix lost under a tree for a moment doesn't).
 bool gMeshRadioUp = false, gMeshFixHeard = false;
@@ -22,21 +25,28 @@ constexpr uint32_t kMeshStopConfirmMs = 4000;
 // Ctrl+L on the public channel asks once more, since everyone hears it.
 constexpr uint32_t kMeshPublicLocationMs = 4000;
 
+// Esc goes back one step: out of whatever is open, then listening back to the sweep, then the radio
+// off and back to Mesh's first screen. Only Esc on the first screen leaves Mesh.
 bool handleMeshEscape() {
   if(gUiMode!=UiMode::Mesh || gLauncherVisible)return false;
   if(gMeshNaming) {gMeshNaming=false;return true;}
   if(!gMeshSession && meshChannelEscape())return true;
+  if(!gMeshSession && gMeshStartWaiting) {gMeshStartWaiting=false;gMeshNotice="";return true;}
   if(gMeshSession) {
     auto& s=*gMeshSession;auto& st=s.state;
     if(st.detailView) {st.detailView=false;return true;}
     if(st.helpView) {st.helpView=false;return true;}
     if(st.nodeView) {st.nodeView=false;return true;}
+    if(s.use==s1_mesh::Use::Scan && s.initResult.load(std::memory_order_acquire)==0 && !gMeshCancelStart &&
+       handleRadioScanEscape(s))return true;
     if(s.help.repeating() && (!s.stopAskedMs || millis()-s.stopAskedMs>=kMeshStopConfirmMs)) {
       s.stopAskedMs=max<uint32_t>(millis(),1);
       gMeshNotice="Help is on. Esc again ends it";gMeshNoticeUntilMs=millis()+kMeshStopConfirmMs;
       meshSound(s1_mesh::Sound::Ask);
       return true;
     }
+    stopMeshMode(false);
+    return true;
   }
   if(stopMeshMode(true))setUiMode(UiMode::Home);
   return true;
@@ -52,13 +62,20 @@ bool meshBlocksMode(UiMode mode) {
   }
 }
 
-bool meshStartIsBusy() {
-  return radioBusy() || gBootBackgroundActive || gRecording || gSubmitting || gThinking || gPlaybackActive ||
-    gTransferUiActive || gOtaApplyInProgress || gInboxHttpBusy || gVoiceDialBusy ||
-    gVoiceReplySpeechBusy || !gQueuedVoiceReplySpeech.isEmpty() ||
-    gRealtimeActive || gRealtimeDialBusy || gRealtimeExclusiveMode || gPendingRealtimeStart ||
-    gTextTurnTaskHandle || gCompletedTextTurn || !gPendingTextTurns.empty() ||
-    !gActiveTextTurn.isEmpty() || gG0VoicePending || gVoiceCapturePreparing;
+// What the radio can't start beside, and what to say. A background check and the start-up services
+// finish by themselves, so a start waits for those (meshStartWaitsFor); the rest are things you're
+// doing, and Mesh says which to finish.
+bool meshStartWaitsFor() {return gInboxHttpBusy || gBootBackgroundActive;}
+const char* meshStartBlocker() {
+  if(radioBusy())return "Stop the radio or podcast first";
+  if(gOtaApplyInProgress || gTransferUiActive)return "Wait for the update to finish";
+  if(gRealtimeActive || gRealtimeDialBusy || gRealtimeExclusiveMode || gPendingRealtimeStart)return "End the voice chat first";
+  if(gRecording || gG0VoicePending || gVoiceCapturePreparing)return "Finish recording first";
+  if(gSubmitting || gThinking || gVoiceDialBusy || gVoiceReplySpeechBusy || !gQueuedVoiceReplySpeech.isEmpty() ||
+     gTextTurnTaskHandle || gCompletedTextTurn || !gPendingTextTurns.empty() || !gActiveTextTurn.isEmpty())
+    return "Wait for Claude's reply";
+  if(gPlaybackActive)return "Stop what's playing first";
+  return nullptr;
 }
 
 // Touch only P0; never reset the I2C bus, expander or the other seven pins.
@@ -152,7 +169,15 @@ void startMeshMode(s1_mesh::Use use) {
   if(gMeshBusOwned)return;
   // Each way it can't start says why, with the same knock.
   const auto refuse=[](const char* why){gMeshNotice=why;meshSound(s1_mesh::Sound::Nope);};
-  if(meshStartIsBusy()) {refuse("Finish current task first");return;}
+  if(const char* why=meshStartBlocker()) {gMeshStartWaiting=false;refuse(why);return;}
+  if(meshStartWaitsFor()) {
+    // Back from Home, an update check or the weather has often just begun. Waiting beats a refusal.
+    gMeshStartWaiting=true;gMeshStartWaitScan=use==s1_mesh::Use::Scan;gMeshStartWaitHelp=openHelp;
+    if(gInboxHttpBusy)gInboxCancelRequested=true;  // One not sent yet is dropped, and asked again later.
+    gMeshNotice="Finishing a background check";gMeshNoticeUntilMs=0;
+    return;
+  }
+  gMeshStartWaiting=false;
   if(!gCanvasSpriteActive) {refuse("Display buffer recovering");return;}
   if(ESP.getFreeHeap()<65536 || heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)<24576) {
     refuse("Not enough free RAM");return;
@@ -563,7 +588,17 @@ void meshOpenName() {
   if(!strcmp(gMeshNameInput,s1_mesh::kDefaultLongName))gMeshNameInput[0]=0;
 }
 
+// The start that was waiting, once nothing is in its way. Leaving Mesh drops it.
+void serviceMeshStartWait() {
+  if(!gMeshStartWaiting)return;
+  if(gUiMode!=UiMode::Mesh || gMeshBusOwned || gMeshSession) {gMeshStartWaiting=false;return;}
+  if(meshStartWaitsFor())return;
+  gMeshStartWaiting=false;gMeshOpenHelp=gMeshStartWaitHelp;
+  startMeshMode(gMeshStartWaitScan?s1_mesh::Use::Scan:s1_mesh::Use::Chat);
+}
+
 void meshOpenStartRow(MeshStartRow row) {
+  gMeshStartWaiting=false;  // Another row picked replaces a start that was waiting.
   gMeshStartRow=uint8_t(row);
   switch(row) {
     case MeshStartRow::Chat: startMeshMode(s1_mesh::Use::Chat);break;
@@ -585,8 +620,8 @@ bool handleMeshKey(char key,const Keyboard_Class::KeysState& keys) {
     const char arrow=meshArrow(key,keys,false);
     if(arrow==1 || arrow==2) {
       gMeshStartRow=uint8_t((gMeshStartRow+(arrow==1?kMeshStartRows-1:1))%kMeshStartRows);
-      // A notice from before gives way to what the row picked does.
-      if(gMeshNotice!="Radio off / SD unavailable")gMeshNotice="";
+      // A notice from before gives way to what the row picked does, unless a start is still waiting.
+      if(!gMeshStartWaiting && gMeshNotice!="Radio off / SD unavailable")gMeshNotice="";
       return true;
     }
     if(keys.enter || key=='\r' || key=='\n')meshOpenStartRow(MeshStartRow(gMeshStartRow%kMeshStartRows));

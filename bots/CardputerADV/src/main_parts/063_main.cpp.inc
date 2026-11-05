@@ -29,6 +29,7 @@ bool appAllowsBackgroundNetwork() {
     case UiMode::Podcasts: // Its TLS needs the heap whole.
     case UiMode::VlcRemote: // VLC explicitly polls; keep background TLS out.
     case UiMode::Nes: // The emulator owns RAM, audio and Wi-Fi until it exits.
+    case UiMode::Mesh: // Its radio can't start while a check is out, and a check can't run with the radio on.
     case UiMode::Sonar:
     case UiMode::RfidLab:
     case UiMode::NfcNotes:
