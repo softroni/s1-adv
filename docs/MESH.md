@@ -287,6 +287,17 @@ real spot is anywhere in that box, so it's within about 3 km of the one sent.
 Anyone near you hears the public channel, and radios with an internet link
 upload it, so the spot can end up on maps like meshmap.net.
 
+### Who Mesh heard
+
+While Mesh is open it notes the last eight radios it heard: the name each gave,
+its signal, how many hops it came over, and the spot it last shared, if it
+shared one. The Lab's **LoRa Cap GPS** has a page for them, with a map around
+you and how far and which way each one is (see
+[the Lab guide](LAB.md#the-gps-sky-and-mesh-pages)). The radio is off in the
+Lab, so it shows what Mesh heard, with how long ago. The list is only in
+memory: it's never saved, logged or sent to Claude, and it's gone when the
+Cardputer restarts.
+
 ## Your name
 
 N on the first screen edits the name other radios show for this Cardputer, up to

@@ -14,6 +14,7 @@ code = r'''
 #include "balloon.h"
 #include "lab.h"
 #include "lab_gps.h"
+#include "mesh_heard.h"
 #include "units.h"
 #include "launcher_icons.h"
 #include <algorithm>
@@ -103,6 +104,7 @@ struct Canvas {
   void fillCircle(int a, int b, int r, uint16_t c) { on(a - r, b - r); on(a + r, b + r); log("fcircle", {a, b, r}, c); }
   void drawCircle(int a, int b, int r, uint16_t c) { on(a - r, b - r); on(a + r, b + r); log("circle", {a, b, r}, c); }
   void drawLine(int a, int b, int e, int f, uint16_t c) { on(a, b); on(e, f); log("line", {a, b, e, f}, c); }
+  void fillTriangle(int a, int b, int e, int f, int g, int h, uint16_t c) { on(a, b); on(e, f); on(g, h); log("tri", {a, b, e, f, g, h}, c); }
   void fillArc(int a, int b, int r0, int r1, float s, float e, uint16_t c) { on(a - r1, b - r1); on(a + r1, b);
     assert(s >= 180 && e <= 360 && e > s); log("arc", {a, b, r0, r1, int(s), int(e)}, c); }
   bool shows(const std::string& s) const { for (const auto& t : text) if (t.find(s) != std::string::npos) return true; return false; }
@@ -499,7 +501,7 @@ void testDevices() {
   pickDevice(Dev::Gps); show("gps-silent"); assert(gCanvas.shows("Nothing from the GPS"));
   gpsLine("GNGGA,123519,4230.5000,N,07054.0000,W,1,08,0.9,180.0,M,0,M,,"); run(30); show("gps-searching"); assert(gCanvas.shows("SEARCHING") && gCanvas.shows("8"));
   gpsLine("GNRMC,123519,A,4230.5000,N,07054.0000,W,10.0,084.4,230394,,,A"); run(30); show("gps-fixed");
-  assert(gCanvas.shows("42.50833") && gCanvas.shows("-70.90000") && gCanvas.shows("11.5 mph"));
+  assert(gCanvas.shows("42.50833") && gCanvas.shows("-70.90000") && gCanvas.shows("11.5") && gCanvas.shows("mph"));
   assert(gLabInputs.get(Sig::Satellites).value == 8);
   esc();
 
@@ -1876,15 +1878,20 @@ void testGpsReadings() {
   key('s'); show("gps-no-fix"); assert(gCanvas.shows("No fix yet") && gNvs["labspot"]["lat"] == 4250833);
   run(2100); renderLabUi(); assert(gCanvas.shows("First fix can take minutes outdoors"));
   gpsLine("GNRMC,123524,A,4230.5000,N,07054.0000,W,0.0,,230394,,,A"); run(30);
-  gNvsWritable = false; key('s'); renderLabUi(); assert(gCanvas.shows("Couldn't save") && gLabSpot.latE5 == 4250833); gNvsWritable = true;
+  gNvsWritable = false; key('s'); renderLabUi(); assert(gCanvas.shows("Can't save") && gLabSpot.latE5 == 4250833); gNvsWritable = true;
   // The guide's picture: moving north, 111 m from the spot.
   gpsLine("GNRMC,123525,A,4230.5000,N,07054.0000,W,10.0,000.0,230394,,,A"); key('s'); run(2100);
   gpsLine("GNGGA,123526,4230.5600,N,07054.0000,W,1,08,0.9,180.0,M,0,M,,");
   gpsLine("GNRMC,123526,A,4230.5600,N,07054.0000,W,10.0,000.0,230394,,,A"); run(30); show("doc-gps");
-  assert(gCanvas.shows("364 ft") && gCanvas.shows("0` N") && gCanvas.shows("11.5 mph"));
+  assert(gCanvas.shows("364 ft S") && gCanvas.shows("0` N") && gCanvas.shows("11.5") && gCanvas.shows("mph"));
+  assert(gCanvas.shows("591 ft") && gCanvas.shows("SATELLITES"));
+  // The needle points the way it's going, and the amber dot on the rim the way to the spot: south.
+  { bool needle = false, spot = false;
+    for (const auto& op : gOps) { needle |= op.rfind("tri 40 40 ", 0) == 0; spot |= op.rfind("fcircle 40 89 4 ", 0) == 0; }
+    assert(needle && spot); }
   // Metric shows the same readings as they're kept.
   gShownUnits = units::System::Metric; renderLabUi();
-  assert(gCanvas.shows("111 m") && gCanvas.shows("18.5 km/h")); gShownUnits = units::System::US;
+  assert(gCanvas.shows("111 m S") && gCanvas.shows("18.5") && gCanvas.shows("km/h") && gCanvas.shows("180 m")); gShownUnits = units::System::US;
   esc();
   // Speed from another screen opens the GPS for it, and like tilt leaves the port alone.
   { onceOnGrove(); const int opens = gAirSensor.opens, bus = gUnits.commands; Serial1.open = false;
@@ -1906,12 +1913,93 @@ void testGpsReadings() {
   gpsHold(kGpsForMesh); gpsHold(kGpsForPulse); gpsRelease(kGpsForPulse); assert(Serial1.open && gGpsHolders == kGpsForMesh);
   gpsRelease(kGpsForMesh); assert(!Serial1.open && !gGpsHolders);
 }
+// The GPS's other pages: the sky, and the radios Mesh heard around you. They run after everything
+// else for the same reason as the readings above.
+// Whether something was drawn whose log line starts with `start` and ends with `end`.
+bool drawn(const std::string& start, const std::string& end) {
+  for (const auto& op : gOps) {
+    if (op.rfind(start, 0) == 0 && op.size() >= end.size() && op.compare(op.size() - end.size(), end.size(), end) == 0) return true;
+  }
+  return false;
+}
+void meshHeardAt(uint32_t id, const char* name, uint32_t agoMs, int16_t rssi, uint8_t hops, bool contact,
+                 int32_t latE5 = 0, int32_t lonE5 = 0, uint8_t bits = 0) {
+  s1_mesh::HeardNode* node = gMeshHeard.hear(id, nowMs - agoMs);
+  assert(node);
+  std::strncpy(node->name, name, sizeof(node->name) - 1);
+  node->rssi = rssi; node->hops = hops; node->contact = contact;
+  node->latE5 = latE5; node->lonE5 = lonE5; node->precisionBits = bits;
+}
+void gpsSky() {
+  gpsLine("GNGGA,123519,4230.5000,N,07054.0000,W,1,08,0.9,180.0,M,0,M,,");
+  gpsLine("GNRMC,123519,A,4230.5000,N,07054.0000,W,0.0,,230394,,,A");
+  gpsLine("GPGSV,3,1,10,02,70,045,42,05,45,120,38,12,30,300,31,15,10,200,22");
+  gpsLine("GPGSV,3,2,10,18,05,090,,20,55,250,45,25,20,010,28,29,80,180,40");
+  gpsLine("GPGSV,3,3,10,31,15,330,17,32,,,");
+  gpsLine("BDGSV,1,1,02,07,60,100,36,10,35,220,29,1");
+}
+void testGpsPages() {
+  setUiMode(UiMode::LabDevices); run(1500); gLabUi.devRow = 0; pickDevice(Dev::Gps);
+  // With nothing from the GPS, the pages still turn, and the mesh page still works.
+  renderLabUi(); assert(gLabUi.page == 0 && gCanvas.shows("Nothing from the GPS") && gCanvas.shows("The last page shows who Mesh heard."));
+  key(RIGHT); show("gps-sky-silent"); assert(gLabUi.page == 1 && gCanvas.shows("NO DATA") && gCanvas.shows("No GPS data"));
+  key(RIGHT); show("gps-mesh-empty"); assert(gLabUi.page == 2 && gCanvas.shows("Nobody yet") && gCanvas.shows("MESH") && gCanvas.shows("No GPS fix"));
+  key(RIGHT); assert(gLabUi.page == 0); key(LEFT); assert(gLabUi.page == 2); key('n'); assert(gLabUi.page == 0);
+  // Searching, the sky page is where to look: what it hears, and how strongly.
+  gpsLine("GNGGA,123519,,,,,0,00,,,M,,M,,"); gpsLine("GNRMC,123519,V,,,,,,,230394,,,N");
+  gpsLine("GPGSV,1,1,03,02,70,045,24,05,45,120,,12,30,300,16"); run(30); show("gps-searching-sky");
+  assert(gCanvas.shows("SEARCHING") && gCanvas.shows("3") && gCanvas.shows("heard") && gCanvas.shows("No fix"));
+  key(RIGHT); renderLabUi(); assert(gCanvas.shows("3 IN VIEW") && gCanvas.shows("0 of 3") && gCanvas.shows("no fix"));
+  // With a fix: twelve satellites on two systems, the strongest seven as bars, strongest first.
+  gpsSky(); run(30); show("doc-gps-sky");
+  assert(gCanvas.shows("12 IN VIEW") && gCanvas.shows("8 of 12") && gCanvas.shows("excellent"));
+  assert(gCanvas.shows("G20") && gCanvas.shows("45") && gCanvas.shows("C7") && !gCanvas.shows("C10") && !gCanvas.shows("G18"));
+  { std::vector<std::string> bars; for (const auto& op : gOps) if (op.rfind("text 0 ", 0) == 0 && op.find(" 112 ") != std::string::npos) bars.push_back(op.substr(op.rfind(' ') + 1));
+    assert((bars == std::vector<std::string>{"G20", "G2", "G29", "G5", "C7", "G12"})); }
+  // Satellites that stop being reported leave, and so does the GPS if it goes quiet.
+  run(3100); renderLabUi(); assert(gCanvas.shows("NO DATA"));
+  gpsLine("GNGGA,123530,,,,,0,00,,,M,,M,,"); gpsLine("GNRMC,123530,V,,,,,,,230394,,,N"); run(2100); renderLabUi();
+  assert(gCanvas.shows("0 IN VIEW") && gCanvas.shows("None yet") && gCanvas.shows("Take it outside, away"));
+  // A fix with no list of satellites says so, rather than to go outside.
+  gpsLine("GNGGA,123531,4230.5000,N,07054.0000,W,1,08,0.9,180.0,M,0,M,,"); gpsLine("GNRMC,123531,A,4230.5000,N,07054.0000,W,0.0,,230394,,,A");
+  run(30); renderLabUi(); assert(gCanvas.shows("No list yet") && gCanvas.shows("8") && !gCanvas.shows("8 of"));
+  // The mesh page: who Mesh heard, newest first, and where the ones that shared a spot are.
+  gpsSky(); run(30); key(RIGHT); assert(gLabUi.page == 2);
+  meshHeardAt(0x1234abcd, "Hilltop Relay", 120000, -96, 0, false, 4251596, -7088966, 32);  // 1.2 km NE.
+  meshHeardAt(0x0badf00d, "Sam", 30000, -110, 2, true, 4250833, -7094897, 13);             // 4 km W, rounded.
+  meshHeardAt(0xdeadbeef, "\xF0\x9F\x90\x99", 3 * 3600000, -88, s1_mesh::kHopsUnknown, false);  // Never said where.
+  meshHeardAt(0x00c0ffee, "Base", 300000, -60, 0, false, 4250788, -7090000, 32);            // 50 m S.
+  meshHeardAt(0x11111111, "Far Node With A Long Name", 600000, -120, 3, false, 4294250, -7090000, 32);  // 30 mi N.
+  show("doc-gps-mesh");
+  assert(gCanvas.shows("5 HEARD") && gCanvas.shows("Sam") && gCanvas.shows("Hilltop Relay") && gCanvas.shows("Base"));
+  assert(gCanvas.shows("~2.5 mi W") && gCanvas.shows("0.7 mi NE") && gCanvas.shows("164 ft S"));
+  // The map zooms to the one picked, Sam, and the one past its edge sits on the rim to the north.
+  assert(drawn("text 0 2 113 ", "5 mi") && drawn("fcircle 50 24 2 ", ""));
+  assert(gCanvas.shows("now") && gCanvas.shows("2 min") && gCanvas.shows("5 min") && gCanvas.shows("10 min") && !gCanvas.shows("!beef"));
+  // Up and down pick, and the list scrolls to the one that never shared a spot.
+  for (int i = 0; i < 4; ++i) key(DOWN);
+  show("gps-mesh-scrolled"); assert(gLabPlay.meshRow == 4 && gCanvas.shows("!beef") && gCanvas.shows("-88 dBm") && gCanvas.shows("3 h"));
+  assert(drawn("text 0 2 113 ", "50 mi"));  // It never said where, so the map holds everyone.
+  key(DOWN); assert(gLabPlay.meshRow == 0); key(UP); assert(gLabPlay.meshRow == 4); key(DOWN); renderLabUi(); assert(gLabPlay.meshRow == 0 && gLabPlay.meshTop == 0);
+  // S only saves the spot on the first page, where it says so.
+  { const int32_t lat = gNvs["labspot"]["lat"]; gpsLine("GNRMC,123531,A,4240.0000,N,07054.0000,W,0.0,,230394,,,A"); run(30);
+    key('s'); assert(gNvs["labspot"]["lat"] == lat); gpsSky(); run(30); }
+  // Without a fix there are no distances, only how each was heard.
+  gpsLine("GNRMC,123532,V,,,,,,,230394,,,N"); run(30); renderLabUi();
+  assert(gCanvas.shows("No GPS fix") && gCanvas.shows("-110 dBm  2 hops") && gCanvas.shows("-96 dBm  direct") && !gCanvas.shows("mi W") && !gCanvas.shows("mi NE"));
+  gpsSky(); run(30);
+  gShownUnits = units::System::Metric; renderLabUi(); assert(gCanvas.shows("~4.0 km W") && drawn("text 0 2 113 ", "5 km")); gShownUnits = units::System::US;
+  // M opens Mesh, from any page.
+  key('m'); assert(gUiMode == UiMode::Mesh && !gLabOpen);
+  setUiMode(UiMode::LabDevices); run(100);
+  gMeshHeard = s1_mesh::Heard{};
+}
 int main(int argc, char** argv) {
   if (argc > 1) gDump = std::fopen(argv[1], "w");
   for (bool& live : gLabHistoryLive) live = false;
-  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testGuidePictures(); testSequences(); testChat(); testOnce(); testPlayFromChat(); setUiMode(UiMode::LabRules); run(1500); testGuards(); testLedPower(); testStickLearn(); testGpsReadings();
+  testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testGuidePictures(); testSequences(); testChat(); testOnce(); testPlayFromChat(); setUiMode(UiMode::LabRules); run(1500); testGuards(); testLedPower(); testStickLearn(); testGpsReadings(); testGpsPages();
   if (gDump) std::fclose(gDump);
-  std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, sequences on their own and from a rule, what the chat can see and offer, one check from the chat, a sequence played from the chat, the lamp and AC guards, units leaving and returning, saving and damage, the LED waiting for full screen light, learning which way the joystick is held, GPS speed, heading and distance from a saved spot, and every screen stays on the display");
+  std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, sequences on their own and from a rule, what the chat can see and offer, one check from the chat, a sequence played from the chat, the lamp and AC guards, units leaving and returning, saving and damage, the LED waiting for full screen light, learning which way the joystick is held, GPS speed, heading and distance from a saved spot, the sky and the radios Mesh heard, and every screen stays on the display");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-lab-ui-') as directory:

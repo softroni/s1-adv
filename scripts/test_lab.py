@@ -148,6 +148,50 @@ void testGps(){
   assert(lab_gps::metersBetween(0,17999950,0,-17999950)==111);  // The short way, across the date line.
   assert(lab_gps::metersBetween(4250833,-7090000,4300000,-7090000)==lab_gps::kFarMeters);
   assert(lab_gps::metersBetween(-9000000,-18000000,9000000,18000000)==lab_gps::kFarMeters);
+  assert(lab_gps::metersApart(4250833,-7090000,4300000,-7090000)==54671);  // Past the cap, for Mesh's map.
+  // Which way, from north clockwise, and the eight points it's named by.
+  assert(lab_gps::bearingDeg(4250833,-7090000,4250933,-7090000)==0&&lab_gps::bearingDeg(4250833,-7090000,4250833,-7089900)==90);
+  assert(lab_gps::bearingDeg(4250833,-7090000,4250733,-7090000)==180&&lab_gps::bearingDeg(4250833,-7090000,4250833,-7090100)==270);
+  assert(lab_gps::bearingDeg(0,0,100,100)==45&&lab_gps::bearingDeg(0,17999950,0,-17999950)==90&&lab_gps::bearingDeg(5,5,5,5)==-1);
+  assert(!strcmp(lab_gps::compassPoint(0),"N")&&!strcmp(lab_gps::compassPoint(22),"N")&&!strcmp(lab_gps::compassPoint(23),"NE")&&
+         !strcmp(lab_gps::compassPoint(359),"N")&&!strcmp(lab_gps::compassPoint(200),"S")&&!strcmp(lab_gps::compassPoint(-1),""));
+  // Quality from GGA: how well spread the satellites are, and the height, only with a fix.
+  lab_gps::Parser g;line(g,"GNGGA,123519,4230.5000,N,07054.0000,W,1,08,0.9,180.4,M,0,M,,");
+  assert(g.fix.hdopE1==9&&g.fix.hasAltitude&&g.fix.altitudeDm==1804&&!strcmp(lab_gps::spreadWord(g.fix.hdopE1),"excellent"));
+  line(g,"GNGGA,123519,4230.5000,N,07054.0000,W,1,05,3.2,-12.5,M,0,M,,");
+  assert(g.fix.hdopE1==32&&g.fix.altitudeDm==-125&&!strcmp(lab_gps::spreadWord(32),"fair"));
+  line(g,"GNGGA,123520,,,,,0,03,99.9,,M,,M,,");assert(g.fix.hdopE1==0&&!g.fix.hasAltitude&&g.fix.satellites==3);
+  line(g,"GNGGA,123520,4230.5000,N,07054.0000,W,1,05,x,1e9,M,0,M,,");assert(g.fix.hdopE1==0&&!g.fix.hasAltitude);
+  assert(!strcmp(lab_gps::spreadWord(0),"")&&!strcmp(lab_gps::spreadWord(20),"good")&&!strcmp(lab_gps::spreadWord(51),"poor"));
+  // The sky from GSV: each satellite's place and signal, in any order, from every system.
+  lab_gps::Parser k;assert(!k.inView(0));
+  line(k,"GPGSV,3,1,10,02,70,045,42,05,45,120,38,12,30,300,31,15,10,200,22",100);
+  line(k,"GPGSV,3,2,10,18,05,090,,20,55,250,45,25,20,010,28,29,80,180,40",100);
+  line(k,"GPGSV,3,3,10,31,15,330,17,32,,,",100);
+  line(k,"BDGSV,1,1,02,07,60,100,36,10,35,220,29,1",100);  // NMEA 4.10 puts a signal number last.
+  assert(k.inView(100)==12&&k.tracked(100)==10&&k.lines==4);
+  int found=0;
+  for(const auto& s:k.sky){
+    if(!k.current(s,100))continue;
+    ++found;
+    if(s.system=='P'&&s.prn==20)assert(s.elevation==55&&s.azimuth==250&&s.snr==45);
+    if(s.system=='P'&&s.prn==32)assert(s.elevation==-1&&s.azimuth==-1&&s.snr==0);
+    if(s.system=='B'&&s.prn==7)assert(s.elevation==60&&s.azimuth==100&&s.snr==36);
+    assert(!(s.system=='B'&&s.prn==1));  // The signal number isn't a satellite.
+  }
+  assert(found==12);
+  // A satellite heard again keeps its slot, and one that stops being reported goes after 5 s.
+  line(k,"GPGSV,1,1,01,20,56,251,47",4000);assert(k.inView(4000)==12&&k.inView(5100)==1&&k.inView(9000)==0);
+  for(const auto& s:k.sky)if(s.system=='P'&&s.prn==20)assert(s.elevation==56&&s.snr==47&&s.seenMs==4000);
+  // More satellites than slots: the stalest make room, and nonsense fields are left out.
+  lab_gps::Parser full;
+  for(int i=0;i<10;++i){char gsv[96];std::snprintf(gsv,sizeof(gsv),"GLGSV,1,1,04,%d,10,10,20,%d,20,20,30,%d,30,30,,%d,40,40,25",
+                                                   i*4+65,i*4+66,i*4+67,i*4+68);line(full,gsv,1000+uint32_t(i));}
+  assert(full.inView(1100)==lab_gps::kSkySatellites);
+  for(const auto& s:full.sky)assert(s.prn>=65+16);
+  line(full,"GAGSV,1,1,03,0,10,10,20,300,10,10,20,x,1,1,1",2000);
+  line(full,"GAGSV,1,1,02,11,95,400,120,12,-5,-1,-3",2000);
+  for(const auto& s:full.sky)if(s.system=='A'){assert(s.prn==11||s.prn==12);assert(s.elevation==-1&&s.azimuth==-1&&s.snr==0);}
   // Every new reading is the GPS's, and needs no port.
   for(Sig g:{Sig::Satellites,Sig::Speed,Sig::Heading,Sig::SpotDistance})assert(fromGps(g)&&onCardputer(g));
   assert(!fromGps(Sig::Tilt)&&onCardputer(Sig::Tilt)&&!fromGps(Sig::Spoken)&&!onCardputer(Sig::Distance));

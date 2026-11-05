@@ -44,6 +44,8 @@ struct LabPlay {
   uint32_t tickMs = 0;
   // Piano.
   int note = -1;
+  // GPS: which radio Mesh heard is picked.
+  int meshRow = 0, meshTop = 0;
 } gLabPlay;
 
 uint32_t gLabDice = 1;
@@ -61,6 +63,8 @@ bool labArrowsTurnPages(Dev dev) { return dev != Dev::Servo; }
 int labDevPages(Dev dev) {
   switch (dev) {
     case Dev::Ultrasonic: case Dev::Env: case Dev::Joystick: case Dev::Knob: case Dev::Light: case Dev::Motion: case Dev::Tilt:
+      return 3;
+    case Dev::Gps:
       return 3;
     case Dev::Servo: case Dev::Speaker:
       return 2;
@@ -527,6 +531,217 @@ void renderLabPiano() {
   labKeys(labPageKeys("1 to 8 play  ESC out"));
 }
 
+// --- GPS: the sky, and the mesh around you ---------------------------------------------------
+constexpr int kLabPlotX = 50, kLabPlotY = 70, kLabPlotR = 46;
+constexpr int kLabPlotLeft = 104;   // Where the words beside a plot start.
+constexpr int kLabSkyBars = 6, kLabSkyStride = 22, kLabSkyBase = 109, kLabSkyTall = 42, kLabSkyFull = 50;
+constexpr int kLabMeshRows = 4, kLabMeshRowH = 25;
+constexpr uint16_t kLabMesh = rgb565_local(103, 234, 148);  // Meshtastic's green, as Mesh uses it.
+
+// 35 dB-Hz and up is what a clear sky gives. Under 15, a fix can't use it.
+uint16_t labSignalColor(uint8_t snr) {
+  return snr >= 35 ? kLabGreen : snr >= 25 ? kLabLime : snr >= 15 ? kLabAmber : snr ? kLabRed : kLabMuted;
+}
+// The letter each system goes by: G GPS, R GLONASS, E Galileo, C BeiDou, J QZSS.
+char labSystemLetter(char talker) {
+  switch (talker) {
+    case 'P': return 'G';
+    case 'L': return 'R';
+    case 'A': return 'E';
+    case 'B': case 'D': return 'C';
+    case 'Q': return 'J';
+    default: return talker;
+  }
+}
+// Every satellite it reports, placed by where it is in the sky: the rim is the horizon and the
+// middle is straight up. The bars are the strongest signals, which is what to watch while finding
+// a spot with a clear view.
+void renderLabGpsSky() {
+  auto& d = gCanvas;
+  const uint32_t now = millis();
+  const bool hearing = gLabGps.hearing(now);
+  const lab_gps::Fix& fix = gLabGps.fix;
+  const int inView = gLabGps.inView(now);
+  labDrawHeadFor(Dev::Gps, hearing ? kLabLime : kLabRed, hearing ? String(inView) + " IN VIEW" : String("NO DATA"),
+                 hearing ? kLabSoft : kLabRed);
+  labDrawDisc(kLabPlotX, kLabPlotY, kLabPlotR);
+  const lab_gps::Satellite* bars[kLabSkyBars] = {};
+  int barCount = 0;
+  for (const lab_gps::Satellite& sat : gLabGps.sky) {
+    if (!gLabGps.current(sat, now)) continue;
+    if (sat.elevation >= 0 && sat.azimuth >= 0) {
+      int x = 0, y = 0;
+      labDialPoint(kLabPlotX, kLabPlotY, kLabPlotR * (90 - sat.elevation) / 90.0f, sat.azimuth, x, y);
+      if (sat.snr) d.fillCircle(x, y, 3, labSignalColor(sat.snr));
+      else d.drawCircle(x, y, 3, kLabMuted);
+    }
+    // The strongest few, strongest first.
+    int at = barCount < kLabSkyBars ? barCount++ : kLabSkyBars;
+    while (at > 0 && bars[at - 1]->snr < sat.snr) {
+      if (at < kLabSkyBars) bars[at] = bars[at - 1];
+      --at;
+    }
+    if (at < kLabSkyBars) bars[at] = &sat;
+  }
+  if (!hearing) {
+    labTextAt(&fonts::FreeSansBold9pt7b, kLabPlotLeft, 24, "No GPS data", TFT_WHITE);
+    labTextAt(&fonts::Font0, kLabPlotLeft, 50, "Check the Cap and its", kLabSoft);
+    labTextAt(&fonts::Font0, kLabPlotLeft, 60, "antenna are fitted.", kLabSoft);
+    labKeys(labPageKeys("ESC back"));
+    return;
+  }
+  labStat(kLabPlotLeft, 23, "IN USE", String(fix.satellites) + (inView ? String(" of ") + String(inView) : String("")));
+  labStat(172, 23, "ACCURACY", fix.valid && fix.hdopE1 ? String(lab_gps::spreadWord(fix.hdopE1)) : String("no fix"),
+          fix.valid && fix.hdopE1 ? (fix.hdopE1 <= 20 ? kLabGreen : kLabAmber) : kLabMuted);
+  if (!barCount) {
+    // Some GPS modules only send the list of satellites now and then, or not at all.
+    const bool listless = fix.satellites > 0;
+    labTextAt(&fonts::FreeSansBold9pt7b, kLabPlotLeft, 56, listless ? "No list yet" : "None yet", TFT_WHITE);
+    labTextAt(&fonts::Font0, kLabPlotLeft, 80, listless ? "The GPS hasn't said" : "Take it outside, away", kLabSoft);
+    labTextAt(&fonts::Font0, kLabPlotLeft, 90, listless ? "which ones it sees." : "from walls and roofs.", kLabSoft);
+    labKeys(labPageKeys("ESC back"));
+    return;
+  }
+  d.drawFastHLine(kLabPlotLeft, kLabSkyBase, 236 - kLabPlotLeft, kLabDim);
+  for (int i = 0; i < barCount; ++i) {
+    const lab_gps::Satellite& sat = *bars[i];
+    const int x = kLabPlotLeft + 3 + i * kLabSkyStride;
+    const int height = sat.snr ? lab::clampTo(sat.snr * kLabSkyTall / kLabSkyFull, 3, kLabSkyTall) : 2;
+    d.fillRect(x, kLabSkyBase - height, 16, height, sat.snr ? labSignalColor(sat.snr) : kLabDim);
+    if (sat.snr) labTextCenter(&fonts::Font0, x + 8, kLabSkyBase - height - 9, String(sat.snr), kLabSoft);
+    char name[8];
+    snprintf(name, sizeof(name), "%c%u", labSystemLetter(sat.system), static_cast<unsigned>(sat.prn));
+    labTextCenter(&fonts::Font0, x + 8, kLabSkyBase + 3, name, kLabMuted);
+  }
+  labKeys(labPageKeys("Green is strong  ESC back"));
+}
+
+// How long ago, in as few letters as reads clearly.
+String labAgoText(uint32_t ms) {
+  const uint32_t seconds = ms / 1000;
+  if (seconds < 60) return "now";
+  if (seconds < 3600) return String(seconds / 60) + " min";
+  if (seconds < 48 * 3600) return String(seconds / 3600) + " h";
+  return String(seconds / 86400) + " d";
+}
+// The outer ring's distance: a round number in the owner's units that holds the furthest radio.
+struct LabScale { int32_t meters; const char* text; };
+constexpr LabScale kLabUsScales[] = {{152, "500 ft"}, {805, "0.5 mi"}, {1609, "1 mi"}, {3219, "2 mi"}, {8047, "5 mi"},
+                                     {16093, "10 mi"}, {32187, "20 mi"}, {80467, "50 mi"}, {160934, "100 mi"}, {321869, "200 mi"}};
+constexpr LabScale kLabMetricScales[] = {{100, "100 m"}, {200, "200 m"}, {500, "500 m"}, {1000, "1 km"}, {2000, "2 km"},
+                                         {5000, "5 km"}, {10000, "10 km"}, {20000, "20 km"}, {50000, "50 km"},
+                                         {100000, "100 km"}, {200000, "200 km"}};
+const LabScale& labMeshScale(int32_t furthest) {
+  const bool us = displayUnits() == units::System::US;
+  const LabScale* scales = us ? kLabUsScales : kLabMetricScales;
+  const int count = us ? int(sizeof(kLabUsScales) / sizeof(LabScale)) : int(sizeof(kLabMetricScales) / sizeof(LabScale));
+  // A tenth to spare, so the furthest isn't on the rim.
+  for (int i = 0; i < count; ++i) {
+    if (furthest + furthest / 10 <= scales[i].meters) return scales[i];
+  }
+  return scales[count - 1];
+}
+// The second line of a radio's row: where it is from here if it said, and how it was heard.
+String labMeshDetail(const s1_mesh::HeardNode& node, bool fixed, const lab_gps::Fix& fix) {
+  String signal = String(node.rssi) + " dBm";
+  if (node.hops == 0) signal = signal + "  direct";
+  else if (node.hops != s1_mesh::kHopsUnknown) signal = signal + "  " + String(node.hops) + (node.hops == 1 ? " hop" : " hops");
+  if (!node.placed() || !fixed) return signal;
+  const int32_t m = lab_gps::metersApart(fix.latE5, fix.lonE5, node.latE5, node.lonE5);
+  char text[24];
+  units::distanceText(text, sizeof(text), m, displayUnits());
+  const int bearing = lab_gps::bearingDeg(fix.latE5, fix.lonE5, node.latE5, node.lonE5);
+  String where = String(node.rough() ? "~" : "") + text;
+  if (bearing >= 0 && m >= 10) where = where + " " + lab_gps::compassPoint(bearing);
+  return where + "  " + String(node.rssi) + " dBm";
+}
+// The radios Mesh heard while it was open, around you on a map. The radio is off here, because it
+// shares its wires with the SD card the Lab writes to, so this is what Mesh last heard. The map
+// zooms to the radio picked in the list, so a far one doesn't squash the near ones into the middle,
+// and anything beyond its edge sits on the rim, the way it lies.
+void renderLabGpsMesh() {
+  auto& d = gCanvas;
+  LabPlay& p = gLabPlay;
+  const uint32_t now = millis();
+  const lab_gps::Fix& fix = gLabGps.fix;
+  const bool fixed = gLabGps.hearing(now) && fix.valid;
+  const s1_mesh::HeardNode* nodes[s1_mesh::kHeardNodes] = {};
+  const int count = static_cast<int>(gMeshHeard.newestFirst(nodes, s1_mesh::kHeardNodes));
+  p.meshRow = lab::clampTo(p.meshRow, 0, max(count - 1, 0));
+  labDrawHeadFor(Dev::Gps, kLabLime, count ? String(count) + " HEARD" : String("MESH"), count ? kLabMesh : kLabSoft);
+  labDrawDisc(kLabPlotX, kLabPlotY, kLabPlotR);
+  if (fixed) {
+    int32_t reach = 0;
+    if (count && nodes[p.meshRow]->placed()) {
+      reach = lab_gps::metersApart(fix.latE5, fix.lonE5, nodes[p.meshRow]->latE5, nodes[p.meshRow]->lonE5);
+    } else {
+      for (int i = 0; i < count; ++i) {
+        if (nodes[i]->placed()) reach = max(reach, lab_gps::metersApart(fix.latE5, fix.lonE5, nodes[i]->latE5, nodes[i]->lonE5));
+      }
+    }
+    const LabScale& scale = labMeshScale(reach);
+    // The picked one last, so its ring sits on top.
+    for (int pass = 0; pass < 2; ++pass) {
+      for (int i = 0; i < count; ++i) {
+        const s1_mesh::HeardNode& node = *nodes[i];
+        if (!node.placed() || (i == p.meshRow) != (pass == 1)) continue;
+        const int32_t m = lab_gps::metersApart(fix.latE5, fix.lonE5, node.latE5, node.lonE5);
+        const int bearing = lab_gps::bearingDeg(fix.latE5, fix.lonE5, node.latE5, node.lonE5);
+        const bool beyond = m > scale.meters;
+        const float out = beyond ? kLabPlotR : static_cast<float>(m) / scale.meters * (kLabPlotR - 5);
+        int x = 0, y = 0;
+        labDialPoint(kLabPlotX, kLabPlotY, out, bearing < 0 ? 0 : bearing, x, y);
+        const uint16_t color = node.contact ? kLabAmber : kLabMesh;
+        // A rounded position is somewhere in a box, so it's drawn open rather than as a point.
+        if (beyond) d.fillCircle(x, y, 2, color);
+        else if (node.rough()) d.drawCircle(x, y, 3, color);
+        else d.fillCircle(x, y, 3, color);
+        if (pass == 1) d.drawCircle(x, y, 6, TFT_WHITE);
+      }
+    }
+    d.fillCircle(kLabPlotX, kLabPlotY, 3, TFT_WHITE);
+    if (fix.moving()) {
+      int x = 0, y = 0;
+      labDialPoint(kLabPlotX, kLabPlotY, 10, fix.courseDeg, x, y);
+      d.drawLine(kLabPlotX, kLabPlotY, x, y, TFT_WHITE);
+    }
+    labTextAt(&fonts::Font0, 2, 113, scale.text, kLabSoft);
+  } else {
+    d.fillCircle(kLabPlotX, kLabPlotY, 3, kLabMuted);
+    labTextCenter(&fonts::Font0, kLabPlotX, kLabPlotY + 8, "No GPS fix", kLabMuted);
+  }
+  if (!count) {
+    labTextAt(&fonts::FreeSansBold9pt7b, kLabPlotLeft, 22, "Nobody yet", TFT_WHITE);
+    static constexpr const char* kLines[] = {"Leave Mesh open to", "listen. Radios it", "hears show here, and",
+                                             "the ones sharing", "where they are go", "on this map."};
+    for (int i = 0; i < 6; ++i) labTextAt(&fonts::Font0, kLabPlotLeft, 46 + i * 11, kLines[i], kLabSoft);
+    labKeys(labPageKeys("M open Mesh  ESC back"));
+    return;
+  }
+  labKeepRowShown(p.meshRow, p.meshTop, kLabMeshRows);
+  const int right = count > kLabMeshRows ? 233 : 236;
+  for (int row = 0; row < kLabMeshRows && p.meshTop + row < count; ++row) {
+    const int i = p.meshTop + row;
+    const s1_mesh::HeardNode& node = *nodes[i];
+    const int y = 21 + row * kLabMeshRowH;
+    if (i == p.meshRow) d.fillRoundRect(kLabPlotLeft - 4, y, right - kLabPlotLeft + 4, kLabMeshRowH - 1, 5, kLabPanel);
+    char name[32];
+    s1_mesh::shownName(node, name, sizeof(name));
+    const String ago = labAgoText(now - node.seenMs);
+    gCanvas.setFont(&fonts::Font0);
+    const int agoWidth = gCanvas.textWidth(ago);
+    gCanvas.setFont(&fonts::Font2);
+    labTextAt(&fonts::Font2, kLabPlotLeft, y, fitCurrentFontToWidth(name, right - 3 - kLabPlotLeft - agoWidth - 4),
+              node.contact ? kLabAmber : TFT_WHITE);
+    labTextRight(&fonts::Font0, right - 3, y + 4, ago, kLabMuted);
+    gCanvas.setFont(&fonts::Font0);
+    labTextAt(&fonts::Font0, kLabPlotLeft, y + 15, fitCurrentFontToWidth(labMeshDetail(node, fixed, fix), right - 3 - kLabPlotLeft),
+              node.placed() && fixed ? kLabMesh : kLabSoft);
+  }
+  labScrollBar(p.meshTop, kLabMeshRows, count, 21, kLabMeshRows * kLabMeshRowH - 1);
+  labKeys(labPageKeys(count > 1 ? (String(kLabArrowUpDown) + " pick  M open Mesh").c_str() : "M open Mesh  ESC back"));
+}
+
 // --- Stepping and keys ------------------------------------------------------------------------
 void serviceLabPage(uint32_t now) {
   LabPlay& p = gLabPlay;
@@ -575,6 +790,11 @@ bool labPageKey(Dev dev, char key, char lower, bool left, bool right, bool up, b
     }
     return true;
   }
+  if (dev == Dev::Gps && page == 2 && (up || down)) {
+    const int count = static_cast<int>(gMeshHeard.count);
+    if (count) p.meshRow = (p.meshRow + (up ? count - 1 : 1)) % count;
+    return true;
+  }
   if (dev == Dev::Speaker && page == 1) {
     if (key >= '1' && key < '1' + kLabPianoKeys) {
       p.note = key - '1';
@@ -594,6 +814,7 @@ void renderLabPage(Dev dev, int page) {
     case Dev::Motion: if (page == 1) renderLabGuard(); else renderLabGraphPage(dev); break;
     case Dev::Tilt: if (page == 1) renderLabLevel(); else renderLabRoll(); break;
     case Dev::Servo: renderLabMoves(); break;
+    case Dev::Gps: if (page == 1) renderLabGpsSky(); else renderLabGpsMesh(); break;
     default: renderLabPiano(); break;
   }
 }

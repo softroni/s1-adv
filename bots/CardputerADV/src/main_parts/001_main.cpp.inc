@@ -91,6 +91,7 @@
 #include "podcast_player.h"
 #include "vlc_remote.h"
 #include "mesh_cap_radio.h"
+#include "mesh_heard.h"
 #include "mesh_sounds.h"
 #include <pb_decode.h>
 #include <generated/meshtastic/leafdata.pb.h>
@@ -125,7 +126,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.303-dev"
+#define APP_VERSION "0.2.304-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"

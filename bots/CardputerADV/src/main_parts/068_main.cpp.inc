@@ -385,6 +385,22 @@ void meshHandlePacket(const libmeshtastic_leaf::MeshPacket& packet) {
       if(s.contacts.rename(packet.header.from,node->name))meshSaveContacts(s.contacts);
     }
   }
+  // Who was heard, how well, and where they said they were, for the Lab's GPS screen once Mesh has
+  // closed. It stays in memory only: a position is never logged or saved.
+  if(auto* heard=gMeshHeard.hear(packet.header.from,now)) {
+    heard->rssi=packet.rxRssi;
+    heard->snr=int8_t(lroundf(constrain(packet.rxSnr,-30.0f,30.0f)));
+    heard->hops=s1_mesh::hopsTaken(packet.header.getHopStart(),packet.header.getHopLimit());
+    const auto* contact=s.contacts.find(packet.header.from);
+    heard->contact=contact!=nullptr;
+    const char* name=node && node->name[0]?node->name:contact?contact->name:"";
+    if(name[0])s1_mesh::copyText(heard->name,sizeof(heard->name),reinterpret_cast<const uint8_t*>(name),strlen(name));
+    int32_t lat=0,lon=0;uint8_t bits=0;
+    if(packet.portNum==meshtastic_PortNum_POSITION_APP &&
+       s1_mesh::decodePosition(packet.payload,packet.payloadLen,lat,lon,bits)) {
+      heard->latE5=lat;heard->lonE5=lon;heard->precisionBits=bits;heard->placedMs=now;
+    }
+  }
   if(packet.portNum==meshtastic_PortNum_ROUTING_APP && packet.header.to==me && packet.requestId) {
     meshtastic_Routing routing=meshtastic_Routing_init_zero;
     auto stream=pb_istream_from_buffer(packet.payload,packet.payloadLen);

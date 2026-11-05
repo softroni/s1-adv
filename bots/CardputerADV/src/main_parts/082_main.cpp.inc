@@ -11,7 +11,7 @@ constexpr uint16_t kLabGreen = rgb565_local(0, 255, 85), kLabAmber = rgb565_loca
 constexpr uint16_t kLabRed = rgb565_local(255, 73, 85), kLabPanel = rgb565_local(36, 36, 85);
 constexpr uint16_t kLabPanel2 = rgb565_local(0, 36, 85), kLabDim = rgb565_local(73, 73, 85);
 constexpr uint16_t kLabMuted = rgb565_local(146, 146, 170), kLabSoft = rgb565_local(182, 182, 170);
-constexpr uint16_t kLabGraph = rgb565_local(0, 109, 170);
+constexpr uint16_t kLabGraph = rgb565_local(0, 109, 170), kLabNeedleShade = rgb565_local(109, 182, 0);
 constexpr int kLabListRows = 5, kLabRowH = 21, kLabListY = 20, kLabWizardRows = 4, kLabRecipeRows = 4;
 constexpr int kLabTrailSteps = 32;    // More than the longest walk through a rule.
 constexpr int kLabGraphTop = 75, kLabGraphH = 48;
@@ -695,49 +695,140 @@ void renderLabAc() {
   labTextAt(&fonts::Font0, 6, 74, "the Cardputer at it and watch.", kLabSoft);
   labKeys("ENTER open IR Remote  ESC back");
 }
+// --- The GPS's round plots: the compass here, and the sky and the mesh in part 084 ------------
+constexpr int kLabDialX = 40, kLabDialY = 58, kLabDialR = 31;
+// Where `degrees` from north lands, `radius` out from the middle. Screen y grows downwards.
+void labDialPoint(int cx, int cy, float radius, int degrees, int& x, int& y) {
+  const float radians = degrees * DEG_TO_RAD;
+  x = cx + static_cast<int>(roundf(radius * sinf(radians)));
+  y = cy - static_cast<int>(roundf(radius * cosf(radians)));
+}
+// A dark disc with north at the top, and rings a third and two thirds of the way out.
+void labDrawDisc(int cx, int cy, int r) {
+  auto& d = gCanvas;
+  d.fillCircle(cx, cy, r, kLabPanel2);
+  d.drawCircle(cx, cy, r * 2 / 3, kLabPanel);
+  d.drawCircle(cx, cy, r / 3, kLabPanel);
+  d.drawFastHLine(cx - r + 1, cy, 2 * r - 1, kLabPanel);
+  d.drawFastVLine(cx, cy - r + 12, 2 * r - 12, kLabPanel);
+  d.drawCircle(cx, cy, r, kLabDim);
+  labTextCenter(&fonts::Font0, cx, cy - r + 3, "N", kLabRed);
+}
+// North is always up, because the Cardputer has no compass. The needle is the way you're moving,
+// and only shows while you are, and the amber dot on the rim is the way to the saved spot.
+void labDrawCompass(const lab_gps::Fix& fix, bool fixed, int spotBearing) {
+  auto& d = gCanvas;
+  constexpr int cx = kLabDialX, cy = kLabDialY, r = kLabDialR;
+  d.fillCircle(cx, cy, r, kLabPanel2);
+  d.drawCircle(cx, cy, r, fixed ? kLabMuted : kLabDim);
+  for (int deg = 0; deg < 360; deg += 30) {
+    const bool cardinal = deg % 90 == 0;
+    int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+    labDialPoint(cx, cy, r - (cardinal ? 5 : 3), deg, x0, y0);
+    labDialPoint(cx, cy, r - 1, deg, x1, y1);
+    d.drawLine(x0, y0, x1, y1, cardinal ? kLabSoft : kLabDim);
+  }
+  labTextCenter(&fonts::Font0, cx, cy - r + 7, "N", kLabRed);
+  labTextCenter(&fonts::Font0, cx, cy + r - 14, "S", kLabMuted);
+  labTextAt(&fonts::Font0, cx + r - 14, cy - 3, "E", kLabMuted);
+  labTextAt(&fonts::Font0, cx - r + 9, cy - 3, "W", kLabMuted);
+  if (spotBearing >= 0) {
+    int x = 0, y = 0;
+    labDialPoint(cx, cy, r, spotBearing, x, y);
+    d.fillCircle(x, y, 4, kLabAmber);
+    d.drawCircle(x, y, 4, TFT_BLACK);
+  }
+  if (fixed && fix.moving()) {
+    int tipX = 0, tipY = 0, tailX = 0, tailY = 0, leftX = 0, leftY = 0, rightX = 0, rightY = 0;
+    labDialPoint(cx, cy, r - 13, fix.courseDeg, tipX, tipY);  // Short of the letters, so they still read.
+    labDialPoint(cx, cy, 9, fix.courseDeg + 180, tailX, tailY);
+    labDialPoint(cx, cy, 5, fix.courseDeg + 270, leftX, leftY);
+    labDialPoint(cx, cy, 5, fix.courseDeg + 90, rightX, rightY);
+    // Lit on one side and shaded on the other, so it reads as a needle with a point.
+    d.fillTriangle(tipX, tipY, leftX, leftY, cx, cy, kLabLime);
+    d.fillTriangle(tipX, tipY, rightX, rightY, cx, cy, kLabNeedleShade);
+    d.fillTriangle(tailX, tailY, leftX, leftY, cx, cy, kLabMuted);
+    d.fillTriangle(tailX, tailY, rightX, rightY, cx, cy, kLabDim);
+  }
+  d.fillCircle(cx, cy, 2, fixed ? TFT_WHITE : kLabMuted);
+}
+String labCoordinateText(int32_t e5) {
+  const int32_t size = e5 < 0 ? -e5 : e5;
+  String tail = String(size % 100000);
+  while (tail.length() < 5) tail = String("0") + tail;
+  return String(e5 < 0 ? "-" : "") + String(size / 100000) + "." + tail;
+}
 void renderLabGps() {
   const uint32_t now = millis();
   const bool hearing = gLabGps.hearing(now);
   const lab_gps::Fix& fix = gLabGps.fix;
-  labDrawHeadFor(Dev::Gps, hearing ? kLabLime : kLabRed, hearing ? (fix.valid ? "FIXED" : "SEARCHING") : "NO DATA", hearing ? kLabGreen : kLabRed);
+  const bool fixed = hearing && fix.valid;
+  const bool us = displayUnits() == units::System::US;
+  const bool noting = !gLabUi.spotNote.isEmpty() && int32_t(now - gLabUi.spotNoteUntilMs) < 0;
   if (!hearing) {
+    labDrawHeadFor(Dev::Gps, kLabRed, "NO DATA", kLabRed);
     labTextAt(&fonts::FreeSansBold9pt7b, 6, 26, "Nothing from the GPS", TFT_WHITE);
     labTextAt(&fonts::Font0, 6, 50, "Check the Cap is on the back and", kLabSoft);
     labTextAt(&fonts::Font0, 6, 61, "its antenna is fitted.", kLabSoft);
-    labKeys("M open Mesh  ESC back");
+    labTextAt(&fonts::Font0, 6, 84, "The last page shows who Mesh heard.", kLabMuted);
+    labKeys(labPageKeys("M Mesh  ESC back"));
     return;
   }
-  labStat(6, 24, "SATELLITES", String(fix.satellites));
-  const bool us = displayUnits() == units::System::US;
+  labDrawHeadFor(Dev::Gps, kLabLime, fixed ? "FIXED" : "SEARCHING", fixed ? kLabGreen : kLabAmber);
+  gCanvas.drawFastVLine(84, 23, fixed ? 98 : 86, kLabPanel);  // Short of the note under both columns.
+  constexpr int kRight = 90, kRight2 = 162;
+  if (!fixed) {
+    labDrawCompass(fix, false, -1);
+    labTextCenter(&fonts::Font2, kLabDialX, 94, "No fix", kLabMuted);
+    // Before a fix, how many satellites it hears is the thing to watch.
+    const int inView = gLabGps.inView(now);
+    const int heard = inView ? inView : fix.satellites;
+    labTextAt(&fonts::Font0, kRight, 22, "SATELLITES", kLabMuted);
+    labTextAt(&fonts::Font4, kRight, 31, String(heard), TFT_WHITE);
+    gCanvas.setFont(&fonts::Font4);
+    labTextAt(&fonts::Font2, kRight + gCanvas.textWidth(String(heard)) + 4, 41, "heard", kLabMuted);
+    labStat(kRight, 62, "TRACKED", inView ? String(gLabGps.tracked(now)) : String("--"));
+    labStat(kRight2, 62, "USED", String(fix.satellites));
+    labTextAt(&fonts::Font0, kRight, 92, "Next page: the sky", kLabSoft);
+    labTextAt(&fonts::Font0, 6, 113, noting ? gLabUi.spotNote : String("First fix can take minutes outdoors"), kLabAmber);
+    labKeys(labPageKeys("S save spot  M Mesh  ESC back"));
+    return;
+  }
+  // How far, and which way, the saved spot is from here.
+  labLoadSpot();
+  String away = "not saved";
+  int spotBearing = -1;
+  if (gLabSpot.set) {
+    const int32_t m = lab_gps::metersBetween(gLabSpot.latE5, gLabSpot.lonE5, fix.latE5, fix.lonE5);
+    char text[24];
+    units::distanceText(text, sizeof(text), m, displayUnits(), m >= lab_gps::kFarMeters);
+    away = text;
+    // Closer than this, the GPS's own wander would swing the direction about.
+    if (m >= 10) {
+      spotBearing = lab_gps::bearingDeg(fix.latE5, fix.lonE5, gLabSpot.latE5, gLabSpot.lonE5);
+      if (spotBearing >= 0) away = away + " " + lab_gps::compassPoint(spotBearing);
+    }
+  }
+  labDrawCompass(fix, true, spotBearing);
+  labTextCenter(&fonts::Font2, kLabDialX, 92, labCoordinateText(fix.latE5), TFT_WHITE);
+  labTextCenter(&fonts::Font2, kLabDialX, 107, labCoordinateText(fix.lonE5), TFT_WHITE);
   char speed[24];
   units::tenthsText(speed, sizeof(speed), us ? units::mphTenths(fix.speedKmhE1) : fix.speedKmhE1);
-  labStat(100, 24, "SPEED", fix.valid ? String(speed) + (us ? " mph" : " km/h") : String("--"));
-  const auto coordinate = [](int32_t e5) -> String {
-    const int32_t size = e5 < 0 ? -e5 : e5;
-    String tail = String(size % 100000);
-    while (tail.length() < 5) tail = String("0") + tail;
-    return String(e5 < 0 ? "-" : "") + String(size / 100000) + "." + tail;
-  };
-  labStat(6, 58, "LATITUDE", fix.valid ? coordinate(fix.latE5) : String("--"));
-  labStat(120, 58, "LONGITUDE", fix.valid ? coordinate(fix.lonE5) : String("--"));
-  const bool noting = !gLabUi.spotNote.isEmpty() && int32_t(now - gLabUi.spotNoteUntilMs) < 0;
-  if (!fix.valid) {
-    labTextAt(&fonts::Font0, 6, 96, noting ? gLabUi.spotNote : String("First fix can take minutes outdoors"), kLabAmber);
-  } else {
-    static constexpr const char* kCompass[8] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
-    labStat(6, 92, "HEADING", fix.moving() ? String(fix.courseDeg) + "` " + kCompass[((fix.courseDeg + 22) % 360) / 45]
-                                           : String("still"));
-    String away = "not saved";
-    labLoadSpot();
-    if (gLabSpot.set) {
-      const int32_t m = lab_gps::metersBetween(gLabSpot.latE5, gLabSpot.lonE5, fix.latE5, fix.lonE5);
-      char text[24];
-      units::distanceText(text, sizeof(text), m, displayUnits(), m >= lab_gps::kFarMeters);
-      away = text;
-    }
-    labStat(120, 92, "FROM SPOT", noting ? gLabUi.spotNote : away, noting ? kLabAmber : TFT_WHITE);
+  labTextAt(&fonts::Font0, kRight, 22, "SPEED", kLabMuted);
+  labTextAt(&fonts::Font4, kRight, 31, speed, TFT_WHITE);
+  gCanvas.setFont(&fonts::Font4);
+  labTextAt(&fonts::Font2, kRight + gCanvas.textWidth(speed) + 4, 41, us ? "mph" : "km/h", kLabMuted);
+  labStat(kRight, 62, "HEADING", fix.moving() ? String(fix.courseDeg) + "` " + lab_gps::compassPoint(fix.courseDeg) : String("still"),
+          fix.moving() ? TFT_WHITE : kLabMuted);
+  labStat(kRight2, 62, "FROM SPOT", noting ? gLabUi.spotNote : away, noting ? kLabAmber : gLabSpot.set ? TFT_WHITE : kLabMuted);
+  labStat(kRight, 92, "SATELLITES", String(fix.satellites));
+  String height = "--";
+  if (fix.hasAltitude) {
+    const int32_t shown = units::rounded(fix.altitudeDm * (us ? 0.328084 : 0.1));
+    height = String(shown) + (us ? " ft" : " m");
   }
-  labKeys("S save spot  M Mesh  ESC back");
+  labStat(kRight2, 92, "ALTITUDE", height, fix.hasAltitude ? TFT_WHITE : kLabMuted);
+  labKeys(labPageKeys("S save spot  M Mesh  ESC back"));
 }
 void renderLabLed() {
   auto& d = gCanvas;
@@ -814,7 +905,13 @@ void renderLabMissing(Dev dev) {
 bool labTakesVoiceSet(Dev dev) { return dev == Dev::Servo || dev == Dev::Strip || dev == Dev::Led || dev == Dev::Speaker; }
 void renderLabDevice() {
   const Dev dev = static_cast<Dev>(gLabUi.devRow);
-  if (dev == Dev::Gps) { renderLabGps(); return; }
+  if (dev == Dev::Gps) {
+    // It has pages, and they work with no GPS data, so this comes before the missing screen.
+    if (gLabUi.page) renderLabPage(dev, gLabUi.page);
+    else renderLabGps();
+    labPageDots();
+    return;
+  }
   if (!labDevHere(dev)) { renderLabMissing(dev); return; }
   if (gLabUi.page) {
     renderLabPage(dev, gLabUi.page);
@@ -1585,9 +1682,9 @@ void labDeviceKey(char key, char lower, bool left, bool right, bool up, bool dow
       return;
     case Dev::Gps:
       if (lower == 'm') setUiMode(UiMode::Mesh);
-      else if (lower == 's') {
+      else if (lower == 's' && !gLabUi.page) {
         // Where the Cardputer is now becomes the spot, for From spot and the Near the spot recipe.
-        gLabUi.spotNote = labSaveSpot() ? "Spot saved" : gLabGps.fix.valid ? "Couldn't save" : "No fix yet";
+        gLabUi.spotNote = labSaveSpot() ? "Spot saved" : gLabGps.fix.valid ? "Can't save" : "No fix yet";
         gLabUi.spotNoteUntilMs = millis() + 2000;
       }
       return;

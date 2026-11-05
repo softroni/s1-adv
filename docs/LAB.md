@@ -53,7 +53,7 @@ More that needs nothing plugged in:
 | Servo | An angle you can set | Yellow wire |
 | LED strip | Color, brightness and how many LEDs are lit | Yellow wire |
 | 2 relays | Two switches | Both wires |
-| Cap LoRa-1262 | GPS position, speed, heading, distance from a saved spot, and satellites | Fits on the Cardputer, not on Grove |
+| Cap LoRa-1262 | GPS position, speed, heading, altitude, distance from a saved spot, the satellites in the sky, and the radios Mesh heard | Fits on the Cardputer, not on Grove |
 
 The Lab can also reach a smartLamp over Wi-Fi, and a TCL or Daikin air conditioner by infrared.
 
@@ -118,7 +118,7 @@ The dot beside each device tells you what the Lab knows:
 <tr>
 <td><img src="assets/lab/hub.png" alt="I/O hub screen listing what's on each port" width="100%"><br><sub><b>I/O hub.</b> What's on each port, and its firmware.</sub></td>
 <td><img src="assets/lab/tilt.png" alt="Tilt screen showing 30 degrees" width="100%"><br><sub><b>Tilt.</b> Built in. Tip the Cardputer to see it move.</sub></td>
-<td><img src="assets/lab/gps.png" alt="GPS screen with satellites, speed, position, heading north and 364 feet from the saved spot" width="100%"><br><sub><b>LoRa Cap GPS.</b> Satellites, position, speed, heading, and how far you are from your spot. S saves the spot, M opens Mesh.</sub></td>
+<td><img src="assets/lab/gps.png" alt="GPS screen with a compass needle pointing north, an amber dot to the south, 11.5 mph, 364 feet south of the saved spot, 8 satellites and 591 feet up" width="100%"><br><sub><b>LoRa Cap GPS.</b> A compass, speed, heading, which way and how far your spot is, satellites, altitude and position. S saves the spot, M opens Mesh. Two <a href="#the-gps-sky-and-mesh-pages">more pages</a> show the sky and the mesh.</sub></td>
 </tr>
 <tr>
 <td><img src="assets/lab/led.png" alt="Cardputer LED screen, on and green" width="100%"><br><sub><b>Cardputer LED.</b> Built in. Left and right change the color, and Space turns it off or on. The screen goes to full brightness while it's lit.</sub></td>
@@ -170,10 +170,22 @@ Most parts have more than one page. The dots under the title show where you are.
 </tr>
 <tr>
 <td width="33%"><img src="assets/lab/piano.png" alt="Eight piano keys with one pressed" width="100%"><br><sub><b>Speaker: piano.</b> Turn the page, then play keys 1 to 8.</sub></td>
+<td width="33%"><img src="assets/lab/gps-sky.png" alt="A sky map with twelve satellites as colored dots, and bars for the six strongest signals" width="100%"><br><sub><b>GPS: sky.</b> Where each satellite is, and how strongly it's heard. Green is strong.</sub></td>
+<td width="33%"><img src="assets/lab/gps-mesh.png" alt="A map around you with radios Mesh heard as dots, and a list of five radios with distance, direction and signal" width="100%"><br><sub><b>GPS: mesh.</b> The radios Mesh heard, on a map around you. Up and down pick one.</sub></td>
 </tr>
 </table>
 
 Sounds and moves stop when you leave the page.
+
+### The GPS, sky and mesh pages
+
+The Cap LoRa-1262 holds a GPS and a LoRa radio, and **LoRa Cap GPS** has a page for each, as well as its own. Left and right turn them.
+
+**The GPS.** North is always at the top of the compass, because the Cardputer has no compass of its own. The needle is the way you're moving, so it only shows above 3 km/h (2 mph). With a [spot saved](#gps-readings), the amber dot on the rim is the way to it, and **From spot** says how far and which way, like 364 ft S. The direction only shows once you're 10 m (33 ft) away, because closer than that the GPS's own wander swings it about. **Satellites** is how many the fix is using. Before there's a fix, the page shows how many it hears instead, and how many of those it's tracking.
+
+**Sky.** Every satellite the GPS reports, placed where it is: the rim is the horizon, the middle is straight overhead, and the rings are 30° and 60° up. A filled dot is being tracked, colored by signal: green is strong, lime good, amber weak, and red too faint to use. An open dot is in view but not tracked yet. The bars are the six strongest, with their signal above and their name below: G is GPS, C BeiDou, R GLONASS, E Galileo and J QZSS. **In use** is how many the fix uses of all those in view, and **Accuracy** is how well spread they are: excellent or good means a few meters. Walls, roofs and trees block the dots on that side, so this is the page to watch while you look for a clear spot.
+
+**Mesh.** The radios [Mesh](MESH.md#who-mesh-heard) heard, newest first, with how long ago, the signal, and how many hops a message took to reach you, or direct. The radio itself is off in the Lab, because it shares its wires with the SD card, so this is what Mesh heard while it was open. Leave Mesh open for a while to fill it, and press **M** to go there. A radio that shared where it is gets a dot on the map, with you in the middle, and its row says how far and which way. Up and down pick a radio, and the map zooms so the one you picked fits: the distance at the bottom left is the edge of the map, and anything further sits on the rim, in its direction. An open dot is a rounded spot, which many radios send on the public channel: the radio is somewhere in a box around it, and its distance has a ~ in front. People you've added in Mesh are amber. The list keeps eight, is only in memory, and is never in the Lab's file, the diary or what Claude sees.
 
 ## Build a rule
 
@@ -234,7 +246,7 @@ With the Cap LoRa-1262 fitted and a fix, which needs the sky, rules can use thre
 
 - **Speed**, in mph, or km/h with metric [units](#units).
 - **Heading**, the way you're moving: 0 is north, 90 east, 180 south and 270 west. A GPS standing still still names a direction, and it wanders, so Heading only reads above 3 km/h (2 mph).
-- **From spot**, how far you are from a spot you saved, in feet, or meters with metric units. Stand where you want it, open **LoRa Cap GPS** in Devices and press **S**. Pressing S again somewhere else moves it. It stops counting at 32 km (20 miles).
+- **From spot**, how far you are from a spot you saved, in feet, or meters with metric units. Stand where you want it, open **LoRa Cap GPS** in Devices and press **S** on its first page. Pressing S again somewhere else moves it. It stops counting at 32 km (20 miles). The GPS page also shows which way the spot is, with an amber dot on its compass.
 
 With no fix, none of the three reads, so a rule waits rather than acting on an old position. The spot stays on the Cardputer: it isn't in the Lab's file on the SD card, and Claude only ever sees the distance. Rules only run while the Lab is open, so take the Cardputer along with rules playing.
 
