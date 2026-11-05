@@ -81,7 +81,8 @@ void setStatus(const char*,int){}void closeRealtimeSession(const char*){}void ca
     function('bool launcherAppInSettingsOrSystem(') + function('int launcherRowOf(') + function('void rememberLauncherApp()') + \
     function('bool findLastLauncherApp(') + function('void syncLauncherToMode(') + \
     function('void saveLauncherSelection()') + function('void saveLauncherOrder()') + \
-    function('int launcherRowFor(') + function('void showLauncherGroup(') + function('void openLauncherOnLastApp()') + r'''
+    function('int launcherRowFor(') + function('void showLauncherGroup(') + function('void openLauncherOnLastApp()') + \
+    function('void saveFavorites()') + function('void favoritesChanged()') + function('void moveLauncherRow(') + r'''
 void setUiMode(UiMode mode){gUiMode=mode;
 ''' + tail + r'''}
 ''' + function('void applyLauncherSelection()') + r'''
@@ -121,6 +122,19 @@ void tabSkipsSettingsAndSystem(){
  // An app moved within its tab is still found by name.
  texts.clear();flash.clear();reboot();pick(5,4);moveRow(5,4,-1);tab();assert(gLauncherSubSelection==3&&on("Snake"));
  moveRow(5,3,1);texts.clear();
+ // Moving the last app with Fn saves its new row too, so a restart finds it, not its neighbour.
+ flash.clear();reboot();pick(5,4);gLauncherSubSelection=4;moveLauncherRow(-1);assert(on("Snake")&&flash["menu_item"]==3);
+ reboot();assert(on("Snake"));tab();assert(gLauncherSelection==5&&on("Snake"));
+ // Moving its neighbour does too, and moving apps in another tab writes nothing.
+ gLauncherSubSelection=2;moveLauncherRow(1);assert(launcherRowOf(5,kLauncherGroups[5].items[4])==2&&flash["menu_item"]==2);
+ int was=writes;gLauncherSelection=6;gLauncherSubSelection=0;moveLauncherRow(1);assert(writes==was+1);  // Only the order.
+ reboot();tab();assert(gLauncherSelection==5&&on("Snake"));
+ // The same on Favorites: moved, then taken off, it comes back where it is after a restart.
+ texts.clear();flash.clear();reboot();texts["favs"]="Games/Tetris\nGames/Snake\n";reboot();
+ pick(0,1);assert(on("Snake"));gLauncherSubSelection=1;moveLauncherRow(-1);assert(flash["menu_tab"]==0&&flash["menu_item"]==0);
+ reboot();tab();assert(gLauncherSelection==0&&on("Snake"));
+ gFavorites.removeAt(0);favoritesChanged();assert(flash["menu_tab"]==5);reboot();tab();assert(gLauncherSelection==5&&on("Snake"));
+ texts.clear();
 }
 int main(){
  tabSkipsSettingsAndSystem();texts.clear();flash.clear();reboot();writes=0;

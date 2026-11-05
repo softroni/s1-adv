@@ -436,9 +436,12 @@ void launcherNotice(const String& text) {
   gLauncherNoticeUntilMs = millis() + 1600;
 }
 
+// The app Tab opens on may have moved, or left Favorites for its own tab, so its place is saved
+// again too. It's only written when that place changes.
 void favoritesChanged() {
   rebuildFavoritesTab();
   saveFavorites();
+  saveLauncherSelection();
 }
 
 // Del, or Space, on the Favorites tab. The rows below move up a number.
@@ -491,6 +494,7 @@ void moveLauncherRow(int delta) {
     if (!launcher_order::move(gLauncherOrder[group], launcherGroup(group).count, static_cast<uint8_t>(row), delta)) return;
     rebuildLauncherTab(group);
     saveLauncherOrder();
+    saveLauncherSelection();
   }
   gLauncherSubSelection = row + delta;
   gLauncherLastSub[group] = gLauncherSubSelection;

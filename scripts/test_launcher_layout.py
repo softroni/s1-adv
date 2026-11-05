@@ -133,6 +133,8 @@ void applyLauncherSelection() { ++opened; openedGroup = gLauncherSelection; open
 void saveFavorites() { ++saves; }
 int orderSaves = 0;
 void saveLauncherOrder() { ++orderSaves; }
+int placeSaves = 0;
+void saveLauncherSelection() { ++placeSaves; }  // Where Tab opens: the app used may have moved.
 ''' + rows + keys + r'''
 void press(char key, int group, int row) {
   groupMove = rowMove = 0;
@@ -382,7 +384,7 @@ int main() {
 
   // Fn with up or down moves an app in every other tab too, and its number goes with it.
   {
-    const int before = orderSaves, favoriteSaves = saves;
+    const int before = orderSaves, favoriteSaves = saves, placesBefore = placeSaves;
     gLauncherSelection = 5; gLauncherSubSelection = 4;  // Games, Snake
     groupMove = rowMove = 0; handleLauncherKey('.', withFn());
     assert(orderSaves == before && gLauncherSubSelection == 4 && rowMove == 0);  // Already last: nothing.
@@ -393,6 +395,7 @@ int main() {
     handleLauncherKey(';', withFn()); assert(orderSaves == before + 4);  // Already first.
     handleLauncherKey('.', withFn()); handleLauncherKey(';', withFn());
     assert(orderSaves == before + 6 && !std::strcmp(launcherGroup(5).items[0].label, "Snake"));
+    assert(placeSaves == placesBefore + 6);  // Each real move, in case it's the app Tab opens on.
     // The menu's table stays as it was, and so do the other tabs.
     assert(!std::strcmp(kLauncherGroups[5].items[0].label, "Tetris") && launcherTableItem(5, 0) == 4);
     assert(!std::strcmp(launcherGroup(6).items[0].label, "Air Music") && launcherTableItem(6, 0) == 0);
