@@ -148,7 +148,8 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
       return;
     }
     gLastLauncherToggleMs = now;
-    gLauncherVisible = !gLauncherVisible;
+    if (gLauncherVisible) gLauncherVisible = false;
+    else openLauncherOnLastApp();
     setStatus(gLauncherVisible ? "Launcher" : "Launcher closed", 700);
     return;
   }
@@ -161,7 +162,7 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
       const LauncherGroup& group = launcherGroup(gLauncherSelection);
       if (group.count) setStatus(group.items[gLauncherSubSelection].label, 500);
     } else {
-      gLauncherVisible = true;
+      openLauncherOnLastApp();
       setStatus("Menu", 700);
     }
     return;

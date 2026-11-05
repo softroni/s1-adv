@@ -160,14 +160,15 @@ bool handleAssistantMenuKey(char key,const Keyboard_Class::KeysState& keys) {
   if (keys.ctrl && lower=='l') {
     gVoiceNoticeVisible=false;
     gChatCommandsVisible=false;
-    gLauncherVisible=!gLauncherVisible;
+    if (gLauncherVisible) gLauncherVisible=false;
+    else openLauncherOnLastApp();
     return true;
   }
   if (keys.tab) {
     gVoiceNoticeVisible=false;
     gChatCommandsVisible=false;
     if (gLauncherVisible) moveLauncherSubSelection(1);
-    else gLauncherVisible=true;
+    else openLauncherOnLastApp();
     return true;
   }
   return false;

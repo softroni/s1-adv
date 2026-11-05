@@ -214,6 +214,7 @@ void loadDeviceSettings() {
   const int savedRows = launcherGroup(gLauncherSelection).count;
   gLauncherSubSelection = savedRows ? min<int>(gPrefs.getUChar("menu_item", 0), savedRows - 1) : 0;
   gLauncherLastSub[gLauncherSelection] = gLauncherSubSelection;
+  rememberLauncherApp();  // Firmware before 0.2.305 also saved Settings and System, which this passes over.
   gPrefs.end();
   gDeviceSettings.minBatteryForUpdate = clampValue<uint8_t>(gDeviceSettings.minBatteryForUpdate, 5, 95);
   gDeviceSettings.clockFace %= kClockFaceCount;
@@ -263,12 +264,15 @@ void saveDeviceSettings() {
   gPrefs.end();
 }
 
-// Called when an item opens, so flash is only written when the answer really changes.
+// Called when an item opens, so flash is only written when the answer really changes. What's
+// saved is the app Tab opens on, so never one in Settings or System.
 void saveLauncherSelection() {
+  int group = 0, row = 0;
+  if (!findLastLauncherApp(group, row)) return;
   static int savedGroup = -1, savedItem = -1;
-  if (gLauncherSelection == savedGroup && gLauncherSubSelection == savedItem) return;
-  savedGroup = gLauncherSelection;
-  savedItem = gLauncherSubSelection;
+  if (group == savedGroup && row == savedItem) return;
+  savedGroup = group;
+  savedItem = row;
   gPrefs.begin(kPrefsDeviceNs, false);
   gPrefs.putUChar("menu_tab", static_cast<uint8_t>(savedGroup));
   gPrefs.putUChar("menu_item", static_cast<uint8_t>(savedItem));

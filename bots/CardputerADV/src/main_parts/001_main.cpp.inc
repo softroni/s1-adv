@@ -126,7 +126,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.304-dev"
+#define APP_VERSION "0.2.305-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"
@@ -247,6 +247,7 @@ constexpr uint32_t kLauncherToggleDebounceMs = 140;
 constexpr uint8_t kLauncherGroupCount = 10;
 constexpr uint8_t kLauncherMaxSubItems = 9;
 constexpr uint8_t kFavoritesGroup = 0;  // The menu's first tab, filled from what the owner picks.
+constexpr uint8_t kSettingsGroup = 7, kSystemGroup = 8;  // Tab doesn't open the menu on these.
 constexpr uint32_t kKeyRushDurationMs = 30000;
 constexpr const char* kKeyRushPrefsNs = "keyrush";
 constexpr uint16_t kSmartLampUdpPort = 61197;

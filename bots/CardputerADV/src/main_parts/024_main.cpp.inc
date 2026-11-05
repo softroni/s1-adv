@@ -256,6 +256,53 @@ bool launcherKeepsPlaceFor(UiMode mode) {
   return mode == UiMode::Home || mode == UiMode::ChatFull || mode == UiMode::Clock;
 }
 
+// Settings and System are for a quick change, so Tab doesn't bring the menu back to them. An app
+// belongs to them by its own tab, so one that's also a favorite counts.
+bool launcherAppInSettingsOrSystem(const LauncherSubItem& app) {
+  const uint8_t tabs[] = {kSettingsGroup, kSystemGroup};
+  for (const uint8_t g : tabs) {
+    const LauncherGroup& tab = kLauncherGroups[g];
+    for (uint8_t s = 0; s < tab.count; ++s)
+      if (tab.items[s].mode == app.mode) return true;
+  }
+  return false;
+}
+
+// The row an app is on in a tab now, or -1.
+int launcherRowOf(int group, const LauncherSubItem& app) {
+  const LauncherGroup& tab = launcherGroup(group);
+  for (uint8_t s = 0; s < tab.count; ++s)
+    if (tab.items[s].mode == app.mode && !strcmp(tab.items[s].label, app.label)) return s;
+  return -1;
+}
+
+// What the menu is on, kept as the app Tab opens it on, unless it's in Settings or System. A
+// screensaver, Chess Mind's included, isn't using an app.
+void rememberLauncherApp() {
+  if (gScreensaverActive) return;
+  if (gLauncherSelection < 0 || gLauncherSelection >= kLauncherGroupCount) return;
+  const LauncherGroup& tab = launcherGroup(gLauncherSelection);
+  if (gLauncherSubSelection < 0 || gLauncherSubSelection >= tab.count) return;
+  if (launcherAppInSettingsOrSystem(tab.items[gLauncherSubSelection])) return;
+  gLauncherLastUsedTab = gLauncherSelection;
+  gLauncherLastUsed = tab.items[gLauncherSubSelection];
+}
+
+// Where the last app used is now: in the tab it was used from, or in its own tab if it has
+// left Favorites since.
+bool findLastLauncherApp(int& group, int& row) {
+  if (gLauncherLastUsedTab < 0) return false;
+  group = gLauncherLastUsedTab;
+  row = launcherRowOf(group, gLauncherLastUsed);
+  for (int g = 0; row < 0 && g < kLauncherGroupCount; ++g) {
+    if (g == kFavoritesGroup) continue;
+    group = g;
+    row = launcherRowOf(g, gLauncherLastUsed);
+  }
+  return row >= 0;
+}
+
+// The menu follows the app in use, and keeps it as the last one used.
 void syncLauncherToMode(UiMode mode) {
   int groupIndex = 0;
   int subIndex = 0;
@@ -265,6 +312,7 @@ void syncLauncherToMode(UiMode mode) {
   gLauncherSelection = groupIndex;
   gLauncherSubSelection = subIndex;
   gLauncherLastSub[groupIndex] = subIndex;
+  rememberLauncherApp();
 }
 
 bool uiModeInterruptsRealtime(UiMode mode) {
@@ -380,6 +428,7 @@ void setUiMode(UiMode mode) {
       gLauncherSubSelection >= 0 && gLauncherSubSelection < launcherGroup(gLauncherSelection).count &&
       launcherGroup(gLauncherSelection).items[gLauncherSubSelection].mode == mode) {
     gLauncherLastSub[gLauncherSelection] = gLauncherSubSelection;
+    if (!launcherKeepsPlaceFor(mode)) rememberLauncherApp();
   } else if (!launcherKeepsPlaceFor(mode)) {
     syncLauncherToMode(mode);
   }
@@ -399,6 +448,24 @@ int launcherRowFor(int group) {
 void showLauncherGroup(int group) {
   gLauncherSelection = group;
   gLauncherSubSelection = launcherRowFor(group);
+}
+
+// Tab opens the menu on the last app used, so a trip to Settings or System doesn't leave it there.
+// Before there is one it opens where it is, unless that's in Settings or System: then on AI Agent.
+void openLauncherOnLastApp() {
+  int group = 0, row = 0;
+  if (findLastLauncherApp(group, row)) {
+    gLauncherSelection = group;
+    gLauncherSubSelection = row;
+    gLauncherLastSub[group] = row;
+  } else {
+    const LauncherGroup& tab = launcherGroup(gLauncherSelection);
+    if (gLauncherSelection == kSettingsGroup || gLauncherSelection == kSystemGroup ||
+        (gLauncherSubSelection >= 0 && gLauncherSubSelection < tab.count &&
+         launcherAppInSettingsOrSystem(tab.items[gLauncherSubSelection])))
+      showLauncherGroup(kFavoritesGroup + 1);
+  }
+  gLauncherVisible = true;
 }
 
 void moveLauncherSelection(int delta) {
@@ -441,5 +508,6 @@ void applyLauncherSelection() {
   }
   // Opened from Favorites, the menu stays there, so it comes back to the list it was used from.
   if (gLauncherSelection != kFavoritesGroup) syncLauncherToMode(target);
+  else rememberLauncherApp();
   saveLauncherSelection();
 }

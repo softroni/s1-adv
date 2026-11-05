@@ -128,6 +128,11 @@ constexpr LauncherGroup kLauncherGroups[kLauncherGroupCount] = {
      {{"Devices", UiMode::LabDevices}, {"Rules", UiMode::LabRules}, {"Sequences", UiMode::LabSequences}}},
 };
 static_assert(launcher_favorites::kMax == kLauncherMaxSubItems, "a favorite needs a row and a number key");
+constexpr bool sameLauncherTitle(const char* a, const char* b) {
+  return *a == *b && (!*a || sameLauncherTitle(a + 1, b + 1));
+}
+static_assert(sameLauncherTitle(kLauncherGroups[kSettingsGroup].title, "Settings") &&
+              sameLauncherTitle(kLauncherGroups[kSystemGroup].title, "System"), "kSettingsGroup and kSystemGroup name those tabs");
 
 // What's on the Favorites tab, saved as "favs". A favorite names an app by its place in
 // kLauncherGroups, so moving apps around their tabs leaves it alone.
@@ -274,6 +279,10 @@ int gChatVisibleRows = 0; // Measured by the last chat render; depends on text s
 int gLauncherSelection = 0;
 int gLauncherSubSelection = 0;
 uint8_t gLauncherLastSub[kLauncherGroupCount] = {};
+// The app Tab opens the menu on: the last one used, never one in Settings or System. Kept by its
+// tab and name, so a row moved since still finds it. -1 until there is one.
+int gLauncherLastUsedTab = -1;
+LauncherSubItem gLauncherLastUsed;
 // Says what a key just did in the menu, over its bottom row for a moment. setStatus can't be seen there.
 String gLauncherNotice;
 uint32_t gLauncherNoticeUntilMs = 0;

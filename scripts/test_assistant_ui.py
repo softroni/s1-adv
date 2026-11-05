@@ -50,6 +50,7 @@ int fileEscapes=0;
 bool handleFileManagerKey(char key,const Keyboard_Class::KeysState&){assert(key==27);++fileEscapes;return true;}
 int launcherMoves=0;
 void moveLauncherSubSelection(int){++launcherMoves;}
+int launcherOpens=0;void openLauncherOnLastApp(){++launcherOpens;gLauncherVisible=true;}
 uint8_t gChatCommandSelection=0;
 bool gRealtimeClassicView=false;uint32_t gLastRenderMs=0;
 struct{void invalidate(){}}gUiFramePolicy;
@@ -105,8 +106,9 @@ int main(){
  assert(request.find("Host: bridge.example.com:8443\r\n")!=std::string::npos);
  // The app launcher remains reachable from Home and while the mic is busy.
  Keyboard_Class::KeysState keys;keys.tab=true;
- assert(handleAssistantMenuKey('\t',keys) && gLauncherVisible && !gChatCommandsVisible);
- assert(handleAssistantMenuKey('\t',keys) && launcherMoves==1);
+ // Tab opens it on the last app used, and a second Tab moves down a row.
+ assert(handleAssistantMenuKey('\t',keys) && gLauncherVisible && !gChatCommandsVisible && launcherOpens==1);
+ assert(handleAssistantMenuKey('\t',keys) && launcherMoves==1 && launcherOpens==1);
  keys.tab=false;keys.ctrl=true;
  assert(handleAssistantMenuKey('k',keys) && gChatCommandsVisible && !gLauncherVisible);
  assert(handleAssistantMenuKey('k',keys) && !gChatCommandsVisible);
@@ -116,6 +118,7 @@ int main(){
  assert(handleAssistantMenuKey('\t',keys) && gLauncherVisible && !gChatCommandsVisible);
  keys.tab=false;keys.ctrl=true;
  assert(handleAssistantMenuKey('l',keys) && !gLauncherVisible);
+ assert(handleAssistantMenuKey('l',keys) && gLauncherVisible && launcherOpens==3);gLauncherVisible=false;
  gUiMode=UiMode::Nes;assert(!handleAssistantMenuKey('k',keys));
  gUiMode=UiMode::Home;gRealtimeRecording=false;
  // Ctrl+B and the menu change only presentation, keeping one live session.

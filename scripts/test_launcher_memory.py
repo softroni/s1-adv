@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""The menu reopens on what you last used, after coming back to Pulse or chat and after a restart, Favorites too."""
+"""The menu reopens on what you last used, after coming back to Pulse or chat and after a restart, Favorites too.
+
+Tab opens it on the last app used, never one in Settings or System."""
 from pathlib import Path
 import os
 import re
@@ -33,11 +35,18 @@ def block(text, marker):
 
 
 table = (parts / '004_main.cpp.inc').read_text()
+# Tab and Ctrl+L open the menu on the last app, from every screen.
+typing = function('void handleTypingKey(')
+tab_block = typing[typing.index('  if (keys.tab) {'):]
+assert re.search(r'\} else \{\s+openLauncherOnLastApp\(\);', tab_block[:tab_block.index('return;')]), 'Tab'
+assert re.search(r'if \(gLauncherVisible\) gLauncherVisible = false;\s+else openLauncherOnLastApp\(\);', typing), 'Ctrl+L'
+assistant = function('bool handleAssistantMenuKey(')
+assert 'else openLauncherOnLastApp();' in assistant[assistant.index("lower=='l'"):] and assistant.count('openLauncherOnLastApp();') == 2
 setui = function('void setUiMode(')
 tail = setui[setui.index('if (gLauncherSelection >= 0 && gLauncherSelection < kLauncherGroupCount'):setui.index('setStatus(String("Mode: ")')]
 load = function('void loadDeviceSettings()')
 favorites = table[table.index('static_assert(launcher_favorites::kMax'):table.index('Preferences gPrefs;')]
-restore = load[load.index('launcher_favorites::read(gFavorites'):load.index('gLauncherLastSub[gLauncherSelection] = gLauncherSubSelection;') + len('gLauncherLastSub[gLauncherSelection] = gLauncherSubSelection;')]
+restore = load[load.index('launcher_favorites::read(gFavorites'):load.index('rememberLauncherApp();') + len('rememberLauncherApp();')]
 
 code = r'''
 #include <algorithm>
@@ -53,12 +62,13 @@ code = r'''
 #include "launcher_order.h"
 using std::min;using std::max;
 constexpr uint16_t rgb565_local(int,int,int){return 0;}
-constexpr uint8_t kLauncherGroupCount=10,kLauncherMaxSubItems=9,kFavoritesGroup=0;
+constexpr uint8_t kLauncherGroupCount=10,kLauncherMaxSubItems=9,kFavoritesGroup=0,kSettingsGroup=7,kSystemGroup=8;
 ''' + block((parts / '002_main.cpp.inc').read_text(), 'enum class UiMode : uint8_t') + \
     block(table, 'struct LauncherSubItem {') + block(table, 'struct LauncherGroup {') + block(table, 'constexpr LauncherGroup kLauncherGroups') + \
     favorites + r'''
 template<class T>T clampValue(T x,T lo,T hi){return std::max(lo,std::min(x,hi));}
 int gLauncherSelection=0,gLauncherSubSelection=0;uint8_t gLauncherLastSub[kLauncherGroupCount]={};
+int gLauncherLastUsedTab=-1;LauncherSubItem gLauncherLastUsed;bool gLauncherVisible=false,gScreensaverActive=false;
 bool gRealtimeActive=false,gRecording=false,gMeshBusOwned=false,gPendingRealtimeStart=false,gRealtimeScreenVisible=false,gRealtimeExclusiveMode=false;
 UiMode gUiMode=UiMode::Home;std::map<std::string,int> flash;std::map<std::string,std::string> texts;int writes=0;
 struct{void begin(const char*,bool){}void end(){}void putUChar(const char*k,uint8_t v){++writes;flash[k]=v;}
@@ -67,8 +77,11 @@ struct{void begin(const char*,bool){}void end(){}void putUChar(const char*k,uint
  std::string getString(const char*k,const char*d){return texts.count(k)?texts[k]:d;}}gPrefs;
 constexpr const char* kPrefsDeviceNs="device_cfg";
 void setStatus(const char*,int){}void closeRealtimeSession(const char*){}void cancelRecordingDiscard(){}void startRealtimeSession(bool){gRealtimeActive=true;}
-''' + function('bool findLauncherEntryForMode(') + function('bool launcherKeepsPlaceFor(') + function('void syncLauncherToMode(') + \
-    function('void saveLauncherSelection()') + function('void saveLauncherOrder()') + r'''
+''' + function('bool findLauncherEntryForMode(') + function('bool launcherKeepsPlaceFor(') + \
+    function('bool launcherAppInSettingsOrSystem(') + function('int launcherRowOf(') + function('void rememberLauncherApp()') + \
+    function('bool findLastLauncherApp(') + function('void syncLauncherToMode(') + \
+    function('void saveLauncherSelection()') + function('void saveLauncherOrder()') + \
+    function('int launcherRowFor(') + function('void showLauncherGroup(') + function('void openLauncherOnLastApp()') + r'''
 void setUiMode(UiMode mode){gUiMode=mode;
 ''' + tail + r'''}
 ''' + function('void applyLauncherSelection()') + r'''
@@ -76,11 +89,41 @@ void moveRow(int g,int row,int d){assert(launcher_order::move(gLauncherOrder[g],
 void pick(int group,int item){gLauncherSelection=group;gLauncherSubSelection=item;applyLauncherSelection();}
 const char* chosen(){return launcherGroup(gLauncherSelection).items[gLauncherSubSelection].label;}
 bool on(const char*label){return !std::strcmp(chosen(),label);}
-void reboot(){gLauncherSelection=0;gLauncherSubSelection=0;std::fill(std::begin(gLauncherLastSub),std::end(gLauncherLastSub),0);
+void tab(){gLauncherVisible=false;openLauncherOnLastApp();assert(gLauncherVisible);}
+void reboot(){gLauncherSelection=0;gLauncherSubSelection=0;gLauncherLastUsedTab=-1;std::fill(std::begin(gLauncherLastSub),std::end(gLauncherLastSub),0);
  gFavorites=launcher_favorites::List();rebuildFavoritesTab();
  ''' + restore + r'''
 }
+void tabSkipsSettingsAndSystem(){
+ texts.clear();flash.clear();reboot();
+ // Tab opens on the last app used, wherever the menu was moved to since.
+ pick(2,6);assert(on("Internet Radio"));gLauncherSelection=5;gLauncherSubSelection=1;tab();assert(gLauncherSelection==2&&on("Internet Radio"));
+ // Not on Settings or System, from the menu or another way, but on the app before them.
+ pick(7,2);assert(gUiMode==UiMode::WifiSettings&&on("Wi-Fi"));tab();assert(on("Internet Radio"));
+ pick(8,1);assert(on("Logs"));setUiMode(UiMode::Home);tab();assert(on("Internet Radio"));
+ setUiMode(UiMode::ScreenSettings);assert(on("Display"));tab();assert(on("Internet Radio")&&gLauncherLastSub[2]==6);
+ // Coming back to Pulse doesn't count, but opening it from the menu does.
+ setUiMode(UiMode::Home);tab();assert(on("Internet Radio"));pick(1,1);setUiMode(UiMode::Snake);setUiMode(UiMode::Home);tab();assert(on("Snake"));
+ // A screensaver isn't using an app, Chess Mind's included.
+ gScreensaverActive=true;setUiMode(UiMode::ChessMind);gScreensaverActive=false;setUiMode(UiMode::Clock);tab();assert(on("Snake"));
+ // The last app is what a restart brings back, never Settings: opening one writes nothing.
+ pick(5,4);int before=writes;pick(7,0);assert(writes==before);reboot();assert(on("Snake"));tab();assert(on("Snake"));
+ // An older firmware saved Settings or System: the menu starts there, but Tab opens on AI Agent.
+ flash["menu_tab"]=8;flash["menu_item"]=0;reboot();assert(gLauncherSelection==8);tab();assert(gLauncherSelection==1);
+ flash["menu_tab"]=7;reboot();setUiMode(UiMode::Home);tab();assert(gLauncherSelection==1);
+ // From Favorites: on that row, and a Settings app there counts as Settings.
+ texts["favs"]="Settings/Wi-Fi\nGames/Snake\n";flash.clear();reboot();
+ pick(0,1);assert(on("Snake"));pick(0,0);assert(gUiMode==UiMode::WifiSettings);tab();assert(gLauncherSelection==0&&on("Snake"));
+ // A favorite, used and then taken off Favorites, is found in its own tab.
+ texts["favs"]="Settings/Wi-Fi\n";reboot();gLauncherLastUsedTab=0;gLauncherLastUsed=kLauncherGroups[5].items[4];tab();assert(gLauncherSelection==5&&on("Snake"));
+ // Saved on a favorite that is now a Settings one, the menu starts on it, and Tab opens on AI Agent.
+ reboot();assert(gLauncherSelection==0&&on("Wi-Fi")&&gLauncherLastUsedTab==-1);tab();assert(gLauncherSelection==1);
+ // An app moved within its tab is still found by name.
+ texts.clear();flash.clear();reboot();pick(5,4);moveRow(5,4,-1);tab();assert(gLauncherSubSelection==3&&on("Snake"));
+ moveRow(5,3,1);texts.clear();
+}
 int main(){
+ tabSkipsSettingsAndSystem();texts.clear();flash.clear();reboot();writes=0;
  // Open Snake, go back to Pulse, and the menu is still on Snake.
  pick(5,4);assert(gUiMode==UiMode::Snake&&on("Snake"));
  setUiMode(UiMode::Home);assert(on("Snake"));
@@ -145,7 +188,7 @@ int main(){
  moveRow(6,0,1);moveRow(9,2,-1);reboot();
  assert(!std::strcmp(launcherGroup(6).items[0].label,"Flappy Bird")&&!std::strcmp(launcherGroup(9).items[1].label,"Sequences"));
  assert(!std::strcmp(launcherGroup(5).items[0].label,"Tetris"));
- std::cout<<"PASS menu memory: survives Pulse, chat and restarts, Favorites and tab orders too, without wearing flash\n";
+ std::cout<<"PASS menu memory: survives Pulse, chat and restarts, Favorites and tab orders too, without wearing flash; Tab skips Settings and System\n";
 }
 '''
 with tempfile.TemporaryDirectory(prefix='s1-launcher-memory-') as directory:

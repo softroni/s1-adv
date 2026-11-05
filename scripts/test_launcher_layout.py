@@ -72,7 +72,7 @@ constexpr uint16_t rgb565_local(int r, int g, int b) { return ((r & 0xF8) << 8) 
 template <class T> T clampValue(T x, T lo, T hi) { return std::min(hi, std::max(lo, x)); }
 uint32_t nowMs = 1000;
 uint32_t millis() { return nowMs; }
-constexpr uint8_t kLauncherGroupCount = 10, kLauncherMaxSubItems = 9, kFavoritesGroup = 0;
+constexpr uint8_t kLauncherGroupCount = 10, kLauncherMaxSubItems = 9, kFavoritesGroup = 0, kSettingsGroup = 7, kSystemGroup = 8;
 ''' + block((parts / '002_main.cpp.inc').read_text(), 'enum class UiMode : uint8_t') + \
     block(table, 'struct LauncherSubItem {') + block(table, 'struct LauncherGroup {') + \
     block(table, 'constexpr LauncherGroup kLauncherGroups') + favorites + r'''
