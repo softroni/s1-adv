@@ -185,7 +185,7 @@ export class CameraService {
     const cam = params.get("cam") || "";
     if (!NO_CAMERA.has(what) && !CAMERA_ID.test(cam)) throw new CameraError("no_camera", 404);
     const day = /^\d{8}$/u.test(params.get("day") || "") ? params.get("day") : "";
-    const clip = /^\d{1,10}$/u.test(params.get("id") || "") ? params.get("id") : "";
+    const clip = /^\d{1,16}$/u.test(params.get("id") || "") ? params.get("id") : "";
     const bytes = (got, type) => {
       if (got.status === 204) { res.writeHead(204, { "cache-control": "no-store" }); res.end(); return; }
       if (got.status !== 200) throw new CameraError(helperCode(got), got.status === 404 || got.status === 409 || got.status === 400 ? got.status : 502);

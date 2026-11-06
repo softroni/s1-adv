@@ -78,8 +78,8 @@ function clock(text) {
 export function clipFromRow(row) {
   const start = clock(row?.start_time), end = clock(row?.end_time);
   if (!start || !row.storage_path || !row.device_sn || !(Number(row.frame_num) > 0)) return null;
-  const id = Number(row.record_id);
-  if (!Number.isInteger(id) || id < 0) return null;
+  const id = Number(row.record_id);  // A HomeBase 3's are 13 digits: yyyyMMdd and a number.
+  if (!Number.isSafeInteger(id) || id < 0) return null;
   let seconds = end ? end.seconds - start.seconds + (end.day !== start.day ? 86400 : 0) : 0;
   if (!(seconds > 0)) seconds = Math.max(1, Math.round(Number(row.frame_num) / 15));
   return { id, day: start.day, start: start.seconds, seconds, sn: row.device_sn, camId: cameraId(row.device_sn), path: String(row.storage_path),

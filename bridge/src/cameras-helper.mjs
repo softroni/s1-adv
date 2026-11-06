@@ -625,8 +625,9 @@ async function monthCounts(ym) {
   try {
     const rows = await archiveRead(DB_COUNT_BY_DATE, { start_date: start, end_date: end });
     for (const row of rows) {
+      // A HomeBase 3 answers 1 for a day with recordings, not how many: a listed day keeps its count.
       const day = String(row?.days || row?.day || "").replace(/\D/gu, "").slice(0, 8);
-      if (validDay(day)) dayCounts.set(day, Number(row.count) || 0);
+      if (validDay(day) && !dayLists.has(day)) dayCounts.set(day, Number(row.count) || 0);
     }
     log(`month ${ym}: ${rows.length} day(s) with clips`);
   } catch (error) {
