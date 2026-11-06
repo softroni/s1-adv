@@ -199,8 +199,8 @@ TV Remote is under Tab, Tools, and `/tv` opens it. It has a page for each device
 Apple TV, **2** Bose, **3** Epson, **4** Samsung, and it opens on the last one used. On the Apple TV
 page `;` `.` `,` `/` move, Enter is OK, Del is Back, Space plays or pauses, H is Home and Z is
 Sleep, and `=` `-` M P are the Bose's volume, mute and power. The Bose page has its inputs, and C
-switches between the two Bose code sets. The Epson page has power, HDMI 1 (I), HDMI 2 (O), Source,
-Menu and its own arrows, and the Samsung page its arrows, Home (H), Source (S) and Exit (E). Holding
+switches between the two Bose code sets. The Epson page has power, HDMI 1 (I), HDMI 2 (O), Menu,
+its own arrows and volume, and the Samsung page its arrows, Home (H), Source (S) and Exit (E). Holding
 an arrow or the volume keeps it going. Bluetooth (B) and typing
 (T) are out of the firmware for now, because having Bluetooth in it left too little memory for
 HTTPS. [TV Remote](TV-REMOTE.md) has the details, including how

@@ -260,7 +260,7 @@ void pagesScenario() {
   assert(gTvPage == Device::AppleTv && gTvBoseSet == 0);
   // 2, the Bose: its volume rocker and buttons, and the codes it's using.
   press('2'); assert(gTvPage == Device::Bose && savedBytes["tv_remote/page"] == 1);
-  for (const char* t : {"Power", "Mute", "TV input", "Bluetooth input", "Codes: 600 remote", "VOLUME", "Point at the Bose. C: other codes"}) assert(shows(t));
+  for (const char* t : {"Power", "Mute", "TV input", "Bluetooth input", "Codes: 600 remote", "VOLUME", "Point it at the Bose. C: other codes"}) assert(shows(t));
   press('='); assert(ir.back().kind == 'B' && lastIr() == boseIr(Action::VolumeUp) && shows("Volume up to the Bose"));
   assert(gTvFlash == (Press{Device::Bose, Action::VolumeUp}));
   release(); press('-'); later(450); assert(lastIr() == boseIr(Action::VolumeDown) && ir.end()[-2].value == boseIr(Action::VolumeDown)); release(); later(0);
@@ -283,9 +283,12 @@ void pagesScenario() {
   press('c'); assert(gTvBoseSet == 0 && savedBytes["tv_remote/bose"] == 0);
   // 3, the projector: power, inputs, menu and its ring.
   press('3'); assert(gTvPage == Device::Epson);
-  for (const char* t : {"Power", "Source", "HDMI 1", "HDMI 2", "Menu", "Back", "Blank", "OK", "Point at the projector. 1-4: remotes"}) assert(shows(t));
+  for (const char* t : {"EPSON", "Power", "HDMI 1", "HDMI 2", "Menu", "Back", "Blank", "VOLUME", "Vol +", "Vol -", "OK", "Point it at the projector"}) assert(shows(t));
+  assert(!shows("Source"));
   press('p'); assert(lastIr() == epsonIr(Action::Power) && shows("Power: twice turns the projector off"));
-  press('s'); assert(lastIr() == epsonIr(Action::Source) && shows("Source to the projector"));
+  n = ir.size(); press('s'); assert(ir.size() == n);  // No Source: HDMI 1 and 2 choose the input.
+  press('='); assert(lastIr() == epsonIr(Action::VolumeUp) && shows("Volume up to the projector") && gTvFlash == (Press{Device::Epson, Action::VolumeUp}));
+  release(); press('-'); later(450); assert(lastIr() == epsonIr(Action::VolumeDown) && ir.end()[-2].value == epsonIr(Action::VolumeDown)); release(); later(0);
   press('i'); assert(lastIr() == epsonIr(Action::Hdmi1) && shows("HDMI 1 to the projector"));
   press('O'); assert(lastIr() == epsonIr(Action::Hdmi2));
   press('m'); assert(lastIr() == epsonIr(Action::Menu));
@@ -294,10 +297,10 @@ void pagesScenario() {
   press('/'); assert(lastIr() == epsonIr(Action::Right) && gCanvas.arcs == 2);
   enter(); assert(lastIr() == epsonIr(Action::Select)); del(); assert(lastIr() == epsonIr(Action::Back));
   release(); press('.'); later(450); assert(lastIr() == epsonIr(Action::Down) && ir.end()[-2].value == epsonIr(Action::Down)); release(); later(0);
-  n = ir.size(); press('='); assert(ir.size() == n && shows("P power, I O HDMI 1 2, S source"));
+  n = ir.size(); press('x'); assert(ir.size() == n && shows("P power, I O HDMI 1 2, = - volume"));
   // 4, the Samsung: its ring, Back, Home, Source and Exit, and its volume, mute and power.
   press('4'); assert(gTvPage == Device::Samsung);
-  for (const char* t : {"SAMSUNG TV", "Back", "Home", "Source", "Exit", "SOUND, POWER", "Vol +", "Vol -", "Power", "Mute", "OK", "Point at the TV. 1-4: remotes"}) assert(shows(t));
+  for (const char* t : {"SAMSUNG TV", "Back", "Home", "Source", "Exit", "SOUND, POWER", "Vol +", "Vol -", "Power", "Mute", "OK", "Point it at the TV"}) assert(shows(t));
   press(';'); assert(lastIr() == samsungIr(Action::Up) && gCanvas.arcs == 1 && shows("Up to the TV"));
   press('/'); assert(lastIr() == samsungIr(Action::Right));
   enter(); assert(lastIr() == samsungIr(Action::Select)); del(); assert(lastIr() == samsungIr(Action::Back));
@@ -345,7 +348,8 @@ int main() {
   }
   // Epson: NECext 83 55, the command and its inverse, as every Epson file has them (EH-TW5650 and others).
   const auto ep = [](Action a) { return irCode({Device::Epson, a}).nec; };
-  assert(bytes(ep(Action::Power)) == (B{0x83, 0x55, 0x90, 0x6F}) && bytes(ep(Action::Source)) == (B{0x83, 0x55, 0x8C, 0x73}));
+  assert(bytes(ep(Action::Power)) == (B{0x83, 0x55, 0x90, 0x6F}) && irCode({Device::Epson, Action::Source}).protocol == IrProtocol::None);
+  assert(bytes(ep(Action::VolumeUp)) == (B{0x83, 0x55, 0x98, 0x67}) && bytes(ep(Action::VolumeDown)) == (B{0x83, 0x55, 0x99, 0x66}));
   assert(bytes(ep(Action::Hdmi1)) == (B{0x83, 0x55, 0x73, 0x8C}) && bytes(ep(Action::Hdmi2)) == (B{0x83, 0x55, 0x77, 0x88}));
   assert(bytes(ep(Action::Menu)) == (B{0x83, 0x55, 0x9A, 0x65}) && bytes(ep(Action::Back)) == (B{0x83, 0x55, 0x84, 0x7B}));
   assert(bytes(ep(Action::Select)) == (B{0x83, 0x55, 0x85, 0x7A}) && bytes(ep(Action::Blank)) == (B{0x83, 0x55, 0x93, 0x6C}));
@@ -418,7 +422,7 @@ int main() {
         if (Device(d) != Device::Bose) break;  // Only the Bose has two sets.
       }
     }
-  assert(frames.size() == 9 + 12 + 6 * 2 + 13);
+  assert(frames.size() == 9 + 13 + 6 * 2 + 13);
   std::sort(frames.begin(), frames.end()); assert(std::adjacent_find(frames.begin(), frames.end()) == frames.end());
   for (Action a : {Action::Bluetooth, Action::Typing, Action::Forget, Action::None, Action::Codes}) assert(irCode({Device::AppleTv, a}).protocol == IrProtocol::None);
 
@@ -464,11 +468,14 @@ int main() {
   assert(key(Device::Bose, 't') == (P{Device::Bose, Action::TvInput}) && key(Device::Bose, 'B') == (P{Device::Bose, Action::BluetoothInput}));
   assert(key(Device::Bose, 'c') == (P{Device::Bose, Action::Codes}) && key(Device::Bose, '+') == (P{Device::Bose, Action::VolumeUp}));
   assert(key(Device::Bose, ';').action == Action::None && keyFor(Device::Bose, 'x', true, false).action == Action::None);
-  assert(key(Device::Epson, 'p') == (P{Device::Epson, Action::Power}) && key(Device::Epson, 'S') == (P{Device::Epson, Action::Source}));
+  assert(key(Device::Epson, 'p') == (P{Device::Epson, Action::Power}) && key(Device::Epson, 'S').action == Action::None);
   assert(key(Device::Epson, 'i') == (P{Device::Epson, Action::Hdmi1}) && key(Device::Epson, 'o') == (P{Device::Epson, Action::Hdmi2}));
   assert(key(Device::Epson, 'm') == (P{Device::Epson, Action::Menu}) && key(Device::Epson, 'b') == (P{Device::Epson, Action::Blank}));
   assert(key(Device::Epson, '/') == (P{Device::Epson, Action::Right}) && keyFor(Device::Epson, 'x', false, true) == (P{Device::Epson, Action::Back}));
-  assert(key(Device::Epson, '=').action == Action::None && key(Device::Epson, 'h').action == Action::None);
+  // Its own volume keys, as its remote has them.
+  assert(key(Device::Epson, '=') == (P{Device::Epson, Action::VolumeUp}) && key(Device::Epson, '+') == (P{Device::Epson, Action::VolumeUp}));
+  assert(key(Device::Epson, '-') == (P{Device::Epson, Action::VolumeDown}) && key(Device::Epson, 'm') == (P{Device::Epson, Action::Menu}));
+  assert(key(Device::Epson, 'h').action == Action::None);
   assert(key(Device::Samsung, '=') == (P{Device::Samsung, Action::VolumeUp}) && key(Device::Samsung, 'p') == (P{Device::Samsung, Action::Power}));
   assert(key(Device::Samsung, ';') == (P{Device::Samsung, Action::Up}) && key(Device::Samsung, 'h') == (P{Device::Samsung, Action::Home}));
   assert(keyFor(Device::Samsung, 'x', true, false) == (P{Device::Samsung, Action::Select}) && keyFor(Device::Samsung, 'x', false, true) == (P{Device::Samsung, Action::Back}));
@@ -484,7 +491,7 @@ int main() {
   saved["tv_remote/bt"] = true;
   beginTvRemote(); render();
   assert(tv_ble::starts == 0 && WiFi.m == WIFI_STA && emojiClears == 0 && shows("APPLE TV") && shows("BOSE SOUND"));
-  for (const char* tab : {"Apple TV", "Bose", "Epson", "Samsung"}) assert(shows(tab));
+  for (const char* tab : {"Apple TV", "Bose", "Epson", "Samsung", "1", "2", "3", "4"}) assert(shows(tab));
   for (const char* s : {"Del", "Back", "Spc", "Play", "H", "Home", "Z", "Sleep", "=", "Vol +", "-", "Vol -", "M", "Mute", "P", "Power", "OK"}) assert(shows(s));
   assert(!shows("T") && !shows("Type") && !shows("B") && !showsPart("BT") && !showsPart("Bluetooth"));
   for (char c : {'b', 't', 'B'}) { press(c); assert(shows("Bluetooth isn't in this version") && !tvRemoteTakesText()); }
@@ -502,7 +509,7 @@ int main() {
 #endif
   // Opened with Bluetooth off, as it starts: everything goes by infrared.
   beginTvRemote(); render();
-  assert(tv_ble::starts == 0 && irInits > 0 && shows("Apple TV") && shows("Point at the Apple TV. 1-4: remotes") && overlays == 1);
+  assert(tv_ble::starts == 0 && irInits > 0 && shows("Apple TV") && shows("Point it at the Apple TV") && overlays == 1);
   for (const char* s : {"Del", "Back", "Spc", "Play", "H", "Home", "Z", "Sleep", "T", "Type", "B", "BT on", "=", "Vol +", "-", "Vol -", "M", "Mute", "P", "Power", "OK"}) assert(shows(s));
   assert(gCanvas.arcs == 0);  // Nothing lit yet.
   assert(!tvRemoteTakesText());

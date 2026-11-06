@@ -248,7 +248,7 @@ void tvShowPage(tv_remote::Device page) {
 const char* tvPageHint() {
   switch (gTvPage) {
     case tv_remote::Device::Bose: return "= - volume, P power, C other codes";
-    case tv_remote::Device::Epson: return "P power, I O HDMI 1 2, S source";
+    case tv_remote::Device::Epson: return "P power, I O HDMI 1 2, = - volume";
     case tv_remote::Device::Samsung: return "H home, S source, E exit, = - volume";
     default: return tv_ble::available() ? "H home, T type, B Bluetooth" : "1-4 change remote, = - Bose volume";
   }
@@ -509,8 +509,9 @@ void tvRocker(int16_t x, int16_t y, int16_t w, int16_t h, tv_remote::Device devi
   d.print("VOLUME");
 }
 
-// The tabs, one a device, the page on screen filled in its colour. With Bluetooth built in, a dot
-// on the Apple TV's tab says how it's connected.
+// The tabs, one a device with the number that opens it, the page on screen filled in its colour.
+// The number is in the small font, or the four wouldn't fit across. With Bluetooth built in, a
+// dot on the Apple TV's tab says how it's connected.
 void tvTabs() {
   auto& d = gCanvas;
   d.fillScreen(TFT_BLACK);
@@ -520,19 +521,28 @@ void tvTabs() {
     const tv_remote::Device device = tv_remote::Device(i);
     const char* name = tv_remote::deviceName(device);
     const bool on = device == gTvPage;
-    const int16_t w = d.textWidth(name) + 10;
+    const char number[2] = {char('1' + i), 0};
+    d.setFont(&fonts::Font0);
+    const int16_t numberW = d.textWidth(number);
+    d.setFont(&fonts::Font2);
+    const int16_t w = 3 + numberW + 2 + d.textWidth(name) + 4;
     const uint16_t accent = tvAccentOf(device);
-    if (on) d.fillRoundRect(x, 1, w, 19, 5, accent);
-    else d.drawRoundRect(x, 1, w, 19, 5, tvEdge());
+    if (on) d.fillRoundRect(x, 1, w, 19, 4, accent);
+    else d.drawRoundRect(x, 1, w, 19, 4, tvEdge());
+    d.setFont(&fonts::Font0);
+    d.setTextColor(on ? TFT_BLACK : tvLabel());
+    d.setCursor(x + 3, 7);
+    d.print(number);
+    d.setFont(&fonts::Font2);
     d.setTextColor(on ? TFT_BLACK : accent);
-    d.setCursor(x + 5, 3);
+    d.setCursor(x + 3 + numberW + 2, 3);
     d.print(name);
     if (device == tv_remote::Device::AppleTv && tv_ble::available() && tv_ble::state() != tv_ble::State::Off) {
       uint16_t ink = 0;
       tvLinkLabel(ink);
       d.fillCircle(x + w - 4, 5, 2, ink);
     }
-    x += w + 3;
+    x += w + 2;
   }
   d.drawFastHLine(0, 22, 240, tvAccent());
 }
@@ -562,10 +572,10 @@ String tvLastLine(uint16_t& ink) {
   ink = tvMuted();
   if (gTvLast.action == Action::None) {
     switch (gTvPage) {
-      case Device::Bose: return "Point at the Bose. C: other codes";
-      case Device::Epson: return "Point at the projector. 1-4: remotes";
-      case Device::Samsung: return "Point at the TV. 1-4: remotes";
-      default: return tvBluetoothReady() ? "Connected: no need to point it" : "Point at the Apple TV. 1-4: remotes";
+      case Device::Bose: return "Point it at the Bose. C: other codes";
+      case Device::Epson: return "Point it at the projector";
+      case Device::Samsung: return "Point it at the TV";
+      default: return tvBluetoothReady() ? "Connected: no need to point it" : "Point it at the Apple TV";
     }
   }
   // Epson projectors ask for a second press before they turn off.
@@ -593,14 +603,17 @@ void renderTvRemote() {
       tvButton(left, 105, "C", String("Codes: ") + tvBoseCodesName() + " remote", {Device::Bose, Action::Codes}, wide);
       break;
     case Device::Epson:
-      tvDrawPad(45, 73, Device::Epson);
-      tvButton(left, 26, "P", "Power", {Device::Epson, Action::Power});
-      tvButton(right, 26, "S", "Source", {Device::Epson, Action::Source});
-      tvButton(left, 48, "I", "HDMI 1", {Device::Epson, Action::Hdmi1});
-      tvButton(right, 48, "O", "HDMI 2", {Device::Epson, Action::Hdmi2});
-      tvButton(left, 70, "M", "Menu", {Device::Epson, Action::Menu});
-      tvButton(right, 70, "Del", "Back", {Device::Epson, Action::Back});
-      tvButton(left, 92, "B", "Blank", {Device::Epson, Action::Blank});
+      tvDrawPad(45, 78, Device::Epson);
+      tvGroup(left, 25, "EPSON", tvAccentOf(Device::Epson));
+      tvButton(left, 35, "P", "Power", {Device::Epson, Action::Power});
+      tvButton(right, 35, "I", "HDMI 1", {Device::Epson, Action::Hdmi1});
+      tvButton(left, 55, "O", "HDMI 2", {Device::Epson, Action::Hdmi2});
+      tvButton(right, 55, "M", "Menu", {Device::Epson, Action::Menu});
+      tvButton(left, 75, "Del", "Back", {Device::Epson, Action::Back});
+      tvButton(right, 75, "B", "Blank", {Device::Epson, Action::Blank});
+      tvGroup(left, 97, "VOLUME", tvAccentOf(Device::Epson));
+      tvButton(left, 107, "=", "Vol +", {Device::Epson, Action::VolumeUp});
+      tvButton(right, 107, "-", "Vol -", {Device::Epson, Action::VolumeDown});
       break;
     case Device::Samsung: {
       const uint16_t ink = tvAccentOf(Device::Samsung);

@@ -27,7 +27,7 @@ enum class Action : uint8_t {
   PlayPause, Home, Sleep,
   // Sound, and power.
   VolumeUp, VolumeDown, Mute, Power,
-  // The projector, and the Samsung's Source and Exit.
+  // The projector's, and the Samsung's Source and Exit.
   Source, Hdmi1, Hdmi2, Menu, Blank, Exit,
   // The Bose.
   TvInput, BluetoothInput, Codes,
@@ -97,9 +97,11 @@ constexpr Press keyFor(Device page, char key, bool enter, bool del) {
       }
     case Device::Epson:
       if (const Action ring = ringKey(key, enter, del); ring != Action::None) return {Device::Epson, ring};
+      // Its own remote's volume keys: with its sound going out over HDMI, they turn that up and down.
+      if (key == '=' || key == '+') return {Device::Epson, Action::VolumeUp};
+      if (key == '-' || key == '_') return {Device::Epson, Action::VolumeDown};
       switch (key) {
         case 'p': case 'P': return {Device::Epson, Action::Power};
-        case 's': case 'S': return {Device::Epson, Action::Source};
         case 'i': case 'I': return {Device::Epson, Action::Hdmi1};
         case 'o': case 'O': return {Device::Epson, Action::Hdmi2};
         case 'm': case 'M': return {Device::Epson, Action::Menu};
@@ -219,11 +221,12 @@ constexpr IrCode irCode(Press p, uint8_t boseSet = 0) {
     case Device::Epson:
       switch (p.action) {
         case Action::Power: return epson(0x90);
-        case Action::Source: return epson(0x8C);
         case Action::Hdmi1: return epson(0x73);
         case Action::Hdmi2: return epson(0x77);
         case Action::Menu: return epson(0x9A);
         case Action::Blank: return epson(0x93);
+        case Action::VolumeUp: return epson(0x98);
+        case Action::VolumeDown: return epson(0x99);
         case Action::Up: return epson(0xB0);
         case Action::Down: return epson(0xB2);
         case Action::Left: return epson(0xB3);

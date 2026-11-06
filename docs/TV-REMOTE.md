@@ -9,7 +9,7 @@
 
 Tab, T, TV Remote, or type `/tv`. It's a remote for four devices, a page each: an **Apple
 TV**, a **Bose** soundbar, an **Epson** projector and a **Samsung** TV. Press **1** to **4** to
-change page; it opens on the page you used last. Everything goes by infrared, so point the
+change page, as each tab shows; it opens on the page you used last. Everything goes by infrared, so point the
 Cardputer at the device, as you would its own remote.
 
 ![TV Remote on the Apple TV page: tabs for the four devices, the arrows around OK, the Apple TV's Back, Play, Home and Sleep, and the Bose's volume, mute and power](assets/screens/tv-remote.png)
@@ -60,22 +60,21 @@ is in use, and it's kept for next time.
 
 ## 3 Epson
 
-![The Epson page: the arrows around OK for its menus, then Power, Source, HDMI 1, HDMI 2, Menu, Back and Blank](assets/screens/tv-remote-epson.png)
+![The Epson page: the arrows around OK for its menus, then Power, HDMI 1, HDMI 2, Menu, Back and Blank, and its volume](assets/screens/tv-remote-epson.png)
 
 | Key | What it does |
 |---|---|
 | P | Power. To turn it off, press P again when the projector asks |
 | I | HDMI 1 |
 | O | HDMI 2 |
-| S | Source: the projector looks for a picture |
 | M | Menu |
 | `;` `.` `,` `/`, Enter, Del | Move in its menus, OK and Back |
 | B | Blank: the picture and sound off and on, the projector still running |
+| `=` `-` | Volume, as its own remote's volume keys: with its sound going out over HDMI to a soundbar, they turn that up and down |
 
 Epson projectors share one set of codes. These are from the remote of an Epson EH-TW5650, a home
 cinema projector, and three other Epson remotes agree, but not every model has every key, so one
-may do nothing on yours. The projector has no volume of its own here: the
-Apple TV page's volume keys work the Bose.
+may do nothing on yours.
 
 ## 4 Samsung
 
@@ -158,9 +157,6 @@ fast memory.
 
 Checked on a computer, not yet with the devices:
 
-- Which Bose code set a given Bose soundbar answers, if either.
-- Which of the Epson keys a given Epson projector answers. Power, HDMI 1 and HDMI 2 are the likeliest.
-- The Samsung's arrows, OK, Return, Home, Source and Exit. Its volume, mute and power work.
 - Pairing with no code, reconnecting by itself, and which keys the Apple TV takes from a keyboard.
   Esc for Back and a media key for Play/Pause are my best reading, not something seen working.
 - How much memory Bluetooth takes while it's on, and whether it starts again cleanly after
