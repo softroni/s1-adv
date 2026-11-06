@@ -60,16 +60,16 @@ is in use, and it's kept for next time.
 
 ## 3 Epson
 
-![The Epson page: the arrows around OK for its menus, then Power, HDMI 1, HDMI 2, Menu, Back and Blank, and its volume](assets/screens/tv-remote-epson.png)
+![The Epson page: the arrows around OK for its menus, then Power, Blank, Menu, Back, HDMI 1 and HDMI 2, and its volume](assets/screens/tv-remote-epson.png)
 
 | Key | What it does |
 |---|---|
 | P | Power. To turn it off, press P again when the projector asks |
-| I | HDMI 1 |
-| O | HDMI 2 |
+| B | Blank: the picture and sound off and on, the projector still running |
 | M | Menu |
 | `;` `.` `,` `/`, Enter, Del | Move in its menus, OK and Back |
-| B | Blank: the picture and sound off and on, the projector still running |
+| I | HDMI 1 |
+| O | HDMI 2 |
 | `=` `-` | Volume, as its own remote's volume keys: with its sound going out over HDMI to a soundbar, they turn that up and down |
 
 Epson projectors share one set of codes. These are from the remote of an Epson EH-TW5650, a home

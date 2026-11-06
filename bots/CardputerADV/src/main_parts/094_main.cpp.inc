@@ -606,11 +606,11 @@ void renderTvRemote() {
       tvDrawPad(45, 78, Device::Epson);
       tvGroup(left, 25, "EPSON", tvAccentOf(Device::Epson));
       tvButton(left, 35, "P", "Power", {Device::Epson, Action::Power});
-      tvButton(right, 35, "I", "HDMI 1", {Device::Epson, Action::Hdmi1});
-      tvButton(left, 55, "O", "HDMI 2", {Device::Epson, Action::Hdmi2});
-      tvButton(right, 55, "M", "Menu", {Device::Epson, Action::Menu});
-      tvButton(left, 75, "Del", "Back", {Device::Epson, Action::Back});
-      tvButton(right, 75, "B", "Blank", {Device::Epson, Action::Blank});
+      tvButton(right, 35, "B", "Blank", {Device::Epson, Action::Blank});
+      tvButton(left, 55, "M", "Menu", {Device::Epson, Action::Menu});
+      tvButton(right, 55, "Del", "Back", {Device::Epson, Action::Back});
+      tvButton(left, 75, "I", "HDMI 1", {Device::Epson, Action::Hdmi1});
+      tvButton(right, 75, "O", "HDMI 2", {Device::Epson, Action::Hdmi2});
       tvGroup(left, 97, "VOLUME", tvAccentOf(Device::Epson));
       tvButton(left, 107, "=", "Vol +", {Device::Epson, Action::VolumeUp});
       tvButton(right, 107, "-", "Vol -", {Device::Epson, Action::VolumeDown});
