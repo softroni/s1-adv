@@ -14,6 +14,7 @@
 //   live/start?cam=            starts a live view; then live/frame?cam= answers the next frame,
 //                              204 when none came in time, 409 once it has ended
 //   live/extend?cam=  live/stop?cam=  turn?cam=&dir=left|right|up|down  code?value=  report?...
+//   live/audio?cam=            the sound since the last ask: 8 kHz mono 16-bit PCM, 204 when none
 //   live/zoom?cam=&x=<tenths>  live/pan?cam=&dir=left|right|up|down[&turn=1]   both answer
 //                              "view <tenths> <x0> <y0> <x1> <y1> <moved|turned|edge|->": the zoom
 //                              now and where the view is in the frame, in thousandths
@@ -42,8 +43,8 @@ export function findNode24(configured) {
   return "";
 }
 
-const WHAT = new Set(["list", "thumb", "picture", "refresh", "live/start", "live/frame", "live/extend", "live/stop", "live/zoom",
-  "live/pan", "turn", "code", "report"]);
+const WHAT = new Set(["list", "thumb", "picture", "refresh", "live/start", "live/frame", "live/audio", "live/extend", "live/stop",
+  "live/zoom", "live/pan", "turn", "code", "report"]);
 
 export class CameraService {
   constructor({ dir = "", envFile = "", node, ffmpeg, enabled = true, spawnImpl = spawn, fetchImpl = fetch, now = Date.now,
@@ -197,6 +198,7 @@ export class CameraService {
         bytes(got, "image/jpeg");
         return;
       }
+      case "live/audio": bytes(await this.call("GET", "/live/audio", { cam }, 5000), "application/octet-stream"); return;
       case "live/extend": ok(await this.call("POST", "/live/extend", { cam })); return;
       case "live/zoom":
       case "live/pan": {

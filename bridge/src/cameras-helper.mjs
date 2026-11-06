@@ -13,7 +13,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import {
-  CAMERA_ID, DIGITAL_ZOOM, PICTURE, RAW, THUMB, cameraId, deviceDecodes, dither332, liveArgs, modeWord, panRect, pictureArgs, rectMille,
+  AUDIO, CAMERA_ID, DIGITAL_ZOOM, PICTURE, RAW, THUMB, audioArgs, cameraId, deviceDecodes, dither332, liveArgs, modeWord, panRect, pictureArgs, rectMille,
   renderRect, scrub, shownName, thumbArgs, viewRect, zoomPlan
 } from "./cameras-media.mjs";
 
@@ -363,6 +363,7 @@ async function liveStart(id) {
   view.stream = stream;
   if (view.ended) { stream.stop(); return; }
   stream.on("video", (frame) => onVideo(view, frame));
+  stream.on("audio", (frame) => onAudio(view, frame));
   stream.on("budget", (notice) => {
     if (Date.now() < view.extendUntil && Date.now() - view.startedAt < LIVE_MAX_MS) notice.extend();
   });
@@ -410,6 +411,43 @@ function onVideo(view, frame) {
   if (frame.codec !== view.codec) return;  // A switch mid-stream: keep what decodes.
   if (view.ff.stdin.writableLength < 8 * 1024 * 1024) view.ff.stdin.write(frame.data);
 }
+// The camera's sound, decoded to PCM and kept until the device asks for it: a second at most, so a
+// device that stopped asking doesn't fall ever further behind.
+function onAudio(view, frame) {
+  if (view.ended || view.audioOff) return;
+  if (!view.audioFf) {
+    const args = audioArgs(frame.codec);
+    if (!args) { view.audioOff = true; log(`live ${view.id} audio ${frame.codec}: not played`); return; }
+    const child = spawn(FFMPEG, args, { stdio: ["pipe", "pipe", "pipe"] });
+    view.pcm = [];
+    view.pcmBytes = 0;
+    child.stdout.on("data", (chunk) => {
+      view.pcm.push(chunk);
+      view.pcmBytes += chunk.length;
+      while (view.pcmBytes > AUDIO.bytesPerSecond && view.pcm.length > 1) view.pcmBytes -= view.pcm.shift().length;
+    });
+    child.stderr.on("data", () => {});
+    child.stdin.on("error", () => {});
+    child.on("close", () => { view.audioFf = null; view.audioOff = true; });
+    view.audioFf = child;
+    view.audioCodec = frame.codec;
+    log(`live ${view.id} audio ${frame.codec}`);
+  }
+  if (view.audioFf.stdin.writableLength < 256 * 1024) view.audioFf.stdin.write(frame.data);
+}
+// What's come since the device last asked, in whole samples; null when nothing has.
+function liveAudio(id) {
+  if (!live || live.id !== id) throw new HelperError("not_live", 409);
+  const view = live;
+  view.askedAt = Date.now();
+  if (!view.pcmBytes) return null;
+  let pcm = Buffer.concat(view.pcm);
+  view.pcm = [];
+  view.pcmBytes = 0;
+  if (pcm.length % 2) { view.pcm.push(pcm.subarray(pcm.length - 1)); view.pcmBytes = 1; pcm = pcm.subarray(0, pcm.length - 1); }
+  view.audioSent = (view.audioSent || 0) + pcm.length;
+  return pcm;
+}
 async function liveEnded(view, why) {
   if (view.ended) return;
   view.ended = true;
@@ -420,9 +458,12 @@ async function liveEnded(view, why) {
   }
   try { view.stream?.stop(); } catch {}
   try { view.ff?.stdin.end(); } catch {}
-  setTimeout(() => { try { view.ff?.kill("SIGKILL"); } catch {} }, 2000).unref();
+  try { view.audioFf?.stdin.end(); } catch {}
+  const audioFf = view.audioFf;
+  setTimeout(() => { try { view.ff?.kill("SIGKILL"); } catch {} try { audioFf?.kill("SIGKILL"); } catch {} }, 2000).unref();
   const seconds = Math.round((Date.now() - view.startedAt) / 1000);
-  log(`live ${view.id} ended (${why}) after ${seconds} s, ${view.frames} frames`);
+  log(`live ${view.id} ended (${why}) after ${seconds} s, ${view.frames} frames` +
+    (view.audioCodec ? `, ${Math.round((view.audioSent || 0) / AUDIO.bytesPerSecond)} s of sound sent` : ", no sound"));
   // The wall keeps the camera's whole view, not the zoomed one.
   if (view.raw) {
     try {
@@ -552,6 +593,12 @@ export function handler() {
           return;
         }
         case "POST /live/extend": liveExtend(cam); send(res, 200, { ok: true }); return;
+        case "GET /live/audio": {
+          const pcm = liveAudio(cam);
+          if (!pcm) { res.writeHead(204, { "cache-control": "no-store" }); res.end(); return; }
+          send(res, 200, pcm, "application/octet-stream");
+          return;
+        }
         case "POST /live/zoom": send(res, 200, await liveZoom(cam, Number(q.get("x")) || 10)); return;
         case "POST /live/pan": send(res, 200, await livePan(cam, q.get("dir") || "", q.get("turn") === "1")); return;
         case "POST /live/stop": if (live?.id === cam) await liveStop("closed"); send(res, 200, { ok: true }); return;

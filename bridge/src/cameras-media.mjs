@@ -188,6 +188,17 @@ export function renderRect(rgb, rect, out = Buffer.alloc(PICTURE.width * PICTURE
   return out;
 }
 
+// Live view's sound: the camera's AAC (ADTS) or A-law, as 8 kHz mono 16-bit PCM, little-endian,
+// which the device plays as it comes with no decoder of its own: 16 KB a second. -flush_packets,
+// because ffmpeg otherwise holds 32 KB of it, two seconds, before writing any.
+export const AUDIO = Object.freeze({ rate: 8000, bytesPerSecond: 16000 });
+export function audioArgs(codec) {
+  const input = codec === "aac-lc" ? ["-probesize", "2048", "-analyzeduration", "0", "-f", "aac"]
+    : codec === "g711a" ? ["-f", "alaw", "-ar", "16000", "-ac", "1"] : null;
+  if (!input) return null;
+  return [...QUIET, ...input, "-i", "pipe:0", "-vn", "-ac", "1", "-ar", String(AUDIO.rate), "-f", "s16le", "-flush_packets", "1", "pipe:1"];
+}
+
 // A camera with a second, telephoto lens (the library's ptz().zoom) zooms 3x with it, and the
 // digital zoom goes on top. The device steps through the ladder, in tenths, and the plan says which
 // lens and which digital output make each step.
