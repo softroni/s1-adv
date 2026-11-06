@@ -7,53 +7,82 @@
 > works once it's back, which needs that memory found elsewhere first. Until then B and T say
 > "Bluetooth isn't in this version".
 
-Tab, T, TV Remote, or type `/tv`. It works an Apple TV in two ways. **Infrared** needs nothing
-set up, but you point the Cardputer at the Apple TV as you would its own remote. **Bluetooth**
-makes the Cardputer a keyboard the Apple TV pairs with once. Then there's no need to point, and
-you can type in search boxes and passwords on the Cardputer's keyboard. The TV's own volume, mute
-and power always go by infrared, and those are a Samsung TV's.
+Tab, T, TV Remote, or type `/tv`. It's a remote for four devices, a page each: an **Apple
+TV**, a **Bose** soundbar, an **Epson** projector and a **Samsung** TV. Press **1** to **4** to
+change page; it opens on the page you used last. Everything goes by infrared, so point the
+Cardputer at the device, as you would its own remote.
 
-![TV Remote: the arrows around OK, then buttons in two groups, Apple TV (Back, Play, Home, Sleep) and Samsung TV (volume, mute, power), each with its key](assets/screens/tv-remote.png)
+![TV Remote on the Apple TV page: tabs for the four devices, the arrows around OK, the Apple TV's Back, Play, Home and Sleep, and the Bose's volume, mute and power](assets/screens/tv-remote.png)
 
-Each button shows the key that presses it. The Apple TV group and the ring go to the Apple TV,
-and the Samsung TV group goes to the TV. When a code goes out, its button or arrow lights up for a
-moment:
+Each button shows the key that presses it, and lights up for a moment as its code goes out:
 
-![Home just sent: its button lit](assets/screens/tv-remote-lit.png)
+![Volume up just sent to the Bose from the Apple TV page: its button lit in the Bose's orange](assets/screens/tv-remote-lit.png)
 
-## The keys
-
-| Key | What it does | Sent by |
-|---|---|---|
-| `;` `.` `,` `/` | Up, down, left and right, with or without Fn. Hold one to keep going | Bluetooth when connected, otherwise infrared |
-| Enter | OK | The same |
-| Del | Back, the Siri Remote's Back or Menu button | The same |
-| Space | Play or pause | The same |
-| H | Home, the Siri Remote's TV button | Infrared |
-| Z | Sleep. With HDMI-CEC on, the TV goes off too | Infrared |
-| `=` and `-` | The TV's volume up and down. Hold one to keep going | Infrared, to the TV |
-| M | Mute the TV | Infrared, to the TV |
-| P | The TV's power, on or off | Infrared, to the TV |
-| T | [Type](#typing) on the Apple TV | Bluetooth |
-| B | Bluetooth on or off | |
-| Shift+B twice | [Forget](#forgetting-the-apple-tv) the Apple TV | |
-| Esc | Leaves the app | |
-
-The bottom line says what the last key sent and how, such as "Up by infrared" or "Volume up to
-the TV". The top corner says how keys are going: **Infrared**, **BT waiting** while Bluetooth
-is on but nothing is connected, **Bluetooth** when the Apple TV is connected, **BT starting** while it waits for the network to
-finish something, or **BT failed**.
+Each device has its colour, on its tab and on its buttons. The bottom line says what the last key
+sent and to what, such as "Up to the Apple TV" or "Volume up to the Bose". Holding an arrow or a
+volume key keeps it going. Esc leaves the app.
 
 The screen dims and goes off on the usual timers, but the screensaver doesn't start here, and a
 key pressed with the screen dimmed or off still does its job, as on a real remote.
 
-## Infrared
+## 1 Apple TV
 
-Point the Cardputer at the front of the Apple TV and press a key. The Apple TV's codes are its
-own Siri Remote's, recorded from an Apple TV 4K, so there's nothing to teach or set up.
+| Key | What it does |
+|---|---|
+| `;` `.` `,` `/` | Up, down, left and right, with or without Fn |
+| Enter | OK |
+| Del | Back, the Siri Remote's Back or Menu button |
+| Space | Play or pause |
+| H | Home, the Siri Remote's TV button |
+| Z | Sleep. With HDMI-CEC on, what's plugged into it goes off too |
+| `=` `-` M P | **The Bose's** volume up and down, mute and power, for when the Apple TV's sound goes through a Bose soundbar |
 
-The TV's volume, mute and power use the codes Samsung TVs have used for years. Another make of TV
-won't answer them yet. Point at the TV for those, which is usually right beside the Apple TV.
+The Apple TV's codes are its own Siri Remote's, recorded from an Apple TV 4K. Home and the arrows
+are known to work from the Cardputer.
+
+## 2 Bose
+
+![The Bose page: a volume rocker, then Power, Mute, TV input, Bluetooth input and the code set](assets/screens/tv-remote-bose.png)
+
+| Key | What it does |
+|---|---|
+| `=` `-` | Volume up and down |
+| M | Mute |
+| P | Power |
+| T | The TV input, the sound from HDMI |
+| B | The Bluetooth input |
+| C | The other code set |
+
+Bose's soundbar remotes don't all send the same signal. There are recordings of two, the Smart
+Soundbar 600's and the Soundbar 300's, and other Bose soundbars may answer either one. The page
+starts with the 600's. If the Bose doesn't answer, press **C** for the 300's, and try again. The page shows which
+is in use, and it's kept for next time.
+
+## 3 Epson
+
+![The Epson page: the arrows around OK for its menus, then Power, Source, HDMI 1, HDMI 2, Menu, Back and Blank](assets/screens/tv-remote-epson.png)
+
+| Key | What it does |
+|---|---|
+| P | Power. To turn it off, press P again when the projector asks |
+| I | HDMI 1 |
+| O | HDMI 2 |
+| S | Source: the projector looks for a picture |
+| M | Menu |
+| `;` `.` `,` `/`, Enter, Del | Move in its menus, OK and Back |
+| B | Blank: the picture and sound off and on, the projector still running |
+
+Epson projectors share one set of codes. These are from the remote of an Epson EH-TW5650, a home
+cinema projector, and three other Epson remotes agree, but not every model has every key, so one
+may do nothing on yours. The projector has no volume of its own here: the
+Apple TV page's volume keys work the Bose.
+
+## 4 Samsung
+
+![The Samsung page: a volume rocker, then Power and Mute](assets/screens/tv-remote-samsung.png)
+
+`=` and `-` set the volume, M mutes it and P turns the TV on or off, with the codes Samsung TVs
+have used for years.
 
 ## Bluetooth
 
@@ -63,7 +92,7 @@ Press **B**. The first time, the screen says where to pair it:
 
 1. On the Apple TV, open **Settings**, then **Remotes and Devices**, then **Bluetooth**.
 2. Pick **Cardputer Remote** from the list. No code is needed.
-3. The corner changes to **Bluetooth**. From now on the arrows, OK, Back and Play go by Bluetooth.
+3. A green dot on the Apple TV tab says it's connected. From now on the arrows, OK, Back and Play go by Bluetooth.
 
 After that the Apple TV connects again by itself, a few seconds after the app opens. Bluetooth
 runs only while TV Remote is open. Leaving the app turns it off. If you left it on, it comes back
@@ -72,10 +101,10 @@ on the next time you open TV Remote. B turns it off for good, and the keys go by
 **Wi-Fi is off while Bluetooth is on.** Bluetooth needs the memory Wi-Fi uses, and the remote
 doesn't need the network. Wi-Fi comes back by itself when you leave the app or press B, and
 messages and updates catch up then. If something is still using the network when you press B,
-the corner says **BT starting** and Bluetooth starts as soon as it's done.
+Bluetooth starts as soon as it's done.
 
-Home and Sleep always go by infrared, as do the TV's own keys, because a keyboard has no key the
-Apple TV reads as those.
+Home and Sleep always go by infrared, as do the other devices' keys, because a keyboard has no key
+the Apple TV reads as those.
 
 ### Forgetting the Apple TV
 
@@ -105,8 +134,8 @@ Bluetooth takes memory that the radio and every secure connection also need, so:
 - Opening TV Remote stops the radio or a podcast.
 - Background checks for messages and updates wait until you leave, as on IR Remote.
 - Turning Bluetooth on turns Wi-Fi off and clears the device's caches, to give it room.
-- If there still isn't enough memory, the corner says **BT failed** and the bottom line says
-  why, Wi-Fi comes straight back, and infrared still works. The log's `TV` lines say how much
+- If there still isn't enough memory, the bottom line says why, Wi-Fi comes straight back, and
+  infrared still works. The log's `TV` lines say how much
   there was and how much Bluetooth took.
 
 Having Bluetooth in the firmware at all leaves every app about 17 KB less memory, even with
@@ -115,9 +144,12 @@ fast memory.
 
 ## Not tested on hardware yet
 
-All of this has been checked on a computer, not yet on a Cardputer and an Apple TV:
+Checked on a computer, not yet with the devices:
 
-- Whether the Apple TV answers the infrared codes from the Cardputer, and from how far.
+- Which Bose code set a given Bose soundbar answers, if either.
+- Which of the Epson keys a given Epson projector answers. Power, HDMI 1 and HDMI 2 are the likeliest.
+- The Samsung's keys. Earlier versions sent them from the Apple TV page, where the sound is the
+  Bose's, so they haven't been tried at the Samsung itself.
 - Pairing with no code, reconnecting by itself, and which keys the Apple TV takes from a keyboard.
   Esc for Back and a media key for Play/Pause are my best reading, not something seen working.
 - How much memory Bluetooth takes while it's on, and whether it starts again cleanly after

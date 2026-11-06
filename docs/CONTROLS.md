@@ -195,11 +195,14 @@ straight over your Wi-Fi; away, save episodes first. [Podcasts](PODCASTS.md) has
 
 ## TV Remote
 
-TV Remote is under Tab, Tools, and `/tv` opens it. It works an Apple TV by infrared. `;` `.` `,` `/` move, Enter is OK,
-Del is Back, Space plays or pauses, H is Home and Z is Sleep. `=` and `-` set the TV's volume, M
-mutes it and P turns it on or off, by infrared to a Samsung TV. Holding an arrow or the volume
-keeps it going. Bluetooth (B) and typing (T) are out of the firmware for now, because having
-Bluetooth in it left too little memory for HTTPS. [TV Remote](TV-REMOTE.md) has the details, including how
+TV Remote is under Tab, Tools, and `/tv` opens it. It has a page for each device, by infrared: **1**
+Apple TV, **2** Bose, **3** Epson, **4** Samsung, and it opens on the last one used. On the Apple TV
+page `;` `.` `,` `/` move, Enter is OK, Del is Back, Space plays or pauses, H is Home and Z is
+Sleep, and `=` `-` M P are the Bose's volume, mute and power. The Bose page has its inputs, and C
+switches between the two Bose code sets. The Epson page has power, HDMI 1 (I), HDMI 2 (O), Source,
+Menu and its own arrows. Holding an arrow or the volume keeps it going. Bluetooth (B) and typing
+(T) are out of the firmware for now, because having Bluetooth in it left too little memory for
+HTTPS. [TV Remote](TV-REMOTE.md) has the details, including how
 to pair it.
 
 ## NFC Notes

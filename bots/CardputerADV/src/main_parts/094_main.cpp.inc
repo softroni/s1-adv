@@ -1,6 +1,7 @@
-// TV Remote: the Apple TV by infrared, or as a Bluetooth keyboard that also types, and the TV's
-// own volume, mute and power by infrared. Bluetooth runs only while this app is open, because its
-// stack takes heap the radio and every TLS connection need elsewhere.
+// TV Remote: a page for each device, the Apple TV, a Bose soundbar, an Epson projector and a
+// Samsung TV, all by infrared, and the page last used comes back. With Bluetooth built in, the
+// Apple TV also pairs with it as a keyboard that types; it runs only while this app is open,
+// because its stack takes heap the radio and every TLS connection need elsewhere.
 #include "../tv_ble.h"
 #include "../tv_remote.h"
 namespace {
@@ -21,15 +22,18 @@ bool gTvWifiOff = false;
 // Waiting for a request under way to finish, because it would lose its network.
 bool gTvBluetoothPending = false;
 tv_ble::State gTvShownState = tv_ble::State::Off;
-tv_remote::Action gTvLast = tv_remote::Action::None;
+// Saved: the page on screen, and which of the Bose's two code sets works.
+tv_remote::Device gTvPage = tv_remote::Device::AppleTv;
+uint8_t gTvBoseSet = 0;
+tv_remote::Press gTvLast = tv_remote::kNothing;
 bool gTvLastByBluetooth = false;
 // The button or arrow just sent, lit on screen until this time.
 constexpr uint32_t kTvFlashMs = 180;
-tv_remote::Action gTvFlash = tv_remote::Action::None;
+tv_remote::Press gTvFlash = tv_remote::kNothing;
 uint32_t gTvFlashUntilMs = 0;
 // The key being held, for its repeats. A typed arrow repeats as its keyboard usage.
 char gTvHeldKey = 0;
-tv_remote::Action gTvHeldAction = tv_remote::Action::None;
+tv_remote::Press gTvHeldAction = tv_remote::kNothing;
 uint8_t gTvHeldUsage = 0;
 uint32_t gTvHeldSinceMs = 0, gTvHeldLastMs = 0;
 uint32_t gTvForgetAskedMs = 0;
@@ -39,7 +43,16 @@ uint32_t gTvNoticeUntilMs = 0;
 // Only on the typing screen, and never logged: it can be a password.
 String gTvTyped;
 
-uint16_t tvAccent() { return rgb565_local(110, 200, 255); }
+// Each device has its colour: its tab, its buttons when they light, its ring.
+uint16_t tvAccentOf(tv_remote::Device d) {
+  switch (d) {
+    case tv_remote::Device::Bose: return rgb565_local(255, 182, 85);
+    case tv_remote::Device::Epson: return rgb565_local(146, 219, 85);
+    case tv_remote::Device::Samsung: return rgb565_local(182, 146, 255);
+    default: return rgb565_local(110, 200, 255);
+  }
+}
+uint16_t tvAccent() { return tvAccentOf(gTvPage); }
 uint16_t tvGreen() { return rgb565_local(88, 240, 141); }
 uint16_t tvAmber() { return rgb565_local(255, 136, 64); }
 uint16_t tvRed() { return rgb565_local(255, 82, 82); }
@@ -58,8 +71,17 @@ void tvLoad() {
   if (gTvLoaded) return;
   gPrefs.begin(kTvPrefsNs, true);
   gTvBluetoothWanted = gPrefs.getBool("bt", false);
+  const uint8_t page = gPrefs.getUChar("page", 0);
+  const uint8_t set = gPrefs.getUChar("bose", 0);
   gPrefs.end();
+  gTvPage = page < tv_remote::kDeviceCount ? tv_remote::Device(page) : tv_remote::Device::AppleTv;
+  gTvBoseSet = set < tv_remote::kBoseCodeSets ? set : 0;
   gTvLoaded = true;
+}
+void tvSaveByte(const char* key, uint8_t value) {
+  gPrefs.begin(kTvPrefsNs, false);
+  gPrefs.putUChar(key, value);
+  gPrefs.end();
 }
 void tvSaveBluetooth(bool wanted) {
   gTvBluetoothWanted = wanted;
@@ -125,20 +147,27 @@ void tvBluetoothStop() {
 }
 bool tvBluetoothReady() { return tv_ble::state() == tv_ble::State::Connected; }
 
-bool tvSendIr(tv_remote::Action a) {
-  const tv_remote::IrCode code = tv_remote::irCode(a);
+bool tvSendIr(tv_remote::Press p) {
+  const tv_remote::IrCode code = tv_remote::irCode(p, gTvBoseSet);
   if (code.protocol == tv_remote::IrProtocol::None) return false;
   initIrRemote();
-  if (code.protocol == tv_remote::IrProtocol::Nec) IrSender.sendNECRaw(code.nec, 0);
-  else IrSender.sendSamsung(code.address, code.command, 0);
+  if (code.protocol == tv_remote::IrProtocol::Nec) {
+    IrSender.sendNECRaw(code.nec, 0);
+  } else if (code.protocol == tv_remote::IrProtocol::Samsung) {
+    IrSender.sendSamsung(code.address, code.command, 0);
+  } else {
+    uint16_t raw[tv_remote::kBoseRaw];
+    const size_t n = tv_remote::boseRaw(code.command, raw);
+    IrSender.sendRaw(raw, n, 38);
+  }
   return true;
 }
 
 // One press: by Bluetooth when the Apple TV is connected and has a key for it, so there's no
-// need to point; otherwise, and always for the TV, by infrared.
-void tvSend(tv_remote::Action a, bool repeat) {
+// need to point; otherwise, and always for the other devices, by infrared.
+void tvSend(tv_remote::Press a, bool repeat) {
   const tv_remote::BluetoothSend bt = tv_remote::bluetoothFor(a);
-  const bool byBluetooth = tvBluetoothReady() && !tv_remote::forTv(a) && (bt.key || bt.media);
+  const bool byBluetooth = tvBluetoothReady() && (bt.key || bt.media);
   bool sent = false;
   if (byBluetooth) sent = bt.key ? tv_ble::key(bt.key) : tv_ble::media(bt.media);
   else sent = tvSendIr(a);
@@ -198,11 +227,39 @@ void tvOpenTyping() {
   tvInvalidate();
 }
 
-void tvHold(char key, tv_remote::Action action, uint8_t usage) {
+void tvHold(char key, tv_remote::Press action, uint8_t usage) {
   gTvHeldKey = key;
   gTvHeldAction = action;
   gTvHeldUsage = usage;
   gTvHeldSinceMs = gTvHeldLastMs = millis();
+}
+
+void tvShowPage(tv_remote::Device page) {
+  if (page == gTvPage) return;
+  gTvPage = page;
+  gTvHeldKey = 0;
+  gTvLast = tv_remote::kNothing;
+  gTvNoticeUntilMs = 0;
+  tvSaveByte("page", uint8_t(page));
+  tvInvalidate();
+}
+
+// What the page's keys are, for a key that does nothing there. Each fits the bottom line.
+const char* tvPageHint() {
+  switch (gTvPage) {
+    case tv_remote::Device::Bose: return "= - volume, P power, C other codes";
+    case tv_remote::Device::Epson: return "P power, I O HDMI 1 2, S source";
+    case tv_remote::Device::Samsung: return "= - volume, M mute, P power";
+    default: return tv_ble::available() ? "H home, T type, B Bluetooth" : "1-4 change remote, = - Bose volume";
+  }
+}
+
+// The two Bose remotes' formats, for whichever the soundbar answers. Kept, once it's found.
+const char* tvBoseCodesName() { return gTvBoseSet == 0 ? "600" : "300"; }
+void tvNextBoseCodes() {
+  gTvBoseSet = uint8_t((gTvBoseSet + 1) % tv_remote::kBoseCodeSets);
+  tvSaveByte("bose", gTvBoseSet);
+  tvSay(String("Bose codes: Soundbar ") + tvBoseCodesName() + "'s remote", tvAccentOf(tv_remote::Device::Bose));
 }
 
 bool tvTypingKey(char key, const Keyboard_Class::KeysState& keys) {
@@ -214,7 +271,7 @@ bool tvTypingKey(char key, const Keyboard_Class::KeysState& keys) {
   }
   if (const uint8_t arrow = tv_remote::typingArrow(key, keys.fn)) {
     tv_ble::key(arrow);
-    if (key > 4) tvHold(key, tv_remote::Action::None, arrow);
+    if (key > 4) tvHold(key, tv_remote::kNothing, arrow);
     return true;
   }
   if (enter) {
@@ -259,7 +316,7 @@ void beginTvRemote() {
   gTvHeldKey = 0;
   gTvForgetAskedMs = 0;
   gTvNotice = "";
-  gTvLast = tv_remote::Action::None;
+  gTvLast = tv_remote::kNothing;
   initIrRemote();
   if (gTvBluetoothWanted && tv_ble::available()) tvBluetoothStart();
   tvInvalidate();
@@ -286,8 +343,8 @@ void serviceTvRemote() {
     gTvNoticeUntilMs = 0;
     tvInvalidate();
   }
-  if (gTvFlash != tv_remote::Action::None && int32_t(millis() - gTvFlashUntilMs) >= 0) {
-    gTvFlash = tv_remote::Action::None;  // Unlit again.
+  if (gTvFlash != tv_remote::kNothing && int32_t(millis() - gTvFlashUntilMs) >= 0) {
+    gTvFlash = tv_remote::kNothing;  // Unlit again.
     tvInvalidate();
   }
   if (!gTvHeldKey) return;
@@ -307,23 +364,27 @@ bool handleTvRemoteKey(char key, const Keyboard_Class::KeysState& keys) {
   if (keys.ctrl || keys.alt) return false;  // Ctrl+L, Ctrl+V and the rest still work here.
   if (gTvView == TvView::Typing) return tvTypingKey(key, keys);
   using tv_remote::Action;
-  const Action a = tv_remote::actionForKey(key, keys.enter, keys.del);
+  if (key >= '1' && key < char('1' + tv_remote::kDeviceCount)) {
+    tvShowPage(tv_remote::Device(key - '1'));
+    return true;
+  }
+  const tv_remote::Press p = tv_remote::keyFor(gTvPage, key, keys.enter, keys.del);
+  const Action a = p.action;
   if (a != Action::Forget) gTvForgetAskedMs = 0;
   if ((a == Action::Bluetooth || a == Action::Typing || a == Action::Forget) && !tv_ble::available()) {
     tvSay(tv_ble::failure(), tvMuted());
     return true;
   }
   switch (a) {
-    case Action::None:
-      tvSay(tv_ble::available() ? "H home, T type, B Bluetooth" : "H home, Z sleep, = - volume", tvMuted());
-      return true;
+    case Action::None: tvSay(tvPageHint(), tvMuted()); return true;
     case Action::Bluetooth: tvToggleBluetooth(); return true;
     case Action::Typing: tvOpenTyping(); return true;
     case Action::Forget: tvForget(); return true;
+    case Action::Codes: tvNextBoseCodes(); return true;
     default: break;
   }
-  tvSend(a, false);
-  if (tv_remote::repeats(a) && key > 4) tvHold(key, a, 0);
+  tvSend(p, false);
+  if (tv_remote::repeats(a) && key > 4) tvHold(key, p, 0);
   return true;
 }
 
@@ -356,10 +417,10 @@ uint16_t tvEdge() { return rgb565_local(73, 73, 170); }
 uint16_t tvKeycap() { return rgb565_local(36, 73, 170); }
 uint16_t tvLit() { return rgb565_local(36, 109, 170); }
 uint16_t tvLabel() { return rgb565_local(146, 146, 170); }
-bool tvLitNow(tv_remote::Action a) { return gTvFlash == a && int32_t(millis() - gTvFlashUntilMs) < 0; }
+bool tvLitNow(tv_remote::Press p) { return gTvFlash == p && int32_t(millis() - gTvFlashUntilMs) < 0; }
 
-// The Apple TV's ring: the four arrows around OK, and the one just sent lit.
-void tvDrawPad(int16_t cx, int16_t cy) {
+// A ring: the four arrows around OK, for the Apple TV or the projector's menus, the one just sent lit.
+void tvDrawPad(int16_t cx, int16_t cy, tv_remote::Device device) {
   using tv_remote::Action;
   auto& d = gCanvas;
   constexpr int16_t r = 37;
@@ -368,8 +429,8 @@ void tvDrawPad(int16_t cx, int16_t cy) {
   struct Side { Action action; float from, to; };
   constexpr Side sides[] = {{Action::Up, 225, 315}, {Action::Down, 45, 135}, {Action::Left, 135, 225}};
   for (const Side& side : sides)
-    if (tvLitNow(side.action)) d.fillArc(cx, cy, 16, r - 1, side.from, side.to, tvLit());
-  if (tvLitNow(Action::Right)) {
+    if (tvLitNow({device, side.action})) d.fillArc(cx, cy, 16, r - 1, side.from, side.to, tvLit());
+  if (tvLitNow({device, Action::Right})) {
     d.fillArc(cx, cy, 16, r - 1, 315, 360, tvLit());
     d.fillArc(cx, cy, 16, r - 1, 0, 45, tvLit());
   }
@@ -380,21 +441,23 @@ void tvDrawPad(int16_t cx, int16_t cy) {
   d.fillTriangle(cx - 33, cy, cx - 26, cy - 6, cx - 26, cy + 6, arrow);
   d.fillTriangle(cx + 33, cy, cx + 26, cy - 6, cx + 26, cy + 6, arrow);
   // No key names here: the Cardputer's ; . , / keys have these arrows on them.
-  const bool ok = tvLitNow(Action::Select);
-  d.fillCircle(cx, cy, 14, ok ? TFT_WHITE : tvAccent());
+  const bool ok = tvLitNow({device, Action::Select});
+  d.fillCircle(cx, cy, 14, ok ? TFT_WHITE : tvAccentOf(device));
   d.setFont(&fonts::Font2);
   d.setTextColor(TFT_BLACK);
   d.setCursor(cx - d.textWidth("OK") / 2, cy - 7);
   d.print("OK");
 }
 
-// A remote's button: its key on a small cap, then what it does. Lit while it's being sent.
+// A remote's button: its key on a small cap, then what it does. Lit, in its device's colour,
+// while it's being sent.
 constexpr int16_t kTvButtonW = 70, kTvButtonH = 17;
-void tvButton(int16_t x, int16_t y, const char* key, const char* label, tv_remote::Action action) {
+void tvButton(int16_t x, int16_t y, const char* key, const String& label, tv_remote::Press press, int16_t w = kTvButtonW) {
   auto& d = gCanvas;
-  const bool lit = tvLitNow(action);
-  d.fillRoundRect(x, y, kTvButtonW, kTvButtonH, 5, lit ? tvAccent() : tvPanel());
-  d.drawRoundRect(x, y, kTvButtonW, kTvButtonH, 5, lit ? tvAccent() : tvEdge());
+  const bool lit = tvLitNow(press);
+  const uint16_t accent = tvAccentOf(press.device);
+  d.fillRoundRect(x, y, w, kTvButtonH, 5, lit ? accent : tvPanel());
+  d.drawRoundRect(x, y, w, kTvButtonH, 5, lit ? accent : tvEdge());
   d.setFont(&fonts::Font0);
   const int16_t capW = max<int16_t>(13, d.textWidth(key) + 6);
   d.fillRoundRect(x + 2, y + 2, capW, kTvButtonH - 4, 3, lit ? TFT_WHITE : tvKeycap());
@@ -404,18 +467,74 @@ void tvButton(int16_t x, int16_t y, const char* key, const char* label, tv_remot
   d.setFont(&fonts::Font2);
   d.setTextColor(lit ? TFT_BLACK : TFT_WHITE);
   d.setCursor(x + capW + 6, y + 1);
-  d.print(fitCurrentFontToWidth(label, kTvButtonW - capW - 8));
+  d.print(fitCurrentFontToWidth(label, w - capW - 8));
 }
 
-// A group's name over its buttons, with a rule to the edge.
-void tvGroup(int16_t x, int16_t y, const char* name) {
+// A group's name over its buttons, in its device's colour, with a rule to the edge.
+void tvGroup(int16_t x, int16_t y, const char* name, uint16_t ink) {
   auto& d = gCanvas;
   d.setFont(&fonts::Font0);
-  d.setTextColor(tvLabel());
+  d.setTextColor(ink);
   d.setCursor(x, y);
   d.print(name);
   const int16_t after = x + d.textWidth(name) + 4;
   d.drawFastHLine(after, y + 3, 236 - after, tvEdge());
+}
+
+// The volume as a rocker, + over -, each half lit as it's sent.
+void tvRocker(int16_t x, int16_t y, int16_t w, int16_t h, tv_remote::Device device) {
+  using tv_remote::Action;
+  auto& d = gCanvas;
+  const int16_t half = (h - 4) / 2;
+  const auto part = [&](int16_t top, Action action, bool plus, const char* key) {
+    const bool lit = tvLitNow({device, action});
+    const uint16_t accent = tvAccentOf(device), ink = lit ? TFT_BLACK : TFT_WHITE;
+    d.fillRoundRect(x, top, w, half, 8, lit ? accent : tvPanel());
+    d.drawRoundRect(x, top, w, half, 8, lit ? accent : tvEdge());
+    // A bold + or -, drawn, since the fonts' are thin at this size.
+    const int16_t cx = x + w / 2, cy = top + half / 2;
+    d.fillRect(cx - 11, cy - 3, 22, 6, ink);
+    if (plus) d.fillRect(cx - 3, cy - 11, 6, 22, ink);
+    d.setFont(&fonts::Font0);
+    d.fillRoundRect(x + 4, top + 4, 13, 12, 3, lit ? TFT_WHITE : tvKeycap());
+    d.setTextColor(lit ? TFT_BLACK : TFT_WHITE);
+    d.setCursor(x + 4 + (13 - d.textWidth(key)) / 2, top + 6);
+    d.print(key);
+  };
+  part(y, Action::VolumeUp, true, "=");
+  part(y + half + 4, Action::VolumeDown, false, "-");
+  d.setFont(&fonts::Font0);
+  d.setTextColor(tvLabel());
+  d.setCursor(x + (w - d.textWidth("VOLUME")) / 2, y + h + 2);
+  d.print("VOLUME");
+}
+
+// The tabs, one a device, the page on screen filled in its colour. With Bluetooth built in, a dot
+// on the Apple TV's tab says how it's connected.
+void tvTabs() {
+  auto& d = gCanvas;
+  d.fillScreen(TFT_BLACK);
+  d.setFont(&fonts::Font2);
+  int16_t x = 2;
+  for (uint8_t i = 0; i < tv_remote::kDeviceCount; ++i) {
+    const tv_remote::Device device = tv_remote::Device(i);
+    const char* name = tv_remote::deviceName(device);
+    const bool on = device == gTvPage;
+    const int16_t w = d.textWidth(name) + 10;
+    const uint16_t accent = tvAccentOf(device);
+    if (on) d.fillRoundRect(x, 1, w, 19, 5, accent);
+    else d.drawRoundRect(x, 1, w, 19, 5, tvEdge());
+    d.setTextColor(on ? TFT_BLACK : accent);
+    d.setCursor(x + 5, 3);
+    d.print(name);
+    if (device == tv_remote::Device::AppleTv && tv_ble::available() && tv_ble::state() != tv_ble::State::Off) {
+      uint16_t ink = 0;
+      tvLinkLabel(ink);
+      d.fillCircle(x + w - 4, 5, 2, ink);
+    }
+    x += w + 3;
+  }
+  d.drawFastHLine(0, 22, 240, tvAccent());
 }
 
 // Where the Apple TV pairs, for as long as nothing has paired yet.
@@ -434,52 +553,92 @@ void tvPairingSteps(int16_t x, int16_t y) {
 }
 
 String tvLastLine(uint16_t& ink) {
+  using tv_remote::Action;
+  using tv_remote::Device;
   if (tvNoticeShowing()) {
     ink = gTvNoticeInk;
     return gTvNotice;
   }
   ink = tvMuted();
-  if (gTvLast == tv_remote::Action::None) {
-    return tvBluetoothReady() ? "Connected: no need to point it" : "Point it at the Apple TV";
+  if (gTvLast.action == Action::None) {
+    switch (gTvPage) {
+      case Device::Bose: return "Point at the Bose. C: other codes";
+      case Device::Epson: return "Point at the projector. 1-4: remotes";
+      case Device::Samsung: return "Point at the TV. 1-4: remotes";
+      default: return tvBluetoothReady() ? "Connected: no need to point it" : "Point at the Apple TV. 1-4: remotes";
+    }
   }
-  const char* name = tv_remote::actionName(gTvLast);
-  if (tv_remote::forTv(gTvLast)) return String(name) + " to the TV";
-  return String(name) + (gTvLastByBluetooth ? " by Bluetooth" : " by infrared");
+  // Epson projectors ask for a second press before they turn off.
+  if (gTvLast == tv_remote::Press{Device::Epson, Action::Power}) return "Power: twice turns the projector off";
+  const String name = tv_remote::actionName(gTvLast.action);
+  if (gTvLastByBluetooth) return name + " by Bluetooth";
+  return name + " to " + tv_remote::deviceThe(gTvLast.device);
 }
 
 void renderTvRemote() {
   using tv_remote::Action;
+  using tv_remote::Device;
+  using tv_remote::Press;
   auto& d = gCanvas;
-  tvHeader("TV Remote");
-  tvDrawPad(45, 78);
-  const bool pairing = tv_ble::state() == tv_ble::State::Waiting && !tv_ble::paired();
-  constexpr int16_t left = 92, right = left + kTvButtonW + 4;
-  if (pairing) {
-    tvPairingSteps(left, 26);
-  } else if (tv_ble::available()) {
-    // With Bluetooth there's a third Apple TV row, so the groups lose their names for a rule.
-    tvButton(left, 25, "Del", "Back", Action::Back);
-    tvButton(right, 25, "Spc", "Play", Action::PlayPause);
-    tvButton(left, 45, "H", "Home", Action::Home);
-    tvButton(right, 45, "Z", "Sleep", Action::Sleep);
-    tvButton(left, 65, "T", "Type", Action::Typing);
-    tvButton(right, 65, "B", tv_ble::on() ? "BT off" : "BT on", Action::Bluetooth);
-    d.drawFastHLine(left, 84, 236 - left, tvEdge());
-    tvButton(left, 86, "=", "Vol +", Action::VolumeUp);
-    tvButton(right, 86, "-", "Vol -", Action::VolumeDown);
-    tvButton(left, 106, "M", "Mute", Action::Mute);
-    tvButton(right, 106, "P", "Power", Action::TvPower);
-  } else {
-    tvGroup(left, 25, "APPLE TV");
-    tvButton(left, 35, "Del", "Back", Action::Back);
-    tvButton(right, 35, "Spc", "Play", Action::PlayPause);
-    tvButton(left, 55, "H", "Home", Action::Home);
-    tvButton(right, 55, "Z", "Sleep", Action::Sleep);
-    tvGroup(left, 77, "SAMSUNG TV");
-    tvButton(left, 87, "=", "Vol +", Action::VolumeUp);
-    tvButton(right, 87, "-", "Vol -", Action::VolumeDown);
-    tvButton(left, 107, "M", "Mute", Action::Mute);
-    tvButton(right, 107, "P", "Power", Action::TvPower);
+  tvTabs();
+  constexpr int16_t left = 92, right = left + kTvButtonW + 4, wide = 2 * kTvButtonW + 4;
+  const uint16_t boseInk = tvAccentOf(Device::Bose);
+  switch (gTvPage) {
+    case Device::Bose:
+      tvRocker(8, 26, 72, 88, Device::Bose);
+      tvButton(left, 25, "P", "Power", {Device::Bose, Action::Power}, wide);
+      tvButton(left, 45, "M", "Mute", {Device::Bose, Action::Mute}, wide);
+      tvButton(left, 65, "T", "TV input", {Device::Bose, Action::TvInput}, wide);
+      tvButton(left, 85, "B", "Bluetooth input", {Device::Bose, Action::BluetoothInput}, wide);
+      tvButton(left, 105, "C", String("Codes: ") + tvBoseCodesName() + " remote", {Device::Bose, Action::Codes}, wide);
+      break;
+    case Device::Epson:
+      tvDrawPad(45, 73, Device::Epson);
+      tvButton(left, 26, "P", "Power", {Device::Epson, Action::Power});
+      tvButton(right, 26, "S", "Source", {Device::Epson, Action::Source});
+      tvButton(left, 48, "I", "HDMI 1", {Device::Epson, Action::Hdmi1});
+      tvButton(right, 48, "O", "HDMI 2", {Device::Epson, Action::Hdmi2});
+      tvButton(left, 70, "M", "Menu", {Device::Epson, Action::Menu});
+      tvButton(right, 70, "Del", "Back", {Device::Epson, Action::Back});
+      tvButton(left, 92, "B", "Blank", {Device::Epson, Action::Blank});
+      break;
+    case Device::Samsung:
+      tvRocker(8, 26, 72, 88, Device::Samsung);
+      tvButton(left, 25, "P", "Power", {Device::Samsung, Action::Power}, wide);
+      tvButton(left, 45, "M", "Mute", {Device::Samsung, Action::Mute}, wide);
+      break;
+    default: {
+      tvDrawPad(45, 78, Device::AppleTv);
+      const bool pairing = tv_ble::state() == tv_ble::State::Waiting && !tv_ble::paired();
+      if (pairing) {
+        tvPairingSteps(left, 26);
+      } else if (tv_ble::available()) {
+        // With Bluetooth there's a third Apple TV row, so the groups lose their names for a rule.
+        tvButton(left, 25, "Del", "Back", {Device::AppleTv, Action::Back});
+        tvButton(right, 25, "Spc", "Play", {Device::AppleTv, Action::PlayPause});
+        tvButton(left, 45, "H", "Home", {Device::AppleTv, Action::Home});
+        tvButton(right, 45, "Z", "Sleep", {Device::AppleTv, Action::Sleep});
+        tvButton(left, 65, "T", "Type", {Device::AppleTv, Action::Typing});
+        tvButton(right, 65, "B", tv_ble::on() ? "BT off" : "BT on", {Device::AppleTv, Action::Bluetooth});
+        d.drawFastHLine(left, 84, 236 - left, tvEdge());
+        tvButton(left, 86, "=", "Vol +", {Device::Bose, Action::VolumeUp});
+        tvButton(right, 86, "-", "Vol -", {Device::Bose, Action::VolumeDown});
+        tvButton(left, 106, "M", "Mute", {Device::Bose, Action::Mute});
+        tvButton(right, 106, "P", "Power", {Device::Bose, Action::Power});
+      } else {
+        tvGroup(left, 25, "APPLE TV", tvAccentOf(Device::AppleTv));
+        tvButton(left, 35, "Del", "Back", {Device::AppleTv, Action::Back});
+        tvButton(right, 35, "Spc", "Play", {Device::AppleTv, Action::PlayPause});
+        tvButton(left, 55, "H", "Home", {Device::AppleTv, Action::Home});
+        tvButton(right, 55, "Z", "Sleep", {Device::AppleTv, Action::Sleep});
+        tvGroup(left, 77, "BOSE SOUND", boseInk);
+        tvButton(left, 87, "=", "Vol +", {Device::Bose, Action::VolumeUp});
+        tvButton(right, 87, "-", "Vol -", {Device::Bose, Action::VolumeDown});
+        tvButton(left, 107, "M", "Mute", {Device::Bose, Action::Mute});
+        tvButton(right, 107, "P", "Power", {Device::Bose, Action::Power});
+      }
+      break;
+    }
   }
   uint16_t ink = 0;
   const String line = tvLastLine(ink);

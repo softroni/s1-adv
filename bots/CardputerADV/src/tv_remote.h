@@ -1,35 +1,57 @@
 #pragma once
-// TV Remote: an Apple TV by infrared or as a Bluetooth keyboard, and a Samsung TV's volume and
-// power by infrared. Everything here is plain data, so the host tests check it byte for byte.
+// TV Remote: a page for each device it works. The Apple TV by infrared (or as a Bluetooth keyboard,
+// when that's built in), a Bose soundbar, an Epson projector and a Samsung TV, all by infrared.
+// Everything here is plain data, so the host tests check it byte for byte.
 #include <cstddef>
 #include <cstdint>
 
 namespace tv_remote {
 
-// What a key asks for, whichever way it's sent.
+// The pages, in the order of their tabs and the number keys that open them.
+enum class Device : uint8_t { AppleTv, Bose, Epson, Samsung };
+constexpr uint8_t kDeviceCount = 4;
+constexpr const char* deviceName(Device d) {
+  return d == Device::AppleTv ? "Apple TV" : d == Device::Bose ? "Bose" : d == Device::Epson ? "Epson" : "Samsung";
+}
+// As the bottom line names it: "Up to the Apple TV".
+constexpr const char* deviceThe(Device d) {
+  return d == Device::AppleTv ? "the Apple TV" : d == Device::Bose ? "the Bose" : d == Device::Epson ? "the projector" : "the TV";
+}
+
+// What a key asks a device for.
 enum class Action : uint8_t {
   None,
+  // A ring: the Apple TV's, or the projector's menus.
+  Up, Down, Left, Right, Select, Back,
   // The Apple TV.
-  Up, Down, Left, Right, Select, Back, PlayPause, Home, Sleep,
-  // The TV it's plugged into.
-  VolumeUp, VolumeDown, Mute, TvPower,
-  // This app.
+  PlayPause, Home, Sleep,
+  // Sound, and power.
+  VolumeUp, VolumeDown, Mute, Power,
+  // The projector.
+  Source, Hdmi1, Hdmi2, Menu, Blank,
+  // The Bose.
+  TvInput, BluetoothInput, Codes,
+  // The Cardputer as a Bluetooth keyboard.
   Bluetooth, Typing, Forget,
 };
+struct Press {
+  Device device;
+  Action action;
+  constexpr bool operator==(const Press& o) const { return device == o.device && action == o.action; }
+  constexpr bool operator!=(const Press& o) const { return !(*this == o); }
+};
+constexpr Press kNothing{Device::AppleTv, Action::None};
 
-// The Apple TV's arrows, and the TV's volume, go again while their key is held.
+// The arrows and the volume go again while their key is held.
 constexpr bool repeats(Action a) {
   return a == Action::Up || a == Action::Down || a == Action::Left || a == Action::Right ||
          a == Action::VolumeUp || a == Action::VolumeDown;
 }
-// What goes to the TV itself always goes by infrared: Bluetooth only reaches the Apple TV.
-constexpr bool forTv(Action a) {
-  return a == Action::VolumeUp || a == Action::VolumeDown || a == Action::Mute || a == Action::TvPower;
-}
 
-// The remote screen's keys. The arrows are ; . , / with or without Fn, as everywhere on the
-// device, and 1 to 4 are a USB keyboard's arrows. Esc never gets here: it leaves the app.
-constexpr Action actionForKey(char key, bool enter, bool del) {
+// What a key does on each page. The arrows are ; . , / with or without Fn, as everywhere on the
+// device, and 1 to 4 are a USB keyboard's arrows. The number keys that change page, and Esc, which
+// leaves, are the app's and never get here.
+constexpr Action ringKey(char key, bool enter, bool del) {
   if (enter || key == '\n' || key == '\r') return Action::Select;
   if (del || key == '\b' || key == 127) return Action::Back;
   switch (key) {
@@ -37,17 +59,55 @@ constexpr Action actionForKey(char key, bool enter, bool del) {
     case '.': case '>': case 2: return Action::Down;
     case ',': case '<': case 3: return Action::Left;
     case '/': case '?': case 4: return Action::Right;
-    case ' ': return Action::PlayPause;
-    case 'h': case 'H': return Action::Home;
-    case 'z': case 'Z': return Action::Sleep;
+    default: return Action::None;
+  }
+}
+constexpr Action soundKey(char key) {
+  switch (key) {
     case '=': case '+': return Action::VolumeUp;
     case '-': case '_': return Action::VolumeDown;
     case 'm': case 'M': return Action::Mute;
-    case 'p': case 'P': return Action::TvPower;
-    case 'b': return Action::Bluetooth;
-    case 'B': return Action::Forget;  // Shift+B, twice, so it can't happen by accident.
-    case 't': case 'T': return Action::Typing;
+    case 'p': case 'P': return Action::Power;
     default: return Action::None;
+  }
+}
+constexpr Press keyFor(Device page, char key, bool enter, bool del) {
+  switch (page) {
+    case Device::AppleTv: {
+      // The Apple TV's sound goes through the Bose, so its volume keys are the Bose's.
+      if (const Action ring = ringKey(key, enter, del); ring != Action::None) return {Device::AppleTv, ring};
+      if (const Action sound = soundKey(key); sound != Action::None) return {Device::Bose, sound};
+      switch (key) {
+        case ' ': return {Device::AppleTv, Action::PlayPause};
+        case 'h': case 'H': return {Device::AppleTv, Action::Home};
+        case 'z': case 'Z': return {Device::AppleTv, Action::Sleep};
+        case 'b': return {Device::AppleTv, Action::Bluetooth};
+        case 'B': return {Device::AppleTv, Action::Forget};  // Shift+B, twice, so it can't happen by accident.
+        case 't': case 'T': return {Device::AppleTv, Action::Typing};
+        default: return {Device::AppleTv, Action::None};
+      }
+    }
+    case Device::Bose:
+      if (const Action sound = soundKey(key); sound != Action::None) return {Device::Bose, sound};
+      switch (key) {
+        case 't': case 'T': return {Device::Bose, Action::TvInput};
+        case 'b': case 'B': return {Device::Bose, Action::BluetoothInput};
+        case 'c': case 'C': return {Device::Bose, Action::Codes};
+        default: return {Device::Bose, Action::None};
+      }
+    case Device::Epson:
+      if (const Action ring = ringKey(key, enter, del); ring != Action::None) return {Device::Epson, ring};
+      switch (key) {
+        case 'p': case 'P': return {Device::Epson, Action::Power};
+        case 's': case 'S': return {Device::Epson, Action::Source};
+        case 'i': case 'I': return {Device::Epson, Action::Hdmi1};
+        case 'o': case 'O': return {Device::Epson, Action::Hdmi2};
+        case 'm': case 'M': return {Device::Epson, Action::Menu};
+        case 'b': case 'B': return {Device::Epson, Action::Blank};
+        default: return {Device::Epson, Action::None};
+      }
+    default:
+      return {Device::Samsung, soundKey(key)};
   }
 }
 
@@ -65,7 +125,15 @@ constexpr const char* actionName(Action a) {
     case Action::VolumeUp: return "Volume up";
     case Action::VolumeDown: return "Volume down";
     case Action::Mute: return "Mute";
-    case Action::TvPower: return "TV power";
+    case Action::Power: return "Power";
+    case Action::Source: return "Source";
+    case Action::Hdmi1: return "HDMI 1";
+    case Action::Hdmi2: return "HDMI 2";
+    case Action::Menu: return "Menu";
+    case Action::Blank: return "Blank";
+    case Action::TvInput: return "TV input";
+    case Action::BluetoothInput: return "Bluetooth input";
+    case Action::Codes: return "Codes";
     case Action::Bluetooth: return "Bluetooth";
     case Action::Typing: return "Typing";
     case Action::Forget: return "Forget";
@@ -74,43 +142,94 @@ constexpr const char* actionName(Action a) {
 }
 
 // --- Infrared ---------------------------------------------------------------------------------
-// Apple TV codes are NEC frames as Arduino-IRremote's sendNECRaw takes them: four bytes, the
-// first sent in the lowest byte. They're the Siri Remote's own, recorded from an Apple TV 4K
-// (A2169) in the CC0 Flipper-IRDB (Streaming_Devices/Apple/Apple_TV_4K_Gen2.ir). The arrows,
-// OK, Back and Play/Pause start with Apple's EE 87 and end with 8C; Home and Sleep start E5 87
-// and end FE. In the EE 87 frames, the command's lowest bit is a parity bit: with it, the ones in
-// the command and the last byte make an odd count. The tests check that, so a typo can't hide.
-// The TV's codes are Samsung32: address 07 and the command, each sent with its own copy or
-// inverse, the volume, mute and power that Samsung TVs have used for years.
-enum class IrProtocol : uint8_t { None, Nec, Samsung };
+// NEC frames are four bytes as Arduino-IRremote's sendNECRaw takes them, the first sent in the
+// lowest byte. Every code is from the CC0 Flipper-IRDB, recorded from each maker's own remote:
+// - Apple TV: the Siri Remote's, from an Apple TV 4K (A2169), Streaming_Devices/Apple/
+//   Apple_TV_4K_Gen2.ir. The arrows, OK, Back and Play/Pause start with Apple's EE 87 and end
+//   with 8C; Home and Sleep start E5 87 and end FE. In the EE 87 frames the command's lowest bit
+//   is a parity bit: the ones in the command and the last byte make an odd count, which the tests
+//   check, so a typo can't hide.
+// - Epson: one family across every Epson file there, address 83 55, from the EH-TW5650 home
+//   cinema projector's remote (Projectors/Epson/Epson_EHTW5650.ir) and three others that agree.
+// - Bose: two remotes with the same buttons in different formats. The Smart Soundbar 600's
+//   (SoundBars/Bose/Bose_Soundbar_600.ir) uses Bose's own timing, a 1 ms header and the command
+//   then its inverse, eight bits each, first bit first, sent twice 50 ms apart. The Soundbar
+//   300's (Bose_Soundbar_300.ir) is NEC with address BA 4B. Which another Bose soundbar takes
+//   isn't known, so C on its page switches between them.
+// - Samsung: Samsung32 at address 07, the volume, mute and power Samsung TVs have used for years.
+enum class IrProtocol : uint8_t { None, Nec, Samsung, Bose };
 
 struct IrCode {
   IrProtocol protocol;
   uint32_t nec;      // NEC: the whole frame.
   uint8_t address;   // Samsung32.
-  uint8_t command;   // Samsung32.
+  uint8_t command;   // Samsung32 and Bose.
 };
 
+constexpr uint32_t necFrame(uint8_t first, uint8_t second, uint8_t command) {
+  return uint32_t(first) | (uint32_t(second) << 8) | (uint32_t(command) << 16) | (uint32_t(uint8_t(~command)) << 24);
+}
 constexpr uint32_t appleFrame(uint8_t command) { return 0x8C000000UL | (uint32_t(command) << 16) | 0x87EEUL; }
 constexpr uint32_t appleTvButton(uint8_t command) { return 0xFE000000UL | (uint32_t(command) << 16) | 0x87E5UL; }
+constexpr IrCode nec(uint32_t frame) { return {IrProtocol::Nec, frame, 0, 0}; }
+constexpr IrCode epson(uint8_t command) { return nec(necFrame(0x83, 0x55, command)); }
 constexpr uint8_t kSamsungTv = 0x07;
+constexpr IrCode samsung(uint8_t command) { return {IrProtocol::Samsung, 0, kSamsungTv, command}; }
+constexpr uint8_t kBoseCodeSets = 2;  // 0: the Smart Soundbar 600's remote, 1: the Soundbar 300's.
+constexpr IrCode bose(uint8_t set, uint8_t smart600, uint8_t soundbar300) {
+  return set == 0 ? IrCode{IrProtocol::Bose, 0, 0, smart600} : nec(necFrame(0xBA, 0x4B, soundbar300));
+}
+constexpr IrCode kNoCode{IrProtocol::None, 0, 0, 0};
 
-constexpr IrCode irCode(Action a) {
-  switch (a) {
-    case Action::Up: return {IrProtocol::Nec, appleFrame(0x0A), 0, 0};
-    case Action::Down: return {IrProtocol::Nec, appleFrame(0x0C), 0, 0};
-    case Action::Left: return {IrProtocol::Nec, appleFrame(0x09), 0, 0};
-    case Action::Right: return {IrProtocol::Nec, appleFrame(0x06), 0, 0};
-    case Action::Select: return {IrProtocol::Nec, appleFrame(0x5C), 0, 0};
-    case Action::Back: return {IrProtocol::Nec, appleFrame(0x03), 0, 0};
-    case Action::PlayPause: return {IrProtocol::Nec, appleFrame(0x5F), 0, 0};
-    case Action::Home: return {IrProtocol::Nec, appleTvButton(0x40), 0, 0};
-    case Action::Sleep: return {IrProtocol::Nec, appleTvButton(0x2A), 0, 0};
-    case Action::VolumeUp: return {IrProtocol::Samsung, 0, kSamsungTv, 0x07};
-    case Action::VolumeDown: return {IrProtocol::Samsung, 0, kSamsungTv, 0x0B};
-    case Action::Mute: return {IrProtocol::Samsung, 0, kSamsungTv, 0x0F};
-    case Action::TvPower: return {IrProtocol::Samsung, 0, kSamsungTv, 0x02};
-    default: return {IrProtocol::None, 0, 0, 0};
+constexpr IrCode irCode(Press p, uint8_t boseSet = 0) {
+  switch (p.device) {
+    case Device::AppleTv:
+      switch (p.action) {
+        case Action::Up: return nec(appleFrame(0x0A));
+        case Action::Down: return nec(appleFrame(0x0C));
+        case Action::Left: return nec(appleFrame(0x09));
+        case Action::Right: return nec(appleFrame(0x06));
+        case Action::Select: return nec(appleFrame(0x5C));
+        case Action::Back: return nec(appleFrame(0x03));
+        case Action::PlayPause: return nec(appleFrame(0x5F));
+        case Action::Home: return nec(appleTvButton(0x40));
+        case Action::Sleep: return nec(appleTvButton(0x2A));
+        default: return kNoCode;
+      }
+    case Device::Bose:
+      switch (p.action) {
+        case Action::Power: return bose(boseSet, 0x32, 0x4C);
+        case Action::VolumeUp: return bose(boseSet, 0xC0, 0x03);
+        case Action::VolumeDown: return bose(boseSet, 0x40, 0x02);
+        case Action::Mute: return bose(boseSet, 0x80, 0x01);
+        case Action::TvInput: return bose(boseSet, 0x70, 0x0E);
+        case Action::BluetoothInput: return bose(boseSet, 0x81, 0x81);
+        default: return kNoCode;
+      }
+    case Device::Epson:
+      switch (p.action) {
+        case Action::Power: return epson(0x90);
+        case Action::Source: return epson(0x8C);
+        case Action::Hdmi1: return epson(0x73);
+        case Action::Hdmi2: return epson(0x77);
+        case Action::Menu: return epson(0x9A);
+        case Action::Blank: return epson(0x93);
+        case Action::Up: return epson(0xB0);
+        case Action::Down: return epson(0xB2);
+        case Action::Left: return epson(0xB3);
+        case Action::Right: return epson(0xB1);
+        case Action::Select: return epson(0x85);
+        case Action::Back: return epson(0x84);
+        default: return kNoCode;
+      }
+    default:
+      switch (p.action) {
+        case Action::VolumeUp: return samsung(0x07);
+        case Action::VolumeDown: return samsung(0x0B);
+        case Action::Mute: return samsung(0x0F);
+        case Action::Power: return samsung(0x02);
+        default: return kNoCode;
+      }
   }
 }
 
@@ -118,6 +237,28 @@ constexpr IrCode irCode(Action a) {
 constexpr uint32_t samsungFrame(uint8_t address, uint8_t command) {
   return uint32_t(address) | (uint32_t(address) << 8) | (uint32_t(command) << 16) |
          (uint32_t(uint8_t(~command)) << 24);
+}
+
+// A Bose frame as the Smart Soundbar 600's remote sends it, for IRremote's sendRaw at 38 kHz:
+// microseconds, mark first. The header, the command's eight bits then their inverse, first bit
+// first, a closing mark, and the same again after a 50 ms gap.
+constexpr uint16_t kBoseHeaderMark = 970, kBoseHeaderSpace = 1510, kBoseMark = 480, kBoseZero = 515,
+                   kBoseOne = 1513, kBoseGap = 50680;
+constexpr size_t kBoseFrame = 2 + 16 * 2 + 1, kBoseRaw = kBoseFrame * 2 + 1;
+inline size_t boseRaw(uint8_t command, uint16_t (&out)[kBoseRaw]) {
+  size_t n = 0;
+  const uint16_t bits = uint16_t(command | (uint16_t(uint8_t(~command)) << 8));
+  for (int frame = 0; frame < 2; ++frame) {
+    if (frame) out[n++] = kBoseGap;
+    out[n++] = kBoseHeaderMark;
+    out[n++] = kBoseHeaderSpace;
+    for (int i = 0; i < 16; ++i) {
+      out[n++] = kBoseMark;
+      out[n++] = (bits >> i) & 1 ? kBoseOne : kBoseZero;
+    }
+    out[n++] = kBoseMark;
+  }
+  return n;
 }
 
 // --- Bluetooth keyboard -----------------------------------------------------------------------
@@ -195,14 +336,15 @@ constexpr HidKey hidForChar(char c) {
   }
 }
 
-// The remote's keys as a keyboard: what the Apple TV takes from one. Esc is its Back, and
-// Play/Pause, which no key has, goes as a media key.
+// The Apple TV's keys as a keyboard: what it takes from one. Esc is its Back, and Play/Pause,
+// which no key has, goes as a media key. Nothing else goes by Bluetooth.
 struct BluetoothSend {
   uint8_t key;     // A keyboard usage, or 0.
   uint16_t media;  // A consumer usage, or 0.
 };
-constexpr BluetoothSend bluetoothFor(Action a) {
-  switch (a) {
+constexpr BluetoothSend bluetoothFor(Press p) {
+  if (p.device != Device::AppleTv) return {0, 0};
+  switch (p.action) {
     case Action::Up: return {kKeyUp, 0};
     case Action::Down: return {kKeyDown, 0};
     case Action::Left: return {kKeyLeft, 0};
