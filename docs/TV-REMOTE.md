@@ -79,10 +79,22 @@ Apple TV page's volume keys work the Bose.
 
 ## 4 Samsung
 
-![The Samsung page: a volume rocker, then Power and Mute](assets/screens/tv-remote-samsung.png)
+![The Samsung page: the arrows around OK, then Back, Home, Source and Exit, and its volume, mute and power](assets/screens/tv-remote-samsung.png)
 
-`=` and `-` set the volume, M mutes it and P turns the TV on or off, with the codes Samsung TVs
-have used for years.
+| Key | What it does |
+|---|---|
+| `;` `.` `,` `/` | Up, down, left and right, with or without Fn |
+| Enter | OK |
+| Del | Return, back a step |
+| H | Home, the Smart Hub |
+| S | Source, to choose an input |
+| E | Exit, out of an app or menu |
+| `=` `-` | Volume up and down |
+| M | Mute |
+| P | Power |
+
+The volume, mute and power are the codes Samsung TVs have used for years; the rest are as three
+Samsung remotes' recordings have them alike.
 
 ## Bluetooth
 
@@ -148,8 +160,7 @@ Checked on a computer, not yet with the devices:
 
 - Which Bose code set a given Bose soundbar answers, if either.
 - Which of the Epson keys a given Epson projector answers. Power, HDMI 1 and HDMI 2 are the likeliest.
-- The Samsung's keys. Earlier versions sent them from the Apple TV page, where the sound is the
-  Bose's, so they haven't been tried at the Samsung itself.
+- The Samsung's arrows, OK, Return, Home, Source and Exit. Its volume, mute and power work.
 - Pairing with no code, reconnecting by itself, and which keys the Apple TV takes from a keyboard.
   Esc for Back and a media key for Play/Pause are my best reading, not something seen working.
 - How much memory Bluetooth takes while it's on, and whether it starts again cleanly after

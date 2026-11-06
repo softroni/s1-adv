@@ -249,7 +249,7 @@ const char* tvPageHint() {
   switch (gTvPage) {
     case tv_remote::Device::Bose: return "= - volume, P power, C other codes";
     case tv_remote::Device::Epson: return "P power, I O HDMI 1 2, S source";
-    case tv_remote::Device::Samsung: return "= - volume, M mute, P power";
+    case tv_remote::Device::Samsung: return "H home, S source, E exit, = - volume";
     default: return tv_ble::available() ? "H home, T type, B Bluetooth" : "1-4 change remote, = - Bose volume";
   }
 }
@@ -602,11 +602,21 @@ void renderTvRemote() {
       tvButton(right, 70, "Del", "Back", {Device::Epson, Action::Back});
       tvButton(left, 92, "B", "Blank", {Device::Epson, Action::Blank});
       break;
-    case Device::Samsung:
-      tvRocker(8, 26, 72, 88, Device::Samsung);
-      tvButton(left, 25, "P", "Power", {Device::Samsung, Action::Power}, wide);
-      tvButton(left, 45, "M", "Mute", {Device::Samsung, Action::Mute}, wide);
+    case Device::Samsung: {
+      const uint16_t ink = tvAccentOf(Device::Samsung);
+      tvDrawPad(45, 78, Device::Samsung);
+      tvGroup(left, 25, "SAMSUNG TV", ink);
+      tvButton(left, 35, "Del", "Back", {Device::Samsung, Action::Back});
+      tvButton(right, 35, "H", "Home", {Device::Samsung, Action::Home});
+      tvButton(left, 55, "S", "Source", {Device::Samsung, Action::Source});
+      tvButton(right, 55, "E", "Exit", {Device::Samsung, Action::Exit});
+      tvGroup(left, 77, "SOUND, POWER", ink);
+      tvButton(left, 87, "=", "Vol +", {Device::Samsung, Action::VolumeUp});
+      tvButton(right, 87, "-", "Vol -", {Device::Samsung, Action::VolumeDown});
+      tvButton(left, 107, "M", "Mute", {Device::Samsung, Action::Mute});
+      tvButton(right, 107, "P", "Power", {Device::Samsung, Action::Power});
       break;
+    }
     default: {
       tvDrawPad(45, 78, Device::AppleTv);
       const bool pairing = tv_ble::state() == tv_ble::State::Waiting && !tv_ble::paired();

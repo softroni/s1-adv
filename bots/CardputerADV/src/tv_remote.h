@@ -21,14 +21,14 @@ constexpr const char* deviceThe(Device d) {
 // What a key asks a device for.
 enum class Action : uint8_t {
   None,
-  // A ring: the Apple TV's, or the projector's menus.
+  // A ring: the Apple TV's, the projector's menus, or the Samsung's.
   Up, Down, Left, Right, Select, Back,
   // The Apple TV.
   PlayPause, Home, Sleep,
   // Sound, and power.
   VolumeUp, VolumeDown, Mute, Power,
-  // The projector.
-  Source, Hdmi1, Hdmi2, Menu, Blank,
+  // The projector, and the Samsung's Source and Exit.
+  Source, Hdmi1, Hdmi2, Menu, Blank, Exit,
   // The Bose.
   TvInput, BluetoothInput, Codes,
   // The Cardputer as a Bluetooth keyboard.
@@ -107,7 +107,14 @@ constexpr Press keyFor(Device page, char key, bool enter, bool del) {
         default: return {Device::Epson, Action::None};
       }
     default:
-      return {Device::Samsung, soundKey(key)};
+      if (const Action ring = ringKey(key, enter, del); ring != Action::None) return {Device::Samsung, ring};
+      if (const Action sound = soundKey(key); sound != Action::None) return {Device::Samsung, sound};
+      switch (key) {
+        case 'h': case 'H': return {Device::Samsung, Action::Home};
+        case 's': case 'S': return {Device::Samsung, Action::Source};
+        case 'e': case 'E': return {Device::Samsung, Action::Exit};
+        default: return {Device::Samsung, Action::None};
+      }
   }
 }
 
@@ -131,6 +138,7 @@ constexpr const char* actionName(Action a) {
     case Action::Hdmi2: return "HDMI 2";
     case Action::Menu: return "Menu";
     case Action::Blank: return "Blank";
+    case Action::Exit: return "Exit";
     case Action::TvInput: return "TV input";
     case Action::BluetoothInput: return "Bluetooth input";
     case Action::Codes: return "Codes";
@@ -156,7 +164,9 @@ constexpr const char* actionName(Action a) {
 //   then its inverse, eight bits each, first bit first, sent twice 50 ms apart. The Soundbar
 //   300's (Bose_Soundbar_300.ir) is NEC with address BA 4B. Which another Bose soundbar takes
 //   isn't known, so C on its page switches between them.
-// - Samsung: Samsung32 at address 07, the volume, mute and power Samsung TVs have used for years.
+// - Samsung: Samsung32 at address 07. The volume, mute and power Samsung TVs have used for years,
+//   and the arrows, OK, Return, Smart Hub, Source and Exit as three files under TVs/Samsung have
+//   them alike (Samsung_UN60JU6500.ir, Samsung_UE48JU6490U.ir, Samsung_TV_Full.ir).
 enum class IrProtocol : uint8_t { None, Nec, Samsung, Bose };
 
 struct IrCode {
@@ -228,6 +238,15 @@ constexpr IrCode irCode(Press p, uint8_t boseSet = 0) {
         case Action::VolumeDown: return samsung(0x0B);
         case Action::Mute: return samsung(0x0F);
         case Action::Power: return samsung(0x02);
+        case Action::Up: return samsung(0x60);
+        case Action::Down: return samsung(0x61);
+        case Action::Left: return samsung(0x65);
+        case Action::Right: return samsung(0x62);
+        case Action::Select: return samsung(0x68);
+        case Action::Back: return samsung(0x58);
+        case Action::Home: return samsung(0x79);  // Smart Hub.
+        case Action::Source: return samsung(0x01);
+        case Action::Exit: return samsung(0x2D);
         default: return kNoCode;
       }
   }

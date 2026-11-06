@@ -295,14 +295,21 @@ void pagesScenario() {
   enter(); assert(lastIr() == epsonIr(Action::Select)); del(); assert(lastIr() == epsonIr(Action::Back));
   release(); press('.'); later(450); assert(lastIr() == epsonIr(Action::Down) && ir.end()[-2].value == epsonIr(Action::Down)); release(); later(0);
   n = ir.size(); press('='); assert(ir.size() == n && shows("P power, I O HDMI 1 2, S source"));
-  // 4, the Samsung: its volume, mute and power.
+  // 4, the Samsung: its ring, Back, Home, Source and Exit, and its volume, mute and power.
   press('4'); assert(gTvPage == Device::Samsung);
-  for (const char* t : {"Power", "Mute", "VOLUME", "Point at the TV. 1-4: remotes"}) assert(shows(t));
+  for (const char* t : {"SAMSUNG TV", "Back", "Home", "Source", "Exit", "SOUND, POWER", "Vol +", "Vol -", "Power", "Mute", "OK", "Point at the TV. 1-4: remotes"}) assert(shows(t));
+  press(';'); assert(lastIr() == samsungIr(Action::Up) && gCanvas.arcs == 1 && shows("Up to the TV"));
+  press('/'); assert(lastIr() == samsungIr(Action::Right));
+  enter(); assert(lastIr() == samsungIr(Action::Select)); del(); assert(lastIr() == samsungIr(Action::Back));
+  press('h'); assert(lastIr() == samsungIr(Action::Home) && shows("Home to the TV"));
+  press('s'); assert(lastIr() == samsungIr(Action::Source));
+  press('E'); assert(lastIr() == samsungIr(Action::Exit) && shows("Exit to the TV"));
+  release(); press(','); later(450); assert(lastIr() == samsungIr(Action::Left) && ir.end()[-2].value == samsungIr(Action::Left)); release(); later(0);
   press('='); assert(lastIr() == samsungIr(Action::VolumeUp) && shows("Volume up to the TV"));
   press('-'); assert(lastIr() == samsungIr(Action::VolumeDown));
   press('m'); assert(lastIr() == samsungIr(Action::Mute));
   press('p'); assert(lastIr() == samsungIr(Action::Power));
-  n = ir.size(); press(';'); press('h'); press('5'); assert(ir.size() == n && gTvPage == Device::Samsung);
+  n = ir.size(); press('z'); press(' '); press('5'); assert(ir.size() == n && gTvPage == Device::Samsung && shows("H home, S source, E exit, = - volume"));
   // Every page fits, with each of its keys lit, a long notice, and each last line.
   for (uint8_t d = 0; d < kDeviceCount; ++d) {
     gTvPage = Device(d);
@@ -394,6 +401,11 @@ int main() {
   const auto sam = [](Action a) { return irCode({Device::Samsung, a}); };
   assert(sam(Action::VolumeUp).protocol == IrProtocol::Samsung && samsungFrame(0x07, 0x07) == 0xF8070707u);
   assert(sam(Action::VolumeUp).command == 0x07 && sam(Action::VolumeDown).command == 0x0B && sam(Action::Mute).command == 0x0F && sam(Action::Power).command == 0x02);
+  // Its arrows, OK, Return, Smart Hub, Source and Exit, as three Samsung files have them alike.
+  assert(sam(Action::Up).command == 0x60 && sam(Action::Down).command == 0x61 && sam(Action::Left).command == 0x65 && sam(Action::Right).command == 0x62);
+  assert(sam(Action::Select).command == 0x68 && sam(Action::Back).command == 0x58 && sam(Action::Home).command == 0x79);
+  assert(sam(Action::Source).command == 0x01 && sam(Action::Exit).command == 0x2D && sam(Action::Up).address == 0x07);
+  assert(samsungFrame(0x07, 0x60) == 0x9F600707u);  // 07 07 60 9F, Up as it goes out.
   // Every key a page has sends a frame, and nothing else does; no two do the same.
   std::vector<std::pair<int, uint32_t>> frames;
   for (uint8_t d = 0; d < kDeviceCount; ++d)
@@ -406,7 +418,7 @@ int main() {
         if (Device(d) != Device::Bose) break;  // Only the Bose has two sets.
       }
     }
-  assert(frames.size() == 9 + 12 + 6 * 2 + 4);
+  assert(frames.size() == 9 + 12 + 6 * 2 + 13);
   std::sort(frames.begin(), frames.end()); assert(std::adjacent_find(frames.begin(), frames.end()) == frames.end());
   for (Action a : {Action::Bluetooth, Action::Typing, Action::Forget, Action::None, Action::Codes}) assert(irCode({Device::AppleTv, a}).protocol == IrProtocol::None);
 
@@ -458,7 +470,10 @@ int main() {
   assert(key(Device::Epson, '/') == (P{Device::Epson, Action::Right}) && keyFor(Device::Epson, 'x', false, true) == (P{Device::Epson, Action::Back}));
   assert(key(Device::Epson, '=').action == Action::None && key(Device::Epson, 'h').action == Action::None);
   assert(key(Device::Samsung, '=') == (P{Device::Samsung, Action::VolumeUp}) && key(Device::Samsung, 'p') == (P{Device::Samsung, Action::Power}));
-  assert(key(Device::Samsung, ';').action == Action::None && key(Device::Samsung, 'h').action == Action::None);
+  assert(key(Device::Samsung, ';') == (P{Device::Samsung, Action::Up}) && key(Device::Samsung, 'h') == (P{Device::Samsung, Action::Home}));
+  assert(keyFor(Device::Samsung, 'x', true, false) == (P{Device::Samsung, Action::Select}) && keyFor(Device::Samsung, 'x', false, true) == (P{Device::Samsung, Action::Back}));
+  assert(key(Device::Samsung, 'S') == (P{Device::Samsung, Action::Source}) && key(Device::Samsung, 'e') == (P{Device::Samsung, Action::Exit}));
+  assert(key(Device::Samsung, 'z').action == Action::None && key(Device::Samsung, ' ').action == Action::None);
   assert(typingArrow(';', true) == kKeyUp && typingArrow(';', false) == 0 && typingArrow(3, false) == kKeyLeft && typingArrow('a', true) == 0);
   assert(repeats(Action::Up) && repeats(Action::VolumeDown) && !repeats(Action::Select) && !repeats(Action::Mute) && !repeats(Action::Sleep));
 

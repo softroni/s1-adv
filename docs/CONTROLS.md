@@ -200,7 +200,8 @@ Apple TV, **2** Bose, **3** Epson, **4** Samsung, and it opens on the last one u
 page `;` `.` `,` `/` move, Enter is OK, Del is Back, Space plays or pauses, H is Home and Z is
 Sleep, and `=` `-` M P are the Bose's volume, mute and power. The Bose page has its inputs, and C
 switches between the two Bose code sets. The Epson page has power, HDMI 1 (I), HDMI 2 (O), Source,
-Menu and its own arrows. Holding an arrow or the volume keeps it going. Bluetooth (B) and typing
+Menu and its own arrows, and the Samsung page its arrows, Home (H), Source (S) and Exit (E). Holding
+an arrow or the volume keeps it going. Bluetooth (B) and typing
 (T) are out of the firmware for now, because having Bluetooth in it left too little memory for
 HTTPS. [TV Remote](TV-REMOTE.md) has the details, including how
 to pair it.
