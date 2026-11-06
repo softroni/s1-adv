@@ -539,9 +539,12 @@ async function livePan(id, direction, turnOnly) {
   await ptz.rotate(direction);
   return viewState(view, "turned");
 }
-// The HomeBase's recordings of one day (yyyyMMdd), from its own table, newest first. Reading it
-// wakes no camera: the base is on mains power.
-async function recordings(day) {
+// The HomeBase's recordings of one day (yyyyMMdd), from its own table. Reading it wakes no
+// camera: the base is on mains power. The library's query (QUERY_LOCAL, 10017) is the HomeBase 2's;
+// a HomeBase 3 refuses it with -6006, so the by-date query (10006) the older eufy-security-client
+// sent to a HomeBase 3 is tried too, on the station channel and on channel 0 as that library did.
+const DB_QUERY_BY_DATE = 10006;
+async function recordings(day, how = "") {
   if (status.state !== "ready") throw new HelperError("not_ready", 409);
   if (!/^\d{8}$/u.test(String(day))) throw new HelperError("bad_day", 400);
   const [stationSn, record] = [...stationRecords.entries()][0] || [];
@@ -549,22 +552,34 @@ async function recordings(day) {
   const accountId = record.raw?.member?.admin_user_id;
   await eufy.connectStation(stationSn);
   const session = eufy.getP2pSessions?.().get(stationSn);
-  if (!session?.queryRecordPage) throw new HelperError("no_archive", 409);
+  if (!session?.readDatabase) throw new HelperError("no_archive", 409);
   const next = new Date(Date.UTC(+day.slice(0, 4), +day.slice(4, 6) - 1, +day.slice(6, 8) + 1));
   const endDate = `${next.getUTCFullYear()}${String(next.getUTCMonth() + 1).padStart(2, "0")}${String(next.getUTCDate()).padStart(2, "0")}`;
-  const rows = new Map();
-  let startTime = "0";
-  for (let page = 0; page < 15; ++page) {
-    const reply = await session.queryRecordPage({ accountId, startDate: day, endDate, startTime, count: 20 });
-    const found = reply.flatMap((group) => group?.table_name === "history_record_info" && Array.isArray(group.payload) ? group.payload : []);
-    for (const row of found) if (row?.record_id !== undefined) rows.set(row.record_id, row);
-    if (found.length < 20) break;
-    const oldest = found.map((row) => String(row.start_time || "").replace(/\D/gu, "")).filter(Boolean).sort()[0];
-    if (!oldest || (startTime !== "0" && oldest >= startTime)) break;
-    startTime = oldest;
+  const rowsOf = (reply) => reply.flatMap((group) => group?.table_name === "history_record_info" && Array.isArray(group.payload) ? group.payload : []);
+  const byDate = (channel) => {
+    const original = session.queryDatabase;
+    if (channel !== undefined) session.queryDatabase = (table, opts) => original.call(session, table, { ...opts, channel });
+    return session.readDatabase("history_record_info", { accountId, innerCmd: DB_QUERY_BY_DATE, timeoutMs: 15000, query: {
+      count: 100, detection_type: 0, device_info: [...cameras.values()].map((cam) => ({ device_sn: cam.sn })), end_date: endDate,
+      event_type: 0, flag: 0, res_unzip: 1, start_date: day, start_time: `${day}000000`, storage_cloud: -1, ai_type: 0,
+    } }).finally(() => { session.queryDatabase = original; });
+  };
+  const tries = how === "local" ? [["local", () => session.queryRecordPage({ accountId, startDate: day, endDate, count: 20 })]]
+    : how === "bydate0" ? [["bydate0", () => byDate(0)]]
+    : how === "bydate255" ? [["bydate255", () => byDate(undefined)]]
+    : [["bydate255", () => byDate(undefined)], ["bydate0", () => byDate(0)], ["local", () => session.queryRecordPage({ accountId, startDate: day, endDate, count: 20 })]];
+  const errors = [];
+  for (const [name, attempt] of tries) {
+    try {
+      const rows = rowsOf(await attempt());
+      log(`recordings ${day} by ${name}: ${rows.length} row(s)`);
+      return { how: name, rows };
+    } catch (error) {
+      errors.push(`${name}: ${scrub(error?.message || error, [...serials]).slice(0, 80)}`);
+    }
   }
-  log(`recordings ${day}: ${rows.size} row(s)`);
-  return [...rows.values()];
+  log(`recordings ${day}: ${errors.join("; ")}`);
+  throw new HelperError("archive_refused", 502);
 }
 function liveExtend(id) {
   if (!live || live.id !== id) throw new HelperError("not_live", 409);
@@ -608,7 +623,7 @@ export function handler() {
     try {
       switch (`${req.method} ${url.pathname}`) {
         case "GET /status": send(res, 200, status); return;
-        case "GET /recordings": send(res, 200, await recordings(q.get("day") || "")); return;
+        case "GET /recordings": send(res, 200, await recordings(q.get("day") || "", q.get("how") || "")); return;
         case "GET /list": send(res, 200, await list()); return;
         case "GET /thumb": send(res, 200, await readPicture(cam, "332"), "application/octet-stream"); return;
         case "GET /picture": send(res, 200, await readPicture(cam, "jpg"), "image/jpeg"); return;
