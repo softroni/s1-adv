@@ -116,6 +116,34 @@ inline bool codePath(char* out, size_t room, const char* digits) {
   const int len = snprintf(out, room, "%scode?value=%s", kBase, digits);
   return len > 0 && size_t(len) < room;
 }
+// The phone sign-in page's link, asked over HTTPS, as the bridge answers:
+//   setup <path> <seconds it lasts>      or   none <why>
+constexpr const char kSetupPath[] = "/api/cardputer/cameras/setup";
+inline bool parseSetup(const char* text, size_t len, char* path, size_t room, uint32_t& seconds) {
+  bool found = false;
+  podcast::eachLine(text, len, [&](char* line, size_t) {
+    char* f[3];
+    const size_t n = podcast::splitFields(line, f, 3);
+    uint32_t s = 0;
+    if (found || n != 3 || strcmp(f[0], "setup") || strncmp(f[1], "/eufy/", 6) || strlen(f[1]) != 22 ||
+        !podcast::readNumber(f[2], s, 24 * 3600) || strlen(f[1]) >= room) return;
+    for (const char* p = f[1] + 6; *p; ++p)
+      if (!((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') || *p == '-' || *p == '_')) return;
+    strcpy(path, f[1]);
+    seconds = s;
+    found = true;
+  });
+  return found;
+}
+// The page's address for the QR code: the bridge's own, as the device reaches it.
+inline bool setupUrl(char* out, size_t room, const char* host, uint16_t port, bool tls, const char* path) {
+  if (!host || !*host || !path || !*path) return false;
+  const bool plainPort = (tls && port == 443) || (!tls && port == 80) || !port;
+  const int len = plainPort ? snprintf(out, room, "%s://%s%s", tls ? "https" : "http", host, path)
+                            : snprintf(out, room, "%s://%s:%u%s", tls ? "https" : "http", host, unsigned(port), path);
+  return len > 0 && size_t(len) < room;
+}
+
 // A captcha's answer: letters and digits, as the picture on the Mac shows them.
 inline bool captchaPath(char* out, size_t room, const char* answer) {
   const size_t n = strlen(answer);

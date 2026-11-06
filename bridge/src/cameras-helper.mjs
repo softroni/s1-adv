@@ -72,7 +72,7 @@ const status = { state: "starting", detail: "" };
 const cameras = new Map();   // id -> { sn, name, dev, station }
 const stations = new Map();  // sn -> dev
 let saved = { motion: {} };  // id -> ms of the last motion, kept across restarts
-let lastTried = 0, triedEnv = 0, signingIn = false;
+let lastTried = 0, triedEnv = 0, signingIn = false, signInAgain = false;
 let live = null;
 
 function setState(state, detail = "") {
@@ -100,7 +100,7 @@ async function writeAtomic(file, data) {
 
 // --- Signing in ----------------------------------------------------------------------------
 async function signIn(reason) {
-  if (signingIn) return;
+  if (signingIn) { signInAgain = true; return; }
   signingIn = true;
   try {
     lastTried = Date.now();
@@ -130,7 +130,18 @@ async function signIn(reason) {
     setState("error", shortError(error));
   } finally {
     signingIn = false;
+    if (signInAgain) { signInAgain = false; void signIn("again"); }
   }
+}
+// The phone page saved the account: sign in with it now. A new account starts a new session.
+async function signInNow(fresh) {
+  if (live) await liveStop("signing in again");
+  if (fresh) {
+    try { await eufy?.disconnect(); } catch {}
+    eufy = null;
+    try { await unlink(SESSION_FILE); } catch {}
+  }
+  void signIn("phone page");
 }
 function shortError(error) {
   const text = scrub(error?.code || error?.message || error, [...serials]);
@@ -419,6 +430,7 @@ export function handler() {
         case "POST /live/stop": if (live?.id === cam) await liveStop("closed"); send(res, 200, { ok: true }); return;
         case "POST /code": await submitCode(q.get("value") || ""); send(res, 200, status); return;
         case "POST /captcha": await submitCaptcha(q.get("value") || ""); send(res, 200, status); return;
+        case "POST /signin": await signInNow(q.get("fresh") === "1"); send(res, 200, status); return;
         default: send(res, 404, { error: "not_found" });
       }
     } catch (error) {

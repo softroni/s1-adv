@@ -11,9 +11,10 @@
 #include "../camera_net.h"
 namespace {
 enum class CamView : uint8_t { Wall, Picture, Live };
-enum class CamJob : uint8_t { None, Ticket, List, Thumb, Picture, Refresh, LiveStart, Frame, Extend, Stop, Turn, Code, Report };
+enum class CamJob : uint8_t { None, Ticket, List, Thumb, Picture, Refresh, LiveStart, Frame, Extend, Stop, Turn, Code, Report, Setup };
 
 constexpr uint32_t kCamListEveryMs = 60000;   // The wall's ages and battery, asked again this often.
+constexpr uint32_t kCamSigningEveryMs = 4000; // And while signing in, so the screen follows the phone.
 constexpr uint32_t kCamNoticeMs = 3500;
 constexpr uint32_t kCamBarsMs = 3000;         // A picture's bars, after a key, before they go.
 constexpr uint32_t kCamTurnLitMs = 350;
@@ -68,6 +69,10 @@ String gCamNotice;
 uint16_t gCamNoticeInk = 0;
 uint32_t gCamNoticeUntil = 0;
 String gCamProblem;                     // Why the wall is empty, when the bridge couldn't be asked.
+// The phone sign-in page's address, shown as a QR code until eufy is signed in.
+String gCamSetupUrl;
+uint32_t gCamSetupUntilMs = 0, gCamSetupAskedMs = 0;
+bool gCamSetupNone = false;             // The bridge has no page (an older one, or nothing to sign in with).
 
 void camInvalidate() { gCamDirty = true; gLastRenderMs = 0; gUiFramePolicy.invalidate(); }
 void camSay(const String& text, uint16_t ink = 0) {
@@ -320,6 +325,7 @@ void camFinished() {
           gCamListOk = true;
           gCamListAtMs = millis();
           if (gCamSel >= cameras::tileCount(fresh->count)) gCamSel = 0;
+          if (fresh->state == cameras::State::Ready) { gCamSetupUrl = ""; gCamSetupNone = false; }
           gCamProblem = "";
         } else {
           delete fresh;
@@ -398,10 +404,36 @@ void camFinished() {
     case CamJob::Turn:
       if (e != camera_net::Error::None) camSay(word == "no_ptz" ? "This camera doesn't turn" : camProblemText(e, word));
       break;
+    case CamJob::Setup: {
+      char path[32], url[200];
+      uint32_t seconds = 0;
+      if (e == camera_net::Error::None && data && cameras::parseSetup(reinterpret_cast<const char*>(data), length, path, sizeof(path), seconds) &&
+          cameras::setupUrl(url, sizeof(url), gHubHost.c_str(), gHubPort, hubUsesTls(), path)) {
+        gCamSetupUrl = url;
+        // Asked again a minute before it ends, so the code on screen always works.
+        gCamSetupUntilMs = millis() + (seconds > 120 ? seconds - 60 : seconds) * 1000;
+        gCamSetupNone = false;
+      } else {
+        gCamSetupUrl = "";
+        gCamSetupNone = e == camera_net::Error::None || e == camera_net::Error::NotFound;
+      }
+      camInvalidate();
+      break;
+    }
     default:
       break;
   }
   free(data);
+}
+
+// The sign-in page's QR code is for an account that isn't signed in, or one eufy refused.
+bool camSignInShown() {
+  if (!gCamList || !gCamListOk) return false;
+  if (gCamList->state == cameras::State::Setup) return true;
+  return gCamList->state == cameras::State::Error && strstr(gCamList->detail, "refused");
+}
+bool camWantsSetupLink() {
+  return camSignInShown() && !gCamSetupNone && (gCamSetupUrl.isEmpty() || int32_t(millis() - gCamSetupUntilMs) >= 0);
 }
 
 // The next thing to ask, most urgent first.
@@ -452,7 +484,15 @@ void camNextJob() {
     if (camStartFor(CamJob::Refresh, cam, "refresh", cameras::kMaxJpeg, kCamRefreshWaitMs)) return;
     gCamRefreshSince = 0;
   }
-  if (gCamWantList || !gCamListOk || (gCamView == CamView::Wall && millis() - gCamListAtMs > kCamListEveryMs)) {
+  if (camWantsSetupLink() && millis() - gCamSetupAskedMs > 10000) {
+    gCamSetupAskedMs = millis();
+    prepareNetworkMemory("cameras", true);
+    compactMemoryForUi("cameras", true);
+    // HTTPS only: the home door doesn't hand out sign-in links.
+    if (camera_net::start(cameras::kSetupPath, false, 0, 0, 512, 15000)) { gCamJob = CamJob::Setup; gCamJobCam = -1; return; }
+  }
+  const uint32_t listEvery = camReady() ? kCamListEveryMs : kCamSigningEveryMs;
+  if (gCamWantList || !gCamListOk || (gCamView == CamView::Wall && millis() - gCamListAtMs > listEvery)) {
     gCamWantList = false;
     if (camStart(CamJob::List, -1, cameras::kListPath, cameras::kMaxList, 15000)) return;
   }
@@ -864,11 +904,13 @@ void camDrawTile(uint8_t tile) {
   if (recent) d.fillCircle(x + cameras::kThumbW - 6 - ageW, ly + 5, 2, camRed());
 }
 
+void camDrawSignIn();
 void camDrawWall() {
   auto& d = gCanvas;
   const uint8_t pageCount = cameras::pages(camCount());
   String right;
   if (camReady() && pageCount > 1) right = String(cameras::pageOf(gCamSel) + 1) + "/" + String(pageCount);
+  if (camSignInShown() && gCamProblem.isEmpty() && gWifiReady) { camDrawSignIn(); return; }
   if (!camReady()) {
     drawBigHeader("Cameras", camAccent(), right);
     const cameras::State state = gCamList && gCamListOk ? gCamList->state : cameras::State::Unknown;
@@ -897,6 +939,43 @@ void camDrawWall() {
     const uint8_t page = cameras::pageOf(gCamSel);
     for (uint8_t t = 0; t < cameras::tileCount(camCount()); ++t) if (cameras::pageOf(t) == page) camDrawTile(t);
   }
+  if (camNoticeShowing()) drawBigNotice(gCamNotice, gCamNoticeInk);
+}
+
+// The sign-in screen: the phone page's QR code, the screen's height, on the white it needs, and
+// what to do beside it.
+void camDrawSignIn() {
+  auto& d = gCanvas;
+  d.fillScreen(TFT_BLACK);
+  const bool refused = gCamList->state == cameras::State::Error;
+  const bool haveCode = !gCamSetupUrl.isEmpty() && int32_t(millis() - gCamSetupUntilMs) < 0;
+  int16_t textX = 8;
+  if (haveCode) {
+    d.fillRect(0, 0, 135, 135, TFT_WHITE);
+    d.qrcode(gCamSetupUrl.c_str(), 0, 0, 135, 1, true);
+    textX = 142;
+  }
+  d.setFont(&fonts::FreeSansBold9pt7b);
+  d.setTextColor(camAccent());
+  d.setCursor(textX, 6);
+  d.print("Cameras");
+  d.setFont(&fonts::Font2);
+  const char* const* lines;
+  static const char* const kScan[] = {"Scan with your", "phone to sign", "in to eufy.", nullptr};
+  static const char* const kRefused[] = {"eufy said no.", "Scan to sign", "in again.", nullptr};
+  static const char* const kWaiting[] = {"Getting a sign-in", "code for your", "phone...", nullptr};
+  static const char* const kNoPage[] = {"Add the eufy", "sign-in on", "the Mac.", nullptr};
+  lines = haveCode ? (refused ? kRefused : kScan) : gCamSetupNone ? kNoPage : kWaiting;
+  d.setTextColor(TFT_WHITE);
+  // Three lines, a gap and three more: 30 + 6 x 16 + 4 = 130, inside the 135 rows.
+  int16_t y = 30;
+  for (int i = 0; lines[i]; ++i, y += 16) { d.setCursor(textX, y); d.print(lines[i]); }
+  d.setTextColor(camMuted());
+  static const char* const kOr[] = {"Or edit", "eufy.env on", "the Mac.", nullptr};
+  static const char* const kGuide[] = {"docs/CAMERAS.md", "says how.", nullptr};
+  const char* const* rest = gCamSetupNone ? kGuide : kOr;
+  y += 4;
+  for (int i = 0; rest[i]; ++i, y += 16) { d.setCursor(textX, y); d.print(rest[i]); }
   if (camNoticeShowing()) drawBigNotice(gCamNotice, gCamNoticeInk);
 }
 

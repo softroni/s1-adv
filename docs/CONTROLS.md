@@ -196,7 +196,8 @@ straight over your Wi-Fi; away, save episodes first. [Podcasts](PODCASTS.md) has
 ## Cameras
 
 Cameras is under Tab, House, and `/cameras` opens it. It shows eufy security cameras through the
-bridge's Mac, which needs setting up first: [Cameras](CAMERAS.md) says how. The first screen is the
+bridge's Mac, which needs setting up first: [Cameras](CAMERAS.md) says how. Until it's signed in to
+eufy, it shows a QR code: scan it with your phone and sign in there. After that, the first screen is the
 wall: each camera's last picture, its name, and how long ago it saw motion, with a red dot when that
 was in the last five minutes. The last tile is the HomeBase and its mode.
 

@@ -2,6 +2,7 @@ import { REPLY_LANGUAGE_POLICY, requestedReplyLanguage } from "./reply-language.
 import { WeatherService, parseCoordinates, validPlace } from "./weather.mjs";
 import { LAN_PORT, PodcastError, PodcastService, lanHandler, showLines } from "./podcasts.mjs";
 import { CameraService, cameraLanRoute, handleCameraRoute } from "./cameras.mjs";
+import { handleSetupPage } from "./cameras-setup.mjs";
 import { startFirmwareJob, updateFirmwareJob, publicFirmwareJob, firmwareJobDeliveryUncertain } from "./firmware-job-status.mjs";
 import { firmwareCapability, firmwareWorkflowPaths } from "./firmware-automation.mjs";
 import { AGENT_STATES, WORK_KINDS, hasAgentStatusAccess, publishedAfterTask } from './agent-status.mjs';
@@ -6464,6 +6465,13 @@ async function main() {
         }
         return;
       }
+
+    // The Cameras sign-in page for a phone, behind its one-time link rather than a device token.
+    if (url.pathname.startsWith("/eufy/")) {
+      await handleSetupPage(runtime.cameras, req, res, url,
+        { limited: () => isAuthRateLimited(req, config), failed: () => recordAuthFailure(req, config) });
+      return;
+    }
 
     const protectedDevicePath =
       isOmnibotShimPath(url.pathname) || url.pathname.startsWith("/api/cardputer/");

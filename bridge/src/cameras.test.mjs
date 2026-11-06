@@ -269,3 +269,107 @@ test("ffmpeg turns camera video into screen-sized baseline JPEGs", { skip: !FFMP
   const sof = small.stdout.indexOf(Buffer.from([0xff, 0xc0]));
   assert.equal(small.stdout.readUInt16BE(sof + 7), PICTURE.width);
 });
+
+// --- The phone sign-in page ----------------------------------------------------------------
+import { Readable } from "node:stream";
+import { readFile as readText, stat as statFile } from "node:fs/promises";
+import { SetupLinks, accountFile, emailIn, handleSetupPage } from "./cameras-setup.mjs";
+
+test("a sign-in link lasts 15 minutes, is reused while it has a while left, and only it opens the page", () => {
+  let now = 1_000_000;
+  const links = new SetupLinks(() => now);
+  const a = links.current();
+  assert.match(a.token, /^[A-Za-z0-9_-]{16}$/u);
+  now += 9 * 60 * 1000;
+  assert.equal(links.current().token, a.token, "kept: a page already open keeps working");
+  now += 2 * 60 * 1000;
+  const b = links.current();
+  assert.notEqual(b.token, a.token, "under five minutes left: a new one");
+  assert.equal(links.check(a.token), null);
+  assert.equal(links.check(b.token), b);
+  assert.equal(links.check("x".repeat(16)), null);
+  assert.equal(links.check(undefined), null);
+  now += 16 * 60 * 1000;
+  assert.equal(links.check(b.token), null, "expired");
+  links.current();
+  links.finish();
+  assert.equal(links.link, null);
+});
+
+test("the account file keeps any password and refuses what would break its lines", () => {
+  const text = accountFile({ email: " Me@Example.com ", password: ' p#ss "word" = x ', country: "gb" }, new Date("2026-11-06T12:00:00Z"));
+  assert.deepEqual(parseEnv(text), { email: "Me@Example.com", password: ' p#ss "word" = x ', country: "GB" });
+  assert.equal(emailIn(text), "me@example.com");
+  for (const bad of [{ email: "nope", password: "x" }, { email: "a@b.co", password: "" }, { email: "a@b.co", password: "line\nbreak" },
+    { email: "a@b.co", password: "x", country: "USA" }, { email: "a b@c.co", password: "x" }])
+    assert.throws(() => accountFile(bad), (e) => e.status === 400);
+});
+
+function phoneReq(method, url, body) {
+  const req = Readable.from(body === undefined ? [] : [Buffer.from(JSON.stringify(body))]);
+  req.method = method;
+  req.url = url;
+  return req;
+}
+
+test("the sign-in page: wrong links count as failures, the right one saves the account and signs in", async () => {
+  const calls = [];
+  let state = "setup";
+  await withHelper({
+    "GET /status": (q, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ state, detail: state === "code" ? "eufy sent a code by email" : "" })); },
+    "GET /list": (q, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ state, cameras: [{ id: "0123abcd" }, { id: "89abcdef" }] })); },
+    "POST /signin": (q, res) => { calls.push(`signin fresh=${q.get("fresh") || ""}`); state = "code"; res.writeHead(200, { "content-type": "application/json" }); res.end("{}"); },
+    "POST /code": (q, res) => { calls.push(`code ${q.get("value")}`); state = "ready"; res.writeHead(200, { "content-type": "application/json" }); res.end("{}"); },
+  }, async (service) => {
+    service.envFile = path.join(service.dir, "eufy.env");
+    let failed = 0, limited = false;
+    const guard = { limited: () => limited, failed: () => { failed++; } };
+    const ask = async (method, pathname, body) => {
+      const res = fakeRes();
+      const handled = await handleSetupPage(service, phoneReq(method, pathname, body), res, new URL(pathname, "https://bridge.example"), guard);
+      return { handled, res, json: () => JSON.parse(res.body.toString() || "{}") };
+    };
+    assert.equal((await ask("GET", "/api/cardputer/cameras/list")).handled, false);
+    // No link yet, a made-up one, a malformed one: all 404, all counted.
+    let r = await ask("GET", "/eufy/AAAAAAAAAAAAAAAA");
+    assert.equal(r.res.status, 404);
+    assert.match(r.res.body.toString(), /This link has expired/u);
+    assert.equal((await ask("GET", "/eufy/short%2F..")).res.status, 404);
+    assert.equal(failed, 2);
+    // The device asks for the link: the page answers it, with no caching and a strict policy.
+    const line = (await (async () => { const res = fakeRes(); await handleCameraRoute(service, "/api/cardputer/cameras/setup", new URLSearchParams(), "dev1", res); return res.body.toString(); })());
+    const [, setupPath, seconds] = line.trim().split("\t");
+    assert.match(setupPath, /^\/eufy\/[A-Za-z0-9_-]{16}$/u);
+    assert(Number(seconds) > 14 * 60 && Number(seconds) <= 15 * 60);
+    const logged = [];
+    const log = console.log;
+    console.log = (...a) => logged.push(a.join(" "));
+    try {
+      r = await ask("GET", setupPath);
+      assert.equal(r.res.status, 200);
+      assert.equal(r.res.headers["cache-control"], "no-store");
+      assert.equal(r.res.headers["referrer-policy"], "no-referrer");
+      assert.match(r.res.headers["content-security-policy"], /default-src 'none'.*script-src 'nonce-/u);
+      assert.match(r.res.body.toString(), /eufy password/u);
+      // Signing in: the account is saved for the helper only, and it signs in at once, afresh.
+      r = await ask("POST", `${setupPath}/account`, { email: "me@example.com", password: "s3cret pass", country: "US" });
+      assert.equal(r.res.status, 200);
+      assert.equal(r.json().state, "code");
+      assert.deepEqual(parseEnv(await readText(service.envFile, "utf8")), { email: "me@example.com", password: "s3cret pass", country: "US" });
+      assert.equal((await statFile(service.envFile)).mode & 0o777, 0o600);
+      r = await ask("POST", `${setupPath}/account`, { email: "me@example.com", password: "other" });
+      r = await ask("POST", `${setupPath}/code`, { code: "12 34 56" });
+      assert.deepEqual(r.json(), { state: "ready", detail: "", cameras: 2 });
+      assert.deepEqual(calls, ["signin fresh=1", "signin fresh=", "code 123456"]);
+    } finally { console.log = log; }
+    assert(!logged.some(l => l.includes(setupPath.slice(6)) || l.includes("s3cret") || l.includes("example.com")), logged.join("\n"));
+    // Signed in, the link has done its job.
+    assert.equal((await ask("GET", `${setupPath}/status`)).res.status, 404);
+    // Bad input is refused without touching the file; too many tries from one address are stopped.
+    const again = service.links.current().token;
+    r = await ask("POST", `/eufy/${again}/account`, { email: "x", password: "y" });
+    assert.equal(r.res.status, 400);
+    limited = true;
+    assert.equal((await ask("GET", `/eufy/${again}`)).res.status, 429);
+  });
+});

@@ -51,6 +51,29 @@ present = part('006_main.cpp.inc').split('void presentUiFrame() {', 1)[1].split(
 assert 'gCanvasSpriteActive && !cameraDrawsDirect()' in present
 # The canvas stays allocated: the app never gives it back or makes it again (it would split the heap TLS needs).
 assert 'releaseUiCanvasForNetwork' not in app and 'restoreUiCanvasAfterNetwork' not in app and 'createSprite' not in app
+# The sign-in screen's words fit beside its QR code (142 to 238) and under each other, in Font2's
+# real widths. Lines shown without the code have the screen's width.
+import re as _re
+sign_in = app.split('void camDrawSignIn() {', 1)[1].split('\n}\n', 1)[0]
+font16 = root / 'bots/CardputerADV/.pio/libdeps/cardputer_adv/M5GFX/src/lgfx/Fonts/Font16.h'
+if font16.exists():
+    table = font16.read_text().split('widtbl_f16[96]', 1)[1].split('}', 1)[0]
+    widths = []
+    for line in table.split('\n'):
+        line = line.split('//', 1)[0]
+        if line.startswith('#'): continue
+        widths += [int(x) for x in _re.findall(r'\d+', line)]
+    widths = widths[:64] + widths[-32:]  # The grave accent's line has two versions; either is 4 or 5 wide.
+    assert len(widths) == 96, len(widths)
+    width = lambda text: sum(widths[ord(c) - 32] for c in text)
+    beside = ['kScan', 'kRefused', 'kOr']
+    for name, body in _re.findall(r'static const char\* const (k\w+)\[\] = \{(.*?)\};', sign_in):
+        texts = _re.findall(r'"([^"]*)"', body)
+        room = 238 - 142 if name in beside else 224
+        for text in texts: assert width(text) <= room, (name, text, width(text))
+        assert len(texts) <= 3, name
+assert 'int16_t y = 30;' in sign_in and 'y += 16)' in sign_in and 'y += 4;' in sign_in  # 30 + 6 x 16 + 4 = 130
+assert 'd.qrcode(gCamSetupUrl.c_str(), 0, 0, 135, 1, true);' in sign_in, 'the code fills the height, with its quiet zone'
 # Live view only ever goes over the home door, never TLS; pictures may come either way.
 assert 'Live works on home Wi-Fi only' in app
 # The serial number, name or address of a camera is never logged; only counts and words.
@@ -111,6 +134,23 @@ int main() {
   assert(cameras::parseTicket("none\n", 5, t) && t.none);
   assert(!cameras::parseTicket("ticket\t31890\t/podcasts/0123456789abcdef0123456789abcdef\n", 57, t));
   assert(!cameras::parseTicket("not_found\n", 10, t));
+
+  // The sign-in page's link, and the QR code's address: short enough for a version 4 code (78
+  // bytes at the lowest error correction), which fills the screen's height with 3-pixel squares.
+  char sp[32];
+  uint32_t secs = 0;
+  const char* setup = "setup\t/eufy/Ab3_-x9QrZt0LmN2\t900\n";
+  assert(parseSetup(setup, strlen(setup), sp, sizeof(sp), secs) && !strcmp(sp, "/eufy/Ab3_-x9QrZt0LmN2") && secs == 900);
+  assert(!parseSetup("none\tCameras aren't set up on the Mac\n", 37, sp, sizeof(sp), secs));
+  assert(!parseSetup("setup\t/eufy/short\t900\n", 23, sp, sizeof(sp), secs));
+  assert(!parseSetup("setup\t/eufy/Ab3_-x9QrZt0Lm<2\t900\n", 34, sp, sizeof(sp), secs));
+  assert(!parseSetup("setup\t/other/Ab3_-x9QrZt0LmN\t900\n", 34, sp, sizeof(sp), secs));
+  char url[200];
+  assert(setupUrl(url, sizeof(url), "bridge-1.tailabcdef.ts.net", 10000, true, sp) &&
+         !strcmp(url, "https://bridge-1.tailabcdef.ts.net:10000/eufy/Ab3_-x9QrZt0LmN2") && strlen(url) <= 78);
+  assert(setupUrl(url, sizeof(url), "bridge.example", 443, true, sp) && !strcmp(url, "https://bridge.example/eufy/Ab3_-x9QrZt0LmN2"));
+  assert(setupUrl(url, sizeof(url), "192.168.0.20", 31889, false, sp) && !strcmp(url, "http://192.168.0.20:31889/eufy/Ab3_-x9QrZt0LmN2"));
+  assert(!setupUrl(url, sizeof(url), "", 443, true, sp));
 
   // The worker's HTTP answers.
   Response r;

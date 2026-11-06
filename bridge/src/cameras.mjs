@@ -5,6 +5,8 @@
 //
 // Routes, under /api/cardputer/cameras/ (HTTPS) or /cameras/<ticket>/ (the home door):
 //   ticket                     where the home door is, or "none" (HTTPS only)
+//   setup                      the phone sign-in page's one-time path, "setup <path> <seconds>",
+//                              or "none <why>" (HTTPS only; the page is cameras-setup.mjs)
 //   list                       the cameras, as lines (cameras-media.mjs listLines)
 //   thumb?cam=                 the wall's 78x44 picture, raw 3-3-2 pixels, 404 when there's none
 //   picture?cam=               the last picture, a 240x135 JPEG, 404 when there's none
@@ -17,8 +19,10 @@ import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFile } from "node:fs/promises";
 import { findFfmpeg, homeAddress, lanAddresses } from "./podcasts.mjs";
 import { CAMERA_ID, listLines } from "./cameras-media.mjs";
+import { SetupLinks, accountFile, emailIn, writeAccount } from "./cameras-setup.mjs";
 
 const HELPER = fileURLToPath(new URL("./cameras-helper.mjs", import.meta.url));
 const TICKET_MS = 12 * 60 * 60 * 1000;
@@ -51,6 +55,28 @@ export class CameraService {
     this.tickets = new Map();
     this.sent = new Map();   // device + camera -> the last live frame it was sent
     this.lanPort = 0;
+    this.links = new SetupLinks(now);
+  }
+
+  // The phone page's link for the device to show as a QR code.
+  setupLines() {
+    const missing = this.missing();
+    if (missing) return `none\t${missing}\n`;
+    const link = this.links.current();
+    return `setup\t/eufy/${link.token}\t${Math.round((link.expires - this.now()) / 1000)}\n`;
+  }
+
+  // The account from the phone page: into eufy.env, and the helper signs in with it now. A new
+  // email starts a new session rather than keep the last account's.
+  async saveAccount(account) {
+    if (this.missing()) throw new CameraError("not_set_up", 503);
+    if (!this.envFile) throw new CameraError("no_account_file", 503);
+    const text = accountFile(account);
+    let old = "";
+    try { old = await readFile(this.envFile, "utf8"); } catch {}
+    await writeAccount(this.envFile, text);
+    console.log("[cameras] account saved from the phone page");
+    if (this.port) await this.call("POST", "/signin", emailIn(old) === emailIn(text) ? {} : { fresh: "1" }, 10000);
   }
 
   // Why the helper can't run, for the device's screen, or "" when it can.
@@ -240,6 +266,7 @@ export async function handleCameraRoute(service, pathname, params, device, res) 
   const what = pathname.slice("/api/cardputer/cameras/".length);
   try {
     if (what === "ticket") { lines(res, service.ticketLines(device)); return; }
+    if (what === "setup") { lines(res, service.setupLines()); return; }
     if (!WHAT.has(what)) throw new CameraError("not_found", 404);
     await service.answer(what, params, device, res);
   } catch (error) {

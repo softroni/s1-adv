@@ -8,6 +8,17 @@ cameras send video too big for it to decode. So the bridge's Mac does that part:
 helper signs in to your eufy account, fetches the pictures and video, and makes them the size of the
 Cardputer's screen. It works with cameras on a eufy HomeBase and with cameras on their own.
 
+## Signing in, from your phone
+
+Until the Mac has your eufy account, Cameras shows a QR code. Scan it with your phone's camera: it
+opens a page on the bridge's own HTTPS address, where you type your eufy email and password. The
+Mac keeps them and signs in at once, and when eufy sends a code (it does the first time), the same
+page asks for it. The Cardputer follows along and shows your cameras when it's done.
+
+The link in the code is good for 15 minutes and stops working once you're signed in; a new one
+comes up on the Cardputer by itself. It works from anywhere, without Tailscale. If eufy refuses the
+email or password later, the code comes back so you can sign in again.
+
 ## What you see
 
 - **The wall** is the first screen: each camera's last picture, its name and how long ago it saw
@@ -77,8 +88,8 @@ bridge's `config.json`, with `data` for its `stateDir`.
    PATH=/opt/homebrew/opt/node@24/bin:$PATH npm install @mega-yfue/eufy-sdk@0.5.0
    ```
 
-3. **The account**, in `~/.s1-adv/eufy.env`, beside `config.json`, readable only by you
-   (`chmod 600`):
+3. **The account.** Open Cameras on the Cardputer and scan its QR code (above), or put it in
+   `~/.s1-adv/eufy.env`, beside `config.json`, readable only by you (`chmod 600`):
 
    ```
    EUFY_EMAIL=you@example.com
@@ -86,12 +97,12 @@ bridge's `config.json`, with `data` for its `stateDir`.
    EUFY_COUNTRY=US
    ```
 
-4. **Restart the bridge.** Its log says `[cameras] starting the helper`, then
-   `[cameras] helper ready` and `[cameras] state signing-in`.
-5. **The first sign-in:** eufy sends a code by email or text. Open Cameras on the Cardputer, type the
-   code and press Enter. The helper keeps the session, so this happens once. If eufy asks for a captcha
-   instead, which it does after failed sign-ins, the picture is `captcha.png` in the cameras folder:
-   type its letters on the Cardputer the same way.
+4. **Restart the bridge** after installing the library. Its log says `[cameras] starting the
+   helper`, then `[cameras] helper ready`.
+5. **The first sign-in:** eufy sends a code by email or text. The phone page asks for it; it can
+   also be typed on the Cardputer's Cameras screen. The helper keeps the session, so this happens
+   once. If eufy asks for a captcha instead, which it does after failed sign-ins, the phone page shows
+   it (it's also `captcha.png` in the cameras folder, and the Cardputer takes its letters too).
 
 The helper signs in as a device of its own, so the phone app stays signed in. Changing `eufy.env`
 makes it sign in again within a few seconds.
@@ -101,7 +112,8 @@ Options, under `cameras` in `config.json`: `enabled: false` turns it off, `dir` 
 
 ## What stays private
 
-The account file is read only by the helper, on the Mac. Pictures are kept in the cameras folder's
+The account file is read only by the helper, on the Mac. The phone page sends it to the Mac over
+HTTPS, behind a link nobody can guess, and neither the link nor what's typed into it is logged. Pictures are kept in the cameras folder's
 `pictures` and sent only to the Cardputer. The bridge's log names cameras by a short code made from
 their serial number, never by name or serial, and never says anything about the account.
 
