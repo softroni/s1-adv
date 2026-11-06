@@ -83,6 +83,15 @@ if _shutil.which('node'):
     catalog = (src / 'camera_catalog.h').read_text()
     for name, ladder in zip(('kLens', 'kDigital'), bridge_ladders):
         assert f'static const uint8_t {name}[] = {{{", ".join(map(str, ladder))}}};' in catalog, (name, ladder)
+# Live sound has a speaker channel of its own: no other player's.
+import re as _re2
+channel = int(_re2.search(r'kCamAudioChannel = (\d+);', app).group(1))
+others = {}
+for path in list(src.glob('*.cpp')) + list(src.glob('*.h')) + list(parts.glob('*.inc')):
+    for name, value in _re2.findall(r'(k\w*Channel)\s*=\s*(\d+)\s*;', path.read_text(errors='ignore')):
+        if name != 'kCamAudioChannel': others.setdefault(int(value), set()).add(f'{path.name}:{name}')
+assert channel not in others, others.get(channel)
+assert 'camAudioFree();\n  camera_net::close();' in app, 'the speaker stops before the app lets go of its buffers'
 # Live view only ever goes over the home door, never TLS; pictures may come either way.
 assert 'Live works on home Wi-Fi only' in app
 # The serial number, name or address of a camera is never logged; only counts and words.

@@ -210,8 +210,9 @@ shows the last pictures and then takes a new one from each camera, one at a time
 - **Live:** the top bar counts down from 0:45, because watching uses the camera's battery. With 10
   seconds left it asks, and Enter gives it another 45. `=` and `-` zoom in and out (a camera with a
   zoom lens uses it from 3x), and the arrows move around the zoomed picture; at its edge a camera that
-  pans and tilts turns, as Fn with an arrow always does. S saves the frame, and Esc stops and goes back
-  to the picture. Live view works on your home Wi-Fi only.
+  pans and tilts turns, as Fn with an arrow always does. The camera's sound plays through the speaker,
+  and M turns it off and on. S saves the frame, and Esc stops and goes back to the picture. Live view
+  works on your home Wi-Fi only.
 
 ## TV Remote
 

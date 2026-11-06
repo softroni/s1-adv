@@ -12,7 +12,7 @@
 namespace {
 enum class CamView : uint8_t { Wall, Picture, Live };
 enum class CamJob : uint8_t { None, Ticket, List, Thumb, Picture, Refresh, LiveStart, Frame, Extend, Stop, Turn, Code, Report, Setup,
-                              Zoom, Pan, AutoRefresh };
+                              Zoom, Pan, AutoRefresh, Audio };
 
 constexpr uint32_t kCamListEveryMs = 60000;   // The wall's ages and battery, asked again this often.
 constexpr uint32_t kCamSigningEveryMs = 4000; // And while signing in, so the screen follows the phone.
@@ -21,6 +21,14 @@ constexpr uint32_t kCamBarsMs = 3000;         // A picture's bars, after a key, 
 constexpr uint32_t kCamTurnLitMs = 350;
 constexpr uint32_t kCamRefreshWaitMs = 45000; // A still wakes a camera: it can take a while.
 constexpr int16_t kCamTopBar = 16, kCamBottomBar = 12;
+
+// Live view's sound: the bridge sends 8 kHz mono 16-bit PCM, which goes into a half-second ring and
+// out to the speaker in 50 ms buffers on a channel of its own, once a quarter second is held, so a
+// late answer from the bridge plays from what's held instead of breaking up.
+constexpr uint8_t kCamAudioChannel = 1;       // The one no other player uses (scripts/test_cameras.py checks).
+constexpr uint32_t kCamAudioRate = 8000;
+constexpr size_t kCamAudioRing = 4000, kCamAudioChunk = 400, kCamAudioStart = 2000, kCamAudioSlots = 3;
+constexpr uint8_t kCamAudioGiveUp = 60;       // Answers with no sound before it's taken as a camera without.
 
 uint16_t camAccent() { return rgb565_local(85, 146, 255); }
 uint16_t camMuted() { return rgb565_local(146, 146, 170); }
@@ -65,6 +73,14 @@ uint8_t gCamWantZoom = 0;                // Tenths to ask for, 0 none.
 cameras::Arrow gCamWantPan = cameras::Arrow::None;
 bool gCamWantPanTurn = false;            // Fn with the arrow: turn the camera whatever the zoom.
 uint32_t gCamZoomLitUntil = 0;           // The zoom in the bar is lit a moment after it changes.
+// Sound: the ring, the speaker's buffers, and how it's going.
+int16_t* gCamAudioRing = nullptr;
+int16_t* gCamAudioSlot = nullptr;
+size_t gCamAudioHead = 0, gCamAudioCount = 0;
+uint8_t gCamAudioNext = 0, gCamAudioEmpty = 0;
+bool gCamWantAudio = false, gCamAudioPlaying = false, gCamAudioHeard = false, gCamAudioNone = false;
+bool gCamAudioMuted = false;             // M; kept for the visit, so the next camera is muted too.
+uint32_t gCamAudioSamples = 0, gCamAudioGaps = 0;
 // Opening the app takes a new picture from each camera once, after the last ones are shown.
 bool gCamAutoPlanned = false;
 bool gCamAutoWanted[cameras::kMax] = {};
@@ -144,6 +160,63 @@ void camQueueReport(const char* stage, const char* note, unsigned code) {
   for (char* p = gCamReport; *p; ++p) if (*p == ' ') *p = '_';
 }
 
+// --- Sound ----------------------------------------------------------------------------------
+void camAudioStop() {
+  if (gCamAudioPlaying || gCamAudioRing) M5Cardputer.Speaker.stop(kCamAudioChannel);
+  gCamAudioPlaying = false;
+  gCamAudioHead = gCamAudioCount = 0;
+}
+void camAudioFree() {
+  camAudioStop();
+  // The speaker may still read the last buffers: it's stopped first, so they can go.
+  free(gCamAudioRing);
+  free(gCamAudioSlot);
+  gCamAudioRing = gCamAudioSlot = nullptr;
+}
+bool camAudioOn() { return gCamLive && gCamLiveStarted && !gCamAudioMuted && !gCamAudioNone; }
+// What the bridge sent, into the ring; the oldest goes when it's full.
+void camAudioTake(const uint8_t* data, size_t length) {
+  if (!gCamAudioRing) {
+    gCamAudioRing = static_cast<int16_t*>(malloc(kCamAudioRing * sizeof(int16_t)));
+    gCamAudioSlot = static_cast<int16_t*>(malloc(kCamAudioSlots * kCamAudioChunk * sizeof(int16_t)));
+    if (!gCamAudioRing || !gCamAudioSlot) {
+      camAudioFree();
+      gCamAudioNone = true;
+      camSay("Not enough memory for sound");
+      return;
+    }
+  }
+  const size_t samples = length / 2;
+  for (size_t i = 0; i < samples; ++i) {
+    const int16_t v = int16_t(data[2 * i] | (data[2 * i + 1] << 8));
+    gCamAudioRing[(gCamAudioHead + gCamAudioCount) % kCamAudioRing] = v;
+    if (gCamAudioCount < kCamAudioRing) ++gCamAudioCount;
+    else gCamAudioHead = (gCamAudioHead + 1) % kCamAudioRing;
+  }
+}
+// From the ring to the speaker, while it has room for another buffer.
+void camAudioFeed() {
+  if (!gCamAudioRing || gCamAudioMuted) return;
+  if (!gCamAudioPlaying) {
+    if (gCamAudioCount < kCamAudioStart) return;
+    gCamAudioPlaying = true;
+  }
+  while (gCamAudioCount >= kCamAudioChunk && M5Cardputer.Speaker.isPlaying(kCamAudioChannel) < 2) {
+    int16_t* slot = gCamAudioSlot + gCamAudioNext * kCamAudioChunk;
+    for (size_t i = 0; i < kCamAudioChunk; ++i) slot[i] = gCamAudioRing[(gCamAudioHead + i) % kCamAudioRing];
+    gCamAudioHead = (gCamAudioHead + kCamAudioChunk) % kCamAudioRing;
+    gCamAudioCount -= kCamAudioChunk;
+    if (!M5Cardputer.Speaker.playRaw(slot, kCamAudioChunk, kCamAudioRate, false, 1, kCamAudioChannel, false)) break;
+    gCamAudioNext = uint8_t((gCamAudioNext + 1) % kCamAudioSlots);
+    gCamAudioSamples += kCamAudioChunk;
+  }
+  // Ran dry: hold a quarter second again before going on.
+  if (gCamAudioCount < kCamAudioChunk && M5Cardputer.Speaker.isPlaying(kCamAudioChannel) == 0) {
+    gCamAudioPlaying = false;
+    ++gCamAudioGaps;
+  }
+}
+
 // --- Leaving and opening views -------------------------------------------------------------
 void camEndLive(const char* why) {
   if (!gCamLive) return;
@@ -155,11 +228,15 @@ void camEndLive(const char* why) {
   gCamZoomView = cameras::View{};
   gCamWantStop = gCamLiveStarted;
   if (gCamLiveStarted && gCamLiveFrames) {
-    camQueueReport("live", why, 0);
+    char note[40];
+    snprintf(note, sizeof(note), "%s_sound%us_gaps%u", why, unsigned(gCamAudioSamples / kCamAudioRate), unsigned(gCamAudioGaps));
+    camQueueReport("live", note, 0);
     appendRuntimeLog("CAM", String("live ") + gCamLiveFrames + " frames " + String(gCamFps, 1) + " fps, " + why, true);
   }
   gCamLiveStarted = false;
-  if (gCamJob == CamJob::Frame || gCamJob == CamJob::LiveStart) camera_net::cancel();
+  camAudioFree();
+  gCamWantAudio = false;
+  if (gCamJob == CamJob::Frame || gCamJob == CamJob::LiveStart || gCamJob == CamJob::Audio) camera_net::cancel();
   // The last frame is now the camera's picture, here and on the bridge.
   if (gCamJpeg && gCamJpegOf >= 0 && gCamLiveFrames) {
     gCamList->cams[gCamJpegOf].pictureAge = 0;
@@ -200,6 +277,11 @@ void camOpenLive(int cam) {
   gCamZoomView = cameras::View{};
   gCamWantZoom = 0;
   gCamWantPan = cameras::Arrow::None;
+  camAudioFree();
+  gCamWantAudio = false;
+  gCamAudioHeard = gCamAudioNone = false;
+  gCamAudioEmpty = 0;
+  gCamAudioSamples = gCamAudioGaps = 0;
   camInvalidate();
 }
 void camRefresh(int cam) {
@@ -401,6 +483,7 @@ void camFinished() {
         gCamLiveFailures = 0;
         camTakeJpeg(cam, data, length);
         data = nullptr;
+        gCamWantAudio = camAudioOn();  // The sound since the last frame, before the next frame.
       } else if (e == camera_net::Error::Conflict) {
         gCamLiveStarted = false;
         camEndLive("ended on the Mac");
@@ -434,6 +517,17 @@ void camFinished() {
       camInvalidate();
       break;
     }
+    case CamJob::Audio:
+      if (!gCamLive || cam != gCamCur) break;
+      if (e == camera_net::Error::None && status == 200 && data && length >= 2) {
+        if (!gCamAudioMuted) camAudioTake(data, length);
+        gCamAudioEmpty = 0;
+        if (!gCamAudioHeard) { gCamAudioHeard = true; camInvalidate(); }
+      } else if (e == camera_net::Error::None && !gCamAudioHeard && ++gCamAudioEmpty >= kCamAudioGiveUp) {
+        gCamAudioNone = true;  // No microphone, or one the bridge can't play: stop asking.
+        camInvalidate();
+      }
+      break;
     case CamJob::AutoRefresh:
       gCamAutoCur = -1;
       if (e == camera_net::Error::None && data && length && cam >= 0 && cam < camCount()) {
@@ -530,6 +624,10 @@ void camNextJob() {
     gCamWantTurn = cameras::Arrow::None;
     if (camStartFor(CamJob::Turn, gCamCur, "turn", 64, 15000, extra)) return;
   }
+  if (gCamWantAudio && camAudioOn()) {
+    gCamWantAudio = false;
+    if (camStartFor(CamJob::Audio, gCamCur, "live/audio", 32000, 5000)) return;
+  }
   if (gCamLive && gCamLiveStarted) {
     if (camStartFor(CamJob::Frame, gCamCur, "live/frame", cameras::kMaxJpeg, 10000)) return;
   }
@@ -624,6 +722,7 @@ void stopCameras() {
     camera_net::cancel();
   }
   gCamLive = gCamLiveStarted = false;
+  camAudioFree();
   camera_net::close();
   camFreeThumbs();
   camFreeJpeg();
@@ -652,6 +751,7 @@ void serviceCameras() {
   }
   if (camera_net::finished()) camFinished();
   if (!camera_net::busy() && !camera_net::finished()) camNextJob();
+  camAudioFeed();
   const uint32_t now = millis();
   if (gCamLive) {
     // The screen stays on while watching, as a video player's does.
@@ -769,6 +869,13 @@ bool handleCamerasKey(char key, const Keyboard_Class::KeysState& keys) {
     return true;
   }
   if (lower == 's') { camSave(); return true; }
+  if (lower == 'm') {
+    gCamAudioMuted = !gCamAudioMuted;
+    if (gCamAudioMuted) camAudioStop();
+    camSay(gCamAudioMuted ? "Sound off" : gCamAudioNone ? "This camera has no sound" : "Sound on", camMuted());
+    camInvalidate();
+    return true;
+  }
   if (lower == 'l') { camEndLive("closed"); return true; }
   return true;
 }
@@ -878,6 +985,17 @@ void camDrawLiveBar(lgfx::LGFXBase& d) {
   d.print(right);
 }
 
+// Sound on or off, in a circle like the turn icon beside it.
+void camDrawSoundIcon(lgfx::LGFXBase& d, int16_t cx, int16_t cy, bool muted) {
+  const uint16_t ink = muted ? camMuted() : TFT_WHITE;
+  d.fillCircle(cx, cy, 9, TFT_BLACK);
+  d.drawCircle(cx, cy, 9, camMuted());
+  d.fillRect(cx - 5, cy - 2, 3, 5, ink);
+  d.fillTriangle(cx - 3, cy, cx + 1, cy - 5, cx + 1, cy + 5, ink);
+  if (muted) d.drawLine(cx - 6, cy + 6, cx + 6, cy - 6, camRed());
+  else { d.drawLine(cx + 3, cy - 2, cx + 3, cy + 2, ink); d.drawLine(cx + 5, cy - 4, cx + 5, cy + 4, ink); }
+}
+
 // Zoomed in, a little map in the bottom corner: the whole picture, and where the view is in it.
 void camDrawZoomMap(lgfx::LGFXBase& d) {
   constexpr int16_t kX = 4, kY = 135 - 4 - 22, kW = 39, kH = 22;
@@ -939,6 +1057,7 @@ void camDrawDirect() {
   if (live) {
     const cameras::Camera* c = camAt(gCamCur);
     if (c && c->ptz) camDrawTurnIcon(d, 226, 121, gCamTurnLitUntil && int32_t(millis() - gCamTurnLitUntil) < 0);
+    if (gCamAudioHeard || gCamAudioMuted) camDrawSoundIcon(d, c && c->ptz ? 203 : 226, 121, gCamAudioMuted);
     if (gCamZoomView.tenths > 10) camDrawZoomMap(d);
   }
   if (!live) camDrawWaking(d);

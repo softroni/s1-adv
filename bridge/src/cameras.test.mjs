@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { DIGITAL_ZOOM, JpegSplitter, PICTURE, RAW, THUMB, cameraId, deviceDecodes, dither332, jpegLayout, listLines, liveArgs, modeWord,
+import { AUDIO, DIGITAL_ZOOM, JpegSplitter, PICTURE, RAW, audioArgs, THUMB, cameraId, deviceDecodes, dither332, jpegLayout, listLines, liveArgs, modeWord,
   panRect, pictureArgs, rectMille, renderRect, scrub, shownName, thumbArgs, to332, viewRect, zoomLadder, zoomPlan } from "./cameras-media.mjs";
 import { createRequire } from "node:module";
 import { CameraError, CameraService, cameraLanRoute, handleCameraRoute, viewLine } from "./cameras.mjs";
@@ -90,13 +90,26 @@ test("the eufy account file is read as KEY=value lines", () => {
 });
 
 test("ffmpeg's arguments read stdin and write stdout only", () => {
-  for (const args of [pictureArgs(), thumbArgs(), liveArgs("h264"), liveArgs("h265")]) {
+  for (const args of [pictureArgs(), thumbArgs(), liveArgs("h264"), liveArgs("h265"), audioArgs("aac-lc"), audioArgs("g711a")]) {
     assert.equal(args[args.indexOf("-i") + 1], "pipe:0");
     assert.equal(args.at(-1), "pipe:1");
     assert.deepEqual(args.filter(a => /^pipe:/u.test(a)), ["pipe:0", "pipe:1"]);
     assert(!args.some(a => /^(?:https?|file):/u.test(a)));
   }
   assert.equal(liveArgs("av1"), null);
+  assert.equal(audioArgs("aac-eld"), null, "ELD has no stream format ffmpeg reads from a pipe");
+});
+
+test("a camera's AAC comes out as 8 kHz mono 16-bit PCM, as fast as it goes in", { skip: !FFMPEG }, () => {
+  const aac = spawnSync(FFMPEG, ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000:duration=1",
+    "-c:a", "aac", "-ac", "1", "-f", "adts", "pipe:1"], { maxBuffer: 4 << 20 });
+  assert.equal(aac.status, 0, String(aac.stderr));
+  const pcm = spawnSync(FFMPEG, audioArgs("aac-lc"), { input: aac.stdout, maxBuffer: 4 << 20 });
+  assert.equal(pcm.status, 0, String(pcm.stderr));
+  assert(Math.abs(pcm.stdout.length - AUDIO.bytesPerSecond) < AUDIO.bytesPerSecond * 0.1, `${pcm.stdout.length} bytes for a second`);
+  let peak = 0;
+  for (let i = 0; i + 1 < pcm.stdout.length; i += 2) peak = Math.max(peak, Math.abs(pcm.stdout.readInt16LE(i)));
+  assert(peak > 3000 && peak <= 32767 * 0.96, `peak ${peak}`);
 });
 
 test("the view: the screen's shape, inside the frame, a third of itself per arrow, stopping at the edges", () => {

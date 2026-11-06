@@ -196,7 +196,9 @@ export function audioArgs(codec) {
   const input = codec === "aac-lc" ? ["-probesize", "2048", "-analyzeduration", "0", "-f", "aac"]
     : codec === "g711a" ? ["-f", "alaw", "-ar", "16000", "-ac", "1"] : null;
   if (!input) return null;
-  return [...QUIET, ...input, "-i", "pipe:0", "-vn", "-ac", "1", "-ar", String(AUDIO.rate), "-f", "s16le", "-flush_packets", "1", "pipe:1"];
+  // Camera microphones are quiet: three times louder, with a limiter (5 ms ahead) for the loud parts.
+  return [...QUIET, ...input, "-i", "pipe:0", "-vn", "-af", "volume=3,alimiter=limit=0.95:attack=5:release=60",
+    "-ac", "1", "-ar", String(AUDIO.rate), "-f", "s16le", "-flush_packets", "1", "pipe:1"];
 }
 
 // A camera with a second, telephoto lens (the library's ptz().zoom) zooms 3x with it, and the

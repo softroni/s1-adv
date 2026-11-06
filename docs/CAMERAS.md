@@ -49,7 +49,17 @@ email or password later, the code comes back so you can sign in again.
 | Live | Fn + arrows | Turn the camera, however far it's zoomed |
 | Live | Enter | 45 seconds more |
 | Live | S | Save the frame to the SD card |
+| Live | M | Sound off and on |
 | Any | Esc | Back: live to the picture, the picture to the wall, the wall out of the app |
+
+## Sound
+
+Live view plays the camera's microphone through the Cardputer's speaker, at the volume set in
+Settings. The Mac turns the camera's sound into plain 8 kHz audio, made a little louder because
+camera microphones are quiet, and the Cardputer fetches it between video frames. It holds a quarter
+of a second before playing, so a late answer plays from what's held instead of breaking up; the
+sound is that much behind the picture. A speaker icon in the bottom corner shows it's on, and M turns
+it off and on (off stays off for the rest of the visit). A camera that sends no sound shows no icon.
 
 ## Zoom
 
