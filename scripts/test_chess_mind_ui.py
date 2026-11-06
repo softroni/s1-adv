@@ -40,7 +40,7 @@ struct Canvas{
 String fitCurrentFontToWidth(String s,int w){while(!s.empty()&&gCanvas.textWidth(s)>w)s.pop_back();return s;}
 void renderLauncherOverlay(){}void renderDebugOverlay(){}
 struct Keyboard_Class{struct KeysState{bool ctrl=false,alt=false,opt=false,enter=false;};};
-enum class UiMode{Home,Clock,Face,CMatrix,ChessMind,Ota,ChatFull};UiMode gUiMode=UiMode::Home,gScreensaverPreviousMode=UiMode::Home;
+enum class UiMode{Home,Clock,Face,CMatrix,ChessMind,Ota,ChatFull,TvRemote};UiMode gUiMode=UiMode::Home,gScreensaverPreviousMode=UiMode::Home;
 uint32_t tick=1000,gLastRenderMs=0;uint32_t millis(){return tick;}uint32_t esp_random(){return 42;}
 struct{void invalidate(){}}gUiFramePolicy;
 bool gScreensaverActive=false,gScreensaverDimmed=false,gScreenOffActive=false,gRealtimeScreenVisible=false;

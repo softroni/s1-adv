@@ -775,6 +775,7 @@ String gLastKeySignature, gDiag;
 std::string gLogged;
 bool gTyping = false;
 bool wifiSettingsTakesAllKeys() { return gTyping; }
+bool tvRemoteTakesText() { return false; }
 String keyboardSignatureFromState() { return String(gKeyboardState.word.c_str()); }
 void setKeyDiag(const String& text) { gDiag = text; }
 template <class... T> void logf(const char*, const char* text) { gLogged += text; }

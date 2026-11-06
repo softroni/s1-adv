@@ -193,6 +193,16 @@ previous or next episode. Esc from the library goes Home and it keeps playing, t
 screens the radio plays behind, and **Ctrl+M** pauses it or carries on. At home the sound comes
 straight over your Wi-Fi; away, save episodes first. [Podcasts](PODCASTS.md) has the details.
 
+## TV Remote
+
+TV Remote is under Tab, Tools, and `/tv` opens it. It works an Apple TV by infrared, or by
+Bluetooth once the Apple TV has paired with it as a keyboard. `;` `.` `,` `/` move, Enter is OK,
+Del is Back, Space plays or pauses, H is Home and Z is Sleep. `=` and `-` set the TV's volume, M
+mutes it and P turns it on or off, by infrared to a Samsung TV. Holding an arrow or the volume
+keeps it going. B turns Bluetooth on or off, and T types on the Apple TV, with Fn and the arrow
+keys to move and Esc back to the remote. [TV Remote](TV-REMOTE.md) has the details, including how
+to pair it.
+
 ## NFC Notes
 
 NFC Notes is under Tab, Tools, and `/nfc` opens it. It needs the M5Stack NFC unit

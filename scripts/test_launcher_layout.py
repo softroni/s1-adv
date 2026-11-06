@@ -264,7 +264,7 @@ int main() {
     const bool first = seen.insert(icon).second;
     assert(first || std::strcmp(group.items[i].label, "Pomodoro") == 0);
   }
-  assert(items == 47 && seen.size() == 46);
+  assert(items == 48 && seen.size() == 47);
   assert(kLauncherGroups[kFavoritesGroup].count == 0 && !std::strcmp(kLauncherGroups[kFavoritesGroup].title, "Favorites"));
 
   // Accents must stay apart once the canvas reduces them to 8 bits.

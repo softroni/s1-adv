@@ -42,6 +42,9 @@
   } else if ((radioTakesArrows() || podcastTakesArrows()) && (upDown || downDown || leftDown || rightDown)) {
     // Find and its results: the arrows move, so the letters can be typed or mean themselves.
     handleTypingKey(upDown ? char(1) : downDown ? char(2) : leftDown ? char(3) : char(4), keys);
+  } else if (gUiMode == UiMode::TvRemote && (upDown || downDown || leftDown || rightDown)) {
+    // A USB keyboard's arrows, as the remote's and the typing screen's own.
+    handleTypingKey(upDown ? char(1) : downDown ? char(2) : leftDown ? char(3) : char(4), keys);
   } else if ((gUiMode == UiMode::Minesweeper || gUiMode == UiMode::Snake || gUiMode == UiMode::Balloon || gUiMode == UiMode::BallCatch || gUiMode == UiMode::Radio || gUiMode == UiMode::VlcRemote) && (upDown || downDown || leftDown || rightDown)) {
     handleTypingKey(upDown ? 'w' : downDown ? 's' : leftDown ? 'a' : 'd', keys);
   } else if ((gUiMode == UiMode::Chess || gUiMode == UiMode::Checkers) && (upDown || downDown || leftDown || rightDown)) {

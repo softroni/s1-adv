@@ -1466,6 +1466,11 @@ bool handleLocalCommand(const String& input) {
     return true;
   }
 
+  if (cmd == "/tv" || cmd == "/tvremote" || cmd == "/appletv") {
+    setUiMode(UiMode::TvRemote);
+    return true;
+  }
+
   if (cmd == "/syncassets") {
     fetchRemoteAssetManifest();
     syncAssetsFromManifest();

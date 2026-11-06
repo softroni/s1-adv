@@ -34,7 +34,8 @@ bool appAllowsBackgroundNetwork() {
     case UiMode::RfidLab:
     case UiMode::NfcNotes:
     case UiMode::WifiSettings: // A join would pull the link out from under any request.
-    case UiMode::IrRemote: return false;
+    case UiMode::IrRemote:
+    case UiMode::TvRemote: return false;  // Its Bluetooth stack takes the heap a check would need.
     case UiMode::LabDevices:
     case UiMode::LabRules:
     case UiMode::LabSequences: return labAllowsNetwork();

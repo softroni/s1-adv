@@ -40,6 +40,8 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
     handlePodcastKey(key, keys);
     return;
   }
+  // And for typing on the Apple TV, which can be a password, so ahead of the key diagnostics too.
+  if (tvRemoteTakesText() && !keys.tab && handleTvRemoteKey(key, keys)) return;
   if (gUiMode==UiMode::BrainFlow &&
       (keys.tab || (keys.ctrl && (lowerKey=='l'||lowerKey=='r'||lowerKey=='v')))) pauseBrainFlow();
   setKeyDiag(String("key=") + String(static_cast<int>(key)));
@@ -60,6 +62,8 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
     return;
   }
   if (gUiMode == UiMode::Mesh && !gLauncherVisible && !keys.tab && handleMeshKey(key,keys)) return;
+  // Ahead of the shortcuts, because a remote uses the plain keys; Ctrl ones go on to them.
+  if (gUiMode == UiMode::TvRemote && !gLauncherVisible && !keys.tab && handleTvRemoteKey(key, keys)) return;
   if (handleFocusShortcut(lowerKey,keys)) return;
   if (handleUnreadAssistantKey(key,keys)) return;
   if (handleHomeLinkRetryKey(key,keys)) return;

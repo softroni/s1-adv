@@ -219,6 +219,13 @@ bool handleScreensaverWake() {
   if (!wasQuietDisplay) {
     return false;
   }
+  // A remote's screen only dims or goes off, and its key does what it says, as on a real one.
+  if (!gScreensaverActive && gUiMode == UiMode::TvRemote && gScreensaverPreviousMode == UiMode::TvRemote) {
+    gScreensaverDimmed = false;
+    gScreenOffActive = false;
+    applyDisplayBrightness();
+    return false;
+  }
   UiMode target = gScreensaverActive
                       ? (gDeviceSettings.screensaverClockOnWake ? UiMode::Clock : gScreensaverPreviousMode)
                       : gScreensaverPreviousMode;
@@ -275,7 +282,8 @@ void serviceIdleScreensaver() {
   // A player keeps its screen, or the radio the one it plays behind: the saver would take it
   // and stop the music. So the screen dims when the saver would start, and goes off when it would
   // have, and a key brings it back as it was.
-  if (!gScreensaverActive && (radioBusy() || radioOn() || podcastOn())) {
+  // TV Remote too, whose Bluetooth would stop with it, and whose keys should work in the dark.
+  if (!gScreensaverActive && (radioBusy() || radioOn() || podcastOn() || gUiMode == UiMode::TvRemote)) {
     const uint32_t offAfterMs = (gDeviceSettings.screensaverEnabled ? saverTimeoutMs : 0) + offTimeoutMs;
     if (gDeviceSettings.screensaverEnabled && !gScreensaverDimmed && !gScreenOffActive && idleMs >= saverTimeoutMs) {
       gScreensaverPreviousMode = gUiMode;

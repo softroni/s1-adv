@@ -60,7 +60,7 @@ int main() {
     const List back = load(text.c_str());
     assert(back.count == 1 && back.refs[0].group == g && back.refs[0].item == i);
   }
-  assert(apps == 47 && kLauncherGroups[kFavoritesGroup].count == 0);
+  assert(apps == 48 && kLauncherGroups[kFavoritesGroup].count == 0);
 
   // New ones go at the end, so the others keep their numbers; nine at most, and no repeats.
   List l;

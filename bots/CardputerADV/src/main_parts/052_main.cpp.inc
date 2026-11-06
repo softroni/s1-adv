@@ -83,6 +83,7 @@ const uint8_t* launcherItemIcon(const LauncherSubItem& item) {
     case UiMode::NfcNotes: return kNfc;
     case UiMode::RfidLab: return kCard;
     case UiMode::IrRemote: return kRemote;
+    case UiMode::TvRemote: return kTv;
     case UiMode::SmartLamp: return kBulb;
     case UiMode::Sonar: return kSonar;
     case UiMode::Mesh: return kMesh;
