@@ -67,6 +67,11 @@ test("the device's list is lines, with ages in seconds and nothing it can't show
   assert.equal(text, "state\tready\nbase\tAway\ncam\t0123abcd\tp\t84\t720\t60\tFront door\ncam\t89abcdef\to\t-\t-\t-\tCamera\n");
   assert.equal(listLines({ state: "code", detail: "eufy sent a code\tby email" }), "state\tcode\teufy sent a code by email\n");
   assert.equal(modeWord("geo"), "Geofence");
+  assert.equal(modeWord(1), "Home");
+  assert.equal(modeWord(63), "Disarmed");
+  assert.equal(modeWord(0), "Away");
+  assert.equal(modeWord(99), "");
+  assert.equal(listLines({ state: "ready", base: { mode: 0 } }), "state\tready\nbase\tAway\n");
   assert.equal(modeWord("?"), "");
   assert.equal(shownName("a".repeat(40)).length, 24);
 });

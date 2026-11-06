@@ -12,7 +12,7 @@ import { mkdir, readFile, rename, stat, writeFile, unlink } from "node:fs/promis
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-  CAMERA_ID, JpegSplitter, PICTURE, THUMB, cameraId, deviceDecodes, dither332, liveArgs, pictureArgs, scrub, shownName, thumbArgs
+  CAMERA_ID, JpegSplitter, PICTURE, THUMB, cameraId, deviceDecodes, dither332, liveArgs, modeWord, pictureArgs, scrub, shownName, thumbArgs
 } from "./cameras-media.mjs";
 
 const DIR = process.env.CAMERAS_DIR || "";
@@ -204,7 +204,7 @@ async function loadDevices() {
   for (const station of stations.values()) {
     let caps = "";
     try { caps = (station.capabilities || []).join(","); } catch {}
-    log(`base caps=${caps || "-"} mode=${property(station, "armingMode") ?? "-"}`);
+    log(`base caps=${caps || "-"} mode=${modeWord(modeOf(station)) || JSON.stringify(modeOf(station) ?? null).slice(0, 40)}`);
   }
 }
 function noteMotion(serial) {
@@ -212,8 +212,20 @@ function noteMotion(serial) {
   saved.motion[cameraId(serial)] = Date.now();
   saveSoon();
 }
+// getProperty answers { name, paramType, value, ts }; the typed getters answer the value itself.
 function property(dev, name) {
-  try { return dev?.getProperty?.(name); } catch { return undefined; }
+  try {
+    const got = dev?.getProperty?.(name);
+    return got && typeof got === "object" && "value" in got ? got.value : got;
+  } catch { return undefined; }
+}
+function batteryOf(dev) {
+  try { const level = Number(dev?.battery?.()?.level); if (Number.isFinite(level)) return level; } catch {}
+  return Number(property(dev, "battery"));
+}
+function modeOf(station) {
+  try { const mode = station?.arming?.()?.mode; if (mode !== undefined && mode !== null) return mode; } catch {}
+  return property(station, "armingMode");
 }
 async function pictureAt(id) {
   try { return (await stat(path.join(PICTURES, `${id}.jpg`))).mtimeMs; } catch { return 0; }
@@ -222,11 +234,11 @@ async function list() {
   const out = { state: status.state, detail: status.detail, cameras: [] };
   if (status.state !== "ready") return out;
   for (const station of stations.values()) {
-    const mode = property(station, "armingMode");
-    if (mode) { out.base = { mode }; break; }
+    const mode = modeOf(station);
+    if (mode !== undefined && mode !== null) { out.base = { mode }; break; }
   }
   for (const [id, cam] of cameras) {
-    const battery = Number(property(cam.dev, "battery"));
+    const battery = batteryOf(cam.dev);
     out.cameras.push({
       id, name: shownName(cam.name), ptz: Boolean(cam.dev.has?.("ptz") && cam.dev.ptz?.()?.rotate),
       off: cam.dev.camera?.()?.enabled === false,

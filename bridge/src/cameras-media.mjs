@@ -136,11 +136,14 @@ export function liveArgs(codec, quality = 7) {
     "-f", format, "-i", "pipe:0", "-an", "-vf", FILL, ...BASELINE, String(quality), "-f", "image2pipe", "pipe:1"];
 }
 
-// The HomeBase's mode, as one word the device shows.
+// The HomeBase's mode, as one word the device shows. The library's typed getter answers the wire
+// number; its names are taken too.
 export function modeWord(mode) {
-  const known = { away: "Away", home: "Home", disarmed: "Disarmed", schedule: "Schedule", geo: "Geofence", off: "Off", custom: "Custom" };
-  const word = known[String(mode || "").toLowerCase()];
-  return word || "";
+  const byNumber = { 0: "away", 1: "home", 2: "schedule", 3: "custom1", 4: "custom2", 5: "custom3", 6: "off", 47: "geo", 63: "disarmed" };
+  const known = { away: "Away", home: "Home", disarmed: "Disarmed", schedule: "Schedule", geo: "Geofence", off: "Off",
+    custom: "Custom", custom1: "Custom 1", custom2: "Custom 2", custom3: "Custom 3" };
+  const key = typeof mode === "number" ? byNumber[mode] : String(mode ?? "").toLowerCase();
+  return known[key] || "";
 }
 
 // A name the device can show: printable, one line, short, with no tab to break its lines.
