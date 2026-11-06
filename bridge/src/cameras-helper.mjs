@@ -555,7 +555,9 @@ async function recordings(day, how = "") {
   if (!session?.readDatabase) throw new HelperError("no_archive", 409);
   const next = new Date(Date.UTC(+day.slice(0, 4), +day.slice(4, 6) - 1, +day.slice(6, 8) + 1));
   const endDate = `${next.getUTCFullYear()}${String(next.getUTCMonth() + 1).padStart(2, "0")}${String(next.getUTCDate()).padStart(2, "0")}`;
-  const rowsOf = (reply) => reply.flatMap((group) => group?.table_name === "history_record_info" && Array.isArray(group.payload) ? group.payload : []);
+  // The library's query answers rows grouped under their table; the by-date one answers them flat.
+  const rowsOf = (reply) => reply.flatMap((item) => item?.table_name === "history_record_info" && Array.isArray(item.payload) ? item.payload
+    : item && typeof item === "object" && item.start_time !== undefined ? [item] : []);
   const byDate = (channel) => {
     const original = session.queryDatabase;
     if (channel !== undefined) session.queryDatabase = (table, opts) => original.call(session, table, { ...opts, channel });
