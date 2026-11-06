@@ -14,8 +14,12 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import {
   AUDIO, CAMERA_ID, DIGITAL_ZOOM, PICTURE, RAW, THUMB, audioArgs, cameraId, deviceDecodes, dither332, liveArgs, modeWord, panRect, pictureArgs, rectMille,
-  renderRect, scrub, shownName, thumbArgs, viewRect, zoomPlan
+  renderRect, scrub, shownName, stillArgs, thumbArgs, viewRect, zoomPlan
 } from "./cameras-media.mjs";
+import {
+  addDays, clipFromRow, clipStateLine, clipsLines, monthLines, monthRange, parseAudioFrame, parseVideoFrame, today, validDay, validMonth,
+  videoCodecOf
+} from "./cameras-archive.mjs";
 
 const DIR = process.env.CAMERAS_DIR || "";
 const ENV_FILE = process.env.CAMERAS_ENV || "";
@@ -210,7 +214,7 @@ async function loadDevices() {
     serials.add(record.sn);
     let dev;
     try { dev = await eufy.getDevice(record.sn); } catch { continue; }
-    if (dev.camera?.()) cameras.set(cameraId(record.sn), { sn: record.sn, name: record.name || record.model, dev, station: record.stationSn });
+    if (dev.camera?.()) cameras.set(cameraId(record.sn), { sn: record.sn, name: record.name || record.model, dev, station: record.stationSn, channel: record.channel });
     else if (record.deviceClass === "homebase" || dev.has?.("arming")) { stations.set(record.sn, dev); stationRecords.set(record.sn, record); }
   }
   log(`${cameras.size} camera(s), ${stations.size} base(s)`);
@@ -340,6 +344,11 @@ async function turn(id, direction) {
 }
 
 // --- Live ----------------------------------------------------------------------------------
+function newView(id, cam) {
+  return { id, raw: null, next: Buffer.alloc(RAW.bytes), filled: 0, shot: null, seq: 0, rgba: null,
+    optical: 1, digital: 1, tenths: 10, rect: viewRect(1), waiters: [], startedAt: Date.now(), askedAt: Date.now(),
+    extendUntil: Date.now() + LIVE_EXTEND_MS, ff: null, codec: "", frames: 0, ended: false, stream: null, cam, clip: null };
+}
 async function liveStart(id) {
   const cam = cameraFor(id);
   if (live?.id === id && !live.ended) { live.askedAt = Date.now(); return; }
@@ -349,9 +358,7 @@ async function liveStart(id) {
   // raw is the newest decoded frame, filling into next; shot is the screen's picture of it at the
   // zoom and place asked for, and seq counts them. optical is the lens the camera was asked for,
   // digital the crop on top of it, rect where that crop is.
-  const view = { id, raw: null, next: Buffer.alloc(RAW.bytes), filled: 0, shot: null, seq: 0, rgba: null,
-    optical: 1, digital: 1, tenths: 10, rect: viewRect(1), waiters: [], startedAt: Date.now(), askedAt: Date.now(),
-    extendUntil: Date.now() + LIVE_EXTEND_MS, ff: null, codec: "", frames: 0, ended: false, stream: null, cam };
+  const view = newView(id, cam);
   live = view;
   log(`live ${id} starting`);
   let stream;
@@ -391,6 +398,11 @@ function onRaw(view, chunk) {
       [view.raw, view.next] = [view.next, view.raw || Buffer.alloc(RAW.bytes)];
       view.filled = 0;
       view.frames += 1;
+      // A clip passes over the frames between the keyframe it started at and the place asked for.
+      if (view.clip) {
+        view.clip.shown += 1;
+        if (view.clip.skip > 0) { view.clip.skip -= 1; continue; }
+      }
       render(view);
     }
   }
@@ -454,6 +466,13 @@ async function liveEnded(view, why) {
   if (view.ended) return;
   view.ended = true;
   for (const wake of view.waiters.splice(0)) wake();
+  if (view.clip) {
+    clearInterval(view.clip.timer);
+    try { view.ff?.kill("SIGKILL"); } catch {}
+    log(`clip ${view.id} closed (${why})`);
+    if (live === view) live = null;
+    return;
+  }
   // The lens back to wide before the camera's session goes, so it isn't left zoomed for the next.
   if (view.optical !== 1) {
     try { await Promise.race([view.cam.dev.ptz?.()?.zoom?.(1), new Promise(resolve => setTimeout(resolve, 3000))]); } catch {}
@@ -489,7 +508,7 @@ async function liveFrame(id, after) {
     });
   }
   view.askedAt = Date.now();
-  if (view.seq > after && view.shot) return { jpeg: view.shot, seq: view.seq };
+  if (view.seq > after && view.shot) return { jpeg: view.shot, seq: view.seq, clip: view.clip ? clipState(view) : null };
   if (view.ended) throw new HelperError("not_live", 409);
   return null;
 }
@@ -505,7 +524,7 @@ async function liveZoom(id, tenths) {
   if (!live || live.id !== id) throw new HelperError("not_live", 409);
   const view = live;
   view.askedAt = Date.now();
-  let plan = zoomPlan(tenths, hasLens(view.cam));
+  let plan = zoomPlan(tenths, !view.clip && hasLens(view.cam));
   if (plan.optical !== view.optical) {
     try {
       await view.cam.dev.ptz().zoom(plan.optical);
@@ -534,54 +553,297 @@ async function livePan(id, direction, turnOnly) {
     const step = panRect(view.rect, direction, view.digital);
     if (step.moved) { view.rect = step.rect; render(view); return viewState(view, "moved"); }
   }
+  if (view.clip) return viewState(view, "edge");  // A recording never turns the camera.
   const ptz = view.cam.dev.ptz?.();
   if (!ptz?.rotate) return viewState(view, "edge");
   await ptz.rotate(direction);
   return viewState(view, "turned");
 }
-// The HomeBase's recordings of one day (yyyyMMdd), from its own table. Reading it wakes no
-// camera: the base is on mains power. The library's query (QUERY_LOCAL, 10017) is the HomeBase 2's;
-// a HomeBase 3 refuses it with -6006, so the by-date query (10006) the older eufy-security-client
-// sent to a HomeBase 3 is tried too, on the station channel and on channel 0 as that library did.
-const DB_QUERY_BY_DATE = 10006;
-async function recordings(day, how = "") {
+// --- Recordings ----------------------------------------------------------------------------
+// The HomeBase's own table of what it recorded, by day, and the recordings themselves, which it
+// sends faster than real time. Neither wakes a camera: the base is on mains power. The library's
+// query (QUERY_LOCAL, 10017) is the HomeBase 2's, and a HomeBase 3 refuses it with -6006; the
+// by-date (10006) and count-by-date (10008) queries the older eufy-security-client sent to a
+// HomeBase 3 work, on channel 0 as it sent them.
+const DB_QUERY_BY_DATE = 10006, DB_COUNT_BY_DATE = 10008, DB_QUERY_LOCAL = 10017;
+const CMD_DOWNLOAD_VIDEO = 1024, CMD_VIDEO_FRAME = 1300, CMD_AUDIO_FRAME = 1301, CMD_DOWNLOAD_FINISH = 1304, RECORDING_DATA = 3;
+const CLIP_CACHE_BYTES = 200 * 1024 * 1024;   // Clips kept on the Mac, played or about to be.
+const dayLists = new Map();   // day -> Map(id -> clip), as listed
+const dayCounts = new Map();  // day -> how many recordings
+const clipStore = new Map();  // "day:id" -> { clip, frames, audio, pcm, done, failed, thumb, codec, bytes, usedAt, waiters }
+let downloads = Promise.resolve();
+
+async function archive() {
   if (status.state !== "ready") throw new HelperError("not_ready", 409);
-  if (!/^\d{8}$/u.test(String(day))) throw new HelperError("bad_day", 400);
   const [stationSn, record] = [...stationRecords.entries()][0] || [];
   if (!stationSn) throw new HelperError("no_base", 404);
-  const accountId = record.raw?.member?.admin_user_id;
   await eufy.connectStation(stationSn);
   const session = eufy.getP2pSessions?.().get(stationSn);
   if (!session?.readDatabase) throw new HelperError("no_archive", 409);
-  const next = new Date(Date.UTC(+day.slice(0, 4), +day.slice(4, 6) - 1, +day.slice(6, 8) + 1));
-  const endDate = `${next.getUTCFullYear()}${String(next.getUTCMonth() + 1).padStart(2, "0")}${String(next.getUTCDate()).padStart(2, "0")}`;
-  // The library's query answers rows grouped under their table; the by-date one answers them flat.
-  const rowsOf = (reply) => reply.flatMap((item) => item?.table_name === "history_record_info" && Array.isArray(item.payload) ? item.payload
-    : item && typeof item === "object" && item.start_time !== undefined ? [item] : []);
-  const byDate = (channel) => {
-    const original = session.queryDatabase;
-    if (channel !== undefined) session.queryDatabase = (table, opts) => original.call(session, table, { ...opts, channel });
-    return session.readDatabase("history_record_info", { accountId, innerCmd: DB_QUERY_BY_DATE, timeoutMs: 15000, query: {
-      count: 100, detection_type: 0, device_info: [...cameras.values()].map((cam) => ({ device_sn: cam.sn })), end_date: endDate,
+  return { session, accountId: record.raw?.member?.admin_user_id };
+}
+// A table read on channel 0: the library's readDatabase sends on the station channel, so its
+// queryDatabase is wrapped for the one call.
+async function archiveRead(innerCmd, query) {
+  const { session, accountId } = await archive();
+  const original = session.queryDatabase;
+  session.queryDatabase = (table, opts) => original.call(session, table, { ...opts, channel: 0 });
+  try {
+    return await session.readDatabase("history_record_info", { accountId, innerCmd, timeoutMs: 15000, query });
+  } finally {
+    session.queryDatabase = original;
+  }
+}
+async function listDay(day) {
+  if (!validDay(day)) throw new HelperError("bad_day", 400);
+  let rows;
+  try {
+    rows = await archiveRead(DB_QUERY_BY_DATE, {
+      count: 1000, detection_type: 0, device_info: [...cameras.values()].map((cam) => ({ device_sn: cam.sn })), end_date: addDays(day, 1),
       event_type: 0, flag: 0, res_unzip: 1, start_date: day, start_time: `${day}000000`, storage_cloud: -1, ai_type: 0,
-    } }).finally(() => { session.queryDatabase = original; });
-  };
-  const tries = how === "local" ? [["local", () => session.queryRecordPage({ accountId, startDate: day, endDate, count: 20 })]]
-    : how === "bydate0" ? [["bydate0", () => byDate(0)]]
-    : how === "bydate255" ? [["bydate255", () => byDate(undefined)]]
-    : [["bydate255", () => byDate(undefined)], ["bydate0", () => byDate(0)], ["local", () => session.queryRecordPage({ accountId, startDate: day, endDate, count: 20 })]];
-  const errors = [];
-  for (const [name, attempt] of tries) {
-    try {
-      const rows = rowsOf(await attempt());
-      log(`recordings ${day} by ${name}: ${rows.length} row(s)`);
-      return { how: name, rows };
-    } catch (error) {
-      errors.push(`${name}: ${scrub(error?.message || error, [...serials]).slice(0, 80)}`);
+    });
+  } catch (error) {
+    // A HomeBase 2 takes the library's own query instead.
+    const { session, accountId } = await archive();
+    rows = (await session.queryRecordPage({ accountId, startDate: day, endDate: addDays(day, 1), count: 100 }))
+      .flatMap((group) => Array.isArray(group?.payload) ? group.payload : []);
+  }
+  const flat = rows.flatMap((item) => item?.table_name === "history_record_info" && Array.isArray(item.payload) ? item.payload : [item]);
+  const clips = new Map();
+  for (const row of flat) {
+    const clip = clipFromRow(row);
+    if (clip && clip.day === day) { serials.add(clip.sn); clips.set(clip.id, clip); }
+  }
+  dayLists.set(day, clips);
+  dayCounts.set(day, clips.size);
+  log(`clips ${day}: ${clips.size}`);
+  return clips;
+}
+async function monthCounts(ym) {
+  if (!validMonth(ym)) throw new HelperError("bad_month", 400);
+  const { start, end } = monthRange(ym);
+  try {
+    const rows = await archiveRead(DB_COUNT_BY_DATE, { start_date: start, end_date: end });
+    for (const row of rows) {
+      const day = String(row?.days || row?.day || "").replace(/\D/gu, "").slice(0, 8);
+      if (validDay(day)) dayCounts.set(day, Number(row.count) || 0);
+    }
+    log(`month ${ym}: ${rows.length} day(s) with clips`);
+  } catch (error) {
+    warn(`month ${ym}: ${scrub(error?.message || error, [...serials]).slice(0, 80)}`);
+  }
+  return dayCounts;
+}
+
+function clipEntry(day, id) {
+  const clip = dayLists.get(day)?.get(Number(id));
+  if (!clip) throw new HelperError("no_clip", 404);
+  const key = `${day}:${clip.id}`;
+  let entry = clipStore.get(key);
+  if (!entry) {
+    entry = { key, clip, frames: [], audio: [], pcm: null, done: false, failed: "", thumb: null, codec: "", bytes: 0, usedAt: Date.now(),
+      waiters: [], started: false };
+    clipStore.set(key, entry);
+  }
+  entry.usedAt = Date.now();
+  return entry;
+}
+function wakeClip(entry) { for (const wake of entry.waiters.splice(0)) wake(); }
+function waitClip(entry, ms) {
+  return new Promise((resolve) => { const timer = setTimeout(resolve, ms); entry.waiters.push(() => { clearTimeout(timer); resolve(); }); });
+}
+// One download at a time per station, as the station sends one at a time.
+function fetchClip(entry) {
+  if (entry.started) return;
+  entry.started = true;
+  downloads = downloads.then(() => downloadClip(entry)).catch((error) => {
+    entry.failed = String(error?.code || error?.message || "failed");
+    entry.done = true;
+    wakeClip(entry);
+  });
+}
+async function downloadClip(entry) {
+  const { session, accountId } = await archive();
+  const channel = cameras.get(entry.clip.camId)?.channel ?? 0;
+  const began = Date.now();
+  await new Promise((resolve) => {
+    let last = Date.now(), got = false, over = false;
+    const finish = (why) => {
+      if (over) return;
+      over = true;
+      clearInterval(timer);
+      session.removeListener("data", onData);
+      entry.done = true;
+      if (!entry.frames.length) entry.failed = why || "nothing came";
+      wakeClip(entry);
+      resolve();
+    };
+    const onData = (frame) => {
+      if (frame.commandId === CMD_DOWNLOAD_FINISH && (frame.channel === channel || frame.channel === 0)) { finish(""); return; }
+      if (frame.dataType !== RECORDING_DATA || frame.channel !== channel) return;
+      if (frame.commandId === CMD_VIDEO_FRAME) {
+        const video = parseVideoFrame(frame.raw);
+        if (!video) return;
+        if (!entry.frames.length && !video.key) return;  // From a keyframe on.
+        if (!entry.codec) entry.codec = videoCodecOf(video.data);
+        entry.frames.push({ key: video.key, ts: video.ts, data: Buffer.from(video.data) });
+        entry.bytes += video.data.length;
+      } else if (frame.commandId === CMD_AUDIO_FRAME) {
+        const adts = parseAudioFrame(frame.raw);
+        if (adts) { entry.audio.push(Buffer.from(adts)); entry.bytes += adts.length; }
+      } else return;
+      got = true;
+      last = Date.now();
+      wakeClip(entry);
+    };
+    const timer = setInterval(() => {
+      const now = Date.now();
+      if (!got && now - began > 20000) finish("the HomeBase sent nothing");
+      else if (got && now - last > 10000) finish("");
+      else if (now - began > 240000) finish("");
+    }, 250);
+    session.on("data", onData);
+    try { session.sendStringPairCommand(CMD_DOWNLOAD_VIDEO, entry.clip.path, accountId, channel); } catch (error) { finish(String(error?.message || error)); }
+  });
+  log(`clip ${entry.clip.camId} ${entry.frames.length} frames, ${Math.round(entry.bytes / 1024)} KB in ${Date.now() - began} ms` +
+    (entry.failed ? ` (${entry.failed})` : "") + (entry.audio.length ? ", with sound" : ""));
+  if (entry.frames.length) {
+    void clipThumb(entry);
+    if (entry.audio.length) {
+      try { entry.pcm = await ffmpeg(audioArgs("aac-lc"), Buffer.concat(entry.audio), 64 * 1024 * 1024, 60000); } catch {}
+      wakeClip(entry);
     }
   }
-  log(`recordings ${day}: ${errors.join("; ")}`);
-  throw new HelperError("archive_refused", 502);
+  trimClips();
+}
+async function clipThumb(entry) {
+  if (entry.thumb || !entry.codec) return;
+  try {
+    const rgb = await ffmpeg(stillArgs(entry.codec), entry.frames[0].data, THUMB.bytes * 3 + 16);
+    if (rgb.length === THUMB.bytes * 3) entry.thumb = Buffer.from(dither332(rgb, THUMB.width, THUMB.height));
+  } catch (error) { warn(`clip picture: ${error.code || error.message}`); }
+}
+function trimClips() {
+  let total = [...clipStore.values()].reduce((sum, e) => sum + e.bytes, 0);
+  for (const entry of [...clipStore.values()].sort((a, b) => a.usedAt - b.usedAt)) {
+    if (total <= CLIP_CACHE_BYTES) break;
+    if (live?.clip?.entry === entry || !entry.done) continue;
+    clipStore.delete(entry.key);
+    total -= entry.bytes;
+  }
+}
+
+// --- Playing a clip --------------------------------------------------------------------------
+// The live view's machinery, its source a clip: frames go to the decoder at their own pace, from a
+// keyframe, and the sound with them. Pausing stops feeding; seeking starts a new decoder at the
+// keyframe before the place and passes over what comes before it without drawing it.
+async function clipStart(day, id) {
+  const entry = clipEntry(day, id);
+  fetchClip(entry);
+  const began = Date.now();
+  while (!entry.frames.length && !entry.done && Date.now() - began < 60000) await waitClip(entry, 1000);
+  if (!entry.frames.length) throw new HelperError("clip_failed", 502);
+  if (!entry.codec || !liveArgs(entry.codec)) throw new HelperError("clip_codec", 502);
+  if (live) await liveStop("a clip");
+  const cam = cameras.get(entry.clip.camId) || { dev: null, sn: entry.clip.sn };
+  const view = newView(entry.clip.camId, cam);
+  view.extendUntil = Infinity;
+  view.clip = { entry, feed: 0, base: 0, shown: 0, skip: 0, playFrom: 0, wallStart: Date.now(), mediaStart: entry.frames[0].ts,
+    playing: true, ended: false, closing: false, audioPos: 0, timer: null };
+  live = view;
+  log(`clip ${entry.clip.camId} playing`);
+  clipDecoder(view);
+  view.clip.timer = setInterval(() => clipTick(view), 10);
+  return { cam: entry.clip.camId, dur: clipDuration(entry) };
+}
+function clipDuration(entry) {
+  const f = entry.frames;
+  return entry.done && f.length > 1 ? f[f.length - 1].ts - f[0].ts + Math.round((f[f.length - 1].ts - f[0].ts) / (f.length - 1)) : entry.clip.seconds * 1000;
+}
+function clipDecoder(view) {
+  const c = view.clip;
+  const old = view.ff;
+  if (old) { old.removeAllListeners("close"); try { old.stdin.end(); } catch {} setTimeout(() => { try { old.kill("SIGKILL"); } catch {} }, 1000).unref(); }
+  const child = spawn(FFMPEG, liveArgs(c.entry.codec), { stdio: ["pipe", "pipe", "pipe"] });
+  view.filled = 0;
+  child.stdout.on("data", (chunk) => onRaw(view, chunk));
+  child.stderr.on("data", () => {});
+  child.stdin.on("error", () => {});
+  child.on("close", () => {
+    if (view.ff !== child) return;
+    if (c.closing) { c.ended = true; c.playing = false; for (const wake of view.waiters.splice(0)) wake(); }
+    else if (!view.ended) void liveEnded(view, "decoder stopped");
+  });
+  view.ff = child;
+}
+function clipTick(view) {
+  const c = view.clip;
+  if (!c || view.ended) return;
+  const f = c.entry.frames, now = Date.now();
+  while (c.feed < f.length && !c.closing) {
+    // Up to the place asked for at once; after it, at the frames' own times, while playing.
+    if (c.feed > c.playFrom) {
+      if (!c.playing) break;
+      if (c.wallStart + (f[c.feed].ts - c.mediaStart) > now) break;
+    }
+    if (view.ff.stdin.writableLength > 4 * 1024 * 1024) break;
+    view.ff.stdin.write(f[c.feed].data);
+    c.feed += 1;
+  }
+  if (c.playing && c.feed >= f.length && c.entry.done && !c.closing) { c.closing = true; try { view.ff.stdin.end(); } catch {} }
+  // The sound up to where the picture is.
+  const pcm = c.entry.pcm;
+  if (pcm && c.playing && f.length) {
+    const media = Math.min(now - c.wallStart + c.mediaStart, f[f.length - 1].ts) - f[0].ts;
+    const want = Math.min(pcm.length, Math.floor((media * AUDIO.bytesPerSecond) / 1000)) & ~1;
+    if (want > c.audioPos) {
+      view.pcm ||= [];
+      view.pcmBytes ||= 0;
+      const piece = pcm.subarray(c.audioPos, want);
+      view.pcm.push(piece);
+      view.pcmBytes += piece.length;
+      while (view.pcmBytes > AUDIO.bytesPerSecond && view.pcm.length > 1) view.pcmBytes -= view.pcm.shift().length;
+      view.audioCodec ||= "aac-lc";
+      c.audioPos = want;
+    }
+  }
+}
+function clipState(view) {
+  const c = view.clip, f = c.entry.frames;
+  const at = c.shown ? Math.min(f.length - 1, c.base + c.shown - 1) : c.playFrom;
+  const pos = c.ended ? clipDuration(c.entry) : Math.max(0, (f[at]?.ts ?? f[0].ts) - f[0].ts);
+  return { pos, dur: clipDuration(c.entry), playing: c.playing, ended: c.ended };
+}
+function clipView(id) {
+  if (!live || live.id !== id || !live.clip) throw new HelperError("not_live", 409);
+  live.askedAt = Date.now();
+  return live;
+}
+function clipPause(id, pause) {
+  const view = clipView(id), c = view.clip;
+  if (pause) { c.playing = false; return clipState(view); }
+  if (c.ended) return clipSeek(id, 0, true);
+  const f = c.entry.frames;
+  c.mediaStart = f[Math.min(c.feed, f.length - 1)].ts;
+  c.wallStart = Date.now();
+  c.playing = true;
+  return clipState(view);
+}
+function clipSeek(id, ms, play) {
+  const view = clipView(id), c = view.clip, f = c.entry.frames;
+  const t0 = f[0].ts;
+  let target = f.findIndex((frame) => frame.ts - t0 >= ms);
+  if (target < 0) target = f.length - 1;
+  let key = target;
+  while (key > 0 && !f[key].key) key -= 1;
+  c.base = key; c.shown = 0; c.skip = target - key; c.feed = key; c.playFrom = target;
+  c.mediaStart = f[target].ts; c.wallStart = Date.now();
+  c.ended = false; c.closing = false;
+  if (play !== undefined) c.playing = play;
+  c.audioPos = Math.floor(((f[target].ts - t0) * AUDIO.bytesPerSecond) / 1000) & ~1;
+  view.pcm = []; view.pcmBytes = 0;
+  clipDecoder(view);
+  return clipState(view);
 }
 function liveExtend(id) {
   if (!live || live.id !== id) throw new HelperError("not_live", 409);
@@ -595,7 +857,7 @@ function startTimers() {
     if (!live || live.ended) return;
     const now = Date.now();
     if (now - live.askedAt > LIVE_IDLE_MS) void liveEnded(live, "nobody watching");
-    else if (now - live.startedAt > LIVE_MAX_MS) void liveEnded(live, "too long");
+    else if (!live.clip && now - live.startedAt > LIVE_MAX_MS) void liveEnded(live, "too long");
     else if (now > live.extendUntil + 15000) void liveEnded(live, "not extended");
   }, 1000).unref();
   // Sign in again when eufy.env changes, or now and then after a failure.
@@ -625,7 +887,36 @@ export function handler() {
     try {
       switch (`${req.method} ${url.pathname}`) {
         case "GET /status": send(res, 200, status); return;
-        case "GET /recordings": send(res, 200, await recordings(q.get("day") || "", q.get("how") || "")); return;
+        case "GET /clips": {
+          const day = q.get("day") || today();
+          send(res, 200, clipsLines(day, [...(await listDay(day)).values()]), "text/plain; charset=utf-8");
+          return;
+        }
+        case "GET /clips/month": {
+          const ym = q.get("ym") || today().slice(0, 6);
+          send(res, 200, monthLines(ym, await monthCounts(ym)), "text/plain; charset=utf-8");
+          return;
+        }
+        case "GET /clips/thumb": {
+          const day = q.get("day") || "";
+          if (!dayLists.has(day)) await listDay(day);
+          const entry = clipEntry(day, q.get("id"));
+          fetchClip(entry);
+          if (!entry.thumb && !entry.done) await waitClip(entry, 4000);
+          if (!entry.thumb && entry.frames.length) await clipThumb(entry);
+          if (entry.thumb) { send(res, 200, entry.thumb, "application/octet-stream"); return; }
+          if (entry.done) throw new HelperError("no_picture", 404);
+          res.writeHead(204, { "cache-control": "no-store" }); res.end();
+          return;
+        }
+        case "POST /clips/start": {
+          const day = q.get("day") || "";
+          if (!dayLists.has(day)) await listDay(day);
+          send(res, 200, await clipStart(day, q.get("id")));
+          return;
+        }
+        case "POST /clips/pause": send(res, 200, clipPause(cam, q.get("on") === "1")); return;
+        case "POST /clips/seek": send(res, 200, clipSeek(cam, Math.max(0, Number(q.get("ms")) || 0))); return;
         case "GET /list": send(res, 200, await list()); return;
         case "GET /thumb": send(res, 200, await readPicture(cam, "332"), "application/octet-stream"); return;
         case "GET /picture": send(res, 200, await readPicture(cam, "jpg"), "image/jpeg"); return;
@@ -635,7 +926,8 @@ export function handler() {
         case "GET /live/frame": {
           const got = await liveFrame(cam, Number(q.get("after")) || 0);
           if (!got) { res.writeHead(204, { "cache-control": "no-store" }); res.end(); return; }
-          res.writeHead(200, { "content-type": "image/jpeg", "content-length": String(got.jpeg.length), "x-seq": String(got.seq), "cache-control": "no-store" });
+          res.writeHead(200, { "content-type": "image/jpeg", "content-length": String(got.jpeg.length), "x-seq": String(got.seq), "cache-control": "no-store",
+            ...(got.clip ? { "x-clip": clipStateLine(got.clip).trim().split("\t").slice(1).join(" ") } : {}) });
           res.end(got.jpeg);
           return;
         }

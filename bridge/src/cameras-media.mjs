@@ -123,6 +123,13 @@ export function pictureArgs(quality = 5) {
   return [...QUIET, "-f", "image2pipe", "-c:v", "mjpeg", "-i", "pipe:0", "-frames:v", "1", "-vf", FILL,
     ...BASELINE, String(quality), "-f", "image2pipe", "pipe:1"];
 }
+// A recording's first keyframe to a thumbnail, as RGB for dither332.
+export function stillArgs(codec) {
+  const format = codec === "h264" ? "h264" : "hevc";
+  return [...QUIET, "-f", format, "-i", "pipe:0", "-frames:v", "1",
+    "-vf", `scale=${THUMB.width}:${THUMB.height}:force_original_aspect_ratio=increase:flags=area,crop=${THUMB.width}:${THUMB.height}`,
+    "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1"];
+}
 // A picture to the wall's thumbnail, as RGB for dither332.
 export function thumbArgs() {
   return [...QUIET, "-f", "image2pipe", "-c:v", "mjpeg", "-i", "pipe:0", "-frames:v", "1",

@@ -15,6 +15,11 @@
 //                              204 when none came in time, 409 once it has ended
 //   live/extend?cam=  live/stop?cam=  turn?cam=&dir=left|right|up|down  code?value=  report?...
 //   live/audio?cam=            the sound since the last ask: 8 kHz mono 16-bit PCM, 204 when none
+//   clips?day=yyyymmdd         the HomeBase's recordings that day (cameras-archive.mjs clipsLines)
+//   clips/month?ym=yyyymm      how many each day; clips/thumb?day=&id= a clip's 78x44 picture
+//   clips/start?day=&id=       plays it: "clip <camera id> <length ms>"; its frames then come from
+//                              live/frame with an x-clip header "<position ms> <length ms> <playing> <ended>"
+//   clips/pause?cam=&on=1|0  clips/seek?cam=&ms=   both answer "clip <position> <length> <playing> <ended>"
 //   live/zoom?cam=&x=<tenths>  live/pan?cam=&dir=left|right|up|down[&turn=1]   both answer
 //                              "view <tenths> <x0> <y0> <x1> <y1> <moved|turned|edge|->": the zoom
 //                              now and where the view is in the frame, in thousandths
@@ -26,6 +31,7 @@ import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
 import { findFfmpeg, homeAddress, lanAddresses } from "./podcasts.mjs";
 import { CAMERA_ID, listLines } from "./cameras-media.mjs";
+import { clipStateLine } from "./cameras-archive.mjs";
 import { SetupLinks, accountFile, emailIn, writeAccount } from "./cameras-setup.mjs";
 
 const HELPER = fileURLToPath(new URL("./cameras-helper.mjs", import.meta.url));
@@ -44,7 +50,9 @@ export function findNode24(configured) {
 }
 
 const WHAT = new Set(["list", "thumb", "picture", "refresh", "live/start", "live/frame", "live/audio", "live/extend", "live/stop",
-  "live/zoom", "live/pan", "turn", "code", "report"]);
+  "live/zoom", "live/pan", "turn", "code", "report", "clips", "clips/month", "clips/thumb", "clips/start", "clips/pause", "clips/seek"]);
+// The routes that name no camera: the rest need cam=<id>.
+const NO_CAMERA = new Set(["list", "report", "code", "clips", "clips/month", "clips/thumb", "clips/start"]);
 
 export class CameraService {
   constructor({ dir = "", envFile = "", node, ffmpeg, enabled = true, spawnImpl = spawn, fetchImpl = fetch, now = Date.now,
@@ -158,7 +166,8 @@ export class CameraService {
       throw new CameraError(error?.name === "TimeoutError" ? "camera_timeout" : "helper_unreachable", 504);
     }
     const body = Buffer.from(await response.arrayBuffer());
-    return { status: response.status, body, type: response.headers.get("content-type") || "", seq: Number(response.headers.get("x-seq")) || 0 };
+    return { status: response.status, body, type: response.headers.get("content-type") || "", seq: Number(response.headers.get("x-seq")) || 0,
+      clip: response.headers.get("x-clip") || "" };
   }
 
   // The list for the device, which says on its first line why there's nothing when there isn't.
@@ -174,12 +183,20 @@ export class CameraService {
   // Answers one of the routes above into res. `device` is the device's id, for its live frames.
   async answer(what, params, device, res) {
     const cam = params.get("cam") || "";
-    if (what !== "list" && what !== "report" && what !== "code" && !CAMERA_ID.test(cam)) throw new CameraError("no_camera", 404);
+    if (!NO_CAMERA.has(what) && !CAMERA_ID.test(cam)) throw new CameraError("no_camera", 404);
+    const day = /^\d{8}$/u.test(params.get("day") || "") ? params.get("day") : "";
+    const clip = /^\d{1,10}$/u.test(params.get("id") || "") ? params.get("id") : "";
     const bytes = (got, type) => {
       if (got.status === 204) { res.writeHead(204, { "cache-control": "no-store" }); res.end(); return; }
       if (got.status !== 200) throw new CameraError(helperCode(got), got.status === 404 || got.status === 409 || got.status === 400 ? got.status : 502);
-      res.writeHead(200, { "content-type": type, "content-length": String(got.body.length), "cache-control": "no-store" });
+      // A clip's frames say where it is: "<position ms> <length ms> <playing> <ended>".
+      const where = /^\d+ \d+ [01] [01]$/u.test(got.clip) ? { "x-clip": got.clip } : {};
+      res.writeHead(200, { "content-type": type, "content-length": String(got.body.length), "cache-control": "no-store", ...where });
       res.end(got.body);
+    };
+    const text = (got) => {
+      if (got.status !== 200) throw new CameraError(helperCode(got), [400, 404, 409].includes(got.status) ? got.status : 502);
+      lines(res, got.body.toString("utf8"));
     };
     const ok = (got) => {
       if (got.status !== 200) throw new CameraError(helperCode(got), got.status === 404 || got.status === 409 || got.status === 400 ? got.status : 502);
@@ -220,6 +237,35 @@ export class CameraService {
         return;
       }
       case "report": report(params); lines(res, "ok\n"); return;
+      // Recordings: a day's list, a month's counts, a clip's picture, and playing one, whose
+      // frames, sound, zoom and pan then go through the live routes with its camera's id.
+      case "clips": text(await this.call("GET", "/clips", day ? { day } : {}, 30000)); return;
+      case "clips/month": {
+        const ym = /^\d{6}$/u.test(params.get("ym") || "") ? params.get("ym") : "";
+        text(await this.call("GET", "/clips/month", ym ? { ym } : {}, 30000));
+        return;
+      }
+      case "clips/thumb":
+        if (!day || !clip) throw new CameraError("no_clip", 404);
+        bytes(await this.call("GET", "/clips/thumb", { day, id: clip }, 30000), "application/octet-stream");
+        return;
+      case "clips/start": {
+        if (!day || !clip) throw new CameraError("no_clip", 404);
+        const got = await this.call("POST", "/clips/start", { day, id: clip }, 70000);
+        if (got.status !== 200) throw new CameraError(helperCode(got), [404, 409].includes(got.status) ? got.status : 502);
+        const started = JSON.parse(got.body.toString("utf8"));
+        if (!CAMERA_ID.test(String(started.cam))) throw new CameraError("clip_failed", 502);
+        lines(res, `clip\t${started.cam}\t${Math.max(0, Math.round(Number(started.dur) || 0))}\n`);
+        return;
+      }
+      case "clips/pause":
+      case "clips/seek": {
+        const ask = what === "clips/pause" ? { cam, on: params.get("on") === "1" ? "1" : "0" } : { cam, ms: String(Math.max(0, Math.round(Number(params.get("ms")) || 0))) };
+        const got = await this.call("POST", `/${what}`, ask, 15000);
+        if (got.status !== 200) throw new CameraError(helperCode(got), [404, 409].includes(got.status) ? got.status : 502);
+        lines(res, clipStateLine(JSON.parse(got.body.toString("utf8"))));
+        return;
+      }
       default: throw new CameraError("not_found", 404);
     }
   }
