@@ -82,6 +82,7 @@ let eufy = null;
 const status = { state: "starting", detail: "" };
 const cameras = new Map();   // id -> { sn, name, dev, station }
 const stations = new Map();  // sn -> dev
+const stationRecords = new Map();  // sn -> its cloud record, for the account id its archive wants
 let saved = { motion: {} };  // id -> ms of the last motion, kept across restarts
 let lastTried = 0, triedEnv = 0, signingIn = false, signInAgain = false, freshAgain = false;
 let live = null;
@@ -204,12 +205,13 @@ async function loadDevices() {
   const records = await eufy.getDevices();
   cameras.clear();
   stations.clear();
+  stationRecords.clear();
   for (const record of records) {
     serials.add(record.sn);
     let dev;
     try { dev = await eufy.getDevice(record.sn); } catch { continue; }
     if (dev.camera?.()) cameras.set(cameraId(record.sn), { sn: record.sn, name: record.name || record.model, dev, station: record.stationSn });
-    else if (record.deviceClass === "homebase" || dev.has?.("arming")) stations.set(record.sn, dev);
+    else if (record.deviceClass === "homebase" || dev.has?.("arming")) { stations.set(record.sn, dev); stationRecords.set(record.sn, record); }
   }
   log(`${cameras.size} camera(s), ${stations.size} base(s)`);
   for (const station of stations.values()) {
@@ -537,6 +539,33 @@ async function livePan(id, direction, turnOnly) {
   await ptz.rotate(direction);
   return viewState(view, "turned");
 }
+// The HomeBase's recordings of one day (yyyyMMdd), from its own table, newest first. Reading it
+// wakes no camera: the base is on mains power.
+async function recordings(day) {
+  if (status.state !== "ready") throw new HelperError("not_ready", 409);
+  if (!/^\d{8}$/u.test(String(day))) throw new HelperError("bad_day", 400);
+  const [stationSn, record] = [...stationRecords.entries()][0] || [];
+  if (!stationSn) throw new HelperError("no_base", 404);
+  const accountId = record.raw?.member?.admin_user_id;
+  await eufy.connectStation(stationSn);
+  const session = eufy.getP2pSessions?.().get(stationSn);
+  if (!session?.queryRecordPage) throw new HelperError("no_archive", 409);
+  const next = new Date(Date.UTC(+day.slice(0, 4), +day.slice(4, 6) - 1, +day.slice(6, 8) + 1));
+  const endDate = `${next.getUTCFullYear()}${String(next.getUTCMonth() + 1).padStart(2, "0")}${String(next.getUTCDate()).padStart(2, "0")}`;
+  const rows = new Map();
+  let startTime = "0";
+  for (let page = 0; page < 15; ++page) {
+    const reply = await session.queryRecordPage({ accountId, startDate: day, endDate, startTime, count: 20 });
+    const found = reply.flatMap((group) => group?.table_name === "history_record_info" && Array.isArray(group.payload) ? group.payload : []);
+    for (const row of found) if (row?.record_id !== undefined) rows.set(row.record_id, row);
+    if (found.length < 20) break;
+    const oldest = found.map((row) => String(row.start_time || "").replace(/\D/gu, "")).filter(Boolean).sort()[0];
+    if (!oldest || (startTime !== "0" && oldest >= startTime)) break;
+    startTime = oldest;
+  }
+  log(`recordings ${day}: ${rows.size} row(s)`);
+  return [...rows.values()];
+}
 function liveExtend(id) {
   if (!live || live.id !== id) throw new HelperError("not_live", 409);
   live.askedAt = Date.now();
@@ -579,6 +608,7 @@ export function handler() {
     try {
       switch (`${req.method} ${url.pathname}`) {
         case "GET /status": send(res, 200, status); return;
+        case "GET /recordings": send(res, 200, await recordings(q.get("day") || "")); return;
         case "GET /list": send(res, 200, await list()); return;
         case "GET /thumb": send(res, 200, await readPicture(cam, "332"), "application/octet-stream"); return;
         case "GET /picture": send(res, 200, await readPicture(cam, "jpg"), "image/jpeg"); return;
