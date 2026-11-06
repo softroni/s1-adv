@@ -197,6 +197,7 @@ struct Response {
   unsigned status = 0;
   uint32_t length = 0;
   bool hasLength = false, close = false, chunked = false, done = false;
+  char clip[40] = "";  // A clip's frames' "<position ms> <length ms> <playing> <ended>" (x-clip).
   // False when the line makes no sense as an HTTP answer. An empty line ends the headers.
   bool line(const char* s) {
     if (!status) {
@@ -227,6 +228,10 @@ struct Response {
       if (sameWord(value, "close", 5)) close = true;
     } else if (is("transfer-encoding")) {
       if (sameWord(value, "chunked", 7)) chunked = true;
+    } else if (is("x-clip")) {
+      size_t n = 0;
+      while (value[n] && n + 1 < sizeof(clip)) { clip[n] = value[n]; ++n; }
+      clip[n] = 0;
     }
     return true;
   }
@@ -293,6 +298,131 @@ inline bool parseView(const char* text, size_t len, View& out) {
   });
   return found;
 }
+
+// --- Recordings: days, the list, the month, a clip playing -----------------------------------
+// A day is its yyyymmdd as a number, 20261106, as the bridge names it.
+struct Ymd { int y = 1970, m = 1, d = 1; };
+inline Ymd ymdOf(uint32_t day) { Ymd v; v.y = int(day / 10000); v.m = int(day / 100 % 100); v.d = int(day % 100); return v; }
+inline uint32_t dayOf(const Ymd& v) { return uint32_t(v.y) * 10000u + uint32_t(v.m) * 100u + uint32_t(v.d); }
+inline int daysInMonth(int y, int m) {
+  static const int kDays[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  if (m < 1 || m > 12) return 30;
+  return m == 2 && ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) ? 29 : kDays[m - 1];
+}
+inline bool validDay(uint32_t day) {
+  const Ymd v = ymdOf(day);
+  return v.y >= 2000 && v.y <= 2099 && v.m >= 1 && v.m <= 12 && v.d >= 1 && v.d <= daysInMonth(v.y, v.m);
+}
+inline uint32_t addDays(uint32_t day, int n) {
+  Ymd v = ymdOf(day);
+  while (n > 0) { if (++v.d > daysInMonth(v.y, v.m)) { v.d = 1; if (++v.m > 12) { v.m = 1; ++v.y; } } --n; }
+  while (n < 0) { if (--v.d < 1) { if (--v.m < 1) { v.m = 12; --v.y; } v.d = daysInMonth(v.y, v.m); } ++n; }
+  return dayOf(v);
+}
+// 0 Sunday to 6 Saturday (Sakamoto's).
+inline int weekday(int y, int m, int d) {
+  static const int t[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+  if (m < 3) y -= 1;
+  return (y + y / 4 - y / 100 + y / 400 + t[m - 1] + d) % 7;
+}
+inline const char* monthName(int m) {
+  static const char* const k[] = {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
+  return m >= 1 && m <= 12 ? k[m - 1] : "";
+}
+// "Fri 6 Nov".
+inline void dayLabel(char* out, size_t room, uint32_t day) {
+  static const char* const kDays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+  const Ymd v = ymdOf(day);
+  char month[4] = "";
+  memcpy(month, monthName(v.m), 3);
+  snprintf(out, room, "%s %d %s", kDays[weekday(v.y, v.m, v.d)], v.d, month);
+}
+// "16:47" from seconds since the day began; "0:41", "2:00" or "1:02:03" for a length in seconds.
+inline void clockOfDay(char* out, size_t room, uint32_t seconds) { snprintf(out, room, "%u:%02u", unsigned(seconds / 3600 % 24), unsigned(seconds / 60 % 60)); }
+inline void lengthText(char* out, size_t room, uint32_t seconds) {
+  if (seconds >= 3600) snprintf(out, room, "%u:%02u:%02u", unsigned(seconds / 3600), unsigned(seconds / 60 % 60), unsigned(seconds % 60));
+  else snprintf(out, room, "%u:%02u", unsigned(seconds / 60), unsigned(seconds % 60));
+}
+
+// A day's list, as the bridge answers it, newest first:
+//   clips <day> <count>
+//   clip <id> <seconds since the day began> <length in seconds> <camera id>
+constexpr size_t kMaxClips = 150, kClipIdBytes = 17;
+struct Clip {
+  char id[kClipIdBytes] = "";
+  char cam[kIdBytes] = "";
+  uint32_t start = 0;
+  uint16_t seconds = 0;
+};
+struct ClipDay {
+  uint32_t day = 0;
+  uint16_t total = 0;  // As the bridge counted, which can be more than fit.
+  uint16_t count = 0;
+  Clip clips[kMaxClips];
+};
+inline bool clipIdValid(const char* id) {
+  size_t n = 0;
+  for (; id[n]; ++n) if (n >= kClipIdBytes - 1 || id[n] < '0' || id[n] > '9') return false;
+  return n > 0;
+}
+inline bool parseClips(const char* text, size_t len, ClipDay& out) {
+  out.day = 0; out.total = 0; out.count = 0;
+  bool head = false;
+  podcast::eachLine(text, len, [&](char* line, size_t) {
+    char* f[5];
+    const size_t n = podcast::splitFields(line, f, 5);
+    uint32_t a = 0, b = 0, c = 0;
+    if (n == 3 && !strcmp(f[0], "clips") && podcast::readNumber(f[1], a) && validDay(a) && podcast::readNumber(f[2], b, 65535)) {
+      out.day = a; out.total = uint16_t(b); head = true;
+    } else if (n == 5 && !strcmp(f[0], "clip") && out.count < kMaxClips && clipIdValid(f[1]) && podcast::readNumber(f[2], b, 86399) &&
+               podcast::readNumber(f[3], c, 65535) && idValid(f[4])) {
+      Clip& clip = out.clips[out.count++];
+      strcpy(clip.id, f[1]); strcpy(clip.cam, f[4]); clip.start = b; clip.seconds = uint16_t(c);
+    }
+  });
+  return head;
+}
+// A month's days with recordings:  month <yyyymm>  then  day <d> <count>.
+struct Month { uint32_t ym = 0; bool has[32] = {}; };
+inline bool parseMonth(const char* text, size_t len, Month& out) {
+  out = Month{};
+  bool head = false;
+  podcast::eachLine(text, len, [&](char* line, size_t) {
+    char* f[3];
+    const size_t n = podcast::splitFields(line, f, 3);
+    uint32_t a = 0, b = 0;
+    if (n == 2 && !strcmp(f[0], "month") && podcast::readNumber(f[1], a) && a / 100 >= 2000 && a % 100 >= 1 && a % 100 <= 12) { out.ym = a; head = true; }
+    else if (n == 3 && !strcmp(f[0], "day") && podcast::readNumber(f[1], a, 31) && a >= 1 && podcast::readNumber(f[2], b)) out.has[a] = b > 0;
+  });
+  return head;
+}
+// Where a clip is: from its frames' x-clip "<position> <length> <playing> <ended>", or the answer to a
+// pause or seek, "clip <position> <length> <playing> <ended>".
+struct ClipState { uint32_t pos = 0, dur = 0; bool playing = false, ended = false, known = false; };
+inline bool parseClipState(const char* text, ClipState& out) {
+  unsigned long pos = 0, dur = 0;
+  int playing = 0, ended = 0;
+  if (!strncmp(text, "clip\t", 5)) text += 5;
+  char tail = 0;
+  const int got = sscanf(text, "%lu %lu %d %d%c", &pos, &dur, &playing, &ended, &tail);
+  if ((got != 4 && !(got == 5 && tail == '\n')) || playing < 0 || playing > 1 || ended < 0 || ended > 1 || dur > 86400000UL) return false;
+  out.pos = uint32_t(pos > dur && dur ? dur : pos); out.dur = uint32_t(dur); out.playing = playing; out.ended = ended; out.known = true;
+  return true;
+}
+// The answer to starting one: "clip <camera id> <length ms>".
+inline bool parseClipStart(const char* text, size_t len, char* cam, uint32_t& dur) {
+  bool ok = false;
+  podcast::eachLine(text, len, [&](char* line, size_t) {
+    char* f[3];
+    uint32_t d = 0;
+    if (ok || podcast::splitFields(line, f, 3) != 3 || strcmp(f[0], "clip") || !idValid(f[1]) || !podcast::readNumber(f[2], d)) return;
+    strcpy(cam, f[1]); dur = d; ok = true;
+  });
+  return ok;
+}
+// The month's grid, Monday first: which row and column day d is in, and how many rows it takes.
+inline int monthLead(int y, int m) { return (weekday(y, m, 1) + 6) % 7; }
+inline int monthRows(int y, int m) { return (monthLead(y, m) + daysInMonth(y, m) + 6) / 7; }
 
 // --- What the screen shows -----------------------------------------------------------------
 // How long ago: "now", "12m", "3h", "2d". Empty for never.

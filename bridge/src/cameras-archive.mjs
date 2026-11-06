@@ -89,9 +89,11 @@ export function clipFromRow(row) {
 // --- What the device reads -------------------------------------------------------------------
 //   clips <day> <count>
 //   clip <id> <seconds since the day began> <length in seconds> <camera id>      newest first
-export function clipsLines(day, clips) {
+// The count is all of them; the lines stop at the newest MAX_CLIP_LINES, all the device keeps.
+export const MAX_CLIP_LINES = 150;
+export function clipsLines(day, clips, limit = MAX_CLIP_LINES) {
   const sorted = [...clips].sort((a, b) => b.start - a.start || b.id - a.id);
-  return [`clips\t${day}\t${sorted.length}`, ...sorted.map(c => `clip\t${c.id}\t${c.start}\t${c.seconds}\t${c.camId}`)].join("\n") + "\n";
+  return [`clips\t${day}\t${sorted.length}`, ...sorted.slice(0, limit).map(c => `clip\t${c.id}\t${c.start}\t${c.seconds}\t${c.camId}`)].join("\n") + "\n";
 }
 //   month <yyyymm>
 //   day <d> <count>        for each day with recordings

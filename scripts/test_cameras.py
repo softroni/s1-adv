@@ -94,6 +94,25 @@ assert channel not in others, others.get(channel)
 assert 'camAudioFree();\n  camera_net::close();' in app, 'the speaker stops before the app lets go of its buffers'
 # Live view only ever goes over the home door, never TLS; pictures may come either way.
 assert 'Live works on home Wi-Fi only' in app
+# Recordings: C opens them from the wall and from a picture; a clip plays in the live view, its
+# requests going to the clip's camera; Esc steps back one level; a clip that ends stops there.
+assert "if (lower == 'c') { camOpenClips(\"\", CamView::Wall); return true; }" in app
+assert 'camOpenClips(c->id, CamView::Picture)' in app
+for job in ('Frame', 'Audio', 'Zoom', 'Pan', 'ClipPause', 'ClipSeek'):
+    assert f'camStartLive(CamJob::{job},' in app and f'camStartFor(CamJob::{job},' not in app, job
+escape = app.split('bool camerasEscape() {', 1)[1].split('\n}\n', 1)[0]
+assert escape.index('CamView::Live') < escape.index('CamView::Month') < escape.index('CamView::Clips')
+end_live = app.split('void camEndLive(const char* why) {', 1)[1].split('\n}\n', 1)[0]
+assert 'gCamView = CamView::Clips;' in end_live, 'Esc from a clip goes back to its list'
+assert app.count('camPlayClip(') == 3, 'a clip plays only by a key: none follows the last by itself'
+keys = app.split('bool handleCamerasKey(', 1)[1].split('\n}\n', 1)[0]
+assert keys.count('camPlayClip(') == 2
+assert '(gCamView == CamView::Picture || gCamView == CamView::Live) && gCamJpeg' in app, 'the lists are drawn on the canvas'
+assert 'Clips play on home Wi-Fi only' in app
+# Every clip route the device asks for is one the bridge answers.
+bridge_routes = (root / 'bridge/src/cameras.mjs').read_text().split('const WHAT = new Set([', 1)[1].split(']);', 1)[0]
+for route in sorted(set(_re2.findall(r'"(clips[a-z/]*)', app.replace('%sclips', '"clips')))):
+    assert f'"{route}"' in bridge_routes, route
 # The serial number, name or address of a camera is never logged; only counts and words.
 for line in app.splitlines():
     if 'appendRuntimeLog(' in line or 'logf(' in line: assert 'name' not in line and '.id' not in line, line
@@ -103,6 +122,7 @@ code = r'''
 #include <cassert>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 using namespace cameras;
 static void lines(const char* t, List& l) { assert(parseList(t, strlen(t), l)); }
 int main() {
@@ -247,6 +267,84 @@ int main() {
   // A saved frame's name on the card.
   assert(savePath(s, sizeof(s), "Front door!", 2026, 11, 6, 9, 5, 3) && !strcmp(s, "/cameras/Front-door-20261106-090503.jpg"));
   assert(savePath(s, sizeof(s), "???", 2026, 1, 2, 3, 4, 5) && !strcmp(s, "/cameras/camera-20260102-030405.jpg"));
+
+  // Recordings: days, as the bridge names them.
+  assert(validDay(20261106) && validDay(20280229) && !validDay(20260229) && !validDay(20261131) && !validDay(19991231) && !validDay(20261300));
+  assert(addDays(20261231, 1) == 20270101 && addDays(20270101, -1) == 20261231 && addDays(20280228, 1) == 20280229);
+  assert(addDays(20261106, -7) == 20261030 && addDays(20261106, 0) == 20261106 && addDays(20260301, -1) == 20260228);
+  assert(weekday(2026, 11, 6) == 5 && weekday(2026, 11, 1) == 0 && weekday(2000, 1, 1) == 6);
+  dayLabel(s, sizeof(s), 20261106); assert(!strcmp(s, "Fri 6 Nov"));
+  dayLabel(s, sizeof(s), 20270101); assert(!strcmp(s, "Fri 1 Jan"));
+  clockOfDay(s, sizeof(s), 16 * 3600 + 47 * 60 + 5); assert(!strcmp(s, "16:47"));
+  clockOfDay(s, sizeof(s), 9 * 60); assert(!strcmp(s, "0:09"));
+  lengthText(s, sizeof(s), 41); assert(!strcmp(s, "0:41"));
+  lengthText(s, sizeof(s), 120); assert(!strcmp(s, "2:00"));
+  lengthText(s, sizeof(s), 3723); assert(!strcmp(s, "1:02:03"));
+  // The month's grid, Monday first: November 2026 starts on a Sunday and takes six rows.
+  assert(monthLead(2026, 11) == 6 && monthRows(2026, 11) == 6);
+  assert(monthLead(2027, 2) == 0 && monthRows(2027, 2) == 4);
+  assert(monthLead(2026, 6) == 0 && monthRows(2026, 6) == 5);
+  {
+    // A day's list, newest first; a bad line is skipped, not the list.
+    static ClipDay day;
+    const char* t = "clips\t20261106\t4\n"
+                    "clip\t2026110600012\t60450\t41\tab12cd34\n"
+                    "clip\t1234567890123456\t3600\t120\t0f0f0f0f\n"
+                    "clip\t12345678901234567\t3600\t120\tab12cd34\n"
+                    "clip\tx1\t1\t1\tab12cd34\n"
+                    "clip\t7\t90000\t1\tab12cd34\n"
+                    "clip\t8\t10\t1\tAB12CD34\n";
+    assert(parseClips(t, strlen(t), day));
+    assert(day.day == 20261106 && day.total == 4 && day.count == 2);
+    assert(!strcmp(day.clips[0].id, "2026110600012") && day.clips[0].start == 60450 && day.clips[0].seconds == 41 && !strcmp(day.clips[0].cam, "ab12cd34"));
+    assert(!strcmp(day.clips[1].id, "1234567890123456") && !strcmp(day.clips[1].cam, "0f0f0f0f"));
+    const char* none = "clips\t20261105\t0\n";
+    assert(parseClips(none, strlen(none), day) && day.day == 20261105 && day.count == 0);
+    const char* bad = "clips\t20261131\t1\n";
+    assert(!parseClips(bad, strlen(bad), day));
+    // More than fit: the first kMaxClips are kept.
+    const size_t room = 200 * 48 + 32;
+    char* many = static_cast<char*>(malloc(room));
+    size_t n = size_t(snprintf(many, room, "clips\t20261106\t200\n"));
+    for (int i = 0; i < 200; ++i) n += size_t(snprintf(many + n, room - n, "clip\t%d\t%d\t30\tab12cd34\n", 1000 + i, 80000 - i * 300));
+    assert(parseClips(many, n, day) && day.total == 200 && day.count == kMaxClips && !strcmp(day.clips[kMaxClips - 1].id, "1149"));
+    free(many);
+  }
+  {
+    Month m;
+    const char* t = "month\t202611\nday\t3\t1\nday\t6\t4\nday\t9\t0\nday\t0\t1\nday\t32\t1\n";
+    assert(parseMonth(t, strlen(t), m) && m.ym == 202611 && m.has[3] && m.has[6] && !m.has[9] && !m.has[0] && !m.has[1]);
+    const char* bad = "month\t202613\nday\t3\t1\n";
+    assert(!parseMonth(bad, strlen(bad), m) && m.ym == 0);
+  }
+  {
+    // Where a clip is: its frames' header, and the answer to a pause or seek.
+    ClipState st;
+    assert(parseClipState("12000 41000 1 0", st) && st.known && st.pos == 12000 && st.dur == 41000 && st.playing && !st.ended);
+    assert(parseClipState("clip\t41000\t41000\t0\t1\n", st) && st.pos == 41000 && !st.playing && st.ended);
+    assert(parseClipState("50000 41000 1 0", st) && st.pos == 41000);
+    ClipState untouched;
+    assert(!parseClipState("", untouched) && !untouched.known);
+    assert(!parseClipState("1 2 3 0", untouched) && !parseClipState("1 2 1", untouched) && !parseClipState("1 2 1 0 9", untouched));
+    char cam[kIdBytes];
+    uint32_t dur = 0;
+    const char* started = "clip\tab12cd34\t41000\n";
+    assert(parseClipStart(started, strlen(started), cam, dur) && !strcmp(cam, "ab12cd34") && dur == 41000);
+    const char* odd = "clip\tnot-an-id\t41000\n";
+    assert(!parseClipStart(odd, strlen(odd), cam, dur));
+  }
+#ifdef BRIDGE_LINES
+  {
+    // The bridge's own lines (cameras-archive.mjs), read the device's way.
+    static ClipDay day;
+    Month m;
+    ClipState st;
+    assert(parseClips(kBridgeClips, strlen(kBridgeClips), day) && day.day == 20261106 && day.count == 2);
+    assert(!strcmp(day.clips[0].id, "2026110600013") && day.clips[0].start == 70000);  // Newest first.
+    assert(parseMonth(kBridgeMonth, strlen(kBridgeMonth), m) && m.ym == 202611 && m.has[3] && !m.has[4]);
+    assert(parseClipState(kBridgeState, st) && st.pos == 1200 && st.dur == 41000 && st.playing && !st.ended);
+  }
+#endif
   return 0;
 }
 '''
@@ -255,8 +353,19 @@ with tempfile.TemporaryDirectory() as tmp:
     test = Path(tmp) / 'cameras.cpp'
     exe = Path(tmp) / 'cameras'
     test.write_text(code)
+    extra = []
+    if _shutil.which('node'):
+        # The bridge's recordings lines, as it writes them, for the device's parsers.
+        made = _json.loads(subprocess.run(['node', '--input-type=module', '-e',
+            f'import {{clipsLines, monthLines, clipStateLine}} from {_json.dumps((root / "bridge/src/cameras-archive.mjs").as_uri())};'
+            'console.log(JSON.stringify([clipsLines("20261106", [{id: 2026110600012, start: 60450, seconds: 41, camId: "ab12cd34"},'
+            '{id: 2026110600013, start: 70000, seconds: 12, camId: "0f0f0f0f"}]), monthLines("202611", new Map([["20261103", 1], ["20261004", 2]])),'
+            'clipStateLine({pos: 1200, dur: 41000, playing: true, ended: false})]))'], check=True, capture_output=True, text=True).stdout)
+        (Path(tmp) / 'bridge_lines.h').write_text(''.join(f'static const char {n}[] = {_json.dumps(v)};\n'
+                                                          for n, v in zip(('kBridgeClips', 'kBridgeMonth', 'kBridgeState'), made)))
+        extra = ['-DBRIDGE_LINES', '-include', str(Path(tmp) / 'bridge_lines.h')]
     subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++17', '-O1', '-g', '-Wall', '-Wextra', '-Werror',
-                    '-fsanitize=address,undefined', '-fno-sanitize-recover=all', '-I', str(src), str(test), '-o', str(exe)], check=True)
+                    '-fsanitize=address,undefined', '-fno-sanitize-recover=all', '-I', str(src)] + extra + [str(test), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True, timeout=60)
 # The bridge's pictures and live frames, made by its own ffmpeg arguments, through the device's own
 # JPEG decoder (M5GFX's TJpgDec, with the 3,900-byte pool drawJpg gives it). 0.2.315 and 0.2.316 sent

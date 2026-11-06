@@ -1,7 +1,8 @@
 # Cameras
 
 Cameras shows eufy security cameras on the Cardputer: the last picture from each, a new picture
-when you ask, and live video. It's under Tab, House, and `/cameras` opens it.
+when you ask, live video, and what the HomeBase recorded, by day. It's under Tab, House, and
+`/cameras` opens it.
 
 The Cardputer can't talk to the cameras itself. eufy's connection is private and encrypted, and the
 cameras send video too big for it to decode. So the bridge's Mac does that part: a small camera
@@ -31,6 +32,12 @@ email or password later, the code comes back so you can sign in again.
 - **Live** has a top bar with the camera's name, the zoom when it's zoomed in, and a countdown. A
   camera that pans and tilts has a small four-way icon in the bottom corner, and when zoomed in a
   little map in the other corner shows where in the picture you are.
+- **Clips** lists a day's recordings, newest first, with the time each began, its camera and its
+  length. The one picked shows its first frame on the right. The header says the day and how many.
+- **The month** is a calendar with the days that have recordings lit.
+- **A clip** plays full screen. The top bar shows whether it's playing or paused, the camera, the time
+  of day it's at, and how far in it is out of how long; a thin line along the bottom shows the same.
+  The keys show at the bottom while it's paused or ended, and for a moment after any key.
 
 ## Keys
 
@@ -40,17 +47,34 @@ email or password later, the code comes back so you can sign in again.
 | Wall | Enter | Open its picture |
 | Wall | L | Watch it live |
 | Wall | R | Wake it for a new picture |
+| Wall | C | Every camera's recordings |
 | Picture | `,` `/` | The previous or next camera |
 | Picture | Enter or L | Watch it live |
 | Picture | R | Wake it for a new picture, about five seconds |
 | Picture | S | Save the picture to the SD card, in `/cameras` |
+| Picture | C | This camera's recordings |
 | Live | = and - | Zoom in and out |
 | Live | arrows | Move around the zoomed picture; at its edge, a camera that pans and tilts turns |
 | Live | Fn + arrows | Turn the camera, however far it's zoomed |
 | Live | Enter | 45 seconds more |
 | Live | S | Save the frame to the SD card |
 | Live | M | Sound off and on |
-| Any | Esc | Back: live to the picture, the picture to the wall, the wall out of the app |
+| Clips | `;` `.` | Pick a clip (Fn: a screenful at a time) |
+| Clips | Enter | Play it |
+| Clips | `,` `/` | The day before or after, up to today |
+| Clips | T | Today |
+| Clips | F | One camera's, then the next's, then all of them again |
+| Clips | D | The month |
+| Clips | R | Ask again |
+| Month | `,` `/` and `;` `.` | A day, or a week, back or on |
+| Month | - and = | A month back or on |
+| Month | Enter | That day's clips |
+| A clip | Space or Enter | Pause and play; at its end, Enter plays it again |
+| A clip | `,` `/` | 10 seconds back or on |
+| A clip | `;` `.` | The clip above or below in the list |
+| A clip | = and - | Zoom; zoomed in, the arrows move around and Fn with an arrow seeks or changes clip |
+| A clip | M, S | Sound off and on, save the frame |
+| Any | Esc | Back: live to the picture, the picture to the wall, the wall out of the app; a clip to its list, the month to the list, the list to where C opened it |
 
 ## Sound
 
@@ -69,6 +93,26 @@ camera with a second, telephoto lens zooms with it too: from 3x it switches to t
 digital zoom goes on top, to 12x. Zooming and moving are instant, because the Mac already has the
 whole frame. The lens goes back to wide when the live view ends, and the picture kept for the wall is
 the whole view, not the zoomed one.
+
+## Recordings
+
+The HomeBase keeps what the cameras record, and the Mac asks it for them; the cameras themselves
+aren't woken, so looking through recordings costs no battery. C on the wall lists every camera's
+recordings, and C on a picture that camera's; F changes which. A day with more than 150 shows the
+newest 150 (the header says "150 of" how many), and choosing one camera with F lists all of its.
+
+The day's list opens on today, as the Mac's clock has it. The arrows step a day at a time, and D shows
+the month, with the days that have recordings lit. Opening a month asks the HomeBase which days have
+any; it knows that, not how many, so the month shows the days only.
+
+Picking a clip, the Mac fetches it from the HomeBase, which sends it faster than it plays, and its
+first frame comes up beside the list. Playing it starts as soon as the first part is on the Mac, and
+the rest follows while it plays. It plays the way live view does, over your home Wi-Fi, with its
+sound and the same digital zoom (a recording has the wide lens's picture only, so the zoom lens isn't
+used). A clip stops at its end, on its last frame, and doesn't go on to the next: Enter plays it
+again, and `.` the next one down the list. The Mac keeps the clips it fetched in memory, up to 200 MB, so going
+back to one is quick; the oldest go first, and all of them when the helper restarts. None are written
+to disk.
 
 ## Battery
 
@@ -137,9 +181,11 @@ Options, under `cameras` in `config.json`: `enabled: false` turns it off, `dir` 
 ## What stays private
 
 The account file is read only by the helper, on the Mac. The phone page sends it to the Mac over
-HTTPS, behind a link nobody can guess, and neither the link nor what's typed into it is logged. Pictures are kept in the cameras folder's
-`pictures` and sent only to the Cardputer. The bridge's log names cameras by a short code made from
-their serial number, never by name or serial, and never says anything about the account.
+HTTPS, behind a link nobody can guess, and neither the link nor what's typed into it is logged.
+Pictures are kept in the cameras folder's `pictures` and sent only to the Cardputer, and recordings
+the Mac fetched stay in its memory. The HomeBase's file names and the cameras' serial numbers never
+reach the Cardputer. The bridge's log names cameras by a short code made from their serial number,
+never by name or serial, and never says anything about the account.
 
 ## When something's wrong
 

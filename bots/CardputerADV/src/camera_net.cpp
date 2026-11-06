@@ -41,6 +41,7 @@ uint16_t keptPort = 0;
 uint8_t* body = nullptr;
 size_t bodyLength = 0;
 char memNote[48] = "";
+char lastClip[40] = "";
 
 void noteMemory(const char* what) {
   snprintf(memNote, sizeof(memNote), "%s %uK/%uK", what, unsigned(ESP.getFreeHeap() / 1024),
@@ -145,6 +146,7 @@ Error exchange(WiFiClient& client, bool home, bool& anyAnswer, bool& reusable) {
   }
   free(line);
   if (e != Error::None || cancelled.load()) return e;
+  memcpy(lastClip, h.clip, sizeof(lastClip));
   if (h.chunked) return Error::Malformed;  // The bridge always says how long.
   const bool bodyless = h.status == 204 || h.status == 304;
   if (!bodyless && !h.hasLength) return Error::Malformed;
@@ -277,6 +279,7 @@ bool start(const char* path, bool home, uint32_t ip, uint16_t port, size_t maxBy
   maxBody = uint32_t(maxBytes);
   waitFor = waitMs ? waitMs : kIdleMs;
   memNote[0] = 0;
+  lastClip[0] = 0;
   cancelled.store(false);
   failure.store(Error::None);
   answer.store(0);
@@ -308,6 +311,7 @@ void drop() {
 }
 void cancel() { if (busy()) cancelled.store(true); }
 const char* memoryNote() { return memNote; }
+const char* clipHeader() { return busy() ? "" : lastClip; }
 const char* errorText(Error e) {
   switch (e) {
     case Error::None: return nullptr;

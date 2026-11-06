@@ -15,7 +15,8 @@
 //                              204 when none came in time, 409 once it has ended
 //   live/extend?cam=  live/stop?cam=  turn?cam=&dir=left|right|up|down  code?value=  report?...
 //   live/audio?cam=            the sound since the last ask: 8 kHz mono 16-bit PCM, 204 when none
-//   clips?day=yyyymmdd         the HomeBase's recordings that day (cameras-archive.mjs clipsLines)
+//   clips?day=yyyymmdd&cam=    the HomeBase's recordings that day, one camera's with cam= (cameras-archive.mjs
+//                              clipsLines); quick=1 reads the list already read, for another camera
 //   clips/month?ym=yyyymm      how many each day; clips/thumb?day=&id= a clip's 78x44 picture
 //   clips/start?day=&id=       plays it: "clip <camera id> <length ms>"; its frames then come from
 //                              live/frame with an x-clip header "<position ms> <length ms> <playing> <ended>"
@@ -239,7 +240,11 @@ export class CameraService {
       case "report": report(params); lines(res, "ok\n"); return;
       // Recordings: a day's list, a month's counts, a clip's picture, and playing one, whose
       // frames, sound, zoom and pan then go through the live routes with its camera's id.
-      case "clips": text(await this.call("GET", "/clips", day ? { day } : {}, 30000)); return;
+      case "clips": {
+        const ask = { ...(day ? { day } : {}), ...(CAMERA_ID.test(cam) ? { cam } : {}), ...(params.get("quick") === "1" ? { quick: "1" } : {}) };
+        text(await this.call("GET", "/clips", ask, 30000));
+        return;
+      }
       case "clips/month": {
         const ym = /^\d{6}$/u.test(params.get("ym") || "") ? params.get("ym") : "";
         text(await this.call("GET", "/clips/month", ym ? { ym } : {}, 30000));
@@ -255,6 +260,7 @@ export class CameraService {
         if (got.status !== 200) throw new CameraError(helperCode(got), [404, 409].includes(got.status) ? got.status : 502);
         const started = JSON.parse(got.body.toString("utf8"));
         if (!CAMERA_ID.test(String(started.cam))) throw new CameraError("clip_failed", 502);
+        this.sent.delete(`${device}\t${started.cam}`);  // Its frames count from one again.
         lines(res, `clip\t${started.cam}\t${Math.max(0, Math.round(Number(started.dur) || 0))}\n`);
         return;
       }

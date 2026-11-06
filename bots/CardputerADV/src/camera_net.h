@@ -31,6 +31,8 @@ uint8_t* take(size_t& length);
 void drop();        // Frees the answer and forgets the request.
 void cancel();      // Ends a request under way; it finishes as cancelled (Error::None, status 0).
 const char* errorText(Error e);
+// A clip's frames' x-clip header from the last answer, or "" when it had none.
+const char* clipHeader();
 // After NoMemory: what ran short, then the memory free and its largest piece, like "TLS 61K/15K".
 const char* memoryNote();
 }  // namespace camera_net

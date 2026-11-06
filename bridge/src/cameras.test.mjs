@@ -518,6 +518,12 @@ test("the archive's rows become clips, and the device's lines", () => {
   const text = clipsLines("20261105", [clip, later]);
   assert.equal(text, `clips\t20261105\t2\nclip\t2026110500157\t${later.start}\t11\t${clip.camId}\nclip\t2026110500156\t${clip.start}\t11\t${clip.camId}\n`);
   assert(!text.includes("T9001") && !text.includes("emmcdata"), "no serials or paths reach the device");
+  // A busy day: the count is all of them, the lines the newest 150.
+  const busy = Array.from({ length: 400 }, (_, i) => ({ ...clip, id: 1000 + i, start: i * 200 }));
+  const busyLines = clipsLines("20261105", busy).trim().split("\n");
+  assert.equal(busyLines[0], "clips\t20261105\t400");
+  assert.equal(busyLines.length, 151);
+  assert(busyLines[1].startsWith("clip\t1399\t"), "newest first");
   assert.equal(monthLines("202611", new Map([["20261104", 47], ["20261106", 0], ["20261201", 3]])), "month\t202611\nday\t4\t47\n");
   assert.equal(clipStateLine({ pos: 5037.4, dur: 11000, playing: true, ended: false }), "clip\t5037\t11000\t1\t0\n");
 });

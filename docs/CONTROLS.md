@@ -203,10 +203,22 @@ was in the last five minutes. The last tile is the HomeBase and its mode. Each t
 shows the last pictures and then takes a new one from each camera, one at a time.
 
 - **On the wall:** the arrows pick a camera, Enter opens its picture, L watches it live and R wakes it
-  for a new picture. Esc leaves.
+  for a new picture. C opens the HomeBase's recordings, every camera's. Esc leaves.
 - **On a picture:** it fills the screen. `,` and `/` go to the previous or next camera, Enter or L
-  watches it live, R takes a new picture, S saves it to the SD card, and Esc goes back to the wall.
-  The bars at the top and bottom go after three seconds, and any key brings them back.
+  watches it live, R takes a new picture, S saves it to the SD card, C opens that camera's recordings,
+  and Esc goes back to the wall. The bars at the top and bottom go after three seconds, and any key
+  brings them back.
+- **Clips:** a day's recordings, newest first, today's to begin with: the time, the camera and the
+  length, and the picked one's first frame beside them. `;` and `.` pick one, Enter plays it, `,` and
+  `/` go a day back or on (not past today), T goes back to today, F shows one camera's and then the
+  next's, R asks again, and D opens the month. Esc goes back to where C was pressed.
+- **The month:** days with recordings are lit and today is amber. `,` and `/` move a day, `;` and `.` a
+  week, `-` and `=` a month, Enter opens that day's clips, and Esc goes back to them.
+- **A clip playing:** Space or Enter pauses and plays, `,` and `/` go 10 seconds back or on, and `;` and
+  `.` play the clip above or below in the list. A clip stops at its end, and Enter plays it again.
+  `=` and `-` zoom; zoomed in, the arrows move around the picture, and Fn with an arrow does the
+  above. M turns the sound off and on, S saves the frame, and Esc goes back to the list. Clips play
+  on your home Wi-Fi only.
 - **Live:** the top bar counts down from 0:45, because watching uses the camera's battery. With 10
   seconds left it asks, and Enter gives it another 45. `=` and `-` zoom in and out (a camera with a
   zoom lens uses it from 3x), and the arrows move around the zoomed picture; at its edge a camera that

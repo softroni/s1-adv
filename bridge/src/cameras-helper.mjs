@@ -501,7 +501,11 @@ async function liveFrame(id, after) {
   if (!live || live.id !== id) throw new HelperError("not_live", 409);
   const view = live;
   view.askedAt = Date.now();
-  if (view.seq <= after && !view.ended) {
+  // A device can't have seen more than this view sent: its count is from a view before (a clip before).
+  if (after > view.seq) after = 0;
+  // A paused or ended clip has no frame coming: it answers at once, so a key to play isn't held up.
+  const still = view.clip && (!view.clip.playing || view.clip.ended);
+  if (view.seq <= after && !view.ended && !still) {
     await new Promise((resolve) => {
       const timer = setTimeout(resolve, FRAME_WAIT_MS);
       view.waiters.push(() => { clearTimeout(timer); resolve(); });
@@ -853,7 +857,7 @@ function clipView(id) {
 }
 function clipPause(id, pause) {
   const view = clipView(id), c = view.clip;
-  if (pause) { c.playing = false; return clipState(view); }
+  if (pause) { c.playing = false; for (const wake of view.waiters.splice(0)) wake(); return clipState(view); }
   if (c.ended) return clipSeek(id, 0, true);
   const f = c.entry.frames;
   c.mediaStart = f[Math.min(c.feed, f.length - 1)].ts;
@@ -920,8 +924,11 @@ export function handler() {
       switch (`${req.method} ${url.pathname}`) {
         case "GET /status": send(res, 200, status); return;
         case "GET /clips": {
+          // One camera's (cam=), and from the list already read (quick=1) when only the camera changed.
           const day = q.get("day") || today();
-          send(res, 200, clipsLines(day, [...(await listDay(day)).values()]), "text/plain; charset=utf-8");
+          const camId = q.get("cam") || "";
+          const listed = (q.get("quick") === "1" && dayLists.get(day)) || await listDay(day);
+          send(res, 200, clipsLines(day, [...listed.values()].filter((clip) => !camId || clip.camId === camId)), "text/plain; charset=utf-8");
           return;
         }
         case "GET /clips/month": {
