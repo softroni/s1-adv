@@ -470,3 +470,54 @@ test("the sign-in page: wrong links count as failures, the right one saves the a
     assert.equal((await ask("GET", `/eufy/${again}`)).res.status, 429);
   });
 });
+
+// --- Recordings ----------------------------------------------------------------------------
+import { addDays, clipFromRow, clipStateLine, clipsLines, monthLines, monthRange, parseAudioFrame, parseVideoFrame, validDay, validMonth,
+  videoCodecOf } from "./cameras-archive.mjs";
+
+test("a HomeBase's recording frames: plain Annex-B video after 22 bytes, ADTS sound after 16", () => {
+  const nal = Buffer.from([0, 0, 0, 1, 0x40, 0x01, 0x0c, 0x01]);  // An H.265 VPS.
+  const video = Buffer.alloc(22 + nal.length);
+  video.writeUInt32LE(nal.length, 0);
+  video[4] = 1;
+  video.writeUInt16LE(7, 6);
+  video.writeUIntLE(1_762_400_000_123, 0x0e, 6);
+  nal.copy(video, 22);
+  assert.deepEqual({ ...parseVideoFrame(video), data: [...parseVideoFrame(video).data] },
+    { key: true, number: 7, ts: 1_762_400_000_123, data: [...nal] });
+  assert.equal(videoCodecOf(nal), "h265");
+  assert.equal(videoCodecOf(Buffer.from([0, 0, 0, 1, 0x67, 0x42])), "h264");
+  const encrypted = Buffer.from(video); encrypted.fill(0x5a, 22);
+  assert.equal(parseVideoFrame(encrypted), null, "not Annex-B: an encrypted frame isn't passed on");
+  const short = Buffer.from(video); short.writeUInt32LE(999, 0);
+  assert.equal(parseVideoFrame(short), null);
+  const adts = Buffer.from([0xff, 0xf1, 0x50, 0x80, 0x01, 0x3f, 0xfc, 0xde, 0x02]);  // A 9-byte ADTS frame.
+  const audio = Buffer.concat([Buffer.alloc(16), adts]);
+  assert.deepEqual([...parseAudioFrame(audio)], [...adts]);
+  assert.equal(parseAudioFrame(Buffer.alloc(40)), null);
+});
+
+test("days and months for the HomeBase's queries", () => {
+  assert(validDay("20261106") && !validDay("20261131") && !validDay("2026116") && !validDay("../../x"));
+  assert.equal(addDays("20261130", 1), "20261201");
+  assert.equal(addDays("20260301", -1), "20260228");
+  assert(validMonth("202611") && !validMonth("202613"));
+  assert.deepEqual(monthRange("202612"), { start: "20261201", end: "20270101" });
+});
+
+test("the archive's rows become clips, and the device's lines", () => {
+  const row = { record_id: 2026110500156, start_time: "2026-11-05 19:20:48", end_time: "2026-11-05 19:20:59", storage_path: "/zx/emmcdata/Camera00/x/y.z",
+    device_sn: "T9001P0000000000", frame_num: 170, cipher_id: 0 };
+  const clip = clipFromRow(row);
+  assert.deepEqual({ id: clip.id, day: clip.day, start: clip.start, seconds: clip.seconds, camId: clip.camId },
+    { id: 2026110500156, day: "20261105", start: 19 * 3600 + 20 * 60 + 48, seconds: 11, camId: cameraId("T9001P0000000000") });
+  assert.equal(clipFromRow({ ...row, storage_path: "" }), null);
+  assert.equal(clipFromRow({ ...row, frame_num: 0 }), null);
+  assert.equal(clipFromRow({ ...row, start_time: "soon" }), null);
+  const later = { ...clip, id: 2026110500157, start: clip.start + 60 };
+  const text = clipsLines("20261105", [clip, later]);
+  assert.equal(text, `clips\t20261105\t2\nclip\t2026110500157\t${later.start}\t11\t${clip.camId}\nclip\t2026110500156\t${clip.start}\t11\t${clip.camId}\n`);
+  assert(!text.includes("T9001") && !text.includes("emmcdata"), "no serials or paths reach the device");
+  assert.equal(monthLines("202611", new Map([["20261104", 47], ["20261106", 0], ["20261201", 3]])), "month\t202611\nday\t4\t47\n");
+  assert.equal(clipStateLine({ pos: 5037.4, dur: 11000, playing: true, ended: false }), "clip\t5037\t11000\t1\t0\n");
+});

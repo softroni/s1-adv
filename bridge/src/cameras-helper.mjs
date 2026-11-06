@@ -510,7 +510,7 @@ async function liveFrame(id, after) {
   view.askedAt = Date.now();
   if (view.seq > after && view.shot) return { jpeg: view.shot, seq: view.seq, clip: view.clip ? clipState(view) : null };
   if (view.ended) throw new HelperError("not_live", 409);
-  return null;
+  return view.clip ? { jpeg: null, clip: clipState(view) } : null;  // A paused or ended clip still says where it is.
 }
 // A camera with a second lens zooms with it (the library's ptz().zoom, which eufy's app sends for
 // a pinch); the rest of a step is the digital zoom's.
@@ -957,9 +957,10 @@ export function handler() {
         case "POST /live/start": await liveStart(cam); send(res, 200, { ok: true }); return;
         case "GET /live/frame": {
           const got = await liveFrame(cam, Number(q.get("after")) || 0);
-          if (!got) { res.writeHead(204, { "cache-control": "no-store" }); res.end(); return; }
+          const where = got?.clip ? { "x-clip": clipStateLine(got.clip).trim().split("\t").slice(1).join(" ") } : {};
+          if (!got?.jpeg) { res.writeHead(204, { "cache-control": "no-store", ...where }); res.end(); return; }
           res.writeHead(200, { "content-type": "image/jpeg", "content-length": String(got.jpeg.length), "x-seq": String(got.seq), "cache-control": "no-store",
-            ...(got.clip ? { "x-clip": clipStateLine(got.clip).trim().split("\t").slice(1).join(" ") } : {}) });
+            ...where });
           res.end(got.jpeg);
           return;
         }

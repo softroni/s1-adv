@@ -187,10 +187,10 @@ export class CameraService {
     const day = /^\d{8}$/u.test(params.get("day") || "") ? params.get("day") : "";
     const clip = /^\d{1,16}$/u.test(params.get("id") || "") ? params.get("id") : "";
     const bytes = (got, type) => {
-      if (got.status === 204) { res.writeHead(204, { "cache-control": "no-store" }); res.end(); return; }
+      const where = /^\d+ \d+ [01] [01]$/u.test(got.clip) ? { "x-clip": got.clip } : {};
+      if (got.status === 204) { res.writeHead(204, { "cache-control": "no-store", ...where }); res.end(); return; }
       if (got.status !== 200) throw new CameraError(helperCode(got), got.status === 404 || got.status === 409 || got.status === 400 ? got.status : 502);
       // A clip's frames say where it is: "<position ms> <length ms> <playing> <ended>".
-      const where = /^\d+ \d+ [01] [01]$/u.test(got.clip) ? { "x-clip": got.clip } : {};
       res.writeHead(200, { "content-type": type, "content-length": String(got.body.length), "cache-control": "no-store", ...where });
       res.end(got.body);
     };
