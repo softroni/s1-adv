@@ -13,7 +13,13 @@ makes the Cardputer a keyboard the Apple TV pairs with once. Then there's no nee
 you can type in search boxes and passwords on the Cardputer's keyboard. The TV's own volume, mute
 and power always go by infrared, and those are a Samsung TV's.
 
-![TV Remote: the arrow keys around OK, the keys for Home, Sleep and the TV's volume, mute and power, and Up just sent by infrared](assets/screens/tv-remote.png)
+![TV Remote: the arrows around OK, then buttons in two groups, Apple TV (Back, Play, Home, Sleep) and Samsung TV (volume, mute, power), each with its key](assets/screens/tv-remote.png)
+
+Each button shows the key that presses it. The Apple TV group and the ring go to the Apple TV,
+and the Samsung TV group goes to the TV. When a code goes out, its button or arrow lights up for a
+moment:
+
+![Home just sent: its button lit](assets/screens/tv-remote-lit.png)
 
 ## The keys
 
@@ -33,8 +39,8 @@ and power always go by infrared, and those are a Samsung TV's.
 | Shift+B twice | [Forget](#forgetting-the-apple-tv) the Apple TV | |
 | Esc | Leaves the app | |
 
-The bottom line says what the last key sent and how, such as "Up by infrared" or "Play/Pause by
-Bluetooth". The top corner says how keys are going: **Infrared**, **BT waiting** while Bluetooth
+The bottom line says what the last key sent and how, such as "Up by infrared" or "Volume up to
+the TV". The top corner says how keys are going: **Infrared**, **BT waiting** while Bluetooth
 is on but nothing is connected, **Bluetooth** when the Apple TV is connected, **BT starting** while it waits for the network to
 finish something, or **BT failed**.
 

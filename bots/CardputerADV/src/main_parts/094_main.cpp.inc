@@ -23,6 +23,10 @@ bool gTvBluetoothPending = false;
 tv_ble::State gTvShownState = tv_ble::State::Off;
 tv_remote::Action gTvLast = tv_remote::Action::None;
 bool gTvLastByBluetooth = false;
+// The button or arrow just sent, lit on screen until this time.
+constexpr uint32_t kTvFlashMs = 180;
+tv_remote::Action gTvFlash = tv_remote::Action::None;
+uint32_t gTvFlashUntilMs = 0;
 // The key being held, for its repeats. A typed arrow repeats as its keyboard usage.
 char gTvHeldKey = 0;
 tv_remote::Action gTvHeldAction = tv_remote::Action::None;
@@ -144,6 +148,8 @@ void tvSend(tv_remote::Action a, bool repeat) {
   }
   gTvLast = a;
   gTvLastByBluetooth = byBluetooth;
+  gTvFlash = a;
+  gTvFlashUntilMs = millis() + kTvFlashMs;
   if (!repeat) {
     flashActivityLed(80, 190, 255, 90);
     gTvNoticeUntilMs = 0;
@@ -280,6 +286,10 @@ void serviceTvRemote() {
     gTvNoticeUntilMs = 0;
     tvInvalidate();
   }
+  if (gTvFlash != tv_remote::Action::None && int32_t(millis() - gTvFlashUntilMs) >= 0) {
+    gTvFlash = tv_remote::Action::None;  // Unlit again.
+    tvInvalidate();
+  }
   if (!gTvHeldKey) return;
   const auto& word = gKeyboardState.word;
   if (gLauncherVisible || word.size() != 1 || word[0] != gTvHeldKey) {
@@ -340,51 +350,72 @@ void tvHeader(const char* title) {
   d.print(link);
 }
 
-// The Apple TV's ring: the four arrow keys around OK.
+// The colours hold up in the canvas's 3-3-2 bits, where a darker tint would turn black.
+uint16_t tvPanel() { return rgb565_local(36, 36, 85); }
+uint16_t tvEdge() { return rgb565_local(73, 73, 170); }
+uint16_t tvKeycap() { return rgb565_local(36, 73, 170); }
+uint16_t tvLit() { return rgb565_local(36, 109, 170); }
+uint16_t tvLabel() { return rgb565_local(146, 146, 170); }
+bool tvLitNow(tv_remote::Action a) { return gTvFlash == a && int32_t(millis() - gTvFlashUntilMs) < 0; }
+
+// The Apple TV's ring: the four arrows around OK, and the one just sent lit.
 void tvDrawPad(int16_t cx, int16_t cy) {
+  using tv_remote::Action;
   auto& d = gCanvas;
-  const uint16_t accent = tvAccent(), ring = rgb565_local(60, 80, 110);
-  d.drawCircle(cx, cy, 36, ring);
-  d.drawCircle(cx, cy, 35, ring);
-  d.fillTriangle(cx, cy - 33, cx - 5, cy - 27, cx + 5, cy - 27, accent);
-  d.fillTriangle(cx, cy + 33, cx - 5, cy + 27, cx + 5, cy + 27, accent);
-  d.fillTriangle(cx - 33, cy, cx - 27, cy - 5, cx - 27, cy + 5, accent);
-  d.fillTriangle(cx + 33, cy, cx + 27, cy - 5, cx + 27, cy + 5, accent);
-  d.setFont(&fonts::Font0);
-  d.setTextColor(TFT_WHITE);
-  d.setCursor(cx - 2, cy - 24);
-  d.print(';');
-  d.setCursor(cx - 2, cy + 17);
-  d.print('.');
-  d.setCursor(cx - 25, cy - 3);
-  d.print(',');
-  d.setCursor(cx + 20, cy - 3);
-  d.print('/');
-  d.fillCircle(cx, cy, 14, accent);
+  constexpr int16_t r = 37;
+  d.fillCircle(cx, cy, r, tvPanel());
+  // Which quarter to light, as LovyanGFX's angles go: clockwise from three o'clock.
+  struct Side { Action action; float from, to; };
+  constexpr Side sides[] = {{Action::Up, 225, 315}, {Action::Down, 45, 135}, {Action::Left, 135, 225}};
+  for (const Side& side : sides)
+    if (tvLitNow(side.action)) d.fillArc(cx, cy, 16, r - 1, side.from, side.to, tvLit());
+  if (tvLitNow(Action::Right)) {
+    d.fillArc(cx, cy, 16, r - 1, 315, 360, tvLit());
+    d.fillArc(cx, cy, 16, r - 1, 0, 45, tvLit());
+  }
+  d.drawCircle(cx, cy, r, tvEdge());
+  const uint16_t arrow = TFT_WHITE;
+  d.fillTriangle(cx, cy - 33, cx - 6, cy - 26, cx + 6, cy - 26, arrow);
+  d.fillTriangle(cx, cy + 33, cx - 6, cy + 26, cx + 6, cy + 26, arrow);
+  d.fillTriangle(cx - 33, cy, cx - 26, cy - 6, cx - 26, cy + 6, arrow);
+  d.fillTriangle(cx + 33, cy, cx + 26, cy - 6, cx + 26, cy + 6, arrow);
+  // No key names here: the Cardputer's ; . , / keys have these arrows on them.
+  const bool ok = tvLitNow(Action::Select);
+  d.fillCircle(cx, cy, 14, ok ? TFT_WHITE : tvAccent());
   d.setFont(&fonts::Font2);
   d.setTextColor(TFT_BLACK);
   d.setCursor(cx - d.textWidth("OK") / 2, cy - 7);
   d.print("OK");
 }
 
-// A row of one or two keys with what they do, the key in the accent colour.
-void tvKeyRow(int16_t x, int16_t y, const char* key, const char* label, const char* key2 = nullptr,
-              const char* label2 = nullptr) {
+// A remote's button: its key on a small cap, then what it does. Lit while it's being sent.
+constexpr int16_t kTvButtonW = 70, kTvButtonH = 17;
+void tvButton(int16_t x, int16_t y, const char* key, const char* label, tv_remote::Action action) {
   auto& d = gCanvas;
+  const bool lit = tvLitNow(action);
+  d.fillRoundRect(x, y, kTvButtonW, kTvButtonH, 5, lit ? tvAccent() : tvPanel());
+  d.drawRoundRect(x, y, kTvButtonW, kTvButtonH, 5, lit ? tvAccent() : tvEdge());
+  d.setFont(&fonts::Font0);
+  const int16_t capW = max<int16_t>(13, d.textWidth(key) + 6);
+  d.fillRoundRect(x + 2, y + 2, capW, kTvButtonH - 4, 3, lit ? TFT_WHITE : tvKeycap());
+  d.setTextColor(lit ? TFT_BLACK : TFT_WHITE);
+  d.setCursor(x + 2 + (capW - d.textWidth(key)) / 2, y + 5);
+  d.print(key);
   d.setFont(&fonts::Font2);
-  int16_t at = x;
-  const auto one = [&](const char* k, const char* l) {
-    d.setTextColor(tvAccent());
-    d.setCursor(at, y);
-    d.print(k);
-    at += d.textWidth(k) + 5;
-    d.setTextColor(TFT_WHITE);
-    d.setCursor(at, y);
-    d.print(l);
-    at += d.textWidth(l) + 12;
-  };
-  one(key, label);
-  if (key2) one(key2, label2);
+  d.setTextColor(lit ? TFT_BLACK : TFT_WHITE);
+  d.setCursor(x + capW + 6, y + 1);
+  d.print(fitCurrentFontToWidth(label, kTvButtonW - capW - 8));
+}
+
+// A group's name over its buttons, with a rule to the edge.
+void tvGroup(int16_t x, int16_t y, const char* name) {
+  auto& d = gCanvas;
+  d.setFont(&fonts::Font0);
+  d.setTextColor(tvLabel());
+  d.setCursor(x, y);
+  d.print(name);
+  const int16_t after = x + d.textWidth(name) + 4;
+  d.drawFastHLine(after, y + 3, 236 - after, tvEdge());
 }
 
 // Where the Apple TV pairs, for as long as nothing has paired yet.
@@ -417,37 +448,44 @@ String tvLastLine(uint16_t& ink) {
 }
 
 void renderTvRemote() {
+  using tv_remote::Action;
   auto& d = gCanvas;
   tvHeader("TV Remote");
-  tvDrawPad(46, 64);
-  d.setFont(&fonts::Font0);
-  d.setTextColor(tvAccent());
-  d.setCursor(8, 106);
-  d.print("Del");
-  d.setCursor(8, 116);
-  d.print("Space");
-  d.setTextColor(TFT_WHITE);
-  d.setCursor(44, 106);
-  d.print("back");
-  d.setCursor(44, 116);
-  d.print("play");
+  tvDrawPad(45, 78);
   const bool pairing = tv_ble::state() == tv_ble::State::Waiting && !tv_ble::paired();
+  constexpr int16_t left = 92, right = left + kTvButtonW + 4;
   if (pairing) {
-    tvPairingSteps(92, 26);
+    tvPairingSteps(left, 26);
+  } else if (tv_ble::available()) {
+    // With Bluetooth there's a third Apple TV row, so the groups lose their names for a rule.
+    tvButton(left, 25, "Del", "Back", Action::Back);
+    tvButton(right, 25, "Spc", "Play", Action::PlayPause);
+    tvButton(left, 45, "H", "Home", Action::Home);
+    tvButton(right, 45, "Z", "Sleep", Action::Sleep);
+    tvButton(left, 65, "T", "Type", Action::Typing);
+    tvButton(right, 65, "B", tv_ble::on() ? "BT off" : "BT on", Action::Bluetooth);
+    d.drawFastHLine(left, 84, 236 - left, tvEdge());
+    tvButton(left, 86, "=", "Vol +", Action::VolumeUp);
+    tvButton(right, 86, "-", "Vol -", Action::VolumeDown);
+    tvButton(left, 106, "M", "Mute", Action::Mute);
+    tvButton(right, 106, "P", "Power", Action::TvPower);
   } else {
-    tvKeyRow(92, 27, "H", "Home", "Z", "Sleep");
-    tvKeyRow(92, 44, "= -", "TV volume");
-    tvKeyRow(92, 61, "M", "Mute", "P", "Power");
-    if (tv_ble::available()) {
-      tvKeyRow(92, 78, "T", "Type");
-      tvKeyRow(92, 95, "B", tv_ble::on() ? "Bluetooth off" : "Bluetooth");
-    }
+    tvGroup(left, 25, "APPLE TV");
+    tvButton(left, 35, "Del", "Back", Action::Back);
+    tvButton(right, 35, "Spc", "Play", Action::PlayPause);
+    tvButton(left, 55, "H", "Home", Action::Home);
+    tvButton(right, 55, "Z", "Sleep", Action::Sleep);
+    tvGroup(left, 77, "SAMSUNG TV");
+    tvButton(left, 87, "=", "Vol +", Action::VolumeUp);
+    tvButton(right, 87, "-", "Vol -", Action::VolumeDown);
+    tvButton(left, 107, "M", "Mute", Action::Mute);
+    tvButton(right, 107, "P", "Power", Action::TvPower);
   }
   uint16_t ink = 0;
   const String line = tvLastLine(ink);
   d.setFont(&fonts::Font0);
   d.setTextColor(ink);
-  d.setCursor(8, 126);
+  d.setCursor(8, 126);  // Under the last row of buttons, the whole width.
   d.print(fitCurrentFontToWidth(line, 224));
   d.setFont(&fonts::Font2);
 }

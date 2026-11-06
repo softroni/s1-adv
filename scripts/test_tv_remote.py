@@ -98,10 +98,13 @@ struct Box { int x, y, w, h; };
 struct Canvas {
   const int* font = &fonts::Font0; int x = 0, y = 0; std::vector<Box> texts; std::vector<std::string> printed;
   void bounds(int a, int b, int w, int h) { assert(a >= 0 && b >= 0 && w > 0 && h > 0 && a + w <= 240 && b + h <= 135); }
-  void fillScreen(uint16_t) { texts.clear(); printed.clear(); }
+  void fillScreen(uint16_t) { texts.clear(); printed.clear(); arcs = 0; }
   void fillRoundRect(int a, int b, int w, int h, int, uint16_t) { bounds(a, b, w, h); }
   void drawRoundRect(int a, int b, int w, int h, int, uint16_t) { bounds(a, b, w, h); }
   void drawCircle(int a, int b, int r, uint16_t) { assert(r > 0); bounds(a - r, b - r, 2 * r + 1, 2 * r + 1); }
+  int arcs = 0;
+  void fillArc(int a, int b, int r0, int r1, float from, float to, uint16_t c) { assert(0 < r0 && r0 < r1 && 0 <= from && from < to && to <= 360); drawCircle(a, b, r1, c); ++arcs; }
+  void drawFastHLine(int a, int b, int w, uint16_t) { bounds(a, b, w, 1); }
   void fillCircle(int a, int b, int r, uint16_t c) { drawCircle(a, b, r, c); }
   void fillTriangle(int a, int b, int c, int d, int e, int f, uint16_t) {
     bounds(min({a, c, e}), min({b, d, f}), max({a, c, e}) - min({a, c, e}) + 1, max({b, d, f}) - min({b, d, f}) + 1); }
@@ -299,8 +302,9 @@ int main() {
   // Wi-Fi is never touched.
   saved["tv_remote/bt"] = true;
   beginTvRemote(); render();
-  assert(tv_ble::starts == 0 && WiFi.m == WIFI_STA && emojiClears == 0 && shows("Infrared") && shows("H") && shows("TV volume"));
-  assert(!shows("T") && !shows("Type") && !shows("B") && !showsPart("Bluetooth"));
+  assert(tv_ble::starts == 0 && WiFi.m == WIFI_STA && emojiClears == 0 && shows("Infrared") && shows("APPLE TV") && shows("SAMSUNG TV"));
+  for (const char* s : {"Del", "Back", "Spc", "Play", "H", "Home", "Z", "Sleep", "=", "Vol +", "-", "Vol -", "M", "Mute", "P", "Power", "OK"}) assert(shows(s));
+  assert(!shows("T") && !shows("Type") && !shows("B") && !showsPart("BT") && !showsPart("Bluetooth"));
   for (char c : {'b', 't', 'B'}) { press(c); assert(shows("Bluetooth isn't in this version") && !tvRemoteTakesText()); }
   assert(tv_ble::starts == 0 && WiFi.m == WIFI_STA && !tvRemoteHoldsWifi());
   press('x'); assert(shows("H home, Z sleep, = - volume"));
@@ -317,12 +321,17 @@ int main() {
   // Opened with Bluetooth off, as it starts: everything goes by infrared.
   beginTvRemote(); render();
   assert(tv_ble::starts == 0 && irInits > 0 && shows("TV Remote") && shows("Infrared") && shows("Point it at the Apple TV") && overlays == 1);
-  assert(shows("H") && shows("Home") && shows("Z") && shows("Sleep") && shows("TV volume") && shows("Bluetooth") && shows("OK"));
+  for (const char* s : {"Del", "Back", "Spc", "Play", "H", "Home", "Z", "Sleep", "T", "Type", "B", "BT on", "=", "Vol +", "-", "Vol -", "M", "Mute", "P", "Power", "OK"}) assert(shows(s));
+  assert(gCanvas.arcs == 0);  // Nothing lit yet.
   assert(!tvRemoteTakesText());
   press(';'); assert(lastIr() == irCode(Action::Up).nec && shows("Up by infrared") && flashes == 1);
+  // The arrow just sent lights its quarter of the ring, and goes dark again after a moment.
+  assert(gCanvas.arcs == 1 && gTvFlash == Action::Up);
+  later(179); render(); assert(gCanvas.arcs == 1);
+  later(1); render(); assert(gCanvas.arcs == 0 && gTvFlash == Action::None);
   press('.', true); assert(lastIr() == irCode(Action::Down).nec);  // Fn makes no difference here.
   press(','); assert(lastIr() == irCode(Action::Left).nec);
-  press('/'); assert(lastIr() == irCode(Action::Right).nec);
+  press('/'); assert(lastIr() == irCode(Action::Right).nec && gCanvas.arcs == 2);  // Right spans 0 degrees: two arcs.
   enter(); assert(lastIr() == irCode(Action::Select).nec && shows("OK by infrared"));
   del(); assert(lastIr() == irCode(Action::Back).nec);
   press(' '); assert(lastIr() == irCode(Action::PlayPause).nec);
