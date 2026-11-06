@@ -583,30 +583,41 @@ async function archive() {
   return { session, accountId: record.raw?.member?.admin_user_id };
 }
 // A table read on channel 0: the library's readDatabase sends on the station channel, so its
-// queryDatabase is wrapped for the one call.
-async function archiveRead(innerCmd, query) {
-  const { session, accountId } = await archive();
-  const original = session.queryDatabase;
-  session.queryDatabase = (table, opts) => original.call(session, table, { ...opts, channel: 0 });
-  try {
-    return await session.readDatabase("history_record_info", { accountId, innerCmd, timeoutMs: 15000, query });
-  } finally {
-    session.queryDatabase = original;
-  }
+// queryDatabase is wrapped for the one call. A station reads one table at a time, so reads queue.
+let archiveReads = Promise.resolve();
+function archiveRead(innerCmd, query, onStationChannel = false) {
+  const run = async () => {
+    const { session, accountId } = await archive();
+    const original = session.queryDatabase;
+    if (!onStationChannel) session.queryDatabase = (table, opts) => original.call(session, table, { ...opts, channel: 0 });
+    try {
+      return await session.readDatabase("history_record_info", { accountId, innerCmd, timeoutMs: 15000, query });
+    } finally {
+      session.queryDatabase = original;
+    }
+  };
+  const result = archiveReads.then(run, run);
+  archiveReads = result.catch(() => {});
+  return result;
 }
+let byDateRefused = false;  // A HomeBase 2 refuses the by-date query and takes the library's.
 async function listDay(day) {
   if (!validDay(day)) throw new HelperError("bad_day", 400);
-  let rows;
-  try {
-    rows = await archiveRead(DB_QUERY_BY_DATE, {
-      count: 1000, detection_type: 0, device_info: [...cameras.values()].map((cam) => ({ device_sn: cam.sn })), end_date: addDays(day, 1),
-      event_type: 0, flag: 0, res_unzip: 1, start_date: day, start_time: `${day}000000`, storage_cloud: -1, ai_type: 0,
-    });
-  } catch (error) {
-    // A HomeBase 2 takes the library's own query instead.
-    const { session, accountId } = await archive();
-    rows = (await session.queryRecordPage({ accountId, startDate: day, endDate: addDays(day, 1), count: 100 }))
-      .flatMap((group) => Array.isArray(group?.payload) ? group.payload : []);
+  let rows = null;
+  if (!byDateRefused) {
+    try {
+      rows = await archiveRead(DB_QUERY_BY_DATE, {
+        count: 1000, detection_type: 0, device_info: [...cameras.values()].map((cam) => ({ device_sn: cam.sn })), end_date: addDays(day, 1),
+        event_type: 0, flag: 0, res_unzip: 1, start_date: day, start_time: `${day}000000`, storage_cloud: -1, ai_type: 0,
+      });
+    } catch (error) {
+      if (!/refused/u.test(String(error?.message))) throw error;
+      byDateRefused = true;
+    }
+  }
+  if (!rows) {
+    rows = await archiveRead(DB_QUERY_LOCAL, { count: 100, start_date: day, end_date: addDays(day, 1), start_time: "0", event_type: 0,
+      ai_type: 0, storage_cloud: -1, trigger_type: 0, detection_type: 0, flag: 0 }, true);
   }
   const flat = rows.flatMap((item) => item?.table_name === "history_record_info" && Array.isArray(item.payload) ? item.payload : [item]);
   const clips = new Map();
