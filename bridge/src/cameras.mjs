@@ -14,6 +14,9 @@
 //   live/start?cam=            starts a live view; then live/frame?cam= answers the next frame,
 //                              204 when none came in time, 409 once it has ended
 //   live/extend?cam=  live/stop?cam=  turn?cam=&dir=left|right|up|down  code?value=  report?...
+//   live/zoom?cam=&x=<tenths>  live/pan?cam=&dir=left|right|up|down[&turn=1]   both answer
+//                              "view <tenths> <x0> <y0> <x1> <y1> <moved|turned|edge|->": the zoom
+//                              now and where the view is in the frame, in thousandths
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -39,7 +42,8 @@ export function findNode24(configured) {
   return "";
 }
 
-const WHAT = new Set(["list", "thumb", "picture", "refresh", "live/start", "live/frame", "live/extend", "live/stop", "turn", "code", "report"]);
+const WHAT = new Set(["list", "thumb", "picture", "refresh", "live/start", "live/frame", "live/extend", "live/stop", "live/zoom",
+  "live/pan", "turn", "code", "report"]);
 
 export class CameraService {
   constructor({ dir = "", envFile = "", node, ffmpeg, enabled = true, spawnImpl = spawn, fetchImpl = fetch, now = Date.now,
@@ -194,6 +198,15 @@ export class CameraService {
         return;
       }
       case "live/extend": ok(await this.call("POST", "/live/extend", { cam })); return;
+      case "live/zoom":
+      case "live/pan": {
+        const ask = what === "live/zoom" ? { cam, x: String(Math.round(Number(params.get("x")) || 10)) }
+          : { cam, dir: String(params.get("dir") || ""), turn: params.get("turn") === "1" ? "1" : "0" };
+        const got = await this.call("POST", `/${what}`, ask, 15000);
+        if (got.status !== 200) throw new CameraError(helperCode(got), [400, 404, 409].includes(got.status) ? got.status : 502);
+        lines(res, viewLine(JSON.parse(got.body.toString("utf8"))));
+        return;
+      }
       case "live/stop": this.sent.delete(`${device}\t${cam}`); ok(await this.call("POST", "/live/stop", { cam }, 10000)); return;
       case "turn": ok(await this.call("POST", "/turn", { cam, dir: params.get("dir") || "" })); return;
       case "code": {
@@ -229,6 +242,13 @@ export class CameraService {
     const id = this.ticket(device);
     return [`ticket\t${this.lanPort}\t/cameras/${id}`, ...addresses.map(entry => `lan\t${entry.address}\t${entry.prefix}`)].join("\n") + "\n";
   }
+}
+
+export function viewLine(state) {
+  const rect = Array.isArray(state?.rect) && state.rect.length === 4 ? state.rect.map(v => Math.max(0, Math.min(1000, Math.round(Number(v) || 0))))
+    : [0, 0, 1000, 1000];
+  const action = ["moved", "turned", "edge"].includes(state?.action) ? state.action : "-";
+  return `view\t${Math.max(10, Math.round(Number(state?.tenths) || 10))}\t${rect.join("\t")}\t${action}\n`;
 }
 
 function helperCode(got) {

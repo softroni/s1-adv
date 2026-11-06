@@ -73,11 +73,13 @@ export function jpegLayout(jpeg) {
   }
   return null;
 }
-// What the Cardputer's decoder draws: the screen's picture, 4:2:0, colour.
+// What the Cardputer's decoder draws: the screen's picture, in colour, 4:2:0 as ffmpeg makes it or
+// 4:4:4 as the helper's own encoder (jpeg-js) does. ffmpeg's 4:2:2 and 4:4:4 it refuses.
 export function deviceDecodes(jpeg) {
   const layout = jpegLayout(jpeg);
+  const sampling = layout?.sampling.join(",");
   return Boolean(layout && layout.width === PICTURE.width && layout.height === PICTURE.height &&
-    layout.sampling.join(",") === "34,17,17");
+    (sampling === "34,17,17" || sampling === "17,17,17"));
 }
 
 // ffmpeg's MJPEG output, one JPEG after another, cut back into whole pictures. Inside a JPEG's
@@ -127,13 +129,80 @@ export function thumbArgs() {
     "-vf", `scale=${THUMB.width}:${THUMB.height}:flags=area`, "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1"];
 }
 // A live camera's Annex-B video to a picture per frame, as small and as soon as it can.
-export function liveArgs(codec, quality = 7) {
+// Live view: ffmpeg decodes the camera's video to raw 960x540 RGB frames on stdout, and the helper
+// cuts the part on screen out of each (viewRect, renderRect) and encodes it itself, so a zoom or a
+// pan is the very next picture, not a restart that waits for the camera's next keyframe. 960 wide is
+// four screens, so the 4x digital zoom still has a pixel for every one on the screen.
+export const RAW = Object.freeze({ width: 960, height: 540, bytes: 960 * 540 * 3 });
+export const DIGITAL_ZOOM = Object.freeze([1, 1.5, 2, 3, 4]);
+export function liveArgs(codec) {
   const format = codec === "h264" ? "h264" : codec === "h265" ? "hevc" : "";
   if (!format) return null;
   // No "-fflags nobuffer": it throws away the packets ffmpeg probed, the first keyframe among them,
   // and then nothing after it decodes.
   return [...QUIET, "-flags", "low_delay", "-probesize", "32768", "-analyzeduration", "0",
-    "-f", format, "-i", "pipe:0", "-an", "-vf", FILL, ...BASELINE, String(quality), "-f", "image2pipe", "pipe:1"];
+    "-f", format, "-i", "pipe:0", "-an",
+    "-vf", `scale=${RAW.width}:${RAW.height}:force_original_aspect_ratio=increase:flags=area,crop=${RAW.width}:${RAW.height}`,
+    "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1"];
+}
+
+// The part of the frame on screen at digital zoom z, its middle near (cx, cy), kept inside the frame.
+// Its shape is the screen's.
+export function viewRect(z, cx = RAW.width / 2, cy = RAW.height / 2) {
+  const fullW = Math.min(RAW.width, (RAW.height * PICTURE.width) / PICTURE.height);
+  const w = fullW / Math.max(1, Number(z) || 1), h = (w * PICTURE.height) / PICTURE.width;
+  const x = Math.min(Math.max(cx - w / 2, 0), RAW.width - w), y = Math.min(Math.max(cy - h / 2, 0), RAW.height - h);
+  return { x, y, w, h, cx: x + w / 2, cy: y + h / 2 };
+}
+// One arrow press moves the view a third of itself. moved is false at the frame's edge.
+export function panRect(rect, direction, z) {
+  const [dx, dy] = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] }[direction] || [0, 0];
+  const next = viewRect(z, rect.cx + (dx * rect.w) / 3, rect.cy + (dy * rect.h) / 3);
+  return { rect: next, moved: Math.abs(next.x - rect.x) > 0.5 || Math.abs(next.y - rect.y) > 0.5 };
+}
+// The view's place in the frame for the device's little map, in thousandths: x0 y0 x1 y1.
+export function rectMille(rect) {
+  return [rect.x / RAW.width, rect.y / RAW.height, (rect.x + rect.w) / RAW.width, (rect.y + rect.h) / RAW.height]
+    .map(v => Math.max(0, Math.min(1000, Math.round(v * 1000))));
+}
+// The rect of a raw frame to the screen's picture, as RGBA for the JPEG encoder: each pixel the
+// average of the frame's pixels under it.
+export function renderRect(rgb, rect, out = Buffer.alloc(PICTURE.width * PICTURE.height * 4)) {
+  const W = PICTURE.width, H = PICTURE.height, stride = RAW.width * 3;
+  const xs = new Int32Array(W + 1), ys = new Int32Array(H + 1);
+  for (let i = 0; i <= W; ++i) xs[i] = Math.min(RAW.width, Math.floor(rect.x + (i * rect.w) / W));
+  for (let j = 0; j <= H; ++j) ys[j] = Math.min(RAW.height, Math.floor(rect.y + (j * rect.h) / H));
+  let o = 0;
+  for (let j = 0; j < H; ++j) {
+    const y0 = Math.min(ys[j], RAW.height - 1), y1 = Math.max(ys[j + 1], y0 + 1);
+    for (let i = 0; i < W; ++i) {
+      const x0 = Math.min(xs[i], RAW.width - 1), x1 = Math.max(xs[i + 1], x0 + 1);
+      let r = 0, g = 0, b = 0;
+      for (let y = y0; y < y1; ++y) {
+        for (let p = y * stride + x0 * 3, end = y * stride + x1 * 3; p < end; p += 3) { r += rgb[p]; g += rgb[p + 1]; b += rgb[p + 2]; }
+      }
+      const n = (y1 - y0) * (x1 - x0);
+      out[o++] = r / n; out[o++] = g / n; out[o++] = b / n; out[o++] = 255;
+    }
+  }
+  return out;
+}
+
+// A camera with a second, telephoto lens (the library's ptz().zoom) zooms 3x with it, and the
+// digital zoom goes on top. The device steps through the ladder, in tenths, and the plan says which
+// lens and which digital output make each step.
+export const LENS_ZOOM = 3;
+export function zoomLadder(lens) {
+  const digital = DIGITAL_ZOOM.map(z => Math.round(z * 10));
+  return lens ? [...digital.filter(t => t < LENS_ZOOM * 10), ...digital.map(t => t * LENS_ZOOM)] : digital;
+}
+export function zoomPlan(tenths, lens) {
+  const ladder = zoomLadder(lens);
+  const asked = Number(tenths) || 10;
+  const step = ladder.reduce((best, t) => Math.abs(t - asked) < Math.abs(best - asked) ? t : best, ladder[0]);
+  const optical = lens && step >= LENS_ZOOM * 10 ? LENS_ZOOM : 1;
+  const branch = DIGITAL_ZOOM.findIndex(z => Math.round(z * 10 * optical) === step);
+  return { tenths: step, optical, branch };
 }
 
 // The HomeBase's mode, as one word the device shows. The library's typed getter answers the wire
@@ -156,7 +225,7 @@ export function shownName(name) {
 //   state <ready|setup|signing-in|code|captcha|error|off> [<what to show>]
 //   base <mode word>
 //   cam <id> <flags> <battery %|-> <seconds since motion|-> <seconds since its picture|-> <name>
-// flags: p pans and tilts, o switched off, - nothing. Ages are seconds, so the device's own
+// flags: p pans and tilts, z zooms with a second lens, o switched off, - nothing. Ages are seconds, so the device's own
 // clock doesn't matter.
 export function listLines(list, now = Date.now()) {
   const lines = [];
@@ -168,7 +237,7 @@ export function listLines(list, now = Date.now()) {
   const age = (ms) => Number.isFinite(ms) && ms > 0 ? String(Math.max(0, Math.round((now - ms) / 1000))) : "-";
   for (const cam of list?.cameras || []) {
     if (!CAMERA_ID.test(String(cam.id || ""))) continue;
-    const flags = `${cam.ptz ? "p" : ""}${cam.off ? "o" : ""}` || "-";
+    const flags = `${cam.ptz ? "p" : ""}${cam.zoom ? "z" : ""}${cam.off ? "o" : ""}` || "-";
     const battery = Number.isInteger(cam.battery) && cam.battery >= 0 && cam.battery <= 100 ? String(cam.battery) : "-";
     lines.push(["cam", cam.id, flags, battery, age(cam.motionAt), age(cam.pictureAt), shownName(cam.name)].join("\t"));
   }

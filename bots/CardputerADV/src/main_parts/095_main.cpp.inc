@@ -11,7 +11,8 @@
 #include "../camera_net.h"
 namespace {
 enum class CamView : uint8_t { Wall, Picture, Live };
-enum class CamJob : uint8_t { None, Ticket, List, Thumb, Picture, Refresh, LiveStart, Frame, Extend, Stop, Turn, Code, Report, Setup };
+enum class CamJob : uint8_t { None, Ticket, List, Thumb, Picture, Refresh, LiveStart, Frame, Extend, Stop, Turn, Code, Report, Setup,
+                              Zoom, Pan, AutoRefresh };
 
 constexpr uint32_t kCamListEveryMs = 60000;   // The wall's ages and battery, asked again this often.
 constexpr uint32_t kCamSigningEveryMs = 4000; // And while signing in, so the screen follows the phone.
@@ -58,6 +59,16 @@ uint32_t gCamLiveEndsMs = 0, gCamLiveBeganMs = 0, gCamLiveFrames = 0, gCamLiveBy
 uint32_t gCamFpsWindowMs = 0, gCamFpsFrames = 0;
 float gCamFps = 0;
 uint32_t gCamTurnLitUntil = 0;
+// Zoom and pan: where the bridge says the view is, and what's waiting to be asked.
+cameras::View gCamZoomView;
+uint8_t gCamWantZoom = 0;                // Tenths to ask for, 0 none.
+cameras::Arrow gCamWantPan = cameras::Arrow::None;
+bool gCamWantPanTurn = false;            // Fn with the arrow: turn the camera whatever the zoom.
+uint32_t gCamZoomLitUntil = 0;           // The zoom in the bar is lit a moment after it changes.
+// Opening the app takes a new picture from each camera once, after the last ones are shown.
+bool gCamAutoPlanned = false;
+bool gCamAutoWanted[cameras::kMax] = {};
+int gCamAutoCur = -1;
 // The screen.
 bool gCamDirty = true;                  // The picture needs drawing again.
 bool gCamWasDirect = false;
@@ -139,6 +150,9 @@ void camEndLive(const char* why) {
   gCamLive = false;
   gCamWantExtend = false;
   gCamWantTurn = cameras::Arrow::None;
+  gCamWantZoom = 0;
+  gCamWantPan = cameras::Arrow::None;
+  gCamZoomView = cameras::View{};
   gCamWantStop = gCamLiveStarted;
   if (gCamLiveStarted && gCamLiveFrames) {
     camQueueReport("live", why, 0);
@@ -183,6 +197,9 @@ void camOpenLive(int cam) {
   gCamFpsWindowMs = millis();
   gCamFpsFrames = 0;
   gCamRefreshSince = 0;
+  gCamZoomView = cameras::View{};
+  gCamWantZoom = 0;
+  gCamWantPan = cameras::Arrow::None;
   camInvalidate();
 }
 void camRefresh(int cam) {
@@ -404,6 +421,31 @@ void camFinished() {
     case CamJob::Turn:
       if (e != camera_net::Error::None) camSay(word == "no_ptz" ? "This camera doesn't turn" : camProblemText(e, word));
       break;
+    case CamJob::Zoom:
+    case CamJob::Pan: {
+      cameras::View view;
+      if (!gCamLive || cam != gCamCur) break;
+      if (e == camera_net::Error::None && data && cameras::parseView(reinterpret_cast<const char*>(data), length, view)) {
+        if (job == CamJob::Zoom && view.tenths != gCamZoomView.tenths) gCamZoomLitUntil = millis() + 1200;
+        gCamZoomView = view;
+        if (view.did == cameras::PanResult::Turned) gCamTurnLitUntil = millis() + kCamTurnLitMs;
+        else if (view.did == cameras::PanResult::Edge) camSay(gCamZoomView.tenths > 10 ? "That's the edge" : "This camera doesn't turn");
+      } else if (e != camera_net::Error::None) camSay(camProblemText(e, word));
+      camInvalidate();
+      break;
+    }
+    case CamJob::AutoRefresh:
+      gCamAutoCur = -1;
+      if (e == camera_net::Error::None && data && length && cam >= 0 && cam < camCount()) {
+        gCamList->cams[cam].pictureAge = int32_t((millis() - gCamListAtMs) / 1000);
+        gCamThumbAsked[cam] = false;
+        gCamThumbNone[cam] = false;
+        free(gCamThumb[cam]);
+        gCamThumb[cam] = nullptr;
+        if (gCamView == CamView::Picture && cam == gCamCur && !gCamRefreshSince) { camTakeJpeg(cam, data, length); data = nullptr; }
+      }
+      camInvalidate();
+      break;
     case CamJob::Setup: {
       char path[32], url[200];
       uint32_t seconds = 0;
@@ -436,6 +478,7 @@ bool camWantsSetupLink() {
   return camSignInShown() && !gCamSetupNone && (gCamSetupUrl.isEmpty() || int32_t(millis() - gCamSetupUntilMs) >= 0);
 }
 
+bool camNextThumb();
 // The next thing to ask, most urgent first.
 void camNextJob() {
   if (!gWifiReady || !wifiLocalAddress()) return;
@@ -468,6 +511,18 @@ void camNextJob() {
   if (gCamLive && gCamWantExtend) {
     gCamWantExtend = false;
     if (camStartFor(CamJob::Extend, gCamCur, "live/extend", 64, 10000)) return;
+  }
+  if (gCamLive && gCamLiveStarted && gCamWantZoom) {
+    char extra[16];
+    snprintf(extra, sizeof(extra), "x=%u", unsigned(gCamWantZoom));
+    gCamWantZoom = 0;
+    if (camStartFor(CamJob::Zoom, gCamCur, "live/zoom", 128, 15000, extra)) return;
+  }
+  if (gCamLive && gCamLiveStarted && gCamWantPan != cameras::Arrow::None) {
+    char extra[24];
+    snprintf(extra, sizeof(extra), "dir=%s%s", cameras::directionWord(gCamWantPan), gCamWantPanTurn ? "&turn=1" : "");
+    gCamWantPan = cameras::Arrow::None;
+    if (camStartFor(CamJob::Pan, gCamCur, "live/pan", 128, 15000, extra)) return;
   }
   if (gCamLive && gCamWantTurn != cameras::Arrow::None) {
     char extra[16];
@@ -503,6 +558,25 @@ void camNextJob() {
   }
   if (gCamView != CamView::Wall) return;
   // Thumbnails, the selected one's first, then the rest of its page.
+  if (camNextThumb()) return;
+  // Then, once the last pictures are up, a new one from each camera, the selected one first.
+  if (!gCamAutoPlanned) {
+    gCamAutoPlanned = true;
+    for (uint8_t i = 0; i < camCount(); ++i) {
+      const cameras::Camera& c = gCamList->cams[i];
+      const int32_t age = c.pictureAge < 0 ? -1 : int32_t(c.pictureAge + (millis() - gCamListAtMs) / 1000);
+      gCamAutoWanted[i] = !c.off && (age < 0 || age > 60);
+    }
+  }
+  for (int pass = 0; pass < 2; ++pass) {
+    for (uint8_t i = 0; i < camCount(); ++i) {
+      if (!gCamAutoWanted[i] || (pass == 0 && i != gCamSel)) continue;
+      gCamAutoWanted[i] = false;
+      if (camStartFor(CamJob::AutoRefresh, i, "refresh", cameras::kMaxJpeg, kCamRefreshWaitMs)) { gCamAutoCur = i; camInvalidate(); return; }
+    }
+  }
+}
+bool camNextThumb() {
   const uint8_t page = cameras::pageOf(gCamSel);
   for (int pass = 0; pass < 2; ++pass) {
     for (uint8_t i = 0; i < camCount(); ++i) {
@@ -510,9 +584,10 @@ void camNextJob() {
       if (pass == 1 && cameras::pageOf(i) != page) continue;
       if (gCamThumb[i] || gCamThumbAsked[i] || gCamThumbNone[i] || gCamList->cams[i].pictureAge < 0) continue;
       gCamThumbAsked[i] = true;
-      if (camStartFor(CamJob::Thumb, i, "thumb", cameras::kThumbBytes, 15000)) return;
+      if (camStartFor(CamJob::Thumb, i, "thumb", cameras::kThumbBytes, 15000)) return true;
     }
   }
+  return false;
 }
 
 // --- The app's life ------------------------------------------------------------------------
@@ -530,6 +605,9 @@ void beginCameras() {
   gCamJob = CamJob::None;
   gCamCode[0] = 0;
   gCamReport[0] = 0;
+  gCamAutoPlanned = false;
+  gCamAutoCur = -1;
+  for (bool& wanted : gCamAutoWanted) wanted = false;
   gCamNotice = "";
   gCamNoticeUntil = 0;
   gCamProblem = "";
@@ -666,13 +744,22 @@ bool handleCamerasKey(char key, const Keyboard_Class::KeysState& keys) {
     if (lower == 's') { camSave(); return true; }
     return true;
   }
-  // Live.
+  // Live. = and - zoom; the arrows move around the zoomed picture, and at its edge, or with Fn,
+  // turn a camera that pans and tilts. The bridge says which happened.
+  const cameras::Camera* c = camAt(gCamCur);
+  if (key == '=' || key == '+' || key == '-' || key == '_') {
+    if (!c || !gCamLiveStarted) return true;
+    const uint8_t from = gCamWantZoom ? gCamWantZoom : uint8_t(gCamZoomView.tenths);
+    const uint8_t to = cameras::zoomStep(c->lens, from, key == '=' || key == '+' ? 1 : -1);
+    if (to == from) camSay(to > 10 ? "That's as close as it goes" : "That's all of it");
+    else gCamWantZoom = to;
+    return true;
+  }
   if (arrow != cameras::Arrow::None) {
-    const cameras::Camera* c = camAt(gCamCur);
-    if (!c || !c->ptz) { camSay("This camera doesn't turn"); return true; }
-    gCamWantTurn = arrow;
-    gCamTurnLitUntil = millis() + kCamTurnLitMs;
-    camInvalidate();
+    if (!c) return true;
+    if (gCamZoomView.tenths <= 10 && !c->ptz) { camSay("This camera doesn't turn: zoom in with ="); return true; }
+    gCamWantPan = arrow;
+    gCamWantPanTurn = keys.fn;
     return true;
   }
   if (enter) {
@@ -772,15 +859,34 @@ void camDrawLiveBar(lgfx::LGFXBase& d) {
   d.setTextColor(TFT_WHITE);
   d.setCursor(16, 0);
   d.print("LIVE");
-  d.setTextColor(camMuted());
-  d.setCursor(52, 0);
-  d.print(camFit(d, c ? c->name : "", 100));
-  char right[24];
+  char right[24], zoom[8] = "";
   if (!gCamLiveStarted || !gCamLiveFrames) snprintf(right, sizeof(right), "%s", "Connecting...");
   else snprintf(right, sizeof(right), "%s  %dfps", clock, int(gCamFps + 0.5f));
+  if (gCamZoomView.tenths > 10) cameras::zoomText(zoom, sizeof(zoom), gCamZoomView.tenths);
+  const int16_t rightW = d.textWidth(right), zoomW = zoom[0] ? d.textWidth(zoom) + 8 : 0;
+  d.setTextColor(camMuted());
+  d.setCursor(52, 0);
+  d.print(camFit(d, c ? c->name : "", 236 - rightW - zoomW - 52 - 6));
+  if (zoom[0]) {
+    const bool lit = gCamZoomLitUntil && int32_t(millis() - gCamZoomLitUntil) < 0;
+    d.setTextColor(lit ? camAccent() : camAmber());
+    d.setCursor(236 - rightW - zoomW, 0);
+    d.print(zoom);
+  }
   d.setTextColor(TFT_WHITE);
-  d.setCursor(236 - d.textWidth(right), 0);
+  d.setCursor(236 - rightW, 0);
   d.print(right);
+}
+
+// Zoomed in, a little map in the bottom corner: the whole picture, and where the view is in it.
+void camDrawZoomMap(lgfx::LGFXBase& d) {
+  constexpr int16_t kX = 4, kY = 135 - 4 - 22, kW = 39, kH = 22;
+  const cameras::View& v = gCamZoomView;
+  d.fillRect(kX, kY, kW, kH, TFT_BLACK);
+  d.drawRect(kX, kY, kW, kH, camMuted());
+  const int16_t x0 = int16_t(kX + 1 + (kW - 2) * v.x0 / 1000), y0 = int16_t(kY + 1 + (kH - 2) * v.y0 / 1000);
+  const int16_t x1 = int16_t(kX + 1 + (kW - 2) * v.x1 / 1000), y1 = int16_t(kY + 1 + (kH - 2) * v.y1 / 1000);
+  d.fillRect(x0, y0, max<int16_t>(2, int16_t(x1 - x0)), max<int16_t>(2, int16_t(y1 - y0)), camAccent());
 }
 
 // The refresh's box over the picture: "Waking Porch... 4s".
@@ -833,6 +939,7 @@ void camDrawDirect() {
   if (live) {
     const cameras::Camera* c = camAt(gCamCur);
     if (c && c->ptz) camDrawTurnIcon(d, 226, 121, gCamTurnLitUntil && int32_t(millis() - gCamTurnLitUntil) < 0);
+    if (gCamZoomView.tenths > 10) camDrawZoomMap(d);
   }
   if (!live) camDrawWaking(d);
   camDrawNoticeDirect(d);
@@ -885,6 +992,14 @@ void camDrawTile(uint8_t tile) {
   if (selected) {
     d.drawRect(x, y, cameras::kThumbW, cameras::kThumbH, edge);
     d.drawRect(x + 1, y + 1, cameras::kThumbW - 2, cameras::kThumbH - 2, edge);
+  }
+  // Taking its new picture, the one-time refresh on opening: an amber strip saying so.
+  if (int(tile) == gCamAutoCur) {
+    d.fillRect(x + 2, y + cameras::kThumbH - 11, cameras::kThumbW - 4, 9, TFT_BLACK);
+    d.setTextColor(camAmber());
+    const char* text = "updating...";
+    d.setCursor(x + (cameras::kThumbW - d.textWidth(text)) / 2, y + cameras::kThumbH - 10);
+    d.print(text);
   }
   // The label: its name, a red dot for motion in the last five minutes, and how long ago.
   const int16_t ly = int16_t(y + cameras::kThumbH);

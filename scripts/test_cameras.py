@@ -74,6 +74,15 @@ if font16.exists():
         assert len(texts) <= 3, name
 assert 'int16_t y = 30;' in sign_in and 'y += 16)' in sign_in and 'y += 4;' in sign_in  # 30 + 6 x 16 + 4 = 130
 assert 'd.qrcode(gCamSetupUrl.c_str(), 0, 0, 135, 1, true);' in sign_in, 'the code fills the height, with its quiet zone'
+# The zoom steps are the bridge's: the device steps through them and the bridge plans each one.
+import json as _json, shutil as _shutil
+if _shutil.which('node'):
+    bridge_ladders = _json.loads(subprocess.run(['node', '--input-type=module', '-e',
+        f'import {{zoomLadder}} from {_json.dumps((root / "bridge/src/cameras-media.mjs").as_uri())};'
+        'console.log(JSON.stringify([zoomLadder(true), zoomLadder(false)]))'], check=True, capture_output=True, text=True).stdout)
+    catalog = (src / 'camera_catalog.h').read_text()
+    for name, ladder in zip(('kLens', 'kDigital'), bridge_ladders):
+        assert f'static const uint8_t {name}[] = {{{", ".join(map(str, ladder))}}};' in catalog, (name, ladder)
 # Live view only ever goes over the home door, never TLS; pictures may come either way.
 assert 'Live works on home Wi-Fi only' in app
 # The serial number, name or address of a camera is never logged; only counts and words.
@@ -151,6 +160,30 @@ int main() {
   assert(setupUrl(url, sizeof(url), "bridge.example", 443, true, sp) && !strcmp(url, "https://bridge.example/eufy/Ab3_-x9QrZt0LmN2"));
   assert(setupUrl(url, sizeof(url), "192.168.0.20", 31889, false, sp) && !strcmp(url, "http://192.168.0.20:31889/eufy/Ab3_-x9QrZt0LmN2"));
   assert(!setupUrl(url, sizeof(url), "", 443, true, sp));
+
+  // Zoom: the device's steps, its words for them, and the bridge's answer.
+  List zl;
+  lines("state\tready\ncam\t0123abcd\tpz\t90\t-\t-\t360\ncam\t89abcdef\t-\t90\t-\t-\tSide\n", zl);
+  assert(zl.cams[0].lens && zl.cams[0].ptz && !zl.cams[1].lens);
+  uint8_t ladder[kZoomSteps];
+  assert(zoomLadder(true, ladder) == 8 && ladder[3] == 30 && ladder[7] == 120);
+  assert(zoomLadder(false, ladder) == 5 && ladder[4] == 40);
+  assert(zoomStep(true, 10, 1) == 15 && zoomStep(true, 20, 1) == 30 && zoomStep(true, 120, 1) == 120);
+  assert(zoomStep(true, 45, -1) == 30 && zoomStep(false, 10, -1) == 10 && zoomStep(false, 40, 1) == 40);
+  assert(zoomStep(false, 45, -1) == 40 && "from a lens zoom to a camera without one");
+  char zt[8];
+  zoomText(zt, sizeof(zt), 15); assert(!strcmp(zt, "1.5x"));
+  zoomText(zt, sizeof(zt), 30); assert(!strcmp(zt, "3x"));
+  zoomText(zt, sizeof(zt), 120); assert(!strcmp(zt, "12x"));
+  View v;
+  const char* va = "view\t45\t100\t200\t600\t700\tmoved\n";
+  assert(parseView(va, strlen(va), v) && v.tenths == 45 && v.x0 == 100 && v.y1 == 700 && v.did == PanResult::Moved);
+  const char* vb = "view\t10\t0\t0\t1000\t1000\tturned\n";
+  assert(parseView(vb, strlen(vb), v) && v.did == PanResult::Turned && v.x1 == 1000);
+  View kept = v;
+  const char* vc = "view\t10\t600\t0\t500\t1000\t-\n";
+  assert(!parseView(vc, strlen(vc), v) && v.x0 == kept.x0 && "a bad answer leaves the view as it was");
+  assert(!parseView("zoom\t30\n", 8, v));
 
   // The worker's HTTP answers.
   Response r;
@@ -236,10 +269,22 @@ if (tjpgd / 'lgfx_tjpgd.c').exists() and ffmpeg and node:
         hevc = subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=15',
                                '-frames:v', '4', '-c:v', 'libx265', '-x265-params', 'log-level=none', '-f', 'hevc', 'pipe:1'],
                               check=True, capture_output=True).stdout
-        (tmp / 'picture.jpg').write_bytes(subprocess.run([ffmpeg] + args['picture'][0:], input=still, check=True, capture_output=True).stdout)
-        frames = subprocess.run([ffmpeg] + args['live'], input=hevc, check=True, capture_output=True).stdout
-        first = frames[:frames.index(b'\xff\xd9') + 2]
-        (tmp / 'frame.jpg').write_bytes(first)
+        (tmp / 'picture.jpg').write_bytes(subprocess.run([ffmpeg] + args['picture'], input=still, check=True, capture_output=True).stdout)
+        # Live: the helper's way, a raw frame cropped at the widest and the closest zoom and encoded by
+        # jpeg-js, where the eufy library's folder has it (it isn't in this repository).
+        (tmp / 'live.raw').write_bytes(subprocess.run([ffmpeg] + args['live'], input=hevc, check=True, capture_output=True).stdout)
+        live = []
+        jpegjs_home = Path.home() / '.s1-adv/data/cameras/package.json'
+        if jpegjs_home.exists():
+            subprocess.run([node, '--input-type=module', '-e',
+                f'import {{RAW, renderRect, viewRect, PICTURE}} from {json.dumps(media.as_uri())};'
+                'import {createRequire} from "node:module"; import {readFileSync, writeFileSync} from "node:fs";'
+                f'const jpeg = createRequire({json.dumps(str(jpegjs_home))})("jpeg-js");'
+                f'const raw = readFileSync({json.dumps(str(tmp / "live.raw"))}).subarray(0, RAW.bytes);'
+                'for (const z of [1, 4]) writeFileSync(' + json.dumps(str(tmp)) + ' + `/live${z}.jpg`, '
+                'jpeg.encode({data: renderRect(raw, viewRect(z)), width: PICTURE.width, height: PICTURE.height}, 70).data);'],
+                check=True)
+            live = [tmp / 'live1.jpg', tmp / 'live4.jpg']
         harness = tmp / 'jd.c'
         harness.write_text(r"""
 #include <stdio.h>
@@ -268,6 +313,7 @@ int main(int argc, char** argv) {
         subprocess.run([os.environ.get('CC', 'cc'), '-O1', '-w', '-I', str(tjpgd), str(harness), str(tjpgd / 'lgfx_tjpgd.c'), '-o', str(exe)], check=True)
         w, h = str(args['size']['width']), str(args['size']['height'])
         assert h in ('135', '136'), 'drawn from the top, so one row past the 135 is off the screen'
-        subprocess.run([str(exe), str(tmp / 'picture.jpg'), w, h, str(tmp / 'frame.jpg'), w, h], check=True)
+        files = [str(tmp / 'picture.jpg')] + [str(f) for f in live]
+        subprocess.run([str(exe)] + [x for f in files for x in (f, w, h)], check=True)
     print('cameras: the device decodes the bridge pictures and live frames')
 print('cameras: ok')

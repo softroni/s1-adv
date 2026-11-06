@@ -10,9 +10,11 @@ import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { mkdir, readFile, rename, stat, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import {
-  CAMERA_ID, JpegSplitter, PICTURE, THUMB, cameraId, deviceDecodes, dither332, liveArgs, modeWord, pictureArgs, scrub, shownName, thumbArgs
+  CAMERA_ID, DIGITAL_ZOOM, PICTURE, RAW, THUMB, cameraId, deviceDecodes, dither332, liveArgs, modeWord, panRect, pictureArgs, rectMille,
+  renderRect, scrub, shownName, thumbArgs, viewRect, zoomPlan
 } from "./cameras-media.mjs";
 
 const DIR = process.env.CAMERAS_DIR || "";
@@ -27,6 +29,7 @@ const LIVE_IDLE_MS = 6000;          // No frame asked for this long: the Cardput
 const LIVE_MAX_MS = 10 * 60 * 1000; // However often it's extended, a live view ends after this.
 const LIVE_EXTEND_MS = 55 * 1000;   // An extend from the device keeps it going this much longer.
 const FRAME_WAIT_MS = 4000;         // A frame request waits this long for a new frame.
+const LIVE_QUALITY = 70;            // jpeg-js's quality for live pictures: about 7 KB each.
 const RETRY_MS = 10 * 60 * 1000;    // A failed sign-in is tried again this rarely, or when eufy.env changes.
 
 const serials = new Set();
@@ -45,6 +48,14 @@ async function loadSdk() {
     : pkg.exports?.["."]?.import || pkg.exports?.["."]?.default || pkg.exports?.["."] || pkg.main;
   if (typeof entry !== "string") throw new Error("eufy library has no entry point");
   return import(pathToFileURL(path.join(root, entry)).href);
+}
+
+// jpeg-js (BSD-3-Clause), which the eufy library brings: the live pictures' encoder. Its 4:4:4
+// baseline JPEGs are ones the device's decoder takes, and it adds no frame of delay as ffmpeg does.
+let jpeg = null;
+function loadJpeg() {
+  jpeg ||= createRequire(path.join(DIR, "package.json"))("jpeg-js");
+  return jpeg;
 }
 
 // --- The account ---------------------------------------------------------------------------
@@ -240,7 +251,7 @@ async function list() {
   for (const [id, cam] of cameras) {
     const battery = batteryOf(cam.dev);
     out.cameras.push({
-      id, name: shownName(cam.name), ptz: Boolean(cam.dev.has?.("ptz") && cam.dev.ptz?.()?.rotate),
+      id, name: shownName(cam.name), ptz: Boolean(cam.dev.has?.("ptz") && cam.dev.ptz?.()?.rotate), zoom: hasLens(cam),
       off: cam.dev.camera?.()?.enabled === false,
       battery: Number.isFinite(battery) ? Math.round(battery) : undefined,
       motionAt: saved.motion[id] || 0, pictureAt: await pictureAt(id),
@@ -301,7 +312,9 @@ async function readPicture(id, kind) {
 }
 async function refresh(id) {
   const cam = cameraFor(id);
-  if (live?.id === id && live.frame) return savePicture(id, live.frame, true);
+  if (live?.id === id && live.raw) {
+    return savePicture(id, jpeg.encode({ data: renderRect(live.raw, viewRect(1)), width: PICTURE.width, height: PICTURE.height }, LIVE_QUALITY).data, true);
+  }
   const media = cam.dev.camera?.();
   if (!media?.snapshotLive) throw new HelperError("no_still", 409);
   const began = Date.now();
@@ -331,8 +344,12 @@ async function liveStart(id) {
   if (live) await liveStop("another camera");
   const media = cam.dev.camera?.();
   if (!media?.live) throw new HelperError("no_live", 409);
-  const view = { id, frame: null, seq: 0, waiters: [], startedAt: Date.now(), askedAt: Date.now(),
-    extendUntil: Date.now() + LIVE_EXTEND_MS, ff: null, codec: "", frames: 0, ended: false, stream: null };
+  // raw is the newest decoded frame, filling into next; shot is the screen's picture of it at the
+  // zoom and place asked for, and seq counts them. optical is the lens the camera was asked for,
+  // digital the crop on top of it, rect where that crop is.
+  const view = { id, raw: null, next: Buffer.alloc(RAW.bytes), filled: 0, shot: null, seq: 0, rgba: null,
+    optical: 1, digital: 1, tenths: 10, rect: viewRect(1), waiters: [], startedAt: Date.now(), askedAt: Date.now(),
+    extendUntil: Date.now() + LIVE_EXTEND_MS, ff: null, codec: "", frames: 0, ended: false, stream: null, cam };
   live = view;
   log(`live ${id} starting`);
   let stream;
@@ -352,6 +369,29 @@ async function liveStart(id) {
   stream.on("stop", () => void liveEnded(view, "camera stopped"));
   stream.on("error", (error) => { warn(`live ${id}: ${error?.name || error?.message}`); void liveEnded(view, "error"); });
 }
+// The picture of the newest frame at the view's zoom and place, for the frames waiting on it.
+function render(view) {
+  if (!view.raw) return;
+  view.rgba = renderRect(view.raw, view.rect, view.rgba || undefined);
+  view.shot = jpeg.encode({ data: view.rgba, width: PICTURE.width, height: PICTURE.height }, LIVE_QUALITY).data;
+  view.seq += 1;
+  for (const wake of view.waiters.splice(0)) wake();
+}
+function onRaw(view, chunk) {
+  let at = 0;
+  while (at < chunk.length) {
+    const take = Math.min(RAW.bytes - view.filled, chunk.length - at);
+    chunk.copy(view.next, view.filled, at, at + take);
+    view.filled += take;
+    at += take;
+    if (view.filled === RAW.bytes) {
+      [view.raw, view.next] = [view.next, view.raw || Buffer.alloc(RAW.bytes)];
+      view.filled = 0;
+      view.frames += 1;
+      render(view);
+    }
+  }
+}
 function onVideo(view, frame) {
   if (view.ended) return;
   if (!view.ff) {
@@ -360,13 +400,7 @@ function onVideo(view, frame) {
     if (!args) { warn(`live ${view.id}: no decoder for ${frame.codec}`); void liveEnded(view, "codec"); return; }
     view.codec = frame.codec;
     const child = spawn(FFMPEG, args, { stdio: ["pipe", "pipe", "pipe"] });
-    const splitter = new JpegSplitter((jpeg) => {
-      view.frame = jpeg;
-      view.seq += 1;
-      view.frames += 1;
-      for (const wake of view.waiters.splice(0)) wake();
-    });
-    child.stdout.on("data", (chunk) => splitter.push(chunk));
+    child.stdout.on("data", (chunk) => onRaw(view, chunk));
     child.stderr.on("data", () => {});
     child.stdin.on("error", () => {});
     child.on("close", () => { if (!view.ended) void liveEnded(view, "decoder stopped"); });
@@ -380,12 +414,22 @@ async function liveEnded(view, why) {
   if (view.ended) return;
   view.ended = true;
   for (const wake of view.waiters.splice(0)) wake();
+  // The lens back to wide before the camera's session goes, so it isn't left zoomed for the next.
+  if (view.optical !== 1) {
+    try { await Promise.race([view.cam.dev.ptz?.()?.zoom?.(1), new Promise(resolve => setTimeout(resolve, 3000))]); } catch {}
+  }
   try { view.stream?.stop(); } catch {}
   try { view.ff?.stdin.end(); } catch {}
   setTimeout(() => { try { view.ff?.kill("SIGKILL"); } catch {} }, 2000).unref();
   const seconds = Math.round((Date.now() - view.startedAt) / 1000);
   log(`live ${view.id} ended (${why}) after ${seconds} s, ${view.frames} frames`);
-  if (view.frame) { try { await savePicture(view.id, view.frame, true); } catch (error) { warn(`last frame not kept: ${error.code || error.message}`); } }
+  // The wall keeps the camera's whole view, not the zoomed one.
+  if (view.raw) {
+    try {
+      const whole = renderRect(view.raw, viewRect(1));
+      await savePicture(view.id, jpeg.encode({ data: whole, width: PICTURE.width, height: PICTURE.height }, LIVE_QUALITY).data, true);
+    } catch (error) { warn(`last frame not kept: ${error.code || error.message}`); }
+  }
   if (live === view) live = null;
 }
 async function liveStop(why) {
@@ -402,9 +446,55 @@ async function liveFrame(id, after) {
     });
   }
   view.askedAt = Date.now();
-  if (view.seq > after && view.frame) return { jpeg: view.frame, seq: view.seq };
+  if (view.seq > after && view.shot) return { jpeg: view.shot, seq: view.seq };
   if (view.ended) throw new HelperError("not_live", 409);
   return null;
+}
+// A camera with a second lens zooms with it (the library's ptz().zoom, which eufy's app sends for
+// a pinch); the rest of a step is the digital zoom's.
+function hasLens(cam) {
+  try { return typeof cam.dev.ptz?.()?.zoom === "function"; } catch { return false; }
+}
+function viewState(view, action = "-") {
+  return { tenths: view.tenths, rect: rectMille(view.rect), action };
+}
+async function liveZoom(id, tenths) {
+  if (!live || live.id !== id) throw new HelperError("not_live", 409);
+  const view = live;
+  view.askedAt = Date.now();
+  let plan = zoomPlan(tenths, hasLens(view.cam));
+  if (plan.optical !== view.optical) {
+    try {
+      await view.cam.dev.ptz().zoom(plan.optical);
+      view.optical = plan.optical;
+      log(`live ${id} lens ${plan.optical}x`);
+    } catch (error) {
+      warn(`live ${id} lens zoom failed: ${error?.code || error?.name || error?.message}`);
+      plan = zoomPlan(Math.round(tenths / view.optical), false);
+      plan = { ...plan, tenths: plan.tenths * view.optical };
+    }
+  }
+  view.digital = DIGITAL_ZOOM[plan.branch];
+  view.tenths = plan.tenths;
+  view.rect = viewRect(view.digital, view.rect.cx, view.rect.cy);  // It stays where it was looking.
+  render(view);
+  return viewState(view);
+}
+// An arrow: the view moves inside the zoomed picture; at its edge, or with turn, a camera that
+// pans and tilts turns that way instead.
+async function livePan(id, direction, turnOnly) {
+  if (!live || live.id !== id) throw new HelperError("not_live", 409);
+  if (!["left", "right", "up", "down"].includes(direction)) throw new HelperError("bad_direction", 400);
+  const view = live;
+  view.askedAt = Date.now();
+  if (!turnOnly && view.digital > 1) {
+    const step = panRect(view.rect, direction, view.digital);
+    if (step.moved) { view.rect = step.rect; render(view); return viewState(view, "moved"); }
+  }
+  const ptz = view.cam.dev.ptz?.();
+  if (!ptz?.rotate) return viewState(view, "edge");
+  await ptz.rotate(direction);
+  return viewState(view, "turned");
 }
 function liveExtend(id) {
   if (!live || live.id !== id) throw new HelperError("not_live", 409);
@@ -462,6 +552,8 @@ export function handler() {
           return;
         }
         case "POST /live/extend": liveExtend(cam); send(res, 200, { ok: true }); return;
+        case "POST /live/zoom": send(res, 200, await liveZoom(cam, Number(q.get("x")) || 10)); return;
+        case "POST /live/pan": send(res, 200, await livePan(cam, q.get("dir") || "", q.get("turn") === "1")); return;
         case "POST /live/stop": if (live?.id === cam) await liveStop("closed"); send(res, 200, { ok: true }); return;
         case "POST /code": await submitCode(q.get("value") || ""); send(res, 200, status); return;
         case "POST /captcha": await submitCaptcha(q.get("value") || ""); send(res, 200, status); return;
@@ -481,6 +573,7 @@ async function main() {
   if (!DIR || !SECRET) { console.error("[cameras] CAMERAS_DIR and CAMERAS_SECRET are needed"); process.exit(2); }
   await mkdir(PICTURES, { recursive: true, mode: 0o700 });
   await loadSaved();
+  loadJpeg();
   startTimers();
   const server = createServer(handler());
   server.listen(0, "127.0.0.1", () => {

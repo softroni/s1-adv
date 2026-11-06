@@ -199,7 +199,8 @@ Cameras is under Tab, House, and `/cameras` opens it. It shows eufy security cam
 bridge's Mac, which needs setting up first: [Cameras](CAMERAS.md) says how. Until it's signed in to
 eufy, it shows a QR code: scan it with your phone and sign in there. After that, the first screen is the
 wall: each camera's last picture, its name, and how long ago it saw motion, with a red dot when that
-was in the last five minutes. The last tile is the HomeBase and its mode.
+was in the last five minutes. The last tile is the HomeBase and its mode. Each time Cameras opens, it
+shows the last pictures and then takes a new one from each camera, one at a time.
 
 - **On the wall:** the arrows pick a camera, Enter opens its picture, L watches it live and R wakes it
   for a new picture. Esc leaves.
@@ -207,9 +208,10 @@ was in the last five minutes. The last tile is the HomeBase and its mode.
   watches it live, R takes a new picture, S saves it to the SD card, and Esc goes back to the wall.
   The bars at the top and bottom go after three seconds, and any key brings them back.
 - **Live:** the top bar counts down from 0:45, because watching uses the camera's battery. With 10
-  seconds left it asks, and Enter gives it another 45. The arrows turn a camera that pans and tilts,
-  which has a small four-way icon in the corner. S saves the frame, and Esc stops and goes back to the
-  picture, which is now the last frame. Live view works on your home Wi-Fi only.
+  seconds left it asks, and Enter gives it another 45. `=` and `-` zoom in and out (a camera with a
+  zoom lens uses it from 3x), and the arrows move around the zoomed picture; at its edge a camera that
+  pans and tilts turns, as Fn with an arrow always does. S saves the frame, and Esc stops and goes back
+  to the picture. Live view works on your home Wi-Fi only.
 
 ## TV Remote
 

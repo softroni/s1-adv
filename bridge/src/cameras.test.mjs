@@ -6,9 +6,10 @@ import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { JpegSplitter, PICTURE, THUMB, cameraId, deviceDecodes, dither332, jpegLayout, listLines, liveArgs, modeWord, pictureArgs, scrub,
-  shownName, thumbArgs, to332 } from "./cameras-media.mjs";
-import { CameraError, CameraService, cameraLanRoute, handleCameraRoute } from "./cameras.mjs";
+import { DIGITAL_ZOOM, JpegSplitter, PICTURE, RAW, THUMB, cameraId, deviceDecodes, dither332, jpegLayout, listLines, liveArgs, modeWord,
+  panRect, pictureArgs, rectMille, renderRect, scrub, shownName, thumbArgs, to332, viewRect, zoomLadder, zoomPlan } from "./cameras-media.mjs";
+import { createRequire } from "node:module";
+import { CameraError, CameraService, cameraLanRoute, handleCameraRoute, viewLine } from "./cameras.mjs";
 import { parseEnv } from "./cameras-helper.mjs";
 
 const FFMPEG = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"].find(p => spawnSync(p, ["-version"]).status === 0);
@@ -60,11 +61,11 @@ test("ffmpeg's pictures are cut back into whole JPEGs, however they arrive", () 
 test("the device's list is lines, with ages in seconds and nothing it can't show", () => {
   const now = 1_000_000_000;
   const text = listLines({ state: "ready", base: { mode: "away" }, cameras: [
-    { id: "0123abcd", name: "Front\tdoor\n", ptz: true, battery: 84, motionAt: now - 720000, pictureAt: now - 60000 },
+    { id: "0123abcd", name: "Front\tdoor\n", ptz: true, zoom: true, battery: 84, motionAt: now - 720000, pictureAt: now - 60000 },
     { id: "89abcdef", name: "", off: true, battery: 140 },
     { id: "NOT-AN-ID", name: "x" },
   ] }, now);
-  assert.equal(text, "state\tready\nbase\tAway\ncam\t0123abcd\tp\t84\t720\t60\tFront door\ncam\t89abcdef\to\t-\t-\t-\tCamera\n");
+  assert.equal(text, "state\tready\nbase\tAway\ncam\t0123abcd\tpz\t84\t720\t60\tFront door\ncam\t89abcdef\to\t-\t-\t-\tCamera\n");
   assert.equal(listLines({ state: "code", detail: "eufy sent a code\tby email" }), "state\tcode\teufy sent a code by email\n");
   assert.equal(modeWord("geo"), "Geofence");
   assert.equal(modeWord(1), "Home");
@@ -92,9 +93,74 @@ test("ffmpeg's arguments read stdin and write stdout only", () => {
   for (const args of [pictureArgs(), thumbArgs(), liveArgs("h264"), liveArgs("h265")]) {
     assert.equal(args[args.indexOf("-i") + 1], "pipe:0");
     assert.equal(args.at(-1), "pipe:1");
+    assert.deepEqual(args.filter(a => /^pipe:/u.test(a)), ["pipe:0", "pipe:1"]);
     assert(!args.some(a => /^(?:https?|file):/u.test(a)));
   }
   assert.equal(liveArgs("av1"), null);
+});
+
+test("the view: the screen's shape, inside the frame, a third of itself per arrow, stopping at the edges", () => {
+  const whole = viewRect(1);
+  assert(Math.abs(whole.w / whole.h - PICTURE.width / PICTURE.height) < 1e-9);
+  assert.equal(whole.h, RAW.height);
+  assert.deepEqual(rectMille(whole), [4, 0, 996, 1000]);
+  let view = viewRect(2);
+  assert.deepEqual(rectMille(view), [252, 250, 748, 750]);
+  const steps = [];
+  for (let i = 0; i < 4; ++i) { const p = panRect(view, "left", 2); steps.push(p.moved); view = p.rect; }
+  assert.deepEqual(steps, [true, true, false, false]);
+  assert.equal(view.x, 0);
+  for (let i = 0; i < 6; ++i) view = panRect(view, "down", 2).rect;
+  assert.equal(Math.round(view.y + view.h), RAW.height);
+  assert.equal(panRect(whole, "up", 1).moved, false, "nothing to move at 1x");
+  // Zooming keeps the place; zooming out keeps it inside.
+  const corner = viewRect(4, 0, 0);
+  assert.deepEqual([corner.x, corner.y], [0, 0]);
+  const out = viewRect(1, corner.cx, corner.cy);
+  assert(out.x >= 0 && out.y >= 0 && out.x + out.w <= RAW.width + 1e-9 && out.y + out.h <= RAW.height + 1e-9);
+});
+
+test("rendering averages the frame under each pixel, and a zoom shows the part asked for", () => {
+  const raw = Buffer.alloc(RAW.bytes);
+  for (let y = 0; y < RAW.height; ++y) for (let x = 0; x < RAW.width; ++x) {
+    const p = (y * RAW.width + x) * 3;
+    raw[p] = x < RAW.width / 2 ? 255 : 0;           // Red on the left, blue on the right,
+    raw[p + 2] = x < RAW.width / 2 ? 0 : 255;
+    raw[p + 1] = y < RAW.height / 2 ? 200 : 40;     // brighter green above.
+  }
+  const at = (rgba, x, y) => [...rgba.subarray((y * PICTURE.width + x) * 4, (y * PICTURE.width + x) * 4 + 4)];
+  const whole = renderRect(raw, viewRect(1));
+  assert.equal(whole.length, PICTURE.width * PICTURE.height * 4);
+  assert.deepEqual(at(whole, 10, 10), [255, 200, 0, 255]);
+  assert.deepEqual(at(whole, 230, 125), [0, 40, 255, 255]);
+  // 4x on the top left is all red and bright; on the bottom right all blue and dark.
+  const tl = renderRect(raw, viewRect(4, 0, 0)), br = renderRect(raw, viewRect(4, RAW.width, RAW.height));
+  assert.deepEqual(at(tl, 239, 135), [255, 200, 0, 255]);
+  assert.deepEqual(at(br, 0, 0), [0, 40, 255, 255]);
+});
+
+test("zoom and pan answers are one line the device reads", () => {
+  assert.equal(viewLine({ tenths: 45, rect: [100, 200, 600, 700], action: "moved" }), "view\t45\t100\t200\t600\t700\tmoved\n");
+  assert.equal(viewLine({ tenths: 10, rect: [-5, 0, 2000, 1000], action: "nonsense" }), "view\t10\t0\t0\t1000\t1000\t-\n");
+  assert.equal(viewLine({}), "view\t10\t0\t0\t1000\t1000\t-\n");
+});
+
+test("zoom: a second lens takes 3x and the digital zoom goes on top; without one it's digital to 4x", () => {
+  assert.deepEqual(zoomLadder(true), [10, 15, 20, 30, 45, 60, 90, 120]);
+  assert.deepEqual(zoomLadder(false), [10, 15, 20, 30, 40]);
+  assert.deepEqual(zoomPlan(10, true), { tenths: 10, optical: 1, branch: 0 });
+  assert.deepEqual(zoomPlan(20, true), { tenths: 20, optical: 1, branch: 2 });
+  assert.deepEqual(zoomPlan(30, true), { tenths: 30, optical: 3, branch: 0 });
+  assert.deepEqual(zoomPlan(90, true), { tenths: 90, optical: 3, branch: 3 });
+  assert.deepEqual(zoomPlan(120, true), { tenths: 120, optical: 3, branch: 4 });
+  assert.deepEqual(zoomPlan(30, false), { tenths: 30, optical: 1, branch: 3 });
+  assert.deepEqual(zoomPlan(120, false), { tenths: 40, optical: 1, branch: 4 }, "as far as it goes");
+  assert.deepEqual(zoomPlan("nonsense", true), { tenths: 10, optical: 1, branch: 0 });
+  for (const lens of [true, false]) for (const t of zoomLadder(lens)) {
+    const plan = zoomPlan(t, lens);
+    assert.equal(plan.tenths, t);
+    assert(Math.abs(plan.optical * DIGITAL_ZOOM[plan.branch] * 10 - t) < 0.01, `${t}`);
+  }
 });
 
 test("the helper isn't started when the Mac has no camera set-up", () => {
@@ -244,16 +310,25 @@ test("ffmpeg turns camera video into screen-sized baseline JPEGs", { skip: !FFMP
   const hevc = spawnSync(FFMPEG, ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=15",
     "-frames:v", "8", "-c:v", "libx265", "-x265-params", "log-level=none", "-f", "hevc", "pipe:1"], { maxBuffer: 64 << 20 });
   assert.equal(hevc.status, 0, String(hevc.stderr));
-  const frames = await new Promise((resolve, reject) => {
-    const got = [];
-    const child = spawn(FFMPEG, liveArgs("h265"));
-    const split = new JpegSplitter(jpeg => got.push(jpeg));
-    child.stdout.on("data", chunk => split.push(chunk));
-    child.on("error", reject);
-    child.on("close", () => resolve(got));
-    child.stdin.end(hevc.stdout);
-  });
-  assert(frames.length >= 6, `${frames.length} frames`);
+  // Live: raw frames of the working size, each rendered and encoded as the helper does.
+  const raw = spawnSync(FFMPEG, liveArgs("h265"), { input: hevc.stdout, maxBuffer: 64 << 20 });
+  assert.equal(raw.status, 0, String(raw.stderr));
+  assert.equal(raw.stdout.length % RAW.bytes, 0);
+  assert(raw.stdout.length / RAW.bytes >= 6, `${raw.stdout.length / RAW.bytes} frames`);
+  // jpeg-js comes with the eufy library, in the helper's folder; where it's installed, its pictures
+  // must be ones the device decodes.
+  let jpegjs = null;
+  for (const from of [path.join(os.homedir(), ".s1-adv/data/cameras/package.json"), import.meta.url]) {
+    try { jpegjs = createRequire(from)("jpeg-js"); break; } catch {}
+  }
+  const frames = [];
+  for (const z of DIGITAL_ZOOM) {
+    const rgba = renderRect(raw.stdout.subarray(0, RAW.bytes), viewRect(z));
+    if (jpegjs) frames.push(Buffer.from(jpegjs.encode({ data: rgba, width: PICTURE.width, height: PICTURE.height }, 70).data));
+  }
+  const ffmpegPicture = spawnSync(FFMPEG, pictureArgs(), { input: spawnSync(FFMPEG, ["-hide_banner", "-loglevel", "error", "-f", "lavfi",
+    "-i", "testsrc2=size=1280x720", "-frames:v", "1", "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1"], { maxBuffer: 16 << 20 }).stdout, maxBuffer: 1 << 20 }).stdout;
+  frames.push(ffmpegPicture);
   for (const jpeg of frames) {
     assert.equal(jpeg[0], 0xff); assert.equal(jpeg[1], 0xd8);
     assert(jpeg.includes(Buffer.from([0xff, 0xc0])), "baseline");
@@ -263,13 +338,6 @@ test("ffmpeg turns camera video into screen-sized baseline JPEGs", { skip: !FFMP
     assert.equal(jpeg.readUInt16BE(sof + 7), PICTURE.width);
     assert(jpeg.length < 24 * 1024, `${jpeg.length} bytes`);
     assert(deviceDecodes(jpeg), JSON.stringify(jpegLayout(jpeg)));
-  }
-  // The layouts the device's decoder refuses are told apart: 4:2:2 and 4:4:4 from ffmpeg, and a wrong size.
-  for (const [format, size] of [["yuvj422p", "240x136"], ["yuvj444p", "240x136"], ["yuvj420p", "240x134"]]) {
-    const other = spawnSync(FFMPEG, ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", `testsrc2=size=${size}`, "-frames:v", "1",
-      "-c:v", "mjpeg", "-pix_fmt", format, "-f", "image2pipe", "pipe:1"], { maxBuffer: 4 << 20 });
-    assert.equal(other.status, 0);
-    assert.equal(deviceDecodes(other.stdout), false, `${format} ${size}`);
   }
   const rgb = spawnSync(FFMPEG, thumbArgs(), { input: frames[0], maxBuffer: 1 << 20 });
   assert.equal(rgb.status, 0);

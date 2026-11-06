@@ -41,7 +41,7 @@ inline State stateFrom(const char* s) {
 struct Camera {
   char id[kIdBytes] = "";
   char name[kNameBytes] = "";
-  bool ptz = false, off = false;
+  bool ptz = false, off = false, lens = false;  // lens: a second, telephoto lens to zoom with.
   int16_t battery = -1;        // Percent, or -1 when the camera doesn't say.
   int32_t motionAge = -1;      // Seconds since it last saw motion, when the list came; -1 never.
   int32_t pictureAge = -1;     // Seconds since its picture was taken; -1 when there's none.
@@ -82,7 +82,7 @@ inline bool parseList(const char* text, size_t len, List& out) {
     } else if (n == 7 && !strcmp(f[0], "cam") && out.count < kMax && idValid(f[1])) {
       Camera c;
       strcpy(c.id, f[1]);
-      for (const char* p = f[2]; *p; ++p) { if (*p == 'p') c.ptz = true; if (*p == 'o') c.off = true; }
+      for (const char* p = f[2]; *p; ++p) { if (*p == 'p') c.ptz = true; if (*p == 'o') c.off = true; if (*p == 'z') c.lens = true; }
       uint32_t battery = 0;
       c.battery = podcast::readNumber(f[3], battery, 100) ? int16_t(battery) : -1;
       if (!readAge(f[4], c.motionAge) || !readAge(f[5], c.pictureAge)) return;
@@ -240,6 +240,59 @@ struct Response {
     return true;
   }
 };
+
+// --- Zoom and pan in live view --------------------------------------------------------------
+// The steps = and - go through, in tenths, as the bridge plans them (cameras-media.mjs zoomLadder):
+// digital to 4x, or with a second lens 2x digital, the lens's 3x, and digital on top to 12x.
+constexpr uint8_t kZoomSteps = 8;
+inline uint8_t zoomLadder(bool lens, uint8_t* out) {
+  static const uint8_t kDigital[] = {10, 15, 20, 30, 40};
+  static const uint8_t kLens[] = {10, 15, 20, 30, 45, 60, 90, 120};
+  const uint8_t* from = lens ? kLens : kDigital;
+  const uint8_t n = lens ? sizeof(kLens) : sizeof(kDigital);
+  for (uint8_t i = 0; i < n; ++i) out[i] = from[i];
+  return n;
+}
+// The next step in or out from where it is now; the same when there's none.
+inline uint8_t zoomStep(bool lens, uint8_t now, int direction) {
+  uint8_t ladder[kZoomSteps];
+  const uint8_t n = zoomLadder(lens, ladder);
+  if (direction > 0) { for (uint8_t i = 0; i < n; ++i) if (ladder[i] > now) return ladder[i]; return ladder[n - 1]; }
+  for (int i = n - 1; i >= 0; --i) if (ladder[i] < now) return ladder[i];
+  return ladder[0];
+}
+// "1.5x", "3x", "12x".
+inline void zoomText(char* out, size_t room, unsigned tenths) {
+  if (tenths % 10) snprintf(out, room, "%u.%ux", tenths / 10, tenths % 10);
+  else snprintf(out, room, "%ux", tenths / 10);
+}
+// The bridge's answer to a zoom or an arrow: the zoom now, where the view is in the frame in
+// thousandths, and what the arrow did.
+//   view <tenths> <x0> <y0> <x1> <y1> <moved|turned|edge|->
+enum class PanResult : uint8_t { None, Moved, Turned, Edge };
+struct View {
+  uint16_t tenths = 10;
+  uint16_t x0 = 0, y0 = 0, x1 = 1000, y1 = 1000;
+  PanResult did = PanResult::None;
+};
+inline bool parseView(const char* text, size_t len, View& out) {
+  bool found = false;
+  podcast::eachLine(text, len, [&](char* line, size_t) {
+    char* f[7];
+    if (found || podcast::splitFields(line, f, 7) != 7 || strcmp(f[0], "view")) return;
+    uint32_t v[5];
+    for (int i = 0; i < 5; ++i) if (!podcast::readNumber(f[1 + i], v[i], i ? 1000 : 1200)) return;
+    if (v[0] < 10 || v[1] >= v[3] || v[2] >= v[4]) return;
+    View got;
+    got.tenths = uint16_t(v[0]);
+    got.x0 = uint16_t(v[1]); got.y0 = uint16_t(v[2]); got.x1 = uint16_t(v[3]); got.y1 = uint16_t(v[4]);
+    got.did = !strcmp(f[6], "moved") ? PanResult::Moved : !strcmp(f[6], "turned") ? PanResult::Turned
+            : !strcmp(f[6], "edge") ? PanResult::Edge : PanResult::None;
+    out = got;
+    found = true;
+  });
+  return found;
+}
 
 // --- What the screen shows -----------------------------------------------------------------
 // How long ago: "now", "12m", "3h", "2d". Empty for never.

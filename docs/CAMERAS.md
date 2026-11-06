@@ -23,12 +23,14 @@ email or password later, the code comes back so you can sign in again.
 
 - **The wall** is the first screen: each camera's last picture, its name and how long ago it saw
   motion, with a red dot when that was in the last five minutes. The last tile is the HomeBase and its
-  mode. Opening the wall wakes no camera: the pictures come from the Mac.
+  mode. The last pictures come up first, from the Mac; then each camera is woken once, in turn, for a
+  new one (the one being taken says "updating"), unless its picture is under a minute old.
 - **A picture** fills the screen, which has the cameras' own shape. Its top bar says when it was taken
   and the camera's battery, and the bottom one the keys. They go after three seconds, and any key
   brings them back.
-- **Live** has a top bar with the camera's name and a countdown. A camera that pans and tilts has a
-  small four-way icon in the bottom corner.
+- **Live** has a top bar with the camera's name, the zoom when it's zoomed in, and a countdown. A
+  camera that pans and tilts has a small four-way icon in the bottom corner, and when zoomed in a
+  little map in the other corner shows where in the picture you are.
 
 ## Keys
 
@@ -42,10 +44,21 @@ email or password later, the code comes back so you can sign in again.
 | Picture | Enter or L | Watch it live |
 | Picture | R | Wake it for a new picture, about five seconds |
 | Picture | S | Save the picture to the SD card, in `/cameras` |
-| Live | arrows | Turn the camera, if it pans and tilts |
+| Live | = and - | Zoom in and out |
+| Live | arrows | Move around the zoomed picture; at its edge, a camera that pans and tilts turns |
+| Live | Fn + arrows | Turn the camera, however far it's zoomed |
 | Live | Enter | 45 seconds more |
 | Live | S | Save the frame to the SD card |
 | Any | Esc | Back: live to the picture, the picture to the wall, the wall out of the app |
+
+## Zoom
+
+Every camera zooms digitally to 4x: the Mac cuts the part you're looking at out of the camera's own
+video, which has more pixels than the screen at every step, and the arrows move around in it. A
+camera with a second, telephoto lens zooms with it too: from 3x it switches to that lens, and the
+digital zoom goes on top, to 12x. Zooming and moving are instant, because the Mac already has the
+whole frame. The lens goes back to wide when the live view ends, and the picture kept for the wall is
+the whole view, not the zoomed one.
 
 ## Battery
 
@@ -55,7 +68,8 @@ it another 45. When it ends, its last frame becomes the camera's picture. The Ma
 video when the Cardputer stops asking for frames for six seconds, for example when it sleeps or loses
 Wi-Fi, and after ten minutes however often it's extended.
 
-A new picture (R) wakes the camera for a few seconds. The wall and the pictures never do.
+A new picture (R) wakes the camera for a few seconds, and so does opening the app, once for each
+camera whose picture is over a minute old. Looking at the wall or a picture again doesn't.
 
 ## Where it works
 
