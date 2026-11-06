@@ -75,7 +75,8 @@ uint32_t uiSceneKey() {
 }
 
 void presentUiFrame() {
-  if (gCanvasSpriteActive) {
+  // Cameras draws a picture straight to the screen; the canvas would cover it.
+  if (gCanvasSpriteActive && !cameraDrawsDirect()) {
     gCanvasBuffer.pushSprite(0, 0);
     // A complete frame must finish DMA before an app can release its storage.
     M5Cardputer.Display.waitDMA();

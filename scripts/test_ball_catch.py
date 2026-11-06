@@ -10,7 +10,7 @@ src = root / 'bots/CardputerADV/src'
 parts = src / 'main_parts'
 for file, text in [
         ('001_main.cpp.inc', '#include "ball_catch.h"'),
-        ('001_main.cpp.inc', 'kLauncherGroupCount = 10'),
+        ('001_main.cpp.inc', 'kLauncherGroupCount = 11'),
         ('004_main.cpp.inc', '{"Ball Catch", UiMode::BallCatch}'),
         ('004_main.cpp.inc', '{"Arcade", "Sensor and joystick games"'),
         ('022_main.cpp.inc', 'mode == "ball_catch"'),
@@ -95,7 +95,7 @@ void aimAndDrop(Game&g,int offset=0){g.bomb=false;g.basketX=g.ballX+offset*kOne;
 void land(Game&g){for(int i=0;i<400&&g.falling&&g.phase!=Phase::Over;++i){const int32_t b=g.basketX;g.step(0);g.basketX=b;}}
 int main(){
  // The launcher's R reaches Arcade, and Ctrl with a number its rows.
- {using namespace launcher_shortcuts;assert(resolve('r',false,10,4,0).kind==Kind::Group&&resolve('r',false,10,4,0).index==6);
+ {using namespace launcher_shortcuts;assert(resolve('r',false,11,4,0).kind==Kind::Group&&resolve('r',false,11,4,0).index==7);
   assert(resolve('r',false,6,4,0).kind==Kind::None);
   assert(resolve('4',true,10,4,0).kind==Kind::Submenu&&resolve('5',true,10,4,0).kind==Kind::InvalidSubmenu);}
  // The ball slides and turns at both walls, and never leaves the screen.

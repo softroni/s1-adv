@@ -26,8 +26,20 @@ inline char digitFromHid(uint8_t rawCode) {
 
 // One letter per group, in menu order. Each is the first letter of the name that's still free,
 // which for Favorites, the first tab, is its V.
-constexpr char kGroupLetters[] = "vamftgrsyl";
+constexpr char kGroupLetters[] = "vamfthgrsyl";
 constexpr uint8_t kGroupLetterCount = sizeof(kGroupLetters) - 1;
+
+// Which tabs the strip has room for. The selected tab shows its name and the rest an icon each;
+// with eleven tabs a long name (Favorites, AI Agent, Settings) leaves under an icon's width
+// for each of the others, so the ones farthest from it are left off until the rest fit.
+inline void visibleTabs(int count, int selected, int selectedWidth, int screenWidth, int iconWidth, int& first, int& last) {
+  first = 0;
+  last = count - 1;
+  while (last > first && (screenWidth - selectedWidth) / (last - first) < iconWidth) {
+    if (selected - first > last - selected) ++first;
+    else --last;
+  }
+}
 
 inline char lowerLetter(char key) {
   return key >= 'A' && key <= 'Z' ? static_cast<char>(key + ('a' - 'A')) : key;

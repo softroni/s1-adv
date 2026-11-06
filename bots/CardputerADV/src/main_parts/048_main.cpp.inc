@@ -64,6 +64,7 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
   if (gUiMode == UiMode::Mesh && !gLauncherVisible && !keys.tab && handleMeshKey(key,keys)) return;
   // Ahead of the shortcuts, because a remote uses the plain keys; Ctrl ones go on to them.
   if (gUiMode == UiMode::TvRemote && !gLauncherVisible && !keys.tab && handleTvRemoteKey(key, keys)) return;
+  if (gUiMode == UiMode::Cameras && !gLauncherVisible && !keys.tab && handleCamerasKey(key, keys)) return;
   if (handleFocusShortcut(lowerKey,keys)) return;
   if (handleUnreadAssistantKey(key,keys)) return;
   if (handleHomeLinkRetryKey(key,keys)) return;

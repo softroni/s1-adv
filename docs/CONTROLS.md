@@ -3,7 +3,7 @@
 - Type a question and press Enter in chat.
 - Tap **Alt** on Pulse, AI Chat, the other assistant screens or [Say a rule](#lab) to start listening, then tap it again to send. Tapping it while Claude is talking stops the reply and listens. Esc cancels.
 - You can also hold **G0**, speak and release, or use **Ctrl+V** or double **Ctrl**.
-- **Tab** opens the app menu from Home, chat and Realtime. The arrow keys pick a row and switch tab, and Enter opens. A letter jumps straight to a tab: **V** Favorites, **A** AI Agent, **M** Media, **F** Focus, **T** Tools, **G** Games, **R** Arcade, **S** Settings, **Y** System, **L** Lab. The selected tab underlines its letter. **1-9** opens that favorite from any tab, and **Ctrl+1-9** opens that row of the tab you're on. **Fn** with up or down moves the selected app one place in its tab, on any tab. The menu opens on the app you last used, even after a restart, but never on Settings or System: after changing a setting, Tab takes you back to the app you were using before. See [Favorites](#favorites) and [Your order](#your-order).
+- **Tab** opens the app menu from Home, chat and Realtime. The arrow keys pick a row and switch tab, and Enter opens. A letter jumps straight to a tab: **V** Favorites, **A** AI Agent, **M** Media, **F** Focus, **T** Tools, **H** House, **G** Games, **R** Arcade, **S** Settings, **Y** System, **L** Lab. The selected tab underlines its letter. **1-9** opens that favorite from any tab, and **Ctrl+1-9** opens that row of the tab you're on. **Fn** with up or down moves the selected app one place in its tab, on any tab. The menu opens on the app you last used, even after a restart, but never on Settings or System: after changing a setting, Tab takes you back to the app you were using before. See [Favorites](#favorites) and [Your order](#your-order).
 - **Ctrl+K** opens assistant commands. R selects Realtime, C AI Chat.
 - **Ctrl+U** on the Home clock installs an available update. An orange **NEW UPDATE / Ctrl+U** badge replaces READY until the newer firmware is installed. Without a candidate, Ctrl+U checks for updates.
 - **Ctrl+R** starts Realtime or commits the current speech turn. While awaiting a reply, it stops Realtime.
@@ -193,9 +193,26 @@ previous or next episode. Esc from the library goes Home and it keeps playing, t
 screens the radio plays behind, and **Ctrl+M** pauses it or carries on. At home the sound comes
 straight over your Wi-Fi; away, save episodes first. [Podcasts](PODCASTS.md) has the details.
 
+## Cameras
+
+Cameras is under Tab, House, and `/cameras` opens it. It shows eufy security cameras through the
+bridge's Mac, which needs setting up first: [Cameras](CAMERAS.md) says how. The first screen is the
+wall: each camera's last picture, its name, and how long ago it saw motion, with a red dot when that
+was in the last five minutes. The last tile is the HomeBase and its mode.
+
+- **On the wall:** the arrows pick a camera, Enter opens its picture, L watches it live and R wakes it
+  for a new picture. Esc leaves.
+- **On a picture:** it fills the screen. `,` and `/` go to the previous or next camera, Enter or L
+  watches it live, R takes a new picture, S saves it to the SD card, and Esc goes back to the wall.
+  The bars at the top and bottom go after three seconds, and any key brings them back.
+- **Live:** the top bar counts down from 0:45, because watching uses the camera's battery. With 10
+  seconds left it asks, and Enter gives it another 45. The arrows turn a camera that pans and tilts,
+  which has a small four-way icon in the corner. S saves the frame, and Esc stops and goes back to the
+  picture, which is now the last frame. Live view works on your home Wi-Fi only.
+
 ## TV Remote
 
-TV Remote is under Tab, Tools, and `/tv` opens it. It has a page for each device, by infrared: **1**
+TV Remote is under Tab, House, and `/tv` opens it. It has a page for each device, by infrared: **1**
 Apple TV, **2** Bose, **3** Epson, **4** Samsung, and it opens on the last one used. On the Apple TV
 page `;` `.` `,` `/` move, Enter is OK, Del is Back, Space plays or pauses, H is Home and Z is
 Sleep, and `=` `-` M P are the Bose's volume, mute and power. The Bose page has its inputs, and C

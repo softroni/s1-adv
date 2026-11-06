@@ -226,6 +226,13 @@ bool handleScreensaverWake() {
     applyDisplayBrightness();
     return false;
   }
+  // Cameras dims too, keeping its picture; the key only wakes it.
+  if (!gScreensaverActive && gUiMode == UiMode::Cameras && gScreensaverPreviousMode == UiMode::Cameras) {
+    gScreensaverDimmed = false;
+    gScreenOffActive = false;
+    applyDisplayBrightness();
+    return true;
+  }
   UiMode target = gScreensaverActive
                       ? (gDeviceSettings.screensaverClockOnWake ? UiMode::Clock : gScreensaverPreviousMode)
                       : gScreensaverPreviousMode;
@@ -283,7 +290,7 @@ void serviceIdleScreensaver() {
   // and stop the music. So the screen dims when the saver would start, and goes off when it would
   // have, and a key brings it back as it was.
   // TV Remote too, whose Bluetooth would stop with it, and whose keys should work in the dark.
-  if (!gScreensaverActive && (radioBusy() || radioOn() || podcastOn() || gUiMode == UiMode::TvRemote)) {
+  if (!gScreensaverActive && (radioBusy() || radioOn() || podcastOn() || gUiMode == UiMode::TvRemote || gUiMode == UiMode::Cameras)) {
     const uint32_t offAfterMs = (gDeviceSettings.screensaverEnabled ? saverTimeoutMs : 0) + offTimeoutMs;
     if (gDeviceSettings.screensaverEnabled && !gScreensaverDimmed && !gScreenOffActive && idleMs >= saverTimeoutMs) {
       gScreensaverPreviousMode = gUiMode;

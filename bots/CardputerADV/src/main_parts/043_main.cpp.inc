@@ -1473,6 +1473,11 @@ bool handleLocalCommand(const String& input) {
     return true;
   }
 
+  if (cmd == "/cameras" || cmd == "/camera" || cmd == "/cams") {
+    setUiMode(UiMode::Cameras);
+    return true;
+  }
+
   if (cmd == "/syncassets") {
     fetchRemoteAssetManifest();
     syncAssetsFromManifest();

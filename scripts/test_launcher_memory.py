@@ -62,7 +62,7 @@ code = r'''
 #include "launcher_order.h"
 using std::min;using std::max;
 constexpr uint16_t rgb565_local(int,int,int){return 0;}
-constexpr uint8_t kLauncherGroupCount=10,kLauncherMaxSubItems=9,kFavoritesGroup=0,kSettingsGroup=7,kSystemGroup=8;
+constexpr uint8_t kLauncherGroupCount=11,kLauncherMaxSubItems=9,kFavoritesGroup=0,kSettingsGroup=8,kSystemGroup=9;
 ''' + block((parts / '002_main.cpp.inc').read_text(), 'enum class UiMode : uint8_t') + \
     block(table, 'struct LauncherSubItem {') + block(table, 'struct LauncherGroup {') + block(table, 'constexpr LauncherGroup kLauncherGroups') + \
     favorites + r'''
@@ -82,7 +82,8 @@ void setStatus(const char*,int){}void closeRealtimeSession(const char*){}void ca
     function('bool findLastLauncherApp(') + function('void syncLauncherToMode(') + \
     function('void saveLauncherSelection()') + function('void saveLauncherOrder()') + \
     function('int launcherRowFor(') + function('void showLauncherGroup(') + function('void openLauncherOnLastApp()') + \
-    function('void saveFavorites()') + function('void favoritesChanged()') + function('void moveLauncherRow(') + r'''
+    function('void saveFavorites()') + function('void favoritesChanged()') + function('void moveLauncherRow(') + \
+    function('void launcherPlaceFromLayout1(') + r'''
 void setUiMode(UiMode mode){gUiMode=mode;
 ''' + tail + r'''}
 ''' + function('void applyLauncherSelection()') + r'''
@@ -98,48 +99,58 @@ void reboot(){gLauncherSelection=0;gLauncherSubSelection=0;gLauncherLastUsedTab=
 void tabSkipsSettingsAndSystem(){
  texts.clear();flash.clear();reboot();
  // Tab opens on the last app used, wherever the menu was moved to since.
- pick(2,6);assert(on("Internet Radio"));gLauncherSelection=5;gLauncherSubSelection=1;tab();assert(gLauncherSelection==2&&on("Internet Radio"));
+ pick(2,6);assert(on("Internet Radio"));gLauncherSelection=6;gLauncherSubSelection=1;tab();assert(gLauncherSelection==2&&on("Internet Radio"));
  // Not on Settings or System, from the menu or another way, but on the app before them.
- pick(7,2);assert(gUiMode==UiMode::WifiSettings&&on("Wi-Fi"));tab();assert(on("Internet Radio"));
- pick(8,1);assert(on("Logs"));setUiMode(UiMode::Home);tab();assert(on("Internet Radio"));
+ pick(8,2);assert(gUiMode==UiMode::WifiSettings&&on("Wi-Fi"));tab();assert(on("Internet Radio"));
+ pick(9,1);assert(on("Logs"));setUiMode(UiMode::Home);tab();assert(on("Internet Radio"));
  setUiMode(UiMode::ScreenSettings);assert(on("Display"));tab();assert(on("Internet Radio")&&gLauncherLastSub[2]==6);
  // Coming back to Pulse doesn't count, but opening it from the menu does.
  setUiMode(UiMode::Home);tab();assert(on("Internet Radio"));pick(1,1);setUiMode(UiMode::Snake);setUiMode(UiMode::Home);tab();assert(on("Snake"));
  // A screensaver isn't using an app, Chess Mind's included.
  gScreensaverActive=true;setUiMode(UiMode::ChessMind);gScreensaverActive=false;setUiMode(UiMode::Clock);tab();assert(on("Snake"));
  // The last app is what a restart brings back, never Settings: opening one writes nothing.
- pick(5,4);int before=writes;pick(7,0);assert(writes==before);reboot();assert(on("Snake"));tab();assert(on("Snake"));
+ pick(6,4);int before=writes;pick(8,0);assert(writes==before);reboot();assert(on("Snake"));tab();assert(on("Snake"));
  // An older firmware saved Settings or System: the menu starts there, but Tab opens on AI Agent.
- flash["menu_tab"]=8;flash["menu_item"]=0;reboot();assert(gLauncherSelection==8);tab();assert(gLauncherSelection==1);
- flash["menu_tab"]=7;reboot();setUiMode(UiMode::Home);tab();assert(gLauncherSelection==1);
+ flash.erase("menu_layout");flash["menu_tab"]=8;flash["menu_item"]=0;reboot();assert(gLauncherSelection==9);tab();assert(gLauncherSelection==1);
+ flash.erase("menu_layout");flash["menu_tab"]=7;reboot();setUiMode(UiMode::Home);tab();assert(gLauncherSelection==1);
+ // 0.2.315 put House after Tools: a place saved before it moves to where its app is now.
+ flash.clear();flash["menu_tab"]=4;flash["menu_item"]=8;reboot();assert(gLauncherSelection==5&&on("TV Remote"));tab();assert(on("TV Remote"));
+ flash.clear();flash["menu_tab"]=4;flash["menu_item"]=4;reboot();assert(gLauncherSelection==5&&on("smartLamp"));
+ flash.clear();flash["menu_tab"]=4;flash["menu_item"]=5;reboot();assert(gLauncherSelection==4&&on("Sonar"));
+ flash.clear();flash["menu_tab"]=5;flash["menu_item"]=1;reboot();assert(gLauncherSelection==6&&on("NES"));
+ flash.clear();flash["menu_tab"]=2;flash["menu_item"]=7;reboot();assert(gLauncherSelection==2&&on("Podcasts"));
+ // One saved by this firmware is taken as it is, and saving marks it so.
+ flash.clear();flash["menu_layout"]=2;flash["menu_tab"]=5;flash["menu_item"]=0;reboot();assert(on("Cameras"));
+ flash.clear();pick(5,1);assert(flash["menu_layout"]==2&&flash["menu_tab"]==5&&flash["menu_item"]==1);
+ flash.clear();texts.clear();reboot();
  // From Favorites: on that row, and a Settings app there counts as Settings.
  texts["favs"]="Settings/Wi-Fi\nGames/Snake\n";flash.clear();reboot();
  pick(0,1);assert(on("Snake"));pick(0,0);assert(gUiMode==UiMode::WifiSettings);tab();assert(gLauncherSelection==0&&on("Snake"));
  // A favorite, used and then taken off Favorites, is found in its own tab.
- texts["favs"]="Settings/Wi-Fi\n";reboot();gLauncherLastUsedTab=0;gLauncherLastUsed=kLauncherGroups[5].items[4];tab();assert(gLauncherSelection==5&&on("Snake"));
+ texts["favs"]="Settings/Wi-Fi\n";reboot();gLauncherLastUsedTab=0;gLauncherLastUsed=kLauncherGroups[6].items[4];tab();assert(gLauncherSelection==6&&on("Snake"));
  // Saved on a favorite that is now a Settings one, the menu starts on it, and Tab opens on AI Agent.
  reboot();assert(gLauncherSelection==0&&on("Wi-Fi")&&gLauncherLastUsedTab==-1);tab();assert(gLauncherSelection==1);
  // An app moved within its tab is still found by name.
- texts.clear();flash.clear();reboot();pick(5,4);moveRow(5,4,-1);tab();assert(gLauncherSubSelection==3&&on("Snake"));
- moveRow(5,3,1);texts.clear();
+ texts.clear();flash.clear();reboot();pick(6,4);moveRow(6,4,-1);tab();assert(gLauncherSubSelection==3&&on("Snake"));
+ moveRow(6,3,1);texts.clear();
  // Moving the last app with Fn saves its new row too, so a restart finds it, not its neighbour.
- flash.clear();reboot();pick(5,4);gLauncherSubSelection=4;moveLauncherRow(-1);assert(on("Snake")&&flash["menu_item"]==3);
- reboot();assert(on("Snake"));tab();assert(gLauncherSelection==5&&on("Snake"));
+ flash.clear();reboot();pick(6,4);gLauncherSubSelection=4;moveLauncherRow(-1);assert(on("Snake")&&flash["menu_item"]==3);
+ reboot();assert(on("Snake"));tab();assert(gLauncherSelection==6&&on("Snake"));
  // Moving its neighbour does too, and moving apps in another tab writes nothing.
- gLauncherSubSelection=2;moveLauncherRow(1);assert(launcherRowOf(5,kLauncherGroups[5].items[4])==2&&flash["menu_item"]==2);
- int was=writes;gLauncherSelection=6;gLauncherSubSelection=0;moveLauncherRow(1);assert(writes==was+1);  // Only the order.
- reboot();tab();assert(gLauncherSelection==5&&on("Snake"));
+ gLauncherSubSelection=2;moveLauncherRow(1);assert(launcherRowOf(6,kLauncherGroups[6].items[4])==2&&flash["menu_item"]==2);
+ int was=writes;gLauncherSelection=7;gLauncherSubSelection=0;moveLauncherRow(1);assert(writes==was+1);  // Only the order.
+ reboot();tab();assert(gLauncherSelection==6&&on("Snake"));
  // The same on Favorites: moved, then taken off, it comes back where it is after a restart.
  texts.clear();flash.clear();reboot();texts["favs"]="Games/Tetris\nGames/Snake\n";reboot();
  pick(0,1);assert(on("Snake"));gLauncherSubSelection=1;moveLauncherRow(-1);assert(flash["menu_tab"]==0&&flash["menu_item"]==0);
  reboot();tab();assert(gLauncherSelection==0&&on("Snake"));
- gFavorites.removeAt(0);favoritesChanged();assert(flash["menu_tab"]==5);reboot();tab();assert(gLauncherSelection==5&&on("Snake"));
+ gFavorites.removeAt(0);favoritesChanged();assert(flash["menu_tab"]==6);reboot();tab();assert(gLauncherSelection==6&&on("Snake"));
  texts.clear();
 }
 int main(){
  tabSkipsSettingsAndSystem();texts.clear();flash.clear();reboot();writes=0;
  // Open Snake, go back to Pulse, and the menu is still on Snake.
- pick(5,4);assert(gUiMode==UiMode::Snake&&on("Snake"));
+ pick(6,4);assert(gUiMode==UiMode::Snake&&on("Snake"));
  setUiMode(UiMode::Home);assert(on("Snake"));
  // Switching between Pulse and chat isn't choosing from the menu either.
  setUiMode(UiMode::ChatFull);assert(on("Snake"));setUiMode(UiMode::Home);assert(on("Snake"));
@@ -149,17 +160,17 @@ int main(){
  // An app opened some other way, like a chat command, counts as used.
  setUiMode(UiMode::WifiSettings);assert(on("Wi-Fi"));setUiMode(UiMode::Home);assert(on("Wi-Fi"));
  // A restart keeps it.
- pick(6,3);assert(on("Ball Catch"));reboot();assert(on("Ball Catch")&&gLauncherLastSub[6]==3);
+ pick(7,3);assert(on("Ball Catch"));reboot();assert(on("Ball Catch")&&gLauncherLastSub[7]==3);
  // Reopening the same thing doesn't wear out flash.
- const int before=writes;pick(6,3);pick(6,3);assert(writes==before);pick(6,2);assert(writes==before+2);
+ const int before=writes;pick(7,3);pick(7,3);assert(writes==before);pick(7,2);assert(writes==before+2);
  // A first boot starts on AI Agent, and a saved row that no longer exists can't crash the menu.
  flash.clear();reboot();assert(gLauncherSelection==1&&gLauncherSubSelection==0);
  flash["menu_tab"]=200;flash["menu_item"]=200;reboot();
  assert(gLauncherSelection==kLauncherGroupCount-1&&gLauncherSubSelection==kLauncherGroups[gLauncherSelection].count-1);
  // Before Favorites, the tab was saved counting from AI Agent: Games was 4 and is 5 now.
- flash.clear();flash["menu_group"]=4;flash["menu_item"]=2;reboot();assert(gLauncherSelection==5&&on("Checkers"));
+ flash.clear();flash["menu_group"]=4;flash["menu_item"]=2;reboot();assert(gLauncherSelection==6&&on("Checkers"));
  flash["menu_group"]=200;reboot();assert(gLauncherSelection==kLauncherGroupCount-1);
- pick(5,1);assert(flash["menu_tab"]==5);flash["menu_group"]=0;reboot();assert(on("NES"));
+ pick(6,1);assert(flash["menu_tab"]==6);flash["menu_group"]=0;reboot();assert(on("NES"));
 
  // Favorites come back after a restart, in their order, from their names.
  flash.clear();texts["favs"]="Games/Snake\nMedia/Internet Radio\nSettings/Pomodoro\nAI Agent/Realtime\n";reboot();
@@ -175,7 +186,7 @@ int main(){
  // And it's still there after a restart.
  pick(0,0);reboot();assert(gLauncherSelection==0&&on("Snake"));
  // The same app opened from its own tab moves the menu there.
- pick(5,4);assert(gLauncherSelection==5&&on("Snake"));
+ pick(6,4);assert(gLauncherSelection==6&&on("Snake"));
  // Something that isn't a favorite, opened some other way, finds its own tab.
  pick(0,0);setUiMode(UiMode::Calculator);assert(gLauncherSelection==4&&on("Calculator"));
  // A saved Favorites row that has gone, or an empty Favorites tab, can't crash the menu.
@@ -185,23 +196,23 @@ int main(){
 
  // A tab's new order comes back after a restart, and the menu reopens on the same app.
  texts.clear();flash.clear();reboot();
- moveRow(5,4,-1);moveRow(5,3,-1);  // Snake up two, to third in Games
+ moveRow(6,4,-1);moveRow(6,3,-1);  // Snake up two, to third in Games
  assert(texts["menu_order"]=="Games/Tetris\nGames/NES\nGames/Snake\nGames/Checkers\nGames/Minesweeper\n");
- pick(5,2);assert(gUiMode==UiMode::Snake&&on("Snake"));
- reboot();assert(gLauncherSelection==5&&gLauncherSubSelection==2&&on("Snake"));
- assert(!std::strcmp(launcherGroup(5).items[3].label,"Checkers")&&!std::strcmp(kLauncherGroups[5].items[2].label,"Checkers"));
+ pick(6,2);assert(gUiMode==UiMode::Snake&&on("Snake"));
+ reboot();assert(gLauncherSelection==6&&gLauncherSubSelection==2&&on("Snake"));
+ assert(!std::strcmp(launcherGroup(6).items[3].label,"Checkers")&&!std::strcmp(kLauncherGroups[6].items[2].label,"Checkers"));
  // An app opened some other way finds its row as it is now.
- pick(1,0);gRealtimeActive=false;setUiMode(UiMode::Minesweeper);assert(gLauncherSelection==5&&gLauncherSubSelection==4&&on("Minesweeper"));
+ pick(1,0);gRealtimeActive=false;setUiMode(UiMode::Minesweeper);assert(gLauncherSelection==6&&gLauncherSubSelection==4&&on("Minesweeper"));
  setUiMode(UiMode::Checkers);assert(gLauncherSubSelection==3&&on("Checkers"));
  // Favorites name apps by the table, so moving one in its tab changes nothing there.
  texts["favs"]="Games/Checkers\n";reboot();assert(gFavorites.count==1&&!std::strcmp(gFavoritesTab.items[0].label,"Checkers"));
- moveRow(5,3,-1);assert(!std::strcmp(gFavoritesTab.items[0].label,"Checkers")&&!std::strcmp(launcherGroup(5).items[2].label,"Checkers"));
+ moveRow(6,3,-1);assert(!std::strcmp(gFavoritesTab.items[0].label,"Checkers")&&!std::strcmp(launcherGroup(6).items[2].label,"Checkers"));
  // Back in the table's order, nothing is kept for that tab.
- moveRow(5,2,1);moveRow(5,2,1);moveRow(5,3,1);assert(texts["menu_order"]=="");
+ moveRow(6,2,1);moveRow(6,2,1);moveRow(6,3,1);assert(texts["menu_order"]=="");
  // Two tabs at once, each its own lines.
- moveRow(6,0,1);moveRow(9,2,-1);reboot();
- assert(!std::strcmp(launcherGroup(6).items[0].label,"Flappy Bird")&&!std::strcmp(launcherGroup(9).items[1].label,"Sequences"));
- assert(!std::strcmp(launcherGroup(5).items[0].label,"Tetris"));
+ moveRow(7,0,1);moveRow(10,2,-1);reboot();
+ assert(!std::strcmp(launcherGroup(7).items[0].label,"Flappy Bird")&&!std::strcmp(launcherGroup(10).items[1].label,"Sequences"));
+ assert(!std::strcmp(launcherGroup(6).items[0].label,"Tetris"));
  std::cout<<"PASS menu memory: survives Pulse, chat and restarts, Favorites and tab orders too, without wearing flash; Tab skips Settings and System\n";
 }
 '''

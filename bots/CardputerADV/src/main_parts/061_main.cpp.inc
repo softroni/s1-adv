@@ -8,6 +8,9 @@
       case UiMode::TvRemote:
         renderTvRemoteUi();
         break;
+      case UiMode::Cameras:
+        renderCamerasUi();
+        break;
       case UiMode::VlcRemote:
         renderVlcRemoteUi();
         break;
@@ -398,6 +401,7 @@ void loop() {
   serviceInternetRadio();
   servicePodcasts();
   serviceTvRemote();
+  serviceCameras();
   serviceVlcRemote();
   if (vlcBusy()) {
     // Bounded DNS/TCP owner; keep input/timers alive, defer background TLS/OTA.

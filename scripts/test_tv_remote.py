@@ -12,14 +12,14 @@ app = (parts / '094_main.cpp.inc').read_text()
 part = lambda name: (parts / name).read_text()
 
 # Wired in like the other apps: menu, name, keys, Esc, the loop, background work, the saver.
-for f, s in [('002_main.cpp.inc', '  Podcasts,\n  TvRemote,\n};'),
-             ('004_main.cpp.inc', '{"Pocket Synth", UiMode::PocketSynth}, {"TV Remote", UiMode::TvRemote}}},'),
-             ('004_main.cpp.inc', '{"Tools", "Local hardware tools", rgb565_local(255, 210, 64), 9,'),
+for f, s in [('002_main.cpp.inc', '  Podcasts,\n  TvRemote,\n'),
+             ('004_main.cpp.inc', '{{"Cameras", UiMode::Cameras}, {"TV Remote", UiMode::TvRemote}, {"smartLamp", UiMode::SmartLamp},'),
+             ('004_main.cpp.inc', '{"House", "Cameras and remotes", rgb565_local(85, 146, 255), 4,'),
              ('007_main.cpp.inc', 'case UiMode::TvRemote: return "TV Remote";'),
              ('022_main.cpp.inc', 'out = UiMode::TvRemote;'),
              ('043_main.cpp.inc', 'setUiMode(UiMode::TvRemote);'),
              ('047_main.cpp.inc', 'gUiMode == UiMode::TvRemote && !gLauncherVisible && tvRemoteEscape()'),
-             ('049_main.cpp.inc', 'gUiMode == UiMode::TvRemote && (upDown || downDown || leftDown || rightDown)'),
+             ('049_main.cpp.inc', '(gUiMode == UiMode::TvRemote || gUiMode == UiMode::Cameras) && (upDown || downDown || leftDown || rightDown)'),
              ('052_main.cpp.inc', 'case UiMode::TvRemote: return kTv;'),
              ('061_main.cpp.inc', 'renderTvRemoteUi();'),
              ('063_main.cpp.inc', 'case UiMode::TvRemote: return false;'),
@@ -42,7 +42,7 @@ assert typing.index('if (tvRemoteTakesText() && !keys.tab && handleTvRemoteKey(k
 assert typing.index('if (key == \'`\'') < typing.index('if (gUiMode == UiMode::TvRemote && !gLauncherVisible && !keys.tab && handleTvRemoteKey(key, keys)) return;') \
        < typing.index('if (handleFocusShortcut(lowerKey,keys)) return;')
 saver = part('009_main.cpp.inc')
-assert '(radioBusy() || radioOn() || podcastOn() || gUiMode == UiMode::TvRemote)' in saver, 'the saver would leave the app and stop Bluetooth'
+assert '(radioBusy() || radioOn() || podcastOn() || gUiMode == UiMode::TvRemote || gUiMode == UiMode::Cameras)' in saver, 'the saver would leave the app and stop Bluetooth'
 wake = saver.split('bool handleScreensaverWake() {', 1)[1].split('\n}\n', 1)[0]
 assert wake.index('gUiMode == UiMode::TvRemote') < wake.index('setUiMode(target);'), "a dimmed remote's key goes through"
 ini = (root / 'bots/CardputerADV/platformio.ini').read_text()

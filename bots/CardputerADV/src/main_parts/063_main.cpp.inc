@@ -36,6 +36,7 @@ bool appAllowsBackgroundNetwork() {
     case UiMode::WifiSettings: // A join would pull the link out from under any request.
     case UiMode::IrRemote:
     case UiMode::TvRemote: return false;  // Its Bluetooth stack takes the heap a check would need.
+    case UiMode::Cameras: return false;   // Its pictures and frames need the heap and the network.
     case UiMode::LabDevices:
     case UiMode::LabRules:
     case UiMode::LabSequences: return labAllowsNetwork();

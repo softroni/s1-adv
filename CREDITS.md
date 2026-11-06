@@ -28,6 +28,8 @@ The original `Copyright (c) 2026 Omnibot contributors` notice remains in
 - Arduino ESP32 / FreeRTOS: embedded runtime.
 - ArduinoJson, arduinoWebSockets, Arduino-IRremote and MFRC522: device libraries.
 - ws and Busboy: bridge WebSocket and upload handling.
+- [eufy-sdk](https://github.com/mega-yfue/eufy-sdk), Apache-2.0: the optional camera helper's eufy client. It
+  is installed beside the bridge's data, not shipped with it, and is independent of Anker and eufy.
 - The firmware's `third_party/` directory retains applicable protocol notices.
 - [libmeshtastic-leaf](https://github.com/Meshtastic-Solutions/libmeshtastic-leaf),
   Thomas Göttgens / Meshtastic Solutions, GPL-3.0-only, supplies the optional

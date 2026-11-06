@@ -27,7 +27,7 @@ code = r'''
 #include <string>
 #include "launcher_favorites.h"
 constexpr uint16_t rgb565_local(int, int, int) { return 0; }
-constexpr uint8_t kLauncherGroupCount = 10, kLauncherMaxSubItems = 9, kFavoritesGroup = 0;
+constexpr uint8_t kLauncherGroupCount = 11, kLauncherMaxSubItems = 9, kFavoritesGroup = 0;
 ''' + block((parts / '002_main.cpp.inc').read_text(), 'enum class UiMode : uint8_t') + \
     block(table, 'struct LauncherSubItem {') + block(table, 'struct LauncherGroup {') + \
     block(table, 'constexpr LauncherGroup kLauncherGroups') + r'''
@@ -60,7 +60,7 @@ int main() {
     const List back = load(text.c_str());
     assert(back.count == 1 && back.refs[0].group == g && back.refs[0].item == i);
   }
-  assert(apps == 48 && kLauncherGroups[kFavoritesGroup].count == 0);
+  assert(apps == 49 && kLauncherGroups[kFavoritesGroup].count == 0);
 
   // New ones go at the end, so the others keep their numbers; nine at most, and no repeats.
   List l;

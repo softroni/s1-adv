@@ -1,6 +1,7 @@
 import { REPLY_LANGUAGE_POLICY, requestedReplyLanguage } from "./reply-language.mjs";
 import { WeatherService, parseCoordinates, validPlace } from "./weather.mjs";
 import { LAN_PORT, PodcastError, PodcastService, lanHandler, showLines } from "./podcasts.mjs";
+import { CameraService, cameraLanRoute, handleCameraRoute } from "./cameras.mjs";
 import { startFirmwareJob, updateFirmwareJob, publicFirmwareJob, firmwareJobDeliveryUncertain } from "./firmware-job-status.mjs";
 import { firmwareCapability, firmwareWorkflowPaths } from "./firmware-automation.mjs";
 import { AGENT_STATES, WORK_KINDS, hasAgentStatusAccess, publishedAfterTask } from './agent-status.mjs';
@@ -188,6 +189,11 @@ async function loadConfig() {
   config.assets.maxFileBytes ||= 10 * 1024 * 1024;
   config.assets.maxManifestFiles ||= 512;
   config.assets.maxManifestBytes ||= 2 * 1024 * 1024;
+  // Cameras: the helper's library, session and pictures under the state folder, and the eufy
+  // account in eufy.env beside this config, where nothing else reads it.
+  config.cameras ||= {};
+  config.cameras.dir = resolvePath(baseDir, config.cameras.dir || path.join(config.stateDir, "cameras"));
+  config.cameras.envFile = resolvePath(baseDir, config.cameras.envFile || path.join(baseDir, "eufy.env"));
   config.firmware ||= {};
   config.firmware.rootDir = resolvePath(
     baseDir,
@@ -3707,6 +3713,7 @@ class BridgeRuntime {
 	    this.labStates = new Map();
 	    this.weather = new WeatherService(config.weather || {});
 	    this.podcasts = new PodcastService(config.podcasts || {});
+	    this.cameras = new CameraService(config.cameras || {});
 	    this.turnActivity = new Map();
 	    this.activitySeq = 0;
 	    this.heldPolls = new Set();
@@ -6564,6 +6571,13 @@ async function main() {
       return;
     }
 
+    // Cameras: lists as lines, pictures as JPEGs, through the camera helper. Names, serial
+    // numbers and pictures aren't logged.
+    if (req.method === "GET" && url.pathname.startsWith("/api/cardputer/cameras/")) {
+      await handleCameraRoute(runtime.cameras, url.pathname, url.searchParams, device.device_id, res);
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/cardputer/device-actions") {
       json(res, 200, buildDeviceActionsPayload());
       return;
@@ -7826,6 +7840,7 @@ async function main() {
   // A running turn must end with the bridge. Left behind, it would keep changing
   // the project with nothing listening for its reply.
   for (const signal of ["SIGTERM", "SIGINT"]) process.once(signal, () => {
+    runtime.cameras.stop();
     void Promise.resolve(runtime.upstream.stop()).finally(() => process.exit(0));
   });
 
@@ -7833,16 +7848,23 @@ async function main() {
   // Set podcasts.lanPort to 0 to keep it closed; the device then streams over HTTPS.
   const lanPort = config.podcasts?.lanPort === undefined ? LAN_PORT : Number(config.podcasts.lanPort);
   if (Number.isInteger(lanPort) && lanPort > 0 && lanPort < 65536) {
-    const lan = createServer(lanHandler(runtime.podcasts));
+    const podcastsDoor = lanHandler(runtime.podcasts);
+    const lan = createServer((req, res) => { if (!cameraLanRoute(runtime.cameras, req, res)) podcastsDoor(req, res); });
     lan.on("error", (error) => {
       runtime.podcasts.lanPort = 0;
+      runtime.cameras.lanPort = 0;
       console.warn(`[podcasts] home network audio off: ${String(error.code || error.message || error).slice(0, 80)}`);
     });
     lan.listen(lanPort, "0.0.0.0", () => {
       runtime.podcasts.lanPort = lanPort;
+      runtime.cameras.lanPort = lanPort;
       console.log(`[podcasts] home network audio on port ${lanPort}`);
     });
   }
+
+  // The camera helper, if this Mac has it set up (docs/CAMERAS.md).
+  if (runtime.cameras.start()) console.log("[cameras] starting the helper");
+  else console.log(`[cameras] off: ${runtime.cameras.missing()}`);
 
   server.listen(config.server.port, config.server.host, () => {
     console.log(

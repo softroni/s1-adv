@@ -27,7 +27,7 @@ code = r'''
 #include <string>
 #include "launcher_order.h"
 constexpr uint16_t rgb565_local(int, int, int) { return 0; }
-constexpr uint8_t kLauncherGroupCount = 10, kLauncherMaxSubItems = 9, kFavoritesGroup = 0;
+constexpr uint8_t kLauncherGroupCount = 11, kLauncherMaxSubItems = 9, kFavoritesGroup = 0;
 ''' + block((parts / '002_main.cpp.inc').read_text(), 'enum class UiMode : uint8_t') + \
     block(table, 'struct LauncherSubItem {') + block(table, 'struct LauncherGroup {') + \
     block(table, 'constexpr LauncherGroup kLauncherGroups') + r'''

@@ -1271,8 +1271,46 @@ constexpr uint8_t kThermometer[32] = {
     0b00000000, 0b00000000,
 };
 
+// A house, for the House tab, and a security camera on its mount, for Cameras.
+constexpr uint8_t kHouse[32] = {
+    0b00000001, 0b10000000,
+    0b00000011, 0b11000000,
+    0b00000111, 0b11100000,
+    0b00001110, 0b01110000,
+    0b00011100, 0b00111000,
+    0b00111000, 0b00011100,
+    0b01110000, 0b00001110,
+    0b11111111, 0b11111111,
+    0b00111111, 0b11111100,
+    0b00111111, 0b11111100,
+    0b00111100, 0b01111100,
+    0b00111100, 0b01111100,
+    0b00111100, 0b01111100,
+    0b00111100, 0b01111100,
+    0b00111100, 0b01111100,
+    0b00000000, 0b00000000,
+};
+constexpr uint8_t kCamera[32] = {
+    0b00000000, 0b00000000,
+    0b01111111, 0b11110000,
+    0b11111111, 0b11111000,
+    0b11111111, 0b11111110,
+    0b11111111, 0b11110011,
+    0b11111111, 0b11110011,
+    0b11111111, 0b11111110,
+    0b11111111, 0b11111000,
+    0b01111111, 0b11110000,
+    0b00000011, 0b00000000,
+    0b00000011, 0b00000000,
+    0b00000011, 0b00000000,
+    0b00000011, 0b00000000,
+    0b00011111, 0b11100000,
+    0b00011111, 0b11100000,
+    0b00000000, 0b00000000,
+};
+
 // Same order as kLauncherGroups.
-constexpr const uint8_t* kGroups[] = {kStar, kRobot, kMusic, kStopwatch, kWrench,
+constexpr const uint8_t* kGroups[] = {kStar, kRobot, kMusic, kStopwatch, kWrench, kHouse,
                                       kGamepad, kJoystick, kGear, kChip, kLab};
 
 // 8x8, one byte per row: marks a row in its own tab that is also on Favorites.

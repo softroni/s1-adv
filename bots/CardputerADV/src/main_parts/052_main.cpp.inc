@@ -84,6 +84,7 @@ const uint8_t* launcherItemIcon(const LauncherSubItem& item) {
     case UiMode::RfidLab: return kCard;
     case UiMode::IrRemote: return kRemote;
     case UiMode::TvRemote: return kTv;
+    case UiMode::Cameras: return kCamera;
     case UiMode::SmartLamp: return kBulb;
     case UiMode::Sonar: return kSonar;
     case UiMode::Mesh: return kMesh;
@@ -160,9 +161,11 @@ void renderLauncherOverlay() {
 
   d.setFont(&fonts::FreeSansBold9pt7b);
   const int16_t selectedTabW = 2 * kTabPad + d.textWidth(group.title);
-  const int16_t otherTabW = (kScreenW - selectedTabW) / (kLauncherGroupCount - 1);
-  int16_t tabX = (kScreenW - selectedTabW - otherTabW * (kLauncherGroupCount - 1)) / 2;
-  for (int i = 0; i < kLauncherGroupCount; ++i) {
+  int firstTab = 0, lastTab = kLauncherGroupCount - 1;
+  launcher_shortcuts::visibleTabs(kLauncherGroupCount, gLauncherSelection, selectedTabW, kScreenW, iconSize, firstTab, lastTab);
+  const int16_t otherTabW = (kScreenW - selectedTabW) / max(1, lastTab - firstTab);
+  int16_t tabX = (kScreenW - selectedTabW - otherTabW * (lastTab - firstTab)) / 2;
+  for (int i = firstTab; i <= lastTab; ++i) {
     if (i == gLauncherSelection) {
       d.fillRoundRect(tabX, 0, selectedTabW, kTabH, 6, group.accent);
       d.setTextColor(black);

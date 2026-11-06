@@ -236,6 +236,8 @@ bool mapActionUiMode(String mode, UiMode& out) {
     out = UiMode::Podcasts;
   } else if (mode == "tv_remote" || mode == "tv" || mode == "apple_tv") {
     out = UiMode::TvRemote;
+  } else if (mode == "cameras" || mode == "camera" || mode == "eufy") {
+    out = UiMode::Cameras;
   } else if (mode == "minesweeper" || mode == "mines") {
     out = UiMode::Minesweeper;
   } else if (mode == "snake") {

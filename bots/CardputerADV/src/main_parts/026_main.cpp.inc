@@ -209,10 +209,12 @@ void loadDeviceSettings() {
   // The menu can change between firmware versions, so what's saved is only a suggestion. Before
   // Favorites was the first tab, menu_group counted from AI Agent.
   uint8_t savedTab = gPrefs.getUChar("menu_tab", 0xff);
-  if (savedTab == 0xff) savedTab = static_cast<uint8_t>(min<int>(gPrefs.getUChar("menu_group", 0), kLauncherGroupCount - 2) + 1);
+  if (savedTab == 0xff) savedTab = static_cast<uint8_t>(min<int>(gPrefs.getUChar("menu_group", 0), kLauncherGroupCount - 3) + 1);
+  uint8_t savedItem = gPrefs.getUChar("menu_item", 0);
+  if (gPrefs.getUChar("menu_layout", 1) < 2) launcherPlaceFromLayout1(savedTab, savedItem);
   gLauncherSelection = min<int>(savedTab, kLauncherGroupCount - 1);
   const int savedRows = launcherGroup(gLauncherSelection).count;
-  gLauncherSubSelection = savedRows ? min<int>(gPrefs.getUChar("menu_item", 0), savedRows - 1) : 0;
+  gLauncherSubSelection = savedRows ? min<int>(savedItem, savedRows - 1) : 0;
   gLauncherLastSub[gLauncherSelection] = gLauncherSubSelection;
   rememberLauncherApp();  // Firmware before 0.2.305 also saved Settings and System, which this passes over.
   gPrefs.end();
@@ -265,6 +267,28 @@ void saveDeviceSettings() {
 }
 
 // Called when an item opens, so flash is only written when the answer really changes. What's
+// 0.2.315 put House after Tools and moved IR Remote, smartLamp and TV Remote into it, so a place
+// saved before then (menu_layout under 2) is moved to where its app is now. Tools' rows are read
+// in its old table order, which is what they were unless the owner reordered Tools.
+void launcherPlaceFromLayout1(uint8_t& tab, uint8_t& row) {
+  if (tab == 0xff) return;
+  int tools = -1, house = -1;
+  for (uint8_t g = 0; g < kLauncherGroupCount; ++g) {
+    if (!strcmp(kLauncherGroups[g].title, "Tools")) tools = g;
+    if (!strcmp(kLauncherGroups[g].title, "House")) house = g;
+  }
+  if (tools < 0 || house != tools + 1) return;
+  if (tab > tools) { if (tab + 1 < kLauncherGroupCount) ++tab; return; }
+  static const char* const kOldTools[] = {"Calculator", "NFC Notes", "RFID Lab", "IR Remote", "smartLamp", "Sonar", "Mesh",
+                                          "Pocket Synth", "TV Remote"};
+  if (tab != tools || row >= sizeof(kOldTools) / sizeof(kOldTools[0])) return;
+  for (const int g : {tools, house}) {
+    const LauncherGroup& now = launcherGroup(g);
+    for (uint8_t s = 0; s < now.count; ++s)
+      if (!strcmp(now.items[s].label, kOldTools[row])) { tab = uint8_t(g); row = s; return; }
+  }
+}
+
 // saved is the app Tab opens on, so never one in Settings or System.
 void saveLauncherSelection() {
   int group = 0, row = 0;
@@ -276,6 +300,7 @@ void saveLauncherSelection() {
   gPrefs.begin(kPrefsDeviceNs, false);
   gPrefs.putUChar("menu_tab", static_cast<uint8_t>(savedGroup));
   gPrefs.putUChar("menu_item", static_cast<uint8_t>(savedItem));
+  if (gPrefs.getUChar("menu_layout", 1) != 2) gPrefs.putUChar("menu_layout", 2);
   gPrefs.end();
 }
 

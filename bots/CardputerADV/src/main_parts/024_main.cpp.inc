@@ -374,6 +374,7 @@ void setUiMode(UiMode mode) {
   if (modeChanged && labMode(gUiMode)) stopLab();
   if (modeChanged && gUiMode == UiMode::WifiSettings) stopWifiSettings();
   if (modeChanged && gUiMode == UiMode::TvRemote) stopTvRemote();  // Its Bluetooth goes with it.
+  if (modeChanged && gUiMode == UiMode::Cameras) stopCameras();    // Its worker and pictures go with it.
   gUiMode = mode;
   if (modeChanged && mode == UiMode::Files) refreshFileManager();
   if (modeChanged && mode == UiMode::Chess) beginChessDemo();
@@ -390,6 +391,7 @@ void setUiMode(UiMode mode) {
   if (modeChanged && mode == UiMode::Radio) beginInternetRadio();
   if (modeChanged && mode == UiMode::Podcasts) beginPodcasts();
   if (modeChanged && mode == UiMode::TvRemote) beginTvRemote();
+  if (modeChanged && mode == UiMode::Cameras) beginCameras();
   if (modeChanged && mode == UiMode::VlcRemote) beginVlcRemote();
   if (modeChanged && mode == UiMode::ChessMind) beginChessMind();
   if (modeChanged && mode == UiMode::PocketSynth) beginPocketSynth();

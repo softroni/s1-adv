@@ -59,7 +59,8 @@ Put S1-ADV on it and you get a menu of more than 40 apps: an AI assistant that r
 | AI Agent | A | Realtime, Pulse, AI Chat |
 | Media | M | Library, Folders, Voice Notes, Notes, Assets, Files, Internet Radio, Podcasts, VLC Remote |
 | Focus | F | Pomodoro, Alarm, Stopwatch, Calendar, Chess Mind, Chess, BrainFlow, KeyRush |
-| Tools | T | Calculator, NFC Notes, RFID Lab, IR Remote, smartLamp, Sonar, Mesh, Pocket Synth, TV Remote |
+| Tools | T | Calculator, NFC Notes, RFID Lab, Sonar, Mesh, Pocket Synth |
+| House | H | Cameras, TV Remote, smartLamp, IR Remote |
 | Games | G | Tetris, NES, Checkers, Minesweeper, Snake |
 | Arcade | R | Air Music, Flappy Bird, Hot Air Balloon, Ball Catch |
 | Settings | S | Device, Display, Wi-Fi, Pomodoro |
