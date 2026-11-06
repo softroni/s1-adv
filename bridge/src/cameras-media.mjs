@@ -2,12 +2,14 @@
 // Nothing here needs the eufy library, so it runs (and is tested) on the bridge's own Node.
 //
 // The Cardputer's screen is 240x135, the cameras' own 16:9, so a picture fills it. Pictures and
-// live frames go to it as baseline JPEGs, which its decoder draws straight to the screen. The
+// live frames go to it as baseline 4:2:0 JPEGs 240x136, which its decoder (M5GFX's TJpgDec) draws
+// straight to the screen, the last row off its bottom. It takes no other layout: ffmpeg's 4:2:2
+// and 4:4:4 give the colour planes sampling factors it refuses, and 4:2:0 needs an even height. The
 // wall's thumbnails go as raw 8-bit pixels, 3 bits of red, 3 of green and 2 of blue, the menu
 // canvas's own format, already dithered here so the device only copies them.
 import { createHash } from "node:crypto";
 
-export const PICTURE = Object.freeze({ width: 240, height: 135 });
+export const PICTURE = Object.freeze({ width: 240, height: 136 });
 export const THUMB = Object.freeze({ width: 78, height: 44, bytes: 78 * 44 });
 
 // A camera's id for the device and the log: short, stable, and not its serial number.
@@ -51,6 +53,33 @@ export function dither332(rgb, width, height) {
   return out;
 }
 
+// A baseline JPEG's size and each component's sampling byte (0x22 is 2x2), from its frame header.
+export function jpegLayout(jpeg) {
+  if (!jpeg || jpeg.length < 4 || jpeg[0] !== 0xff || jpeg[1] !== 0xd8) return null;
+  let at = 2;
+  while (at + 4 <= jpeg.length) {
+    if (jpeg[at] !== 0xff) return null;
+    const marker = jpeg[at + 1];
+    if (marker === 0xff) { at += 1; continue; }
+    const length = jpeg.readUInt16BE(at + 2);
+    if (marker === 0xc0 || marker === 0xc1) {
+      const count = jpeg[at + 9];
+      const sampling = [];
+      for (let i = 0; i < count; ++i) sampling.push(jpeg[at + 11 + i * 3]);
+      return { height: jpeg.readUInt16BE(at + 5), width: jpeg.readUInt16BE(at + 7), sampling };
+    }
+    if (marker === 0xda || marker === 0xd9 || (marker >= 0xc2 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc)) return null;
+    at += 2 + length;
+  }
+  return null;
+}
+// What the Cardputer's decoder draws: the screen's picture, 4:2:0, colour.
+export function deviceDecodes(jpeg) {
+  const layout = jpegLayout(jpeg);
+  return Boolean(layout && layout.width === PICTURE.width && layout.height === PICTURE.height &&
+    layout.sampling.join(",") === "34,17,17");
+}
+
 // ffmpeg's MJPEG output, one JPEG after another, cut back into whole pictures. Inside a JPEG's
 // coded data every 0xFF byte is followed by 0x00, so FF D9 is only ever the end of a picture.
 export class JpegSplitter {
@@ -86,8 +115,7 @@ export class JpegSplitter {
 // ffmpeg's arguments. Each reads stdin and writes stdout, and only those: no files, no network.
 const QUIET = ["-nostdin", "-hide_banner", "-loglevel", "error"];
 const FILL = `scale=${PICTURE.width}:${PICTURE.height}:force_original_aspect_ratio=increase:flags=area,crop=${PICTURE.width}:${PICTURE.height}`;
-// 4:2:2, not 4:2:0: 4:2:0 needs an even height and 135 isn't one, so it would lose a row.
-const BASELINE = ["-c:v", "mjpeg", "-pix_fmt", "yuvj422p", "-huffman", "default", "-q:v"];
+const BASELINE = ["-c:v", "mjpeg", "-pix_fmt", "yuvj420p", "-huffman", "default", "-q:v"];
 // A camera's still, any size, to the screen's picture.
 export function pictureArgs(quality = 5) {
   return [...QUIET, "-f", "image2pipe", "-c:v", "mjpeg", "-i", "pipe:0", "-frames:v", "1", "-vf", FILL,

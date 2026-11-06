@@ -76,7 +76,9 @@ export class CameraService {
     try { old = await readFile(this.envFile, "utf8"); } catch {}
     await writeAccount(this.envFile, text);
     console.log("[cameras] account saved from the phone page");
-    if (this.port) await this.call("POST", "/signin", emailIn(old) === emailIn(text) ? {} : { fresh: "1" }, 10000);
+    // Only a different account needs its session forgotten; a first sign-in has none.
+    const before = emailIn(old);
+    if (this.port) await this.call("POST", "/signin", before && before !== emailIn(text) ? { fresh: "1" } : {}, 10000);
   }
 
   // Why the helper can't run, for the device's screen, or "" when it can.

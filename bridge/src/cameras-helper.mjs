@@ -12,7 +12,7 @@ import { mkdir, readFile, rename, stat, writeFile, unlink } from "node:fs/promis
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
-  CAMERA_ID, JpegSplitter, PICTURE, THUMB, cameraId, dither332, liveArgs, pictureArgs, scrub, shownName, thumbArgs
+  CAMERA_ID, JpegSplitter, PICTURE, THUMB, cameraId, deviceDecodes, dither332, liveArgs, pictureArgs, scrub, shownName, thumbArgs
 } from "./cameras-media.mjs";
 
 const DIR = process.env.CAMERAS_DIR || "";
@@ -72,7 +72,7 @@ const status = { state: "starting", detail: "" };
 const cameras = new Map();   // id -> { sn, name, dev, station }
 const stations = new Map();  // sn -> dev
 let saved = { motion: {} };  // id -> ms of the last motion, kept across restarts
-let lastTried = 0, triedEnv = 0, signingIn = false, signInAgain = false;
+let lastTried = 0, triedEnv = 0, signingIn = false, signInAgain = false, freshAgain = false;
 let live = null;
 
 function setState(state, detail = "") {
@@ -130,18 +130,29 @@ async function signIn(reason) {
     setState("error", shortError(error));
   } finally {
     signingIn = false;
-    if (signInAgain) { signInAgain = false; void signIn("again"); }
+    if (signInAgain) {
+      signInAgain = false;
+      const fresh = freshAgain;
+      freshAgain = false;
+      void (fresh ? forgetSession() : Promise.resolve()).then(() => signIn("again"));
+    }
   }
 }
 // The phone page saved the account: sign in with it now. A new account starts a new session.
+// eufy.env changing also wakes the 5-second check; whichever comes first signs in, and the other
+// leaves it alone, because each sign-in has eufy send another code and only the last one works.
 async function signInNow(fresh) {
+  const changed = await envChangedAt();
+  if (signingIn && !fresh && triedEnv === changed) return;
   if (live) await liveStop("signing in again");
-  if (fresh) {
-    try { await eufy?.disconnect(); } catch {}
-    eufy = null;
-    try { await unlink(SESSION_FILE); } catch {}
-  }
+  if (signingIn) { signInAgain = true; freshAgain ||= fresh; return; }
+  if (fresh) await forgetSession();
   void signIn("phone page");
+}
+async function forgetSession() {
+  try { await eufy?.disconnect(); } catch {}
+  eufy = null;
+  try { await unlink(SESSION_FILE); } catch {}
 }
 function shortError(error) {
   const text = scrub(error?.code || error?.message || error, [...serials]);
@@ -153,7 +164,8 @@ async function afterLogin(result) {
     setState("ready");
     await loadDevices();
   } else if (result?.status === sdk.LoginStatus.TwoFactor) {
-    setState("code", result.method ? `eufy sent a code by ${String(result.method).slice(0, 12)}` : "eufy sent a code");
+    // The library asks eufy to email it (its message_type 2), to the account's address.
+    setState("code", "eufy emailed you a code");
   } else if (result?.status === sdk.LoginStatus.Captcha) {
     try {
       const png = Buffer.from(String(result.image || "").replace(/^data:image\/\w+;base64,/u, ""), "base64");
@@ -189,6 +201,11 @@ async function loadDevices() {
     else if (record.deviceClass === "homebase" || dev.has?.("arming")) stations.set(record.sn, dev);
   }
   log(`${cameras.size} camera(s), ${stations.size} base(s)`);
+  for (const station of stations.values()) {
+    let caps = "";
+    try { caps = (station.capabilities || []).join(","); } catch {}
+    log(`base caps=${caps || "-"} mode=${property(station, "armingMode") ?? "-"}`);
+  }
 }
 function noteMotion(serial) {
   if (!serial) return;
@@ -262,7 +279,13 @@ async function savePicture(id, jpeg, sized = false) {
 }
 async function readPicture(id, kind) {
   cameraFor(id);
-  try { return await readFile(path.join(PICTURES, `${id}.${kind}`)); } catch { throw new HelperError("no_picture", 404); }
+  let data;
+  try { data = await readFile(path.join(PICTURES, `${id}.${kind}`)); } catch { throw new HelperError("no_picture", 404); }
+  // One kept by 0.2.315 or 0.2.316 is in a layout the device can't draw: made again, once.
+  if (kind === "jpg" && !deviceDecodes(data)) {
+    try { data = await savePicture(id, data); log(`picture ${id} remade for the device`); } catch (error) { warn(`picture ${id} not remade: ${error.code || error.message}`); }
+  }
+  return data;
 }
 async function refresh(id) {
   const cam = cameraFor(id);

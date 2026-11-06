@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { JpegSplitter, PICTURE, THUMB, cameraId, dither332, listLines, liveArgs, modeWord, pictureArgs, scrub,
+import { JpegSplitter, PICTURE, THUMB, cameraId, deviceDecodes, dither332, jpegLayout, listLines, liveArgs, modeWord, pictureArgs, scrub,
   shownName, thumbArgs, to332 } from "./cameras-media.mjs";
 import { CameraError, CameraService, cameraLanRoute, handleCameraRoute } from "./cameras.mjs";
 import { parseEnv } from "./cameras-helper.mjs";
@@ -257,6 +257,14 @@ test("ffmpeg turns camera video into screen-sized baseline JPEGs", { skip: !FFMP
     assert.equal(jpeg.readUInt16BE(sof + 5), PICTURE.height);
     assert.equal(jpeg.readUInt16BE(sof + 7), PICTURE.width);
     assert(jpeg.length < 24 * 1024, `${jpeg.length} bytes`);
+    assert(deviceDecodes(jpeg), JSON.stringify(jpegLayout(jpeg)));
+  }
+  // The layouts the device's decoder refuses are told apart: 4:2:2 and 4:4:4 from ffmpeg, and a wrong size.
+  for (const [format, size] of [["yuvj422p", "240x136"], ["yuvj444p", "240x136"], ["yuvj420p", "240x134"]]) {
+    const other = spawnSync(FFMPEG, ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", `testsrc2=size=${size}`, "-frames:v", "1",
+      "-c:v", "mjpeg", "-pix_fmt", format, "-f", "image2pipe", "pipe:1"], { maxBuffer: 4 << 20 });
+    assert.equal(other.status, 0);
+    assert.equal(deviceDecodes(other.stdout), false, `${format} ${size}`);
   }
   const rgb = spawnSync(FFMPEG, thumbArgs(), { input: frames[0], maxBuffer: 1 << 20 });
   assert.equal(rgb.status, 0);
@@ -357,12 +365,15 @@ test("the sign-in page: wrong links count as failures, the right one saves the a
       assert.equal(r.json().state, "code");
       assert.deepEqual(parseEnv(await readText(service.envFile, "utf8")), { email: "me@example.com", password: "s3cret pass", country: "US" });
       assert.equal((await statFile(service.envFile)).mode & 0o777, 0o600);
+      // The same account again keeps its session; a different one has the last one's forgotten.
+      // (A first account has no session to forget.)
       r = await ask("POST", `${setupPath}/account`, { email: "me@example.com", password: "other" });
+      r = await ask("POST", `${setupPath}/account`, { email: "someone@example.org", password: "x" });
       r = await ask("POST", `${setupPath}/code`, { code: "12 34 56" });
       assert.deepEqual(r.json(), { state: "ready", detail: "", cameras: 2 });
-      assert.deepEqual(calls, ["signin fresh=1", "signin fresh=", "code 123456"]);
+      assert.deepEqual(calls, ["signin fresh=", "signin fresh=", "signin fresh=1", "code 123456"]);
     } finally { console.log = log; }
-    assert(!logged.some(l => l.includes(setupPath.slice(6)) || l.includes("s3cret") || l.includes("example.com")), logged.join("\n"));
+    assert(!logged.some(l => l.includes(setupPath.slice(6)) || l.includes("s3cret") || l.includes("example.com") || l.includes("example.org")), logged.join("\n"));
     // Signed in, the link has done its job.
     assert.equal((await ask("GET", `${setupPath}/status`)).res.status, 404);
     // Bad input is refused without touching the file; too many tries from one address are stopped.

@@ -216,4 +216,58 @@ with tempfile.TemporaryDirectory() as tmp:
     subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++17', '-O1', '-g', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=address,undefined', '-fno-sanitize-recover=all', '-I', str(src), str(test), '-o', str(exe)], check=True)
     subprocess.run([str(exe)], check=True, timeout=60)
+# The bridge's pictures and live frames, made by its own ffmpeg arguments, through the device's own
+# JPEG decoder (M5GFX's TJpgDec, with the 3,900-byte pool drawJpg gives it). 0.2.315 and 0.2.316 sent
+# 4:2:2 that ffmpeg marks in a way this decoder refuses, and every picture said "Couldn't show".
+import json, shutil
+tjpgd = root / 'bots/CardputerADV/.pio/libdeps/cardputer_adv/M5GFX/src/lgfx/utility'
+ffmpeg = shutil.which('ffmpeg') or next((p for p in ('/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg') if Path(p).exists()), None)
+node = shutil.which('node')
+if (tjpgd / 'lgfx_tjpgd.c').exists() and ffmpeg and node:
+    media = root / 'bridge/src/cameras-media.mjs'
+    args = json.loads(subprocess.run([node, '--input-type=module', '-e',
+        f'import {{pictureArgs, liveArgs, PICTURE}} from {json.dumps(media.as_uri())};'
+        'console.log(JSON.stringify({picture: pictureArgs(), live: liveArgs("h265"), size: PICTURE}))'],
+        check=True, capture_output=True, text=True).stdout)
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        still = subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=2880x1616',
+                                '-frames:v', '1', '-c:v', 'mjpeg', '-f', 'image2pipe', 'pipe:1'], check=True, capture_output=True).stdout
+        hevc = subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=15',
+                               '-frames:v', '4', '-c:v', 'libx265', '-x265-params', 'log-level=none', '-f', 'hevc', 'pipe:1'],
+                              check=True, capture_output=True).stdout
+        (tmp / 'picture.jpg').write_bytes(subprocess.run([ffmpeg] + args['picture'][0:], input=still, check=True, capture_output=True).stdout)
+        frames = subprocess.run([ffmpeg] + args['live'], input=hevc, check=True, capture_output=True).stdout
+        first = frames[:frames.index(b'\xff\xd9') + 2]
+        (tmp / 'frame.jpg').write_bytes(first)
+        harness = tmp / 'jd.c'
+        harness.write_text(r"""
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "lgfx_tjpgd.h"
+typedef struct { const unsigned char* d; size_t n, at; } Src;
+static uint32_t in(void* dev, uint8_t* buf, uint32_t len) { Src* s = dev; if (s->at + len > s->n) len = (uint32_t)(s->n - s->at); if (buf) memcpy(buf, s->d + s->at, len); s->at += len; return len; }
+static uint32_t out(void* dev, void* bitmap, JRECT* r) { (void)dev; (void)bitmap; (void)r; return 1; }
+int main(int argc, char** argv) {
+  for (int i = 1; i < argc; i += 3) {
+    FILE* f = fopen(argv[i], "rb"); fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
+    unsigned char* d = malloc((size_t)n); if (fread(d, 1, (size_t)n, f) != (size_t)n) return 2; fclose(f);
+    Src s = { d, (size_t)n, 0 };
+    static uint8_t pool[3900];
+    lgfxJdec jd;
+    if (lgfx_jd_prepare(&jd, in, pool, sizeof(pool), &s) != JDR_OK) { printf("%s: prepare failed\n", argv[i]); return 1; }
+    if (jd.width != atoi(argv[i + 1]) || jd.height != atoi(argv[i + 2])) { printf("%s: %ux%u\n", argv[i], jd.width, jd.height); return 1; }
+    if (lgfx_jd_decomp(&jd, out, 0) != JDR_OK) { printf("%s: decomp failed\n", argv[i]); return 1; }
+    free(d);
+  }
+  return 0;
+}
+""")
+        exe = tmp / 'jd'
+        subprocess.run([os.environ.get('CC', 'cc'), '-O1', '-w', '-I', str(tjpgd), str(harness), str(tjpgd / 'lgfx_tjpgd.c'), '-o', str(exe)], check=True)
+        w, h = str(args['size']['width']), str(args['size']['height'])
+        assert h in ('135', '136'), 'drawn from the top, so one row past the 135 is off the screen'
+        subprocess.run([str(exe), str(tmp / 'picture.jpg'), w, h, str(tmp / 'frame.jpg'), w, h], check=True)
+    print('cameras: the device decodes the bridge pictures and live frames')
 print('cameras: ok')
