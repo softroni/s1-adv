@@ -653,7 +653,7 @@ function clipEntry(day, id) {
   const key = `${day}:${clip.id}`;
   let entry = clipStore.get(key);
   if (!entry) {
-    entry = { key, clip, frames: [], audio: [], pcm: null, done: false, failed: "", thumb: null, codec: "", bytes: 0, usedAt: Date.now(),
+    entry = { key, clip, frames: [], pcm: null, done: false, failed: "", thumb: null, codec: "", bytes: 0, usedAt: Date.now(),
       waiters: [], started: false };
     clipStore.set(key, entry);
   }
@@ -685,13 +685,15 @@ async function downloadClip(entry) {
       over = true;
       clearInterval(timer);
       session.removeListener("data", onData);
+      try { entry.audioFf?.stdin.end(); } catch {}
       entry.done = true;
       if (!entry.frames.length) entry.failed = why || "nothing came";
       wakeClip(entry);
       resolve();
     };
     const onData = (frame) => {
-      if (frame.commandId === CMD_DOWNLOAD_FINISH && (frame.channel === channel || frame.channel === 0)) { finish(""); return; }
+      // The finish frame's channel isn't the camera's on a HomeBase 3; a station sends one at a time.
+      if (frame.commandId === CMD_DOWNLOAD_FINISH) { finish(""); return; }
       if (frame.dataType !== RECORDING_DATA || frame.channel !== channel) return;
       if (frame.commandId === CMD_VIDEO_FRAME) {
         const video = parseVideoFrame(frame.raw);
@@ -702,7 +704,7 @@ async function downloadClip(entry) {
         entry.bytes += video.data.length;
       } else if (frame.commandId === CMD_AUDIO_FRAME) {
         const adts = parseAudioFrame(frame.raw);
-        if (adts) { entry.audio.push(Buffer.from(adts)); entry.bytes += adts.length; }
+        if (adts) { clipSound(entry, adts); entry.bytes += adts.length; }
       } else return;
       got = true;
       last = Date.now();
@@ -718,15 +720,33 @@ async function downloadClip(entry) {
     try { session.sendStringPairCommand(CMD_DOWNLOAD_VIDEO, entry.clip.path, accountId, channel); } catch (error) { finish(String(error?.message || error)); }
   });
   log(`clip ${entry.clip.camId} ${entry.frames.length} frames, ${Math.round(entry.bytes / 1024)} KB in ${Date.now() - began} ms` +
-    (entry.failed ? ` (${entry.failed})` : "") + (entry.audio.length ? ", with sound" : ""));
-  if (entry.frames.length) {
-    void clipThumb(entry);
-    if (entry.audio.length) {
-      try { entry.pcm = await ffmpeg(audioArgs("aac-lc"), Buffer.concat(entry.audio), 64 * 1024 * 1024, 60000); } catch {}
-      wakeClip(entry);
-    }
-  }
+    (entry.failed ? ` (${entry.failed})` : "") + (entry.audioFrames ? `, ${entry.audioFrames} sound frames` : ""));
+  if (entry.frames.length) void clipThumb(entry);
   trimClips();
+}
+// A clip's sound, decoded as it comes, into a buffer that doubles as it fills, so it plays with the
+// picture while the rest of the clip is still on its way.
+function clipSound(entry, adts) {
+  if (!entry.audioFf) {
+    const child = spawn(FFMPEG, audioArgs("aac-lc"), { stdio: ["pipe", "pipe", "pipe"] });
+    entry.pcmBuf = Buffer.alloc(64 * 1024);
+    entry.pcmLen = 0;
+    child.stdout.on("data", (chunk) => {
+      if (entry.pcmLen + chunk.length > entry.pcmBuf.length) {
+        const bigger = Buffer.alloc(Math.max(entry.pcmBuf.length * 2, entry.pcmLen + chunk.length));
+        entry.pcmBuf.copy(bigger, 0, 0, entry.pcmLen);
+        entry.pcmBuf = bigger;
+      }
+      chunk.copy(entry.pcmBuf, entry.pcmLen);
+      entry.pcmLen += chunk.length;
+      entry.pcm = entry.pcmBuf.subarray(0, entry.pcmLen);
+    });
+    child.stderr.on("data", () => {});
+    child.stdin.on("error", () => {});
+    entry.audioFf = child;
+  }
+  entry.audioFrames = (entry.audioFrames || 0) + 1;
+  entry.audioFf.stdin.write(Buffer.from(adts));
 }
 async function clipThumb(entry) {
   if (entry.thumb || !entry.codec) return;
