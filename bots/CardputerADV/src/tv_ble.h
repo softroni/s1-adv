@@ -4,7 +4,17 @@
 #include <cstddef>
 #include <cstdint>
 
+// Bluetooth is in the image only when this is 1. Linking it costs every app about 17.5 KB of heap,
+// even with Bluetooth off, and on 0.2.307 that left TLS too little: every HTTPS request failed in
+// the hardware SHA's buffer allocation. Until that memory is found elsewhere, it's 0.
+#ifndef TV_REMOTE_BLUETOOTH
+#define TV_REMOTE_BLUETOOTH 0
+#endif
+
 namespace tv_ble {
+
+// Whether this build has Bluetooth at all.
+constexpr bool available() { return TV_REMOTE_BLUETOOTH != 0; }
 
 enum class State : uint8_t { Off, Waiting, Connected, Failed };
 

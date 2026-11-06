@@ -1,12 +1,19 @@
 # TV Remote
 
+> **Bluetooth is out of the firmware for now (0.2.309).** Having it in the image at all left every
+> app about 17.5 KB less memory, and on 0.2.307 that broke HTTPS: the chip's hash unit couldn't get
+> a buffer while checking the bridge's certificate, so chat, updates and everything else on the
+> network failed. Infrared works as described here. The Bluetooth and typing parts below are how it
+> works once it's back, which needs that memory found elsewhere first. Until then B and T say
+> "Bluetooth isn't in this version".
+
 Tab, T, TV Remote, or type `/tv`. It works an Apple TV in two ways. **Infrared** needs nothing
 set up, but you point the Cardputer at the Apple TV as you would its own remote. **Bluetooth**
 makes the Cardputer a keyboard the Apple TV pairs with once. Then there's no need to point, and
 you can type in search boxes and passwords on the Cardputer's keyboard. The TV's own volume, mute
 and power always go by infrared, and those are a Samsung TV's.
 
-![TV Remote with Bluetooth connected: the arrow keys around OK, and the keys for Home, Sleep, the TV's volume, mute and power, typing and Bluetooth](assets/screens/tv-remote.png)
+![TV Remote: the arrow keys around OK, the keys for Home, Sleep and the TV's volume, mute and power, and Up just sent by infrared](assets/screens/tv-remote.png)
 
 ## The keys
 

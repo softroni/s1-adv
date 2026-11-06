@@ -48,7 +48,7 @@ Put S1-ADV on it and you get a menu of more than 40 apps: an AI assistant that r
 
 **Connect the real world.** Plug in sensors, lights, motors and switches. The Lab tests each one, then joins them with rules you build step by step, or just say aloud: "when I wave my hand, turn the strip red." Line up timed steps as sequences, and let a rule start them. Then talk to it: change a rule by voice, ask why one didn't fire, or have rules speak. The [Lab guide](docs/LAB.md) shows how it all works.
 
-**Use it every day.** Focus timer, alarms, calendar, notes, calculator, weather, Internet radio, podcasts and audiobooks, a synth you play on the keyboard, an infrared remote for TCL and Daikin air conditioners, and a remote for the Apple TV that also types on it as a Bluetooth keyboard.
+**Use it every day.** Focus timer, alarms, calendar, notes, calculator, weather, Internet radio, podcasts and audiobooks, a synth you play on the keyboard, an infrared remote for TCL and Daikin air conditioners, and an infrared remote for the Apple TV and a Samsung TV's volume.
 
 <details>
 <summary><b>Every app, by menu tab</b></summary>
@@ -291,7 +291,7 @@ Type `/status` on the device to see its connection and version. There's much mor
 | [Build and flash](docs/FLASHING.md) | Every way to flash, plus building with your own settings |
 | [Internet Radio](docs/RADIO.md) | Finding stations, and the station list on the SD card |
 | [Podcasts](docs/PODCASTS.md) | Podcasts, free audiobooks and old-time radio through the bridge, with your place kept and episodes saved for offline |
-| [TV Remote](docs/TV-REMOTE.md) | An Apple TV by infrared or Bluetooth, typing on it, and a Samsung TV's volume |
+| [TV Remote](docs/TV-REMOTE.md) | An Apple TV by infrared, and a Samsung TV's volume, mute and power |
 | [Mesh](docs/MESH.md) · [NES](docs/NES.md) · [Focus audio](docs/FOCUS-AUDIO.md) | The optional extras |
 | [OpenClaw](docs/OPENCLAW.md) | Using the bridge with your own OpenClaw agent |
 | [Architecture](docs/ARCHITECTURE.md) | How the firmware and bridge fit together |

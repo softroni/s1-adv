@@ -1,13 +1,38 @@
 #include "tv_ble.h"
 
 #include <Arduino.h>
-#include <NimBLEDevice.h>
-#include <NimBLEHIDDevice.h>
 #include <esp_heap_caps.h>
 #include <esp_wifi.h>
 
 #include "tv_remote.h"
 
+#if TV_REMOTE_BLUETOOTH
+#include <NimBLEDevice.h>
+#include <NimBLEHIDDevice.h>
+#endif
+
+// Wi-Fi and Bluetooth share one radio, and the Wi-Fi library aborts if modem sleep is off while
+// Bluetooth is enabled ("Should enable WiFi modem sleep when both WiFi and Bluetooth are
+// enabled"). The firmware turns it off for speed in several places, so while Bluetooth holds it,
+// a request for none gets the lightest sleep instead, and the last mode asked for comes back after.
+// It's here with or without Bluetooth, because the linker routes esp_wifi_set_ps through it.
+namespace tv_ble {
+namespace {
+volatile bool gHoldingWifiSleep = false;
+wifi_ps_type_t gWifiSleepWanted = WIFI_PS_NONE;
+}  // namespace
+}  // namespace tv_ble
+
+extern "C" esp_err_t __real_esp_wifi_set_ps(wifi_ps_type_t type);
+extern "C" esp_err_t __wrap_esp_wifi_set_ps(wifi_ps_type_t type) {
+  if (tv_ble::gHoldingWifiSleep) {
+    tv_ble::gWifiSleepWanted = type;
+    if (type == WIFI_PS_NONE) type = WIFI_PS_MIN_MODEM;
+  }
+  return __real_esp_wifi_set_ps(type);
+}
+
+#if TV_REMOTE_BLUETOOTH
 namespace tv_ble {
 namespace {
 
@@ -36,13 +61,6 @@ class Callbacks : public NimBLEServerCallbacks {
 };
 Callbacks gCallbacks;
 
-// Wi-Fi and Bluetooth share one radio, and the Wi-Fi library aborts if modem sleep is off while
-// Bluetooth is enabled ("Should enable WiFi modem sleep when both WiFi and Bluetooth are
-// enabled"). The firmware turns it off for speed in several places, so while Bluetooth holds it,
-// a request for none gets the lightest sleep instead, and the last mode asked for comes back after.
-volatile bool gHoldingWifiSleep = false;
-wifi_ps_type_t gWifiSleepWanted = WIFI_PS_NONE;
-
 bool send(NimBLECharacteristic* c, const uint8_t* data, size_t length) {
   if (!gOn || !gConnected || !c) return false;
   const bool sent = c->notify(data, length);
@@ -50,20 +68,6 @@ bool send(NimBLECharacteristic* c, const uint8_t* data, size_t length) {
   return sent;
 }
 
-}  // namespace
-}  // namespace tv_ble
-
-extern "C" esp_err_t __real_esp_wifi_set_ps(wifi_ps_type_t type);
-extern "C" esp_err_t __wrap_esp_wifi_set_ps(wifi_ps_type_t type) {
-  if (tv_ble::gHoldingWifiSleep) {
-    tv_ble::gWifiSleepWanted = type;
-    if (type == WIFI_PS_NONE) type = WIFI_PS_MIN_MODEM;
-  }
-  return __real_esp_wifi_set_ps(type);
-}
-
-namespace tv_ble {
-namespace {
 void holdWifiSleep() {
   if (gHoldingWifiSleep) return;
   wifi_ps_type_t now = WIFI_PS_NONE;
@@ -189,3 +193,18 @@ bool media(uint16_t usage) {
 }
 
 }  // namespace tv_ble
+#else
+// No Bluetooth in this build: the app shows only infrared, and these say so if asked.
+namespace tv_ble {
+bool start(const char*, int) { return false; }
+void stop() {}
+State state() { return State::Off; }
+bool on() { return false; }
+uint32_t heapCost() { return 0; }
+const char* failure() { return "Bluetooth isn't in this version"; }
+bool paired() { return false; }
+bool forget() { return false; }
+bool key(uint8_t, uint8_t) { return false; }
+bool media(uint16_t) { return false; }
+}  // namespace tv_ble
+#endif

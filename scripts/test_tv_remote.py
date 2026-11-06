@@ -46,13 +46,19 @@ assert '(radioBusy() || radioOn() || podcastOn() || gUiMode == UiMode::TvRemote)
 wake = saver.split('bool handleScreensaverWake() {', 1)[1].split('\n}\n', 1)[0]
 assert wake.index('gUiMode == UiMode::TvRemote') < wake.index('setUiMode(target);'), "a dimmed remote's key goes through"
 ini = (root / 'bots/CardputerADV/platformio.ini').read_text()
-assert 'h2zero/NimBLE-Arduino@2.5.2' in ini and '-D CONFIG_BT_NIMBLE_ROLE_CENTRAL_DISABLED' in ini
-assert 'CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1' in ini
+# Bluetooth is a build switch: the library is in the image exactly when the switch is on, because
+# linking it costs every app 17.5 KB of heap, which broke HTTPS on 0.2.307.
+bluetooth = '-D TV_REMOTE_BLUETOOTH=1' in ini
+assert bluetooth != ('-D TV_REMOTE_BLUETOOTH=0' in ini)
+assert (re.search(r'^\s+h2zero/NimBLE-Arduino@2\.5\.2\s*$', ini, re.M) is not None) == bluetooth
+assert '-D CONFIG_BT_NIMBLE_ROLE_CENTRAL_DISABLED' in ini and 'CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1' in ini
+assert '#ifndef TV_REMOTE_BLUETOOTH\n#define TV_REMOTE_BLUETOOTH 0' in (src / 'tv_ble.h').read_text()
 # The Wi-Fi library aborts if modem sleep is off while Bluetooth is enabled, and the firmware turns
 # it off in several places, so every request goes through Bluetooth's guard.
 ble = (src / 'tv_ble.cpp').read_text()
 assert '-Wl,--wrap=esp_wifi_set_ps' in ini and 'extern "C" esp_err_t __wrap_esp_wifi_set_ps(wifi_ps_type_t type) {' in ble
 assert 'if (type == WIFI_PS_NONE) type = WIFI_PS_MIN_MODEM;' in ble
+assert ble.index('__wrap_esp_wifi_set_ps') < ble.index('#if TV_REMOTE_BLUETOOTH\nnamespace tv_ble'), 'the wrap links with or without Bluetooth'
 started = ble.split('bool start(const char* name, int batteryPercent) {', 1)[1]
 assert started.index('holdWifiSleep();') < started.index('NimBLEDevice::init(name)'), 'sleep before the controller starts'
 stopped = ble.split('void stop() {', 1)[1]
@@ -186,7 +192,8 @@ void stop() { ++stops; if (isOn) assert(WiFi.m == WIFI_OFF); isOn = false; st = 
 State state() { return st; }
 bool on() { return isOn; }
 uint32_t heapCost() { return 31000; }
-const char* failure() { return st == State::Failed ? "Not enough memory for Bluetooth" : ""; }
+const char* failure() { if (!available()) return "Bluetooth isn't in this version";  // As the real one without it.
+  return st == State::Failed ? "Not enough memory for Bluetooth" : ""; }
 bool paired() { return isOn && bonded; }
 bool forget() { assert(isOn); ++forgets; bonded = false; return true; }
 bool key(uint8_t u, uint8_t m) { assert(u); if (st != State::Connected) return false; keys.push_back({u, m}); return true; }
@@ -287,6 +294,26 @@ int main() {
   assert(repeats(Action::Up) && repeats(Action::VolumeDown) && !repeats(Action::Select) && !repeats(Action::Mute) && !repeats(Action::Sleep));
 
   // --- The app -------------------------------------------------------------------------------
+#if !TV_REMOTE_BLUETOOTH
+  // Without Bluetooth: infrared only. A saved "on" doesn't start it, B, T and Shift+B say why, and
+  // Wi-Fi is never touched.
+  saved["tv_remote/bt"] = true;
+  beginTvRemote(); render();
+  assert(tv_ble::starts == 0 && WiFi.m == WIFI_STA && emojiClears == 0 && shows("Infrared") && shows("H") && shows("TV volume"));
+  assert(!shows("T") && !shows("Type") && !shows("B") && !showsPart("Bluetooth"));
+  for (char c : {'b', 't', 'B'}) { press(c); assert(shows("Bluetooth isn't in this version") && !tvRemoteTakesText()); }
+  assert(tv_ble::starts == 0 && WiFi.m == WIFI_STA && !tvRemoteHoldsWifi());
+  press('x'); assert(shows("H home, Z sleep, = - volume"));
+  press(';'); assert(lastIr() == irCode(Action::Up).nec && shows("Up by infrared"));
+  press('='); assert(lastIr() == samsungFrame(7, 0x07));
+  release(); press(';'); later(450); assert(lastIr() == irCode(Action::Up).nec); release(); later(0);
+  stopTvRemote(); assert(tv_ble::stops == 0 && wifiDials == 0);
+  beginTvRemote();
+  for (int i = 0; i <= int(Action::TvPower); ++i) { gTvLast = Action(i); gTvNoticeUntilMs = 0; render(); }
+  tvSay("Bluetooth isn't in this version", tvMuted()); render();
+  puts("PASS TV Remote without Bluetooth: infrared only, Bluetooth keys say why, Wi-Fi untouched, screens fit");
+  return 0;
+#endif
   // Opened with Bluetooth off, as it starts: everything goes by infrared.
   beginTvRemote(); render();
   assert(tv_ble::starts == 0 && irInits > 0 && shows("TV Remote") && shows("Infrared") && shows("Point it at the Apple TV") && overlays == 1);
@@ -445,7 +472,10 @@ int main() {
 '''
 with tempfile.TemporaryDirectory(prefix='s1-tv-remote-') as d:
     p = Path(d); (p / 'test.cpp').write_text(code)
-    subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++17', '-O1', '-g', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',
-                    '-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-I' + str(src), str(p / 'test.cpp'),
-                    '-o', str(p / 'test')], check=True)
-    subprocess.run([str(p / 'test')], check=True, timeout=60)
+    # Both builds: with Bluetooth, as it may be switched back on, and without, as it ships now.
+    for flag in ('1', '0'):
+        exe = p / ('test' + flag)
+        subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++17', '-O1', '-g', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function',
+                        '-DTV_REMOTE_BLUETOOTH=' + flag, '-fsanitize=address,undefined', '-fno-omit-frame-pointer', '-I' + str(src),
+                        str(p / 'test.cpp'), '-o', str(exe)], check=True)
+        subprocess.run([str(exe)], check=True, timeout=60)

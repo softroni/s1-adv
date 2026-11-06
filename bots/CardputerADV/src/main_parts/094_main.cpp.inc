@@ -72,6 +72,10 @@ void tvWifiBack() {
 
 bool tvBluetoothStart() {
   if (tv_ble::on()) return true;
+  if (!tv_ble::available()) {
+    tvSay(tv_ble::failure(), tvMuted());
+    return false;
+  }
   if (!networkWorkIdle()) {
     gTvBluetoothPending = true;
     tvSay("Bluetooth waits for a request to end", tvAmber());
@@ -251,7 +255,7 @@ void beginTvRemote() {
   gTvNotice = "";
   gTvLast = tv_remote::Action::None;
   initIrRemote();
-  if (gTvBluetoothWanted) tvBluetoothStart();
+  if (gTvBluetoothWanted && tv_ble::available()) tvBluetoothStart();
   tvInvalidate();
 }
 
@@ -295,9 +299,13 @@ bool handleTvRemoteKey(char key, const Keyboard_Class::KeysState& keys) {
   using tv_remote::Action;
   const Action a = tv_remote::actionForKey(key, keys.enter, keys.del);
   if (a != Action::Forget) gTvForgetAskedMs = 0;
+  if ((a == Action::Bluetooth || a == Action::Typing || a == Action::Forget) && !tv_ble::available()) {
+    tvSay(tv_ble::failure(), tvMuted());
+    return true;
+  }
   switch (a) {
     case Action::None:
-      tvSay("H home, T type, B Bluetooth", tvMuted());
+      tvSay(tv_ble::available() ? "H home, T type, B Bluetooth" : "H home, Z sleep, = - volume", tvMuted());
       return true;
     case Action::Bluetooth: tvToggleBluetooth(); return true;
     case Action::Typing: tvOpenTyping(); return true;
@@ -430,8 +438,10 @@ void renderTvRemote() {
     tvKeyRow(92, 27, "H", "Home", "Z", "Sleep");
     tvKeyRow(92, 44, "= -", "TV volume");
     tvKeyRow(92, 61, "M", "Mute", "P", "Power");
-    tvKeyRow(92, 78, "T", "Type");
-    tvKeyRow(92, 95, "B", tv_ble::on() ? "Bluetooth off" : "Bluetooth");
+    if (tv_ble::available()) {
+      tvKeyRow(92, 78, "T", "Type");
+      tvKeyRow(92, 95, "B", tv_ble::on() ? "Bluetooth off" : "Bluetooth");
+    }
   }
   uint16_t ink = 0;
   const String line = tvLastLine(ink);
