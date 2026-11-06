@@ -26,6 +26,9 @@ for f, s in [('002_main.cpp.inc', '  Podcasts,\n  TvRemote,\n};'),
              ('025_main.cpp.inc', 'if (wifiSettingsTakesAllKeys() || tvRemoteTakesText()) {')]:
     assert s in part(f), (f, s)
 assert 'constexpr uint8_t kTv[32]' in (src / 'launcher_icons.h').read_text()
+for f, head in [('043_main.cpp.inc', 'void maintainConnectivity() {'), ('040_main.cpp.inc', 'bool ensureWifiForHttp(const char* reason, uint32_t timeoutMs) {')]:
+    body = part(f).split(head, 1)[1]
+    assert body.index('if (tvRemoteHoldsWifi()) return') < body.index('WiFi.'), (f, 'Bluetooth has Wi-Fi off: no reconnect, no dial')
 assert 'main_parts/094_main.cpp.inc' in (src / 'main.cpp').read_text()
 mode = part('024_main.cpp.inc').split('void setUiMode(UiMode mode) {', 1)[1]
 assert mode.index('if (modeChanged && gUiMode == UiMode::TvRemote) stopTvRemote();') < mode.index('  gUiMode = mode;') < \
@@ -55,6 +58,10 @@ assert started.index('holdWifiSleep();') < started.index('NimBLEDevice::init(nam
 stopped = ble.split('void stop() {', 1)[1]
 assert stopped.index('NimBLEDevice::deinit(true);') < stopped.index('releaseWifiSleep();'), 'and back only once it has stopped'
 
+# Every message fits the bottom line whole: Font0 is 6 px a letter, and the line is 224 px.
+said = re.findall(r'tvSay\("([^"]*)"', app) + re.findall(r'gFailure = "([^"]*)"', (src / 'tv_ble.cpp').read_text())
+assert len(said) >= 12, said
+for line in said: assert len(line) * 6 <= 224, line
 app = app.replace('#include "../tv_ble.h"\n', '').replace('#include "../tv_remote.h"\n', '')
 code = r'''
 #include "tv_remote.h"
@@ -133,6 +140,21 @@ void appendRuntimeLog(const String& area, const String& message, bool) { assert(
 void logHeapStats(const char* tag) { heapTags.push_back(tag); }
 int flashes = 0;
 void flashActivityLed(uint8_t, uint8_t, uint8_t, uint32_t) { ++flashes; }
+// Wi-Fi, as Bluetooth takes it off and gives it back.
+enum { WIFI_OFF = 0, WIFI_STA = 1 };
+bool gWifiReady = true, networkIdle = true;
+int emojiClears = 0, netPreps = 0, wifiDials = 0;
+std::string lastDial;
+bool networkWorkIdle() { return networkIdle; }
+void clearEmojiCache() { ++emojiClears; }
+void prepareNetworkMemory(const char* why, bool force) { assert(std::string(why) == "TV" && force); ++netPreps; }
+struct {
+  int m = WIFI_STA, disconnects = 0;
+  int getMode() { return m; }
+  bool disconnect(bool, bool) { ++disconnects; return true; }
+  bool mode(int to) { m = to; return true; }
+} WiFi;
+void beginWifiStationConnect(const char* why) { assert(WiFi.m == WIFI_OFF); WiFi.m = WIFI_STA; ++wifiDials; lastDial = why; }
 // The saved setting, as Preferences keeps it.
 std::map<std::string, bool> saved;
 struct {
@@ -158,8 +180,9 @@ State st = State::Off; bool isOn = false, bonded = false, startFails = false;
 int starts = 0, stops = 0, forgets = 0, battery = -2;
 std::vector<std::pair<uint8_t, uint8_t>> keys; std::vector<uint16_t> medias;
 bool start(const char* name, int b) { ++starts; assert(std::string(name) == "Cardputer Remote"); battery = b; assert(!isOn);
+  assert(WiFi.m == WIFI_OFF);  // Wi-Fi's memory is free first.
   if (startFails) { st = State::Failed; return false; } isOn = true; st = State::Waiting; return true; }
-void stop() { ++stops; isOn = false; st = State::Off; }
+void stop() { ++stops; if (isOn) assert(WiFi.m == WIFI_OFF); isOn = false; st = State::Off; }  // Running, Wi-Fi was off.
 State state() { return st; }
 bool on() { return isOn; }
 uint32_t heapCost() { return 31000; }
@@ -188,11 +211,13 @@ uint32_t lastIr() { assert(!ir.empty()); return ir.back().value; }
 void renderAll() {
   for (auto s : {tv_ble::State::Off, tv_ble::State::Waiting, tv_ble::State::Connected, tv_ble::State::Failed})
     for (bool bonded : {false, true})
-      for (TvView v : {TvView::Remote, TvView::Typing}) {
+      for (TvView v : {TvView::Remote, TvView::Typing}) for (bool pending : {false, true}) {
         const auto keepState = tv_ble::st; const bool keepOn = tv_ble::isOn, keepBond = tv_ble::bonded; const TvView keepView = gTvView;
+        const bool keepPending = gTvBluetoothPending;
         tv_ble::st = s; tv_ble::isOn = s == tv_ble::State::Waiting || s == tv_ble::State::Connected; tv_ble::bonded = bonded; gTvView = v;
+        gTvBluetoothPending = pending && !tv_ble::isOn;
         render();
-        tv_ble::st = keepState; tv_ble::isOn = keepOn; tv_ble::bonded = keepBond; gTvView = keepView;
+        tv_ble::st = keepState; tv_ble::isOn = keepOn; tv_ble::bonded = keepBond; gTvView = keepView; gTvBluetoothPending = keepPending;
       }
   render();
 }
@@ -282,7 +307,7 @@ int main() {
   press('p'); assert(lastIr() == samsungFrame(7, 0x02));
   { Keyboard_Class::KeysState k; k.word = {char(2)}; assert(handleTvRemoteKey(char(2), k)); assert(lastIr() == irCode(Action::Down).nec); }
   // A key with no job says what the keys are, and sends nothing.
-  size_t before = ir.size(); press('x'); assert(ir.size() == before && showsPart("H home"));
+  size_t before = ir.size(); press('x'); assert(ir.size() == before && shows("H home, T type, B Bluetooth"));
   // Ctrl and Alt keys go on to the device's own shortcuts.
   { Keyboard_Class::KeysState k; k.ctrl = true; assert(!handleTvRemoteKey('l', k)); k.ctrl = false; k.alt = true; assert(!handleTvRemoteKey('h', k)); }
   assert(ir.size() == before);
@@ -309,7 +334,10 @@ int main() {
   press('b');
   assert(tv_ble::starts == 1 && tv_ble::on() && tv_ble::battery == 77 && saved["tv_remote/bt"]);
   assert(shows("BT waiting") && shows("Pair on the Apple TV:") && shows("Remotes and Devices >") && shows("Cardputer Remote"));
-  assert(heapTags == (std::vector<std::string>{"tv-bt-before", "tv-bt-on"}) && logged.size() == 1 && logged[0].find("Bluetooth on, took 31000 bytes") == 0);
+  assert(heapTags == (std::vector<std::string>{"tv-bt-before", "tv-bt-on"}) && logged.size() == 1);
+  assert(logged[0] == "Bluetooth on, with Wi-Fi=98000 before=98000 largest=40000 took=31000 now=98000");
+  assert(WiFi.m == WIFI_OFF && WiFi.disconnects == 1 && !gWifiReady && tvRemoteHoldsWifi() && emojiClears == 1 && netPreps == 1);
+  assert(shows("Wi-Fi is off while Bluetooth is on"));
   // Not connected yet, so the arrows still go by infrared.
   press(';'); assert(lastIr() == irCode(Action::Up).nec && tv_ble::keys.empty());
   // Connected: the Apple TV's keys go by Bluetooth, with no pointing; the TV's still by infrared.
@@ -364,13 +392,15 @@ int main() {
   press('B'); assert(tv_ble::forgets == 0 && showsPart("Shift+B again forgets"));
   tick += 4001; press('B'); assert(tv_ble::forgets == 0);
   press(';'); press('B'); assert(tv_ble::forgets == 0);  // Another key in between starts again.
-  press('B'); assert(tv_ble::forgets == 1 && !tv_ble::bonded && showsPart("Forgotten") && logged.back() == "Forgot paired devices");
+  press('B'); assert(tv_ble::forgets == 1 && !tv_ble::bonded && shows("Forgotten: pair again on the Apple TV") && logged.back() == "Forgot paired devices");
 
   // Leaving turns Bluetooth off, and coming back turns it on again, because that's how it was left.
   stopTvRemote(); assert(!tv_ble::on() && tv_ble::stops == 1 && heapTags.back() == "tv-bt-off" && saved["tv_remote/bt"]);
-  beginTvRemote(); assert(tv_ble::on() && tv_ble::starts == 2 && gTvView == TvView::Remote);
+  assert(WiFi.m == WIFI_STA && wifiDials == 1 && lastDial == "Wi-Fi back on" && !tvRemoteHoldsWifi());
+  stopTvRemote(); assert(wifiDials == 1);  // Once.
+  beginTvRemote(); assert(tv_ble::on() && tv_ble::starts == 2 && gTvView == TvView::Remote && WiFi.m == WIFI_OFF);
   // B again: off, saved off, and the next visit starts with infrared only.
-  press('b'); assert(!tv_ble::on() && !saved["tv_remote/bt"] && showsPart("keys go by infrared"));
+  press('b'); assert(!tv_ble::on() && !saved["tv_remote/bt"] && showsPart("keys go by infrared") && WiFi.m == WIFI_STA && wifiDials == 2);
   stopTvRemote(); beginTvRemote(); assert(!tv_ble::on() && tv_ble::starts == 2);
   // With Bluetooth off, Shift+B says how to turn it on.
   press('B'); assert(showsPart("B turns it on") && tv_ble::forgets == 1);
@@ -382,10 +412,27 @@ int main() {
   // When Bluetooth can't start, it says why, and the remote still works by infrared.
   tv_ble::startFails = true;
   press('b'); assert(!tv_ble::on() && shows("BT failed") && shows("Not enough memory for Bluetooth"));
-  assert(logged.back().find("Bluetooth failed: Not enough memory for Bluetooth") == 0);
+  assert(logged.back().find("Bluetooth failed: Not enough memory for Bluetooth with Wi-Fi=") == 0);
+  assert(WiFi.m == WIFI_STA && !tvRemoteHoldsWifi());
   press('t'); assert(!tvRemoteTakesText());
   press(';'); assert(lastIr() == irCode(Action::Up).nec);
   stopTvRemote(); tv_ble::startFails = false; tv_ble::st = tv_ble::State::Off;
+  beginTvRemote();
+
+  // A request under way keeps its network: Bluetooth waits, then starts by itself.
+  press('b'); assert(!tv_ble::on()); stopTvRemote();
+  networkIdle = false; const int startsBefore = tv_ble::starts;
+  beginTvRemote(); press('b'); render();
+  assert(!tv_ble::on() && gTvBluetoothPending && WiFi.m == WIFI_STA && shows("BT starting") && shows("Bluetooth waits for a request to end"));
+  press('t'); render(); assert(tvRemoteTakesText() && shows("network is free..."));
+  tvRemoteEscape();
+  later(100); assert(tv_ble::starts == startsBefore);
+  networkIdle = true; later(10); assert(tv_ble::on() && !gTvBluetoothPending && WiFi.m == WIFI_OFF && tv_ble::starts == startsBefore + 1);
+  // B while waiting gives up the wait; so does leaving.
+  press('b'); networkIdle = false; press('b'); assert(gTvBluetoothPending); press('b');
+  assert(!gTvBluetoothPending && !saved["tv_remote/bt"] && WiFi.m == WIFI_STA);
+  press('b'); assert(gTvBluetoothPending); stopTvRemote(); assert(!gTvBluetoothPending && WiFi.m == WIFI_STA);
+  networkIdle = true; later(10); assert(!tv_ble::on());
   beginTvRemote();
 
   // Every screen fits, in every state, with a notice and without, and with a long typed line.

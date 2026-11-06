@@ -683,6 +683,7 @@ void servicePodcasts();
 bool handlePodcastKey(char key, const Keyboard_Class::KeysState& keys);
 void renderPodcastsUi();
 bool tvRemoteTakesText();
+bool tvRemoteHoldsWifi();
 bool tvRemoteEscape();
 void beginTvRemote();
 void stopTvRemote();

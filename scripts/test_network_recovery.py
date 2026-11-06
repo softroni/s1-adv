@@ -347,7 +347,7 @@ def main():
     if not interval:
         raise SystemExit('Wi-Fi reconnect interval declaration changed; review the extraction.')
     code = CPP + CPP_INTEGRATION + interval.group() + '\n'
-    code += 'bool gWifiSettingsHolds=false;bool wifiSettingsOwnsRadio(){return gWifiSettingsHolds;}\n'
+    code += 'bool gWifiSettingsHolds=false;bool wifiSettingsOwnsRadio(){return gWifiSettingsHolds;}bool tvRemoteHoldsWifi(){return false;}\n'
     code += extract_function(source, 'bool networkWorkIdle()')
     code += extract_function(source, 'void maintainConnectivity()') + CPP_INTEGRATION_TESTS
     with tempfile.TemporaryDirectory(prefix='s1-network-recovery-') as directory:

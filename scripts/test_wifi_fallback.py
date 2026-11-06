@@ -162,6 +162,8 @@ struct { bool takeReconnect(uint32_t, bool, bool) { return false; } } gNetworkRe
 bool networkWorkIdle() { return true; }
 void serviceSetupPortal() {}
 bool wifiSettingsOwnsRadio() { return false; }
+bool gTvHoldsWifi = false;
+bool tvRemoteHoldsWifi() { return gTvHoldsWifi; }
 bool ensureCaptivePortalAccess(bool, const char*) { return true; }
 void syncClockFromNtp(bool) {}
 void startHubWebSocket() {}
@@ -300,6 +302,17 @@ int main() {
   assert(gWifiSsid == "Phone" && gWifiReady && (WiFi.dialed == Dialed{"Phone"}) && (gSavedAsCurrent == std::vector<std::string>{"Phone"}));
   assert(logged("roam trying saved ssid=Phone, lost ssid=Home") && logged("roam joined saved ssid=Phone"));
   std::cout << "PASS running: the network in use is lost, and the next saved one joins and is kept\n";
+
+  // TV Remote has Wi-Fi off for Bluetooth: the running check leaves it be, says nothing, and dials
+  // nothing, however long it's off. Given back, it's the usual check again.
+  online("Home", "homepass", {{"Home", "homepass"}, {"Phone", "phonepass"}}, {{"Home", "homepass"}, {"Phone", "phonepass"}});
+  gTvHoldsWifi = true; WiFi.air.erase("Home");
+  run(gNow + 60000);
+  assert(gChat.empty() && WiFi.dialed.empty() && WiFi.reconnects == 0 && gWifiSsid == "Home");
+  gTvHoldsWifi = false;
+  run(gNow + 20000);
+  assert(said("Wi-Fi disconnected.") && (WiFi.dialed == Dialed{"Phone"}));
+  std::cout << "PASS running: nothing dials while TV Remote has Wi-Fi off for Bluetooth\n";
 
   // A blip: back within the wait, so nothing else is dialed.
   online("Home", "homepass", {{"Home", "homepass"}, {"Phone", "phonepass"}}, {{"Home", "homepass"}, {"Phone", "phonepass"}});

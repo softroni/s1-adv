@@ -1212,6 +1212,8 @@ void maintainConnectivity() {
   if (wifiSettingsOwnsRadio()) {
     return;
   }
+  // TV Remote turned Wi-Fi off to give Bluetooth its memory, and turns it back on when it's done.
+  if (tvRemoteHoldsWifi()) return;
 
   bool wifiNow = WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0);
   const bool idleForRecovery = !gBootBackgroundActive && networkWorkIdle();

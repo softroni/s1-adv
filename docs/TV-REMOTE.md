@@ -28,7 +28,8 @@ and power always go by infrared, and those are a Samsung TV's.
 
 The bottom line says what the last key sent and how, such as "Up by infrared" or "Play/Pause by
 Bluetooth". The top corner says how keys are going: **Infrared**, **BT waiting** while Bluetooth
-is on but nothing is connected, **Bluetooth** when the Apple TV is connected, or **BT failed**.
+is on but nothing is connected, **Bluetooth** when the Apple TV is connected, **BT starting** while it waits for the network to
+finish something, or **BT failed**.
 
 The screen dims and goes off on the usual timers, but the screensaver doesn't start here, and a
 key pressed with the screen dimmed or off still does its job, as on a real remote.
@@ -54,6 +55,11 @@ Press **B**. The first time, the screen says where to pair it:
 After that the Apple TV connects again by itself, a few seconds after the app opens. Bluetooth
 runs only while TV Remote is open. Leaving the app turns it off. If you left it on, it comes back
 on the next time you open TV Remote. B turns it off for good, and the keys go by infrared again.
+
+**Wi-Fi is off while Bluetooth is on.** Bluetooth needs the memory Wi-Fi uses, and the remote
+doesn't need the network. Wi-Fi comes back by itself when you leave the app or press B, and
+messages and updates catch up then. If something is still using the network when you press B,
+the corner says **BT starting** and Bluetooth starts as soon as it's done.
 
 Home and Sleep always go by infrared, as do the TV's own keys, because a keyboard has no key the
 Apple TV reads as those.
@@ -85,10 +91,10 @@ Bluetooth takes memory that the radio and every secure connection also need, so:
 
 - Opening TV Remote stops the radio or a podcast.
 - Background checks for messages and updates wait until you leave, as on IR Remote.
-- If there isn't enough memory, the corner says **BT failed** and the bottom line says why, and
-  infrared still works.
-- While Bluetooth is on, Wi-Fi uses its power-saving mode, because the chip can't run both radios
-  without it. Leaving puts Wi-Fi back as it was.
+- Turning Bluetooth on turns Wi-Fi off and clears the device's caches, to give it room.
+- If there still isn't enough memory, the corner says **BT failed** and the bottom line says
+  why, Wi-Fi comes straight back, and infrared still works. The log's `TV` lines say how much
+  there was and how much Bluetooth took.
 
 Having Bluetooth in the firmware at all leaves every app about 17 KB less memory, even with
 Bluetooth off. Most of that is the Bluetooth controller's code, which has to sit in the chip's
@@ -102,4 +108,6 @@ All of this has been checked on a computer, not yet on a Cardputer and an Apple 
 - Pairing with no code, reconnecting by itself, and which keys the Apple TV takes from a keyboard.
   Esc for Back and a media key for Play/Pause are my best reading, not something seen working.
 - How much memory Bluetooth takes while it's on, and whether it starts again cleanly after
-  leaving. The device's log says both: look for the `TV` lines in Logs.
+  leaving. The device's log says both: look for the `TV` lines in Logs, and press U there to send
+  them to the bridge. 0.2.307 started Bluetooth with Wi-Fi on and had too little left, which is
+  why 0.2.308 turns Wi-Fi off first.

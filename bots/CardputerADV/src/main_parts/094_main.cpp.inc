@@ -16,6 +16,10 @@ constexpr size_t kTvTypedKept = 48;          // Of what was typed, the end the s
 TvView gTvView = TvView::Remote;
 bool gTvLoaded = false;
 bool gTvBluetoothWanted = false;  // Saved: Bluetooth starts with the app, as it was left.
+// Bluetooth needs Wi-Fi's memory, so Wi-Fi is off while it's on, and back when it stops.
+bool gTvWifiOff = false;
+// Waiting for a request under way to finish, because it would lose its network.
+bool gTvBluetoothPending = false;
 tv_ble::State gTvShownState = tv_ble::State::Off;
 tv_remote::Action gTvLast = tv_remote::Action::None;
 bool gTvLastByBluetooth = false;
@@ -60,27 +64,56 @@ void tvSaveBluetooth(bool wanted) {
   gPrefs.end();
 }
 
+void tvWifiBack() {
+  if (!gTvWifiOff) return;
+  gTvWifiOff = false;
+  beginWifiStationConnect("Wi-Fi back on");
+}
+
 bool tvBluetoothStart() {
   if (tv_ble::on()) return true;
+  if (!networkWorkIdle()) {
+    gTvBluetoothPending = true;
+    tvSay("Bluetooth waits for a request to end", tvAmber());
+    return false;
+  }
+  gTvBluetoothPending = false;
+  // Everything that can go goes first: caches, the voice buffers, and Wi-Fi, which the remote
+  // doesn't use. Even with all of Wi-Fi's memory in use, the stack didn't fit on 0.2.307.
+  const uint32_t withWifi = ESP.getFreeHeap();
+  clearEmojiCache();
+  prepareNetworkMemory("TV", true);
+  if (WiFi.getMode() != WIFI_OFF) {
+    WiFi.disconnect(false, false);
+    WiFi.mode(WIFI_OFF);
+    gWifiReady = false;
+    gTvWifiOff = true;
+  }
+  const uint32_t before = ESP.getFreeHeap(), largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
   logHeapStats("tv-bt-before");
   const bool started = tv_ble::start(kTvBluetoothName, gBatterySnapshot.level);
   gTvShownState = tv_ble::state();
+  const String heap = " with Wi-Fi=" + String(withWifi) + " before=" + String(before) + " largest=" + String(largest) +
+                      " took=" + String(tv_ble::heapCost()) + " now=" + String(ESP.getFreeHeap());
   if (!started) {
-    appendRuntimeLog("TV", String("Bluetooth failed: ") + tv_ble::failure() + " free=" + String(ESP.getFreeHeap()), true);
+    appendRuntimeLog("TV", String("Bluetooth failed: ") + tv_ble::failure() + heap, true);
+    tvWifiBack();
     tvSay(tv_ble::failure(), tvRed());
     return false;
   }
   logHeapStats("tv-bt-on");
-  appendRuntimeLog("TV", "Bluetooth on, took " + String(tv_ble::heapCost()) + " bytes, free=" + String(ESP.getFreeHeap()) +
-                   " largest=" + String(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)), true);
+  appendRuntimeLog("TV", "Bluetooth on," + heap, true);
   return true;
 }
 void tvBluetoothStop() {
-  if (!tv_ble::on() && tv_ble::state() != tv_ble::State::Failed) return;
-  tv_ble::stop();
-  gTvShownState = tv_ble::State::Off;
-  logHeapStats("tv-bt-off");
-  appendRuntimeLog("TV", "Bluetooth off, free=" + String(ESP.getFreeHeap()), true);
+  gTvBluetoothPending = false;
+  if (tv_ble::on() || tv_ble::state() == tv_ble::State::Failed) {
+    tv_ble::stop();
+    gTvShownState = tv_ble::State::Off;
+    logHeapStats("tv-bt-off");
+    appendRuntimeLog("TV", "Bluetooth off, free=" + String(ESP.getFreeHeap()), true);
+  }
+  tvWifiBack();  // Only once the stack's memory is back.
 }
 bool tvBluetoothReady() { return tv_ble::state() == tv_ble::State::Connected; }
 
@@ -115,7 +148,7 @@ void tvSend(tv_remote::Action a, bool repeat) {
 }
 
 void tvToggleBluetooth() {
-  if (tv_ble::on()) {
+  if (tv_ble::on() || gTvBluetoothPending) {
     tvBluetoothStop();
     tvSaveBluetooth(false);
     if (gTvView == TvView::Typing) gTvView = TvView::Remote;
@@ -123,7 +156,7 @@ void tvToggleBluetooth() {
     return;
   }
   tvSaveBluetooth(true);
-  if (tvBluetoothStart()) tvSay("Bluetooth on", tvGreen());
+  if (tvBluetoothStart()) tvSay("Wi-Fi is off while Bluetooth is on", tvGreen());
 }
 
 void tvForget() {
@@ -140,13 +173,13 @@ void tvForget() {
   gTvForgetAskedMs = 0;
   const bool forgot = tv_ble::forget();
   appendRuntimeLog("TV", forgot ? "Forgot paired devices" : "Forgetting paired devices failed", true);
-  tvSay(forgot ? "Forgotten: pair it again on the Apple TV" : "Couldn't forget it", forgot ? tvGreen() : tvRed());
+  tvSay(forgot ? "Forgotten: pair again on the Apple TV" : "Couldn't forget it", forgot ? tvGreen() : tvRed());
 }
 
 void tvOpenTyping() {
   if (!tv_ble::on()) {
     tvSaveBluetooth(true);
-    if (!tvBluetoothStart()) return;
+    if (!tvBluetoothStart() && !gTvBluetoothPending) return;
   }
   gTvView = TvView::Typing;
   gTvTyped = "";
@@ -195,6 +228,8 @@ bool tvTypingKey(char key, const Keyboard_Class::KeysState& keys) {
 }
 
 bool tvRemoteTakesText() { return gUiMode == UiMode::TvRemote && gTvView == TvView::Typing && !gLauncherVisible; }
+// Wi-Fi is off for Bluetooth: nothing may dial it until TV Remote gives it back.
+bool tvRemoteHoldsWifi() { return gTvWifiOff; }
 
 // Typing steps back to the remote; the remote's Esc leaves the app.
 bool tvRemoteEscape() {
@@ -229,6 +264,7 @@ void stopTvRemote() {
 
 void serviceTvRemote() {
   if (gUiMode != UiMode::TvRemote) return;
+  if (gTvBluetoothPending && networkWorkIdle() && tvBluetoothStart()) tvSay("Wi-Fi is off while Bluetooth is on", tvGreen());
   const tv_ble::State now = tv_ble::state();
   if (now != gTvShownState) {
     if (now == tv_ble::State::Connected) appendRuntimeLog("TV", "Bluetooth connected", true);
@@ -261,7 +297,7 @@ bool handleTvRemoteKey(char key, const Keyboard_Class::KeysState& keys) {
   if (a != Action::Forget) gTvForgetAskedMs = 0;
   switch (a) {
     case Action::None:
-      tvSay("H home  T type  B Bluetooth  = - volume", tvMuted());
+      tvSay("H home, T type, B Bluetooth", tvMuted());
       return true;
     case Action::Bluetooth: tvToggleBluetooth(); return true;
     case Action::Typing: tvOpenTyping(); return true;
@@ -279,7 +315,9 @@ String tvLinkLabel(uint16_t& ink) {
     case tv_ble::State::Connected: ink = tvGreen(); return "Bluetooth";
     case tv_ble::State::Waiting: ink = tvAmber(); return "BT waiting";
     case tv_ble::State::Failed: ink = tvRed(); return "BT failed";
-    default: ink = tvMuted(); return "Infrared";
+    default:
+      if (gTvBluetoothPending) { ink = tvAmber(); return "BT starting"; }
+      ink = tvMuted(); return "Infrared";
   }
 }
 
@@ -428,6 +466,12 @@ void renderTvTyping() {
     d.setTextColor(tvRed());
     d.setCursor(8, 56);
     d.print(fitCurrentFontToWidth(tv_ble::failure(), 222));
+  } else if (gTvBluetoothPending) {
+    d.setTextColor(tvAmber());
+    d.setCursor(8, 56);
+    d.print("Bluetooth starts when the");
+    d.setCursor(8, 73);
+    d.print("network is free...");
   } else if (!tv_ble::paired()) {
     d.setTextColor(tvAmber());
     d.setCursor(8, 56);

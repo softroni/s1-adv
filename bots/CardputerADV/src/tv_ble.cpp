@@ -82,6 +82,7 @@ bool start(const char* name, int batteryPercent) {
   if (gOn) return true;
   gFailed = false;
   gFailure = "";
+  gHeapCost = 0;
   const uint32_t before = ESP.getFreeHeap();
   if (before < kMinFreeHeap) {
     gFailed = true;
