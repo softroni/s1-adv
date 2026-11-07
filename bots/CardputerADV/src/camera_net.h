@@ -18,7 +18,8 @@ void close();       // Ends it, cancelling any request, and frees all it holds.
 bool opened();
 // Asks for path. At home (ip, port: the bridge's computer, host order) or over HTTPS. maxBytes
 // bounds the answer; waitMs is how long the bridge may take to start answering.
-bool start(const char* path, bool home, uint32_t ip, uint16_t port, size_t maxBytes, uint32_t waitMs);
+// `slot`, when one is reserved: a 200's body goes into that buffer instead of the heap.
+bool start(const char* path, bool home, uint32_t ip, uint16_t port, size_t maxBytes, uint32_t waitMs, int slot = -1);
 bool busy();        // A request is under way.
 bool finished();    // One ended, and its answer waits for take() or drop().
 Error error();      // The last request's, once it has finished.
@@ -31,6 +32,17 @@ uint8_t* take(size_t& length);
 void drop();        // Frees the answer and forgets the request.
 void cancel();      // Ends a request under way; it finishes as cancelled (Error::None, status 0).
 const char* errorText(Error e);
+// Fixed buffers for a run of like-sized answers (a live view's frames and sound): made once and
+// reused, so the heap isn't taken and given back for every frame, and doesn't end up in pieces too
+// small for the next one. take() then gives the slot's buffer, which stays the worker's (isSlot):
+// the caller never frees it. A slot released while a request writes it goes as that one ends, and
+// close() frees them all; after either, the caller must not use its pointers.
+constexpr uint8_t kSlots = 3;
+bool reserve(uint8_t slot, size_t bytes);  // False when there's no memory for it.
+void release(uint8_t slot);
+bool isSlot(const uint8_t* p);
+// An HTTPS connection is open: during a request, or kept a few seconds after one for the next.
+bool tlsOpen();
 // A clip's frames' x-clip header from the last answer, or "" when it had none.
 const char* clipHeader();
 // After NoMemory: what ran short, then the memory free and its largest piece, like "TLS 61K/15K".

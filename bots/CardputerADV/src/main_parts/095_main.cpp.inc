@@ -33,6 +33,12 @@ constexpr uint8_t kCamAudioChannel = 1;       // The one no other player uses (s
 constexpr uint32_t kCamAudioRate = 8000;
 constexpr size_t kCamAudioRing = 4000, kCamAudioChunk = 400, kCamAudioStart = 2000, kCamAudioSlots = 3;
 constexpr uint8_t kCamAudioGiveUp = 60;       // Answers with no sound before it's taken as a camera without.
+// A live view or clip reads its frames and sound into buffers made once as it starts (camera_net's
+// slots): two for frames, one shown while the next comes, and one for sound. The bridge keeps every
+// frame under its FRAME_BUDGET (7600, cameras-jpeg.mjs), so one always fits; a frame each time from
+// the heap left it in pieces too small for the next, and live view stalled on "Not enough memory".
+constexpr size_t kCamFrameSlotBytes = 8 * 1024, kCamAudioSlotBytes = 4 * 1024;
+constexpr uint8_t kCamAudioSlot = 2;
 
 uint16_t camAccent() { return rgb565_local(85, 146, 255); }
 uint16_t camMuted() { return rgb565_local(146, 146, 170); }
@@ -53,6 +59,9 @@ uint32_t gCamMemReportedMs = 0;
 uint8_t gCamSel = 0;                    // The wall's selected tile.
 uint8_t gCamCur = 0;                    // The camera a picture or live view shows.
 uint8_t* gCamJpeg = nullptr;            // What's on screen in those views.
+bool gCamJpegInSlot = false;            // It's a frame in one of camera_net's slots: never freed here.
+int8_t gCamJpegSlot = -1, gCamFrameSlotAsked = -1;
+bool gCamSlots = false;                 // The live view's slots are made.
 size_t gCamJpegLen = 0;
 int gCamJpegOf = -1;                    // Which camera it's of, -1 none.
 bool gCamPictureNone = false;           // Asked, and the camera has no picture yet.
@@ -159,7 +168,14 @@ void camFreeThumbs() {
   for (size_t i = 0; i < cameras::kMax; ++i) { free(gCamThumb[i]); gCamThumb[i] = nullptr; gCamThumbAsked[i] = gCamThumbNone[i] = false; gCamThumbTries[i] = 0; }
   gCamThumbNotBefore = 0;
 }
-void camFreeJpeg() { free(gCamJpeg); gCamJpeg = nullptr; gCamJpegLen = 0; gCamJpegOf = -1; }
+void camFreeJpeg() {
+  if (!gCamJpegInSlot) free(gCamJpeg);
+  gCamJpeg = nullptr;
+  gCamJpegLen = 0;
+  gCamJpegOf = -1;
+  gCamJpegInSlot = false;
+  gCamJpegSlot = -1;
+}
 
 // --- The way to the bridge -----------------------------------------------------------------
 uint32_t camHomeIp() {
@@ -171,7 +187,7 @@ bool camTicketWanted() {
   return mine && gCamTicketFor != mine && gCamHomeOffFor != mine;
 }
 // Over the home door when there's one, else HTTPS with the memory TLS needs made ready.
-bool camStart(CamJob job, int cam, const char* httpsPath, size_t maxBytes, uint32_t waitMs) {
+bool camStart(CamJob job, int cam, const char* httpsPath, size_t maxBytes, uint32_t waitMs, int slot = -1) {
   char home[200];
   const uint32_t ip = camHomeIp();
   const bool viaHome = ip && cameras::homePath(home, sizeof(home), gCamTicket, httpsPath);
@@ -179,7 +195,7 @@ bool camStart(CamJob job, int cam, const char* httpsPath, size_t maxBytes, uint3
     prepareNetworkMemory("cameras", true);
     compactMemoryForUi("cameras", true);
   }
-  if (!camera_net::start(viaHome ? home : httpsPath, viaHome, ip, gCamTicket.port, maxBytes, waitMs)) return false;
+  if (!camera_net::start(viaHome ? home : httpsPath, viaHome, ip, gCamTicket.port, maxBytes, waitMs, slot)) return false;
   gCamJob = job;
   gCamJobCam = cam;
   gCamJobGen = gCamClipGen;
@@ -198,10 +214,16 @@ const char* camLiveId() {
   const cameras::Camera* c = camAt(gCamCur);
   return c ? c->id : "";
 }
-bool camStartLive(CamJob job, const char* what, size_t maxBytes, uint32_t waitMs, const char* extra = "") {
+bool camStartLive(CamJob job, const char* what, size_t maxBytes, uint32_t waitMs, const char* extra = "", int slot = -1) {
   char path[160];
   if (!cameras::routePath(path, sizeof(path), what, camLiveId(), extra)) return false;
-  return camStart(job, gCamCur, path, maxBytes, waitMs);
+  return camStart(job, gCamCur, path, maxBytes, waitMs, slot);
+}
+// The live view's slots back to the heap. One a request is writing goes when it ends (camera_net).
+void camReleaseSlots() {
+  for (uint8_t i = 0; i < camera_net::kSlots; ++i) camera_net::release(i);
+  gCamSlots = false;
+  gCamFrameSlotAsked = -1;
 }
 
 // What went wrong or how live view went, for the bridge's log. Only numbers and short words.
@@ -313,10 +335,25 @@ void camEndLive(const char* why) {
     gCamWantClipPause = -1;
     gCamWantClipSeek = -1;
     camFreeJpeg();
+    camReleaseSlots();
     gCamView = CamView::Clips;
     camInvalidate();
     return;
   }
+  // The last frame stays on screen as the picture: out of its slot first, as the slots go.
+  if (gCamJpeg && gCamJpegInSlot) {
+    auto* copy = static_cast<uint8_t*>(malloc(gCamJpegLen + 1));
+    if (copy) {
+      memcpy(copy, gCamJpeg, gCamJpegLen + 1);
+      gCamJpeg = copy;
+      gCamJpegInSlot = false;
+      gCamJpegSlot = -1;
+    } else {
+      camFreeJpeg();
+      gCamWantPicture = true;  // Asked of the bridge instead, which has it.
+    }
+  }
+  camReleaseSlots();
   // The last frame is now the camera's picture, here and on the bridge.
   if (gCamJpeg && gCamJpegOf >= 0 && gCamLiveFrames) {
     gCamList->cams[gCamJpegOf].pictureAge = 0;
@@ -348,6 +385,13 @@ void camOpenLive(int cam) {
 }
 // What a live view and a clip both start from.
 void camLiveBegin() {
+  // The wall's pictures make room while watching; they're asked again, at home in a moment, back on
+  // the wall. Then the slots, made once for the whole view; without the memory for them, frames
+  // come into the heap as they did.
+  camFreeThumbs();
+  gCamSlots = camera_net::reserve(0, kCamFrameSlotBytes) && camera_net::reserve(1, kCamFrameSlotBytes) &&
+              camera_net::reserve(kCamAudioSlot, kCamAudioSlotBytes);
+  if (!gCamSlots) { camReleaseSlots(); camReportMemory("slots"); }
   gCamView = CamView::Live;
   gCamLive = true;
   gCamLiveStarted = false;
@@ -609,7 +653,9 @@ String camProblemText(camera_net::Error e, const String& word) {
 }
 
 void camTakeJpeg(int cam, uint8_t* data, size_t length) {
-  free(gCamJpeg);
+  if (!gCamJpegInSlot) free(gCamJpeg);
+  gCamJpegInSlot = camera_net::isSlot(data);
+  gCamJpegSlot = gCamJpegInSlot ? gCamFrameSlotAsked : -1;
   gCamJpeg = data;
   gCamJpegLen = length;
   gCamJpegOf = cam;
@@ -780,7 +826,7 @@ void camFinished() {
         camEndLive("ended on the Mac");
         camSay(clip ? "The clip stopped on the Mac" : "Live view ended");
       } else if (e != camera_net::Error::None) {
-        if (e == camera_net::Error::NoMemory) camQueueReport("frame", camera_net::memoryNote(), unsigned(e));
+        if (e == camera_net::Error::NoMemory) camReportMemory("frame");
         if (++gCamLiveFailures >= 3) { camEndLive("failures"); camSay(camProblemText(e, word)); }
       }
       break;
@@ -946,7 +992,7 @@ void camFinished() {
     default:
       break;
   }
-  free(data);
+  if (!camera_net::isSlot(data)) free(data);  // A slot's stays the worker's.
 }
 
 // The sign-in page's QR code is for an account that isn't signed in, or one eufy refused.
@@ -1033,11 +1079,13 @@ void camNextJob() {
   }
   if (gCamWantAudio && camAudioOn()) {
     gCamWantAudio = false;
-    if (camStartLive(CamJob::Audio, "live/audio", 32000, 5000)) return;
+    if (camStartLive(CamJob::Audio, "live/audio", gCamSlots ? kCamAudioSlotBytes - 1 : 32000, 5000, "", gCamSlots ? kCamAudioSlot : -1)) return;
   }
   if (gCamLive && gCamLiveStarted && !(gCamFrameNotBefore && int32_t(millis() - gCamFrameNotBefore) < 0)) {
     gCamFrameNotBefore = 0;
-    if (camStartLive(CamJob::Frame, "live/frame", cameras::kMaxJpeg, 10000)) return;
+    // Into the slot not on screen, so the frame showing stays whole while the next comes.
+    gCamFrameSlotAsked = gCamSlots ? int8_t(gCamJpegInSlot && gCamJpegSlot == 0 ? 1 : 0) : -1;
+    if (camStartLive(CamJob::Frame, "live/frame", gCamSlots ? kCamFrameSlotBytes - 1 : cameras::kMaxJpeg, 10000, "", gCamFrameSlotAsked)) return;
   }
   if (gCamWantRefresh >= 0) {
     const int cam = gCamWantRefresh;
@@ -1175,9 +1223,11 @@ void stopCameras() {
   gCamLive = gCamLiveStarted = false;
   gCamClipMode = gCamWantClipStart = false;
   camAudioFree();
+  camFreeJpeg();          // Before close: a frame in a slot is the worker's, and close frees the slots.
+  gCamSlots = false;
+  gCamFrameSlotAsked = -1;
   camera_net::close();
   camFreeThumbs();
-  camFreeJpeg();
   camCloseClips();
   delete gCamList;
   gCamList = nullptr;
@@ -1998,6 +2048,8 @@ bool camerasOn() { return gUiMode == UiMode::Cameras; }
 // The worker is asking the bridge over HTTPS: away from home, or the home door's ticket. The memory
 // guard lets that pass (010), as it does the inbox's. Planes asks through the same worker.
 bool cameraHttpsBusy() {
-  return (gUiMode == UiMode::Cameras || gUiMode == UiMode::Planes) && camera_net::busy() && !camera_net::overHome();
+  // Or an HTTPS connection kept open for the next request: 40 KB held, for a few seconds.
+  return (gUiMode == UiMode::Cameras || gUiMode == UiMode::Planes) &&
+         ((camera_net::busy() && !camera_net::overHome()) || camera_net::tlsOpen());
 }
 }  // namespace

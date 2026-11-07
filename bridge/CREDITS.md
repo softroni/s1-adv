@@ -28,6 +28,9 @@ The original `Copyright (c) 2026 Omnibot contributors` notice remains in
   space station's passes in Skywatch.
 - [eufy-sdk](https://github.com/mega-yfue/eufy-sdk), Apache-2.0: the optional camera helper's eufy client. It
   is installed beside the bridge's data, not shipped with it, and is independent of Anker and eufy.
+- `src/cameras-jpeg.mjs`, the Cameras frames' JPEG encoder, is adapted from
+  [jpeg-js](https://github.com/jpeg-js/jpeg-js)'s encoder (BSD-3-Clause, Copyright (c) 2008 Adobe Systems
+  Incorporated, ported to JavaScript by Andreas Ritter), with 4:2:0 colour added. Its licence is in the file.
 - The firmware's `third_party/` directory retains applicable protocol notices.
 
 Dependencies keep their own licenses. The S1-ADV license does not replace them.

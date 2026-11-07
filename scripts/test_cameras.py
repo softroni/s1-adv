@@ -91,7 +91,17 @@ for path in list(src.glob('*.cpp')) + list(src.glob('*.h')) + list(parts.glob('*
     for name, value in _re2.findall(r'(k\w*Channel)\s*=\s*(\d+)\s*;', path.read_text(errors='ignore')):
         if name != 'kCamAudioChannel': others.setdefault(int(value), set()).add(f'{path.name}:{name}')
 assert channel not in others, others.get(channel)
-assert 'camAudioFree();\n  camera_net::close();' in app, 'the speaker stops before the app lets go of its buffers'
+stop = app.split('void stopCameras() {', 1)[1].split('\n}\n', 1)[0]
+assert stop.index('camAudioFree();') < stop.index('camera_net::close();'), 'the speaker stops before the app lets go of its buffers'
+assert stop.index('camFreeJpeg();') < stop.index('camera_net::close();'), "a frame in a slot is let go before close frees the slots"
+# Frames and sound go into slots made once per view; the last frame is copied out before they go.
+begin = app.split('void camLiveBegin() {', 1)[1].split('\n}\n', 1)[0]
+assert 'camera_net::reserve(0, kCamFrameSlotBytes)' in begin and 'camFreeThumbs();' in begin
+end_live2 = app.split('void camEndLive(const char* why) {', 1)[1].split('\n}\n', 1)[0]
+assert end_live2.index('memcpy(copy, gCamJpeg, gCamJpegLen + 1);') < end_live2.rindex('camReleaseSlots();')
+assert 'if (!camera_net::isSlot(data)) free(data);' in app
+budget = int(_re2.search(r'export const FRAME_BUDGET = (\d+);', (root / 'bridge/src/cameras-jpeg.mjs').read_text()).group(1))
+assert budget + 1 <= 8 * 1024, 'a frame and its ending zero fit the device slot'
 # Live view only ever goes over the home door, never TLS; pictures may come either way.
 assert 'Live works on home Wi-Fi only' in app
 # Recordings: C opens them from the wall and from a picture; a clip plays in the live view, its
@@ -126,7 +136,7 @@ assert len(kinds) == len(words), 'a word for each kind of request, in order'
 guard = part('010_main.cpp.inc').split('void serviceMemoryGuard() {', 1)[1].split('\n}\n', 1)[0]
 assert guard.index('if (cameraHttpsBusy()) { criticalSinceMs = 0; return; }') < guard.index('ESP.restart();')
 assert guard.index('noteRestart("memory", freeHeap, largest);') < guard.index('ESP.restart();')
-assert '(gUiMode == UiMode::Cameras || gUiMode == UiMode::Planes) && camera_net::busy() && !camera_net::overHome();' in app
+assert '(gUiMode == UiMode::Cameras || gUiMode == UiMode::Planes) &&\n         ((camera_net::busy() && !camera_net::overHome()) || camera_net::tlsOpen());' in app
 net = (src / 'camera_net.cpp').read_text()
 assert 'vTaskPrioritySet(nullptr, wantHome ? kHomePriority : kHttpsPriority);' in net and 'kHttpsPriority = tskIDLE_PRIORITY' in net, \
     'HTTPS on the worker runs at idle priority, so a handshake cannot starve the idle task'
@@ -430,20 +440,22 @@ if (tjpgd / 'lgfx_tjpgd.c').exists() and ffmpeg and node:
                               check=True, capture_output=True).stdout
         (tmp / 'picture.jpg').write_bytes(subprocess.run([ffmpeg] + args['picture'], input=still, check=True, capture_output=True).stdout)
         # Live: the helper's way, a raw frame cropped at the widest and the closest zoom and encoded by
-        # jpeg-js, where the eufy library's folder has it (it isn't in this repository).
+        # cameras-jpeg.mjs: 4:2:0 under the frame budget, and a frame of noise, the worst case, too.
         (tmp / 'live.raw').write_bytes(subprocess.run([ffmpeg] + args['live'], input=hevc, check=True, capture_output=True).stdout)
-        live = []
-        jpegjs_home = Path.home() / '.s1-adv/data/cameras/package.json'
-        if jpegjs_home.exists():
-            subprocess.run([node, '--input-type=module', '-e',
-                f'import {{RAW, renderRect, viewRect, PICTURE}} from {json.dumps(media.as_uri())};'
-                'import {createRequire} from "node:module"; import {readFileSync, writeFileSync} from "node:fs";'
-                f'const jpeg = createRequire({json.dumps(str(jpegjs_home))})("jpeg-js");'
-                f'const raw = readFileSync({json.dumps(str(tmp / "live.raw"))}).subarray(0, RAW.bytes);'
-                'for (const z of [1, 4]) writeFileSync(' + json.dumps(str(tmp)) + ' + `/live${z}.jpg`, '
-                'jpeg.encode({data: renderRect(raw, viewRect(z)), width: PICTURE.width, height: PICTURE.height}, 70).data);'],
-                check=True)
-            live = [tmp / 'live1.jpg', tmp / 'live4.jpg']
+        encoder = root / 'bridge/src/cameras-jpeg.mjs'
+        sizes = json.loads(subprocess.run([node, '--input-type=module', '-e',
+            f'import {{RAW, renderRect, viewRect, PICTURE}} from {json.dumps(media.as_uri())};'
+            f'import {{encodeWithin, FRAME_BUDGET}} from {json.dumps(encoder.as_uri())};'
+            'import {readFileSync, writeFileSync} from "node:fs";'
+            f'const raw = readFileSync({json.dumps(str(tmp / "live.raw"))}).subarray(0, RAW.bytes);'
+            'const noise = Buffer.alloc(PICTURE.width * PICTURE.height * 4); for (let i = 0; i < noise.length; i++) noise[i] = (i * 2654435761) >>> 24;'
+            'const out = {budget: FRAME_BUDGET, sizes: []}; const state = {quality: 75};'
+            'for (const [name, rgba] of [["live1", renderRect(raw, viewRect(1))], ["live4", renderRect(raw, viewRect(4))], ["noise", noise]]) {'
+            '  const jpeg = encodeWithin(rgba, PICTURE.width, PICTURE.height, FRAME_BUDGET, state);'
+            '  writeFileSync(' + json.dumps(str(tmp)) + ' + `/${name}.jpg`, jpeg); out.sizes.push(jpeg.length); }'
+            'console.log(JSON.stringify(out));'], check=True, capture_output=True, text=True).stdout)
+        assert all(n <= sizes['budget'] for n in sizes['sizes']), sizes
+        live = [tmp / 'live1.jpg', tmp / 'live4.jpg', tmp / 'noise.jpg']
         harness = tmp / 'jd.c'
         harness.write_text(r"""
 #include <stdio.h>

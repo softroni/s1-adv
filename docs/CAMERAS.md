@@ -132,6 +132,19 @@ Away from home, pictures come over the bridge's HTTPS address, and live view and
 on home Wi-Fi only: a live frame and HTTPS don't fit in the Cardputer's memory together. Away, opening
 the app shows the last pictures without waking each camera for a new one; R still takes one.
 
+## Keeping it quick
+
+The Mac does all the work it can: it decodes each camera's video, cuts out the part you're looking
+at, and makes every frame a small JPEG in the layout the Cardputer decodes fastest, never more than
+about 7.5 KB, lowering the quality on a busy picture rather than sending a bigger one. The Cardputer
+only draws them. It sets aside two frame buffers and one for sound as a live view or clip starts and
+uses them for every frame, so its memory doesn't end up in pieces too small for the next one, and it
+lets the wall's small pictures go while you watch, asking for them again after.
+
+Away from home, where every request goes over HTTPS, the Cardputer keeps the secure connection open
+for a few seconds after each answer, so the wall's list and pictures come over one connection instead
+of setting one up for each.
+
 ## Motion pictures
 
 The picture shown is the last one taken through the Cardputer: by R, or the last frame of a live

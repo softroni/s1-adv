@@ -19,6 +19,10 @@ constexpr uint32_t kStack = 10240;     // TLS's handshake runs on it; plain HTTP
 constexpr UBaseType_t kHomePriority = 2, kHttpsPriority = tskIDLE_PRIORITY;
 constexpr uint32_t kIdleMs = 10000;    // A body that stops for this long has failed.
 constexpr size_t kLineMax = 384;
+constexpr size_t kLineRoom = kLineMax + 256;  // The request, then each line of the answer's head.
+// An HTTPS connection stays open this long after its last answer, so the next of a run of requests
+// (the wall's list and pictures) skips the handshake: seconds, and 40 KB taken and given back.
+constexpr uint32_t kTlsIdleMs = 3000;
 
 enum class Phase : uint8_t { Idle, Queued, Running, Done };
 std::atomic<Phase> phase{Phase::Idle};
@@ -37,13 +41,23 @@ char requested[400] = "";
 bool wantHome = false;
 uint32_t homeIp = 0, maxBody = 0, waitFor = 0;
 uint16_t homePort = 0;
-// Kept by the worker between requests: the home connection, and where it goes.
+// Kept by the worker between requests: the home connection, and where it goes; or the HTTPS one.
 WiFiClient* kept = nullptr;
 uint32_t keptIp = 0;
 uint16_t keptPort = 0;
+WiFiClientSecure* keptTls = nullptr;
+uint32_t keptTlsAt = 0;
+std::atomic<bool> tlsHeld{false};
+char* line = nullptr;                  // The worker's, for its whole life: no heap taken per request.
+// The caller's fixed buffers (reserve), and the one this request reads into, or -1.
+uint8_t* slots[kSlots] = {};
+size_t slotSize[kSlots] = {};
+bool slotDropLater[kSlots] = {};       // Released while a request wrote it: freed as that one ends.
+int intoSlot = -1;
 // The answer, the caller's once Done.
 uint8_t* body = nullptr;
 size_t bodyLength = 0;
+bool bodyInSlot = false;
 char memNote[48] = "";
 char lastClip[40] = "";
 
@@ -56,6 +70,13 @@ void dropKept() {
   kept->stop();
   delete kept;
   kept = nullptr;
+}
+void dropTls() {
+  if (!keptTls) return;
+  keptTls->stop();
+  delete keptTls;
+  keptTls = nullptr;
+  tlsHeld.store(false);
 }
 Error fromStatus(unsigned s) {
   if (s == 200 || s == 204) return Error::None;
@@ -117,15 +138,14 @@ Error exchange(WiFiClient& client, bool home, bool& anyAnswer, bool& reusable) {
                      unsigned((homeIp >> 8) & 255), unsigned(homeIp & 255), unsigned(homePort));
   else if (bridgePort == 443) snprintf(host, sizeof(host), "%s", bridgeHost);
   else snprintf(host, sizeof(host), "%s:%u", bridgeHost, unsigned(bridgePort));
-  auto* line = static_cast<char*>(heap_caps_malloc(kLineMax + 256, MALLOC_CAP_8BIT));
   if (!line) { noteMemory("request"); return Error::NoMemory; }
   const int n = home
-    ? snprintf(line, kLineMax + 256, "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: S1-ADV-Cameras/1\r\nAccept: */*\r\n"
+    ? snprintf(line, kLineRoom, "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: S1-ADV-Cameras/1\r\nAccept: */*\r\n"
                "Connection: keep-alive\r\n\r\n", requested, host)
-    : snprintf(line, kLineMax + 256, "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: S1-ADV-Cameras/1\r\nAuthorization: Bearer %s\r\n"
-               "Accept: */*\r\nConnection: close\r\n\r\n", requested, host, bridgeToken);
-  if (n <= 0 || size_t(n) >= kLineMax + 256) { free(line); return Error::Malformed; }
-  if (client.write(reinterpret_cast<const uint8_t*>(line), size_t(n)) != size_t(n)) { free(line); return Error::Connect; }
+    : snprintf(line, kLineRoom, "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: S1-ADV-Cameras/1\r\nAuthorization: Bearer %s\r\n"
+               "Accept: */*\r\nConnection: keep-alive\r\n\r\n", requested, host, bridgeToken);
+  if (n <= 0 || size_t(n) >= kLineRoom) return Error::Malformed;
+  if (client.write(reinterpret_cast<const uint8_t*>(line), size_t(n)) != size_t(n)) return Error::Connect;
   Reader r(client);
   r.idle = waitFor;  // The bridge may take a while to start: a still wakes a camera.
   cameras::Response h;
@@ -148,7 +168,6 @@ Error exchange(WiFiClient& client, bool home, bool& anyAnswer, bool& reusable) {
     else if (b == '\n' || len >= kLineMax) { e = Error::Malformed; break; }
     else line[len++] = char(b);
   }
-  free(line);
   if (e != Error::None || cancelled.load()) return e;
   memcpy(lastClip, h.clip, sizeof(lastClip));
   if (h.chunked) return Error::Malformed;  // The bridge always says how long.
@@ -158,20 +177,25 @@ Error exchange(WiFiClient& client, bool home, bool& anyAnswer, bool& reusable) {
   // An error's few words are kept too, so the screen can say which.
   const size_t limit = h.status == 200 ? maxBody : 256;
   if (length > limit) return Error::TooBig;
+  // A 200 for a request with a slot goes into it: no heap taken. Anything else, as big as it is.
+  const bool toSlot = h.status == 200 && intoSlot >= 0 && slots[intoSlot];
+  if (toSlot && length + 1 > slotSize[intoSlot]) return Error::TooBig;
   if (length) {
-    auto* data = static_cast<uint8_t*>(heap_caps_malloc(length + 1, MALLOC_CAP_8BIT));
+    auto* data = toSlot ? slots[intoSlot] : static_cast<uint8_t*>(heap_caps_malloc(length + 1, MALLOC_CAP_8BIT));
     if (!data) { noteMemory("answer"); return Error::NoMemory; }
     const int got = r.into(data, length);
-    if (got) { free(data); return got == -3 ? Error::None : got == -2 ? Error::Timeout : Error::Connect; }
+    if (got) { if (!toSlot) free(data); return got == -3 ? Error::None : got == -2 ? Error::Timeout : Error::Connect; }
     data[length] = 0;
     body = data;
     bodyLength = length;
+    bodyInSlot = toSlot;
   }
-  reusable = home && !h.close;
+  reusable = !h.close;
   return fromStatus(h.status);
 }
 
 Error runHome() {
+  dropTls();
   for (int attempt = 0; attempt < 2; ++attempt) {
     const bool reuse = kept && keptIp == homeIp && keptPort == homePort && kept->connected();
     if (!reuse) {
@@ -194,51 +218,88 @@ Error runHome() {
   return Error::Connect;
 }
 
+// Over HTTPS on the connection kept from the last request when it's still open, else a new one.
 Error runHttps() {
   dropKept();
   if (!bridgeHost[0] || !bridgeCa) return Error::NoBridge;
-  auto* tls = new (std::nothrow) WiFiClientSecure();
-  if (!tls) { noteMemory("client"); return Error::NoMemory; }
-  tls->setCACert(bridgeCa);
-  tls->setHandshakeTimeout(15);
-  Error e = Error::None;
-  if (!tls->connect(bridgeHost, bridgePort)) {
-    char detail[32] = {};
-    e = tls->lastError(detail, sizeof(detail)) == MBEDTLS_ERR_SSL_ALLOC_FAILED ? Error::NoMemory : Error::Connect;
-    if (e == Error::NoMemory) noteMemory("TLS");
-  } else {
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    const bool reuse = keptTls && keptTls->connected();
+    if (!reuse) {
+      dropTls();
+      keptTls = new (std::nothrow) WiFiClientSecure();
+      if (!keptTls) { noteMemory("client"); return Error::NoMemory; }
+      tlsHeld.store(true);
+      keptTls->setCACert(bridgeCa);
+      keptTls->setHandshakeTimeout(15);
+      if (!keptTls->connect(bridgeHost, bridgePort)) {
+        char detail[32] = {};
+        const Error e = keptTls->lastError(detail, sizeof(detail)) == MBEDTLS_ERR_SSL_ALLOC_FAILED ? Error::NoMemory : Error::Connect;
+        if (e == Error::NoMemory) noteMemory("TLS");
+        dropTls();
+        return e;
+      }
+    }
     bool anyAnswer = false, reusable = false;
-    e = exchange(*tls, false, anyAnswer, reusable);
+    const Error e = exchange(*keptTls, false, anyAnswer, reusable);
+    if (!reusable || e == Error::Malformed || e == Error::Timeout || e == Error::Connect || cancelled.load()) dropTls();
+    else keptTlsAt = millis();
+    // A kept connection the far end had already closed fails before any answer: once more on a new one.
+    if (reuse && !anyAnswer && e == Error::Connect && !cancelled.load()) continue;
+    return e;
   }
-  tls->stop();
-  delete tls;
-  return e;
+  return Error::Connect;
 }
-
 void loop(void*) {
+  line = static_cast<char*>(heap_caps_malloc(kLineRoom, MALLOC_CAP_8BIT));
   for (;;) {
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    // With an HTTPS connection kept, it wakes now and then to close it once it's been idle a while.
+    ulTaskNotifyTake(pdTRUE, keptTls ? pdMS_TO_TICKS(500) : portMAX_DELAY);
     if (stopping.load()) break;
+    if (keptTls && phase.load() != Phase::Queued && millis() - keptTlsAt >= kTlsIdleMs) dropTls();
     if (phase.load() != Phase::Queued) continue;
     phase.store(Phase::Running);
     const uint32_t began = millis();
     vTaskPrioritySet(nullptr, wantHome ? kHomePriority : kHttpsPriority);
     const Error e = wantHome ? runHome() : runHttps();
     took.store(millis() - began);
+    // What the caller gets: nothing for a cancelled request, nor what went into a slot released
+    // meanwhile. Slots released while it ran go now. Frees happen after the gate.
+    uint8_t* unwanted = nullptr;
+    uint8_t* gone[kSlots] = {};
     portENTER_CRITICAL(&gate);
+    const bool dropBody = cancelled.load() || (bodyInSlot && intoSlot >= 0 && slotDropLater[intoSlot]);
+    if (dropBody) {
+      if (!bodyInSlot) unwanted = body;
+      body = nullptr;
+      bodyLength = 0;
+      bodyInSlot = false;
+    }
+    for (uint8_t i = 0; i < kSlots; ++i) {
+      if (!slotDropLater[i]) continue;
+      gone[i] = slots[i];
+      slots[i] = nullptr;
+      slotSize[i] = 0;
+      slotDropLater[i] = false;
+    }
+    intoSlot = -1;
     if (cancelled.load()) { failure.store(Error::None); answer.store(0); }
     else failure.store(e);
     phase.store(Phase::Done);
     portEXIT_CRITICAL(&gate);
-    if (cancelled.load() || e != Error::None) {
-      // A cancelled or failed answer isn't wanted, and only a whole one is any use.
-      if (cancelled.load() && body) { free(body); body = nullptr; bodyLength = 0; }
-    }
+    free(unwanted);
+    for (uint8_t* p : gone) free(p);
     if (stopping.load()) break;
   }
-  // Leaving: everything it held goes with it.
+  // Leaving: everything it held goes with it, the caller's slots too.
   dropKept();
-  if (body) { free(body); body = nullptr; bodyLength = 0; }
+  dropTls();
+  if (body && !bodyInSlot) free(body);
+  body = nullptr;
+  bodyLength = 0;
+  bodyInSlot = false;
+  for (uint8_t i = 0; i < kSlots; ++i) { free(slots[i]); slots[i] = nullptr; slotSize[i] = 0; slotDropLater[i] = false; }
+  free(line);
+  line = nullptr;
   phase.store(Phase::Idle);
   worker = nullptr;
   vTaskDelete(nullptr);
@@ -263,20 +324,30 @@ bool open() {
 // Doesn't wait: a TLS handshake under way can take seconds to notice, and the screen shouldn't.
 // The worker frees what it holds as it goes.
 void close() {
-  if (!worker) { drop(); return; }
+  if (!worker) {
+    drop();
+    for (uint8_t i = 0; i < kSlots; ++i) { free(slots[i]); slots[i] = nullptr; slotSize[i] = 0; slotDropLater[i] = false; }
+    return;
+  }
   cancelled.store(true);
   stopping.store(true);
   xTaskNotifyGive(worker);
 }
 bool opened() { return worker != nullptr && !stopping.load(); }
-bool start(const char* path, bool home, uint32_t ip, uint16_t port, size_t maxBytes, uint32_t waitMs) {
+bool start(const char* path, bool home, uint32_t ip, uint16_t port, size_t maxBytes, uint32_t waitMs, int slot) {
   if (!worker || stopping.load() || !path || !*path || strlen(path) >= sizeof(requested)) return false;
   if (home && (!ip || !port)) return false;
+  if (slot >= int(kSlots) || (slot >= 0 && !slots[slot])) return false;
   portENTER_CRITICAL(&gate);
   const Phase now = phase.load();
   if (now == Phase::Queued || now == Phase::Running) { portEXIT_CRITICAL(&gate); return false; }
   portEXIT_CRITICAL(&gate);
-  if (body) { free(body); body = nullptr; bodyLength = 0; }
+  if (body && !bodyInSlot) free(body);
+  body = nullptr;
+  bodyLength = 0;
+  bodyInSlot = false;
+  intoSlot = slot;
+  if (slot >= 0 && maxBytes + 1 > slotSize[slot]) maxBytes = slotSize[slot] - 1;
   strcpy(requested, path);
   wantHome = home;
   homeIp = ip;
@@ -305,15 +376,52 @@ uint8_t* take(size_t& length) {
   length = bodyLength;
   body = nullptr;
   bodyLength = 0;
+  bodyInSlot = false;
   phase.store(Phase::Idle);
   return out;
 }
 void drop() {
   if (busy()) return;
-  if (body) { free(body); body = nullptr; }
+  if (body && !bodyInSlot) free(body);
+  body = nullptr;
   bodyLength = 0;
+  bodyInSlot = false;
   if (phase.load() == Phase::Done) phase.store(Phase::Idle);
 }
+bool reserve(uint8_t slot, size_t bytes) {
+  if (slot >= kSlots || !bytes) return false;
+  portENTER_CRITICAL(&gate);
+  const bool inUse = (phase.load() == Phase::Queued || phase.load() == Phase::Running) && intoSlot == int(slot);
+  const bool have = slots[slot] && slotSize[slot] >= bytes && !slotDropLater[slot];
+  portEXIT_CRITICAL(&gate);
+  if (have) return true;
+  if (inUse) return false;
+  release(slot);
+  auto* p = static_cast<uint8_t*>(heap_caps_malloc(bytes, MALLOC_CAP_8BIT));
+  if (!p) { noteMemory("slot"); return false; }
+  portENTER_CRITICAL(&gate);
+  slots[slot] = p;
+  slotSize[slot] = bytes;
+  slotDropLater[slot] = false;
+  portEXIT_CRITICAL(&gate);
+  return true;
+}
+void release(uint8_t slot) {
+  if (slot >= kSlots) return;
+  uint8_t* p = nullptr;
+  portENTER_CRITICAL(&gate);
+  const bool inUse = (phase.load() == Phase::Queued || phase.load() == Phase::Running) && intoSlot == int(slot);
+  if (inUse) slotDropLater[slot] = slots[slot] != nullptr;
+  else { p = slots[slot]; slots[slot] = nullptr; slotSize[slot] = 0; slotDropLater[slot] = false; }
+  portEXIT_CRITICAL(&gate);
+  free(p);
+}
+bool isSlot(const uint8_t* p) {
+  if (!p) return false;
+  for (uint8_t i = 0; i < kSlots; ++i) if (slots[i] == p) return true;
+  return false;
+}
+bool tlsOpen() { return tlsHeld.load(); }
 void cancel() { if (busy()) cancelled.store(true); }
 const char* memoryNote() { return memNote; }
 const char* clipHeader() { return busy() ? "" : lastClip; }

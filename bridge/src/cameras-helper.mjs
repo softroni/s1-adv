@@ -10,7 +10,6 @@ import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { mkdir, readFile, rename, stat, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
-import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import {
   AUDIO, CAMERA_ID, DIGITAL_ZOOM, PICTURE, RAW, THUMB, audioArgs, cameraId, deviceDecodes, dither332, liveArgs, modeWord, panRect, pictureArgs, rectMille,
@@ -20,6 +19,7 @@ import {
   addDays, clipFromRow, clipStateLine, clipsLines, monthLines, monthRange, parseAudioFrame, parseVideoFrame, today, validDay, validMonth,
   videoCodecOf
 } from "./cameras-archive.mjs";
+import { FRAME_BUDGET, encodeWithin } from "./cameras-jpeg.mjs";
 
 const DIR = process.env.CAMERAS_DIR || "";
 const ENV_FILE = process.env.CAMERAS_ENV || "";
@@ -33,7 +33,8 @@ const LIVE_IDLE_MS = 6000;          // No frame asked for this long: the Cardput
 const LIVE_MAX_MS = 10 * 60 * 1000; // However often it's extended, a live view ends after this.
 const LIVE_EXTEND_MS = 55 * 1000;   // An extend from the device keeps it going this much longer.
 const FRAME_WAIT_MS = 4000;         // A frame request waits this long for a new frame.
-const LIVE_QUALITY = 70;            // jpeg-js's quality for live pictures: about 7 KB each.
+const PICTURE_BUDGET = 12 * 1024;   // A live view's last frame, kept as the camera's picture: one-off, so roomier.
+const AUDIO_ANSWER_MAX = 3200;      // Sound per ask, 0.2 s: a late ask takes the rest next time, not one big piece.
 const RETRY_MS = 10 * 60 * 1000;    // A failed sign-in is tried again this rarely, or when eufy.env changes.
 
 const serials = new Set();
@@ -54,13 +55,8 @@ async function loadSdk() {
   return import(pathToFileURL(path.join(root, entry)).href);
 }
 
-// jpeg-js (BSD-3-Clause), which the eufy library brings: the live pictures' encoder. Its 4:4:4
-// baseline JPEGs are ones the device's decoder takes, and it adds no frame of delay as ffmpeg does.
-let jpeg = null;
-function loadJpeg() {
-  jpeg ||= createRequire(path.join(DIR, "package.json"))("jpeg-js");
-  return jpeg;
-}
+// Live and clip frames are encoded here (cameras-jpeg.mjs): 4:2:0, under FRAME_BUDGET bytes, so the
+// Cardputer reads each into one buffer it keeps for the whole view, and decodes half the colour data.
 
 // --- The account ---------------------------------------------------------------------------
 export function parseEnv(text) {
@@ -319,7 +315,7 @@ async function readPicture(id, kind) {
 async function refresh(id) {
   const cam = cameraFor(id);
   if (live?.id === id && live.raw) {
-    return savePicture(id, jpeg.encode({ data: renderRect(live.raw, viewRect(1)), width: PICTURE.width, height: PICTURE.height }, LIVE_QUALITY).data, true);
+    return savePicture(id, encodeWithin(renderRect(live.raw, viewRect(1)), PICTURE.width, PICTURE.height, PICTURE_BUDGET, { quality: 80 }), true);
   }
   const media = cam.dev.camera?.();
   if (!media?.snapshotLive) throw new HelperError("no_still", 409);
@@ -383,7 +379,7 @@ async function liveStart(id) {
 function render(view) {
   if (!view.raw) return;
   view.rgba = renderRect(view.raw, view.rect, view.rgba || undefined);
-  view.shot = jpeg.encode({ data: view.rgba, width: PICTURE.width, height: PICTURE.height }, LIVE_QUALITY).data;
+  view.shot = encodeWithin(view.rgba, PICTURE.width, PICTURE.height, FRAME_BUDGET, view.encoding ||= { quality: 75 });
   view.seq += 1;
   for (const wake of view.waiters.splice(0)) wake();
 }
@@ -455,10 +451,13 @@ function liveAudio(id) {
   const view = live;
   view.askedAt = Date.now();
   if (!view.pcmBytes) return null;
-  let pcm = Buffer.concat(view.pcm);
-  view.pcm = [];
-  view.pcmBytes = 0;
-  if (pcm.length % 2) { view.pcm.push(pcm.subarray(pcm.length - 1)); view.pcmBytes = 1; pcm = pcm.subarray(0, pcm.length - 1); }
+  // The oldest 0.2 s at most, in whole samples; the rest waits for the next ask.
+  const all = Buffer.concat(view.pcm);
+  const take = Math.min(all.length, AUDIO_ANSWER_MAX) & ~1;
+  if (!take) return null;
+  const pcm = all.subarray(0, take);
+  view.pcm = take < all.length ? [all.subarray(take)] : [];
+  view.pcmBytes = all.length - take;
   view.audioSent = (view.audioSent || 0) + pcm.length;
   return pcm;
 }
@@ -489,7 +488,7 @@ async function liveEnded(view, why) {
   if (view.raw) {
     try {
       const whole = renderRect(view.raw, viewRect(1));
-      await savePicture(view.id, jpeg.encode({ data: whole, width: PICTURE.width, height: PICTURE.height }, LIVE_QUALITY).data, true);
+      await savePicture(view.id, encodeWithin(whole, PICTURE.width, PICTURE.height, PICTURE_BUDGET, { quality: 80 }), true);
     } catch (error) { warn(`last frame not kept: ${error.code || error.message}`); }
   }
   if (live === view) live = null;
@@ -999,7 +998,6 @@ async function main() {
   if (!DIR || !SECRET) { console.error("[cameras] CAMERAS_DIR and CAMERAS_SECRET are needed"); process.exit(2); }
   await mkdir(PICTURES, { recursive: true, mode: 0o700 });
   await loadSaved();
-  loadJpeg();
   startTimers();
   const server = createServer(handler());
   server.listen(0, "127.0.0.1", () => {

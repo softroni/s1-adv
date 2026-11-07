@@ -546,3 +546,30 @@ test("a device's start-up reason reaches the log in words", async () => {
   assert.equal(line(""), "");
   assert.equal(line("boot=abc"), "");
 });
+
+test("live frames: 4:2:0, the size the device decodes, and never over the frame budget", async () => {
+  const { encodeJpeg, encodeWithin, FRAME_BUDGET } = await import("./cameras-jpeg.mjs");
+  const { deviceDecodes, jpegLayout, PICTURE } = await import("./cameras-media.mjs");
+  const W = PICTURE.width, H = PICTURE.height;
+  const gradient = Buffer.alloc(W * H * 4), noise = Buffer.alloc(W * H * 4);
+  for (let y = 0; y < H; ++y) for (let x = 0; x < W; ++x) {
+    const p = (y * W + x) * 4;
+    gradient[p] = x; gradient[p + 1] = y; gradient[p + 2] = (x + y) & 255;
+    for (let c = 0; c < 3; ++c) noise[p + c] = ((p + c) * 2654435761) >>> 24;
+  }
+  const smooth = encodeJpeg(gradient, W, H, 75);
+  assert.equal(smooth[0], 0xff); assert.equal(smooth[1], 0xd8);
+  assert.equal(smooth.at(-2), 0xff); assert.equal(smooth.at(-1), 0xd9);
+  assert.deepEqual(jpegLayout(smooth).sampling, [0x22, 0x11, 0x11]);
+  assert(deviceDecodes(smooth));
+  // Noise is the worst a camera sends: the quality comes down until it fits, and stays down.
+  const state = { quality: 75 };
+  const noisy = encodeWithin(noise, W, H, FRAME_BUDGET, state);
+  assert(noisy.length <= FRAME_BUDGET, `${noisy.length}`);
+  assert(state.quality < 75);
+  const lowered = state.quality;
+  assert(encodeWithin(noise, W, H, FRAME_BUDGET, state).length <= FRAME_BUDGET);
+  // Then smooth pictures: it climbs back a step at a time.
+  for (let i = 0; i < 5; ++i) encodeWithin(gradient, W, H, FRAME_BUDGET, state);
+  assert.equal(state.quality, Math.min(80, lowered + 5));
+});

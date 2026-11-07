@@ -51,7 +51,7 @@ assert 'gpsRelease(kGpsForPlanes)' in stop and 'delete gPlSky;' in stop and 'del
 esc = app.split('bool planesEscape() {', 1)[1].split('\n}\n', 1)[0]
 assert 'case PlView::Sky: return false;' in esc and esc.count('return false') == 1
 # Its HTTPS passes the memory guard, as Cameras' does: the ticket's handshake restarted 0.2.323.
-assert '(gUiMode == UiMode::Cameras || gUiMode == UiMode::Planes) && camera_net::busy() && !camera_net::overHome();' in part('095_main.cpp.inc')
+assert '(gUiMode == UiMode::Cameras || gUiMode == UiMode::Planes) &&\n         ((camera_net::busy() && !camera_net::overHome()) || camera_net::tlsOpen());' in part('095_main.cpp.inc')
 guard = part('010_main.cpp.inc').split('void serviceMemoryGuard() {', 1)[1]
 assert guard.index('if (cameraHttpsBusy()) { criticalSinceMs = 0; return; }') < guard.index('ESP.restart();')
 assert 'gPlNearDueMs = now + (viaHome ? kPlNearEveryMs : kPlNearAwayMs);' in app
