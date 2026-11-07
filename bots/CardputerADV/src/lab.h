@@ -444,6 +444,7 @@ class SeqRun {
     if (!mRunning) return;
     for (uint8_t i = 0; i < kOutCount; ++i) if ((mHeld >> i) & 1) drive[i] = mDrive[i];
   }
+  bool holds(Out out) const { return mRunning && ((mHeld >> static_cast<uint8_t>(out)) & 1); }
 
  private:
   void claim(Out out, const Drive& drive) {
@@ -661,6 +662,24 @@ inline bool outFromKey(const char* key, Out& out) {
     }
   }
   return false;
+}
+
+// --- The bridge's page setting a part ------------------------------------------------------------
+// The web page's buttons reach the Lab through its live report's answer (lab_live.h reads them,
+// labPageSet applies them). Every output can be set from there, the relays, lamp and air
+// conditioners included, because the owner asked for those to switch with no confirm, unlike a
+// check from the chat (onceCanDrive). What it says back about each, as words for the page.
+enum class PageSet : uint8_t { Done, UnknownOutput, OutOfRange, RulesPlaying, SequenceScreen, SequenceHolds, NotSetUp,
+                               LabClosed, Count };
+constexpr const char* kPageSetWords[static_cast<uint8_t>(PageSet::Count)] = {
+    "ok", "unknown output", "out of range", "rules are playing", "sequence screen open", "a sequence has it", "not set up",
+    "Lab not open"};
+constexpr bool pageCanSet(Out out) { return out != Out::Say && out != Out::Sequence; }
+// An output's own range, and -1 for off on the strip's color and the LED, and 0 for a quiet speaker.
+// Nothing is clamped: past the range is refused.
+constexpr bool pageValueValid(Out out, int value) {
+  return (value >= info(out).lo && value <= info(out).hi) ||
+         (value == -1 && (out == Out::StripColor || out == Out::Led)) || (value == 0 && out == Out::Tone);
 }
 // Keeps what the small screen and a header can both carry, up to kNameChars.
 inline void cleanName(const char* text, char* out) {

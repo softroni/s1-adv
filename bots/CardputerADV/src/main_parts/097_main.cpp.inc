@@ -2,7 +2,9 @@
 // its loop can hand the bridge a report of every reading and output (lab_live.h says what and
 // how often), over the bridge's plain-HTTP home door with a ticket. The ticket comes once per
 // Wi-Fi address over HTTPS, through the background check's own worker, so the Lab never holds a
-// second TLS connection. Away from home, or with an older bridge, nothing is sent.
+// second TLS connection. Away from home, or with an older bridge, nothing is sent. The answer can
+// carry the page's buttons, which labPageSet applies as soon as it's read; what became of each goes
+// back in the next report, sent at once.
 #include "../lab_live.h"
 #include "../lab_live_net.h"
 namespace {
@@ -15,6 +17,7 @@ bool gLabLiveRetried = false;       // This visit already asked again after the 
 bool gLabLiveSentAny = false;       // This visit has told the bridge something, so it should hear the end.
 bool gLabLiveLast = false;          // The report under way is the last one, which nobody waits for.
 lab_live::Cadence gLabLiveCadence;
+lab_live::Dids gLabLiveDids;        // The page's last buttons, to answer in the next report.
 
 uint32_t labLiveHomeIp() {
   const uint32_t mine = wifiLocalAddress();
@@ -75,6 +78,8 @@ void labLiveSnapshot(lab_live::Snapshot& s, uint32_t now) {
     for (uint8_t i = 0; i < gLabBook.count && i < 8; ++i) if (gLabStates[i].active) s.firing |= static_cast<uint8_t>(1u << i);
   }
   if (gLabSeqRun.running() && gLabSeqRun.index() < gLabSeqCount) s.seq = gLabSeqs[gLabSeqRun.index()].name;
+  s.did = gLabLiveDids.list();
+  s.dids = gLabLiveDids.count();
 }
 
 bool labLiveStart(uint32_t ip, const char* body, size_t length, uint32_t now) {
@@ -118,6 +123,7 @@ bool labLiveAskTicket(uint32_t now) {
 
 void labLiveOpened() {
   lab_live_net::abort();  // A last report from the visit before has nothing left to say.
+  gLabLiveDids.clear();
   gLabLiveLast = gLabLiveSentAny = gLabLiveRetried = false;
   gLabLiveOpenedMs = millis();
   gLabLiveCadence.restart();
@@ -139,14 +145,17 @@ void labLiveClosing() {
 void serviceLabLive(uint32_t now) {
   if (labLiveAskTicket(now) || lab_live_net::busy() || lab_live_net::finished()) return;
   const uint32_t ip = labLiveHomeIp();
-  // A check over TLS needs every piece of memory it can get, so a report waits for it to end.
-  if (!ip || !gLabLiveCadence.due(now) || gInboxHttpBusy) return;
+  // A check over TLS needs every piece of memory it can get, so a report waits for it to end. The
+  // page waiting to hear about its buttons doesn't wait for the cadence.
+  const bool answering = gLabLiveDids.count() && !gLabLiveCadence.stopped();
+  if (!ip || (!gLabLiveCadence.due(now) && !answering) || gInboxHttpBusy) return;
   gLabLiveCadence.sent(now);
   std::unique_ptr<char[]> body(new (std::nothrow) char[lab_live::kMaxBody + 1]);
   if (!body) return;
   lab_live::Snapshot snapshot;
   labLiveSnapshot(snapshot, now);
   if (!labLiveStart(ip, body.get(), lab_live::body(snapshot, body.get(), lab_live::kMaxBody + 1), now)) gLabLiveCadence.failed();
+  else gLabLiveDids.clear();  // Said once.
 }
 
 // Every loop, from any screen: moves a report along and reads its answer.
@@ -169,5 +178,14 @@ void serviceLabLiveNet() {
   }
   gLabLiveCadence.answered(answer);
   if (gLabLiveCadence.stopped()) logf("[LAB_LIVE] stopped after %u failures, last http=%d", unsigned(lab_live::kMaxFailures), answer.status);
+  if (answer.status != 200) return;
+  // The page's buttons, in order, here in the main loop.
+  for (uint8_t i = 0; i < answer.sets; ++i) {
+    const lab_live::Set& set = answer.set[i];
+    const lab::PageSet result = set.check != lab::PageSet::Done ? set.check : labPageSet(set.out, set.value, millis());
+    gLabLiveDids.add(set.id, result);
+    if (set.check == lab::PageSet::Done) logf("[LAB_LIVE] page set %s=%d: %s", lab::kOuts[static_cast<uint8_t>(set.out)].key, set.value, lab::kPageSetWords[static_cast<uint8_t>(result)]);
+    else logf("[LAB_LIVE] page set #%u: %s", unsigned(set.id), lab::kPageSetWords[static_cast<uint8_t>(result)]);
+  }
 }
 }  // namespace

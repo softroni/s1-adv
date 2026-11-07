@@ -586,6 +586,19 @@ While the Lab is open on your home Wi-Fi, [the bridge's web page](BRIDGE-UI.md) 
 
 Needs firmware 0.2.326 or later, and the bridge's page turned on.
 
+### Control parts from the page
+
+The page's part cards have controls too: the servo's angle, the LED strip's color, brightness and length, the Cardputer's LED, a beep from the speaker, both relays, the smartLamp's power and brightness, and the TCL and Daikin air conditioners. A tap reaches the Cardputer with its next report, within about a second, and the card says whether it worked.
+
+- **Relays, the lamp and the air conditioners switch with no confirm.** From Claude, those always wait for you on the Cardputer: a rule or sequence is checked before it's saved, a sequence that switches them only plays when you press P, and a check from the chat can't touch them. The page switches them straight away, because you asked for it to work that way. Mind what's plugged into the relays.
+- **Only while the Lab is open, at home.** The controls ride the same reports as the live readings, so with the Lab closed or the Cardputer away from home, nothing goes.
+- **With a part's screen open, the screen follows.** Set the servo from the page with the Servo screen up and its angle moves there too, and a sweep stops.
+- **It lasts until the Lab takes it back:** that part's screen or another one closing, rules playing, or a sequence driving the same part. When the Lab closes, everything the page turned on goes back to rest, the relays, lamp and air conditioners included.
+- **Some things it says no to:** while rules play, since they decide every part; on a sequence's own screen; for a part a running sequence is driving; for a servo, strip or relays that aren't set up in Devices; and for anything past a part's range.
+- **The speaker beeps once** for each tap, and never keeps playing.
+
+Needs firmware 0.2.329 or later.
+
 ## If a part doesn't answer
 
 The Lab tells you where to look, and units reconnect by themselves.
