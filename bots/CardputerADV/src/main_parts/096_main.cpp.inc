@@ -15,6 +15,7 @@
 #include "../camera_net.h"
 #include "../drone_id.h"
 #include "../drone_listen.h"
+#include <initializer_list>
 namespace {
 enum class PlView : uint8_t { Sky, Plane, Passes, Pass, Now, Spotted, Sightings, LookUp, GoOut, Drones, Drone, DroneAlert };
 enum class PlJob : uint8_t { None, Ticket, Near, Iss, Report };
@@ -33,8 +34,8 @@ constexpr const char* kPlSpottedPath = "/planes/spotted.txt";
 constexpr const char* kPlPrefsNs = "planes";
 constexpr uint8_t kPlRecent = 40;                // Sightings listed, newest first.
 constexpr uint8_t kPlAlertMemory = 16, kPlSavedMemory = 24;
-constexpr int16_t kPlMapX = 56, kPlMapY = 75, kPlMapR = 46;
-constexpr int16_t kPlListX = 109, kPlRowH = 24, kPlRows = 4, kPlFootY = 126;
+constexpr int16_t kPlMapX = 54, kPlMapY = 72, kPlMapR = 46;  // The round maps, left; the chosen one's card beside them.
+constexpr int16_t kPlCardX = 108, kPlRowH = 24, kPlRows = 4;
 
 uint16_t plAccent() { return rgb565_local(110, 200, 255); }
 uint16_t plMuted() { return rgb565_local(146, 146, 170); }
@@ -544,6 +545,20 @@ void plReadSpotted() {
 }
 
 // --- Drawing -------------------------------------------------------------------------------
+// The screen is 240 by 135 and small in the hand, so every page has the same frame and few, big
+// things: a title and the clock along the top, with an icon for each of the five pages and the one
+// showing lit (or, inside a page, a word about it); the page itself; and along the bottom at most
+// four keys on caps, each with a word. Numbers come as tiles, a small label over a big value, and
+// which way to look as an arrow in a ring, north up like the maps.
+constexpr int16_t kPlKeysY = 124;
+uint16_t plCap() { return rgb565_local(36, 73, 170); }
+// 8x8, a byte a row, leftmost pixel in the top bit: a plane, the station's truss and panels, the
+// Earth, a star and a drone's four rotors, in the order the pages go.
+constexpr uint8_t kPlPageIcons[5][8] = {
+    {0x18, 0x18, 0x7E, 0xFF, 0x18, 0x18, 0x3C, 0x66}, {0xC3, 0xC3, 0xDB, 0xFF, 0xDB, 0xC3, 0xC3, 0x00},
+    {0x3C, 0x5A, 0x99, 0xFF, 0x99, 0x5A, 0x3C, 0x00}, {0x18, 0x18, 0xFF, 0x7E, 0x3C, 0x66, 0x42, 0x00},
+    {0xC3, 0xC3, 0x24, 0x18, 0x18, 0x24, 0xC3, 0xC3}};
+
 // Words wrapped into width from (x, y), a line every lineH, at most maxLines, in the current font.
 int16_t plWrap(const String& text, int16_t x, int16_t y, int16_t width, int16_t lineH, uint8_t maxLines) {
   auto& d = gCanvas;
@@ -581,26 +596,115 @@ uint8_t plPage() {
     default: return 0;
   }
 }
-// The keys along the bottom, and on the four pages, which one this is.
-void plFooter(const char* keys, bool dots) {
+// The top. With no word, the page icons; with one, the word, for a screen inside a page.
+void plTop(const String& title, uint16_t ink, const String& word = String()) {
+  auto& d = gCanvas;
+  d.fillScreen(TFT_BLACK);
+  char clock[12];
+  plClockNow(clock, sizeof(clock));
+  d.setFont(&fonts::Font2);
+  const int16_t clockX = 236 - d.textWidth(clock);
+  d.setTextColor(plMuted());
+  d.setCursor(clockX, 2);
+  d.print(clock);
+  int16_t edge = clockX - 7;
+  if (word.isEmpty()) {
+    const uint8_t page = plPage();
+    const int16_t first = edge - 4 * 11 - 8;
+    for (uint8_t i = 0; i < 5; ++i) {
+      const int16_t x = first + i * 11;
+      d.drawBitmap(x, 4, kPlPageIcons[i], 8, 8, i == page ? ink : plDim());
+      if (i == page) d.fillRect(x, 14, 8, 2, ink);
+    }
+    edge = first - 7;
+  } else {
+    d.setFont(&fonts::Font0);
+    const String shown = fitCurrentFontToWidth(word, 100);
+    const int16_t x = edge - d.textWidth(shown);
+    d.setTextColor(plMuted());
+    d.setCursor(x, 6);
+    d.print(shown);
+    edge = x - 7;
+  }
+  d.setFont(&fonts::FreeSansBold9pt7b);
+  d.setTextColor(ink);
+  d.setCursor(5, 2);
+  d.print(fitCurrentFontToWidth(title, edge - 5));
+  d.drawFastHLine(0, 20, 240, ink);
+}
+// The bottom: keys on caps, each with its word, as many as fit.
+struct PlKey { const char* key; String word; };
+void plKeys(std::initializer_list<PlKey> keys) {
+  auto& d = gCanvas;
+  d.setFont(&fonts::Font0);
+  int16_t x = 3;
+  for (const PlKey& k : keys) {
+    const int16_t capW = max<int16_t>(11, d.textWidth(k.key) + 6), wordW = d.textWidth(k.word);
+    if (x + capW + 3 + wordW > 238) break;
+    d.fillRoundRect(x, kPlKeysY, capW, 11, 3, plCap());
+    d.setTextColor(TFT_WHITE);
+    d.setCursor(x + (capW - d.textWidth(k.key)) / 2, kPlKeysY + 2);
+    d.print(k.key);
+    x += capW + 3;
+    d.setTextColor(plMuted());
+    d.setCursor(x, kPlKeysY + 2);
+    d.print(k.word);
+    x += wordW + 7;
+  }
+}
+// A number: a small label over its big value.
+void plTile(int16_t x, int16_t y, int16_t w, const char* label, const String& value, uint16_t ink = TFT_WHITE) {
   auto& d = gCanvas;
   d.setFont(&fonts::Font0);
   d.setTextColor(plMuted());
-  d.setCursor(4, kPlFootY);
-  d.print(fitCurrentFontToWidth(keys, dots ? 206 : 232));
-  if (!dots) return;
-  for (uint8_t i = 0; i < 5; ++i) {
-    const int16_t x = 213 + i * 6, y = kPlFootY + 3;
-    if (i == plPage()) d.fillCircle(x, y, 2, plAccent());
-    else d.drawCircle(x, y, 2, plDim());
-  }
+  d.setCursor(x, y);
+  d.print(fitCurrentFontToWidth(label, w - 2));
+  d.setFont(&fonts::Font2);
+  d.setTextColor(ink);
+  d.setCursor(x, y + 9);
+  d.print(fitCurrentFontToWidth(value, w - 2));
 }
-void plHeader(const String& title, uint16_t ink, const String& hint, const String& hint2 = "") {
-  char clock[12];
-  plClockNow(clock, sizeof(clock));
-  drawBigHeader(title, ink, clock, hint, hint2);
+// "12 mi", "0.6 mi", "19 km": a distance for a tile or a sentence.
+void plSpaced(char* out, size_t room, const char* compact) {
+  size_t k = 0;
+  while (compact[k] && ((compact[k] >= '0' && compact[k] <= '9') || compact[k] == '.')) ++k;
+  snprintf(out, room, "%.*s %s", int(k), compact, compact + k);
 }
-// A round map: north up, a ring at its edge and one at half, and you in the middle.
+void plDistanceWords(char* out, size_t room, uint32_t meters) {
+  char compact[16];
+  planes::distanceShort(compact, sizeof(compact), meters, plUnits());
+  plSpaced(out, room, compact);
+}
+// Which way to look: an arrow in a ring, north up like the maps, with north marked.
+void plDial(int16_t cx, int16_t cy, int16_t r, int bearing, uint16_t ink) {
+  auto& d = gCanvas;
+  d.drawCircle(cx, cy, r, plDim());
+  d.fillRect(cx - 1, cy - r - 1, 3, 3, plMuted());
+  const double a = planes::normalDeg(bearing) * 3.14159265358979 / 180.0, s = sin(a), c = -cos(a);
+  const int tipX = cx + int(lround(s * (r - 2))), tipY = cy + int(lround(c * (r - 2)));
+  const int tailX = cx - int(lround(s * (r - 5))), tailY = cy - int(lround(c * (r - 5)));
+  const int baseX = cx + int(lround(s * (r - 10))), baseY = cy + int(lround(c * (r - 10)));
+  for (int o = -1; o <= 1; ++o) d.drawLine(tailX - int(lround(c * o)), tailY + int(lround(s * o)), baseX - int(lround(c * o)), baseY + int(lround(s * o)), ink);
+  d.fillTriangle(tipX, tipY, baseX - int(lround(c * 5)), baseY + int(lround(s * 5)), baseX + int(lround(c * 5)), baseY - int(lround(s * 5)), ink);
+}
+// A plane on the map: an arrow pointing where it's flying, or a dot when it isn't known.
+void plGlyph(int16_t x, int16_t y, int track, uint16_t ink, bool chosen) {
+  auto& d = gCanvas;
+  if (chosen) d.drawCircle(x, y, 8, TFT_WHITE);
+  if (track < 0) { d.fillCircle(x, y, chosen ? 3 : 2, chosen ? TFT_WHITE : ink); return; }
+  const double a = track * 3.14159265358979 / 180.0, s = sin(a), c = -cos(a);
+  const int len = chosen ? 6 : 5, back = chosen ? 4 : 3, half = chosen ? 4 : 3;
+  const int bx = x - int(lround(s * back)), by = y - int(lround(c * back));
+  d.fillTriangle(x + int(lround(s * len)), y + int(lround(c * len)), bx - int(lround(c * half)), by + int(lround(s * half)),
+                 bx + int(lround(c * half)), by - int(lround(s * half)), chosen ? TFT_WHITE : ink);
+}
+// Signal strength as four bars.
+void plBars(int16_t x, int16_t y, int8_t rssi, uint16_t ink) {
+  auto& d = gCanvas;
+  const int lit = rssi >= -60 ? 4 : rssi >= -70 ? 3 : rssi >= -80 ? 2 : 1;
+  for (int i = 0; i < 4; ++i) d.fillRect(x + i * 5, y + 12 - (i + 1) * 3, 3, (i + 1) * 3, i < lit ? ink : plFaint());
+}
+// A round map: north up, a ring at its edge and one at half, and you (or overhead) in the middle.
 void plDrawRound(bool sky) {
   auto& d = gCanvas;
   d.drawCircle(kPlMapX, kPlMapY, kPlMapR, plDim());
@@ -608,8 +712,9 @@ void plDrawRound(bool sky) {
   d.drawFastHLine(kPlMapX - kPlMapR + 1, kPlMapY, kPlMapR * 2 - 1, plFaint());
   d.drawFastVLine(kPlMapX, kPlMapY - kPlMapR + 1, kPlMapR * 2 - 1, plFaint());
   d.setFont(&fonts::Font0);
-  d.setTextColor(plMuted());
+  d.setTextColor(TFT_WHITE);
   d.setCursor(kPlMapX - 2, kPlMapY - kPlMapR + 3); d.print("N");
+  d.setTextColor(plMuted());
   d.setCursor(kPlMapX - 2, kPlMapY + kPlMapR - 10); d.print("S");
   d.setCursor(kPlMapX - kPlMapR + 3, kPlMapY - 3); d.print("W");
   d.setCursor(kPlMapX + kPlMapR - 8, kPlMapY - 3); d.print("E");
@@ -626,157 +731,136 @@ uint16_t plHeightInk(const planes::Plane& p) {
   if (p.altFt < 15000) return plAmber();
   return plAccent();
 }
-void plDrawPlaneDots() {
+// A message where a page's card goes, in the bigger font.
+void plCardSays(const String& text, uint16_t ink, int16_t x = kPlCardX) {
   auto& d = gCanvas;
-  const uint32_t range = planes::rangeMeters(gPlRange, plUnits());
-  d.setFont(&fonts::Font0);
-  // Back to front, so the nearest and the chosen are drawn on top.
-  for (int i = gPlSky->count - 1; i >= 0; --i) {
-    const planes::Plane& p = gPlSky->planes[i];
-    int dx, dy;
-    planes::mapPoint(p.distM, p.bearing, range, kPlMapR - 5, dx, dy);
-    const int16_t x = kPlMapX + dx, y = kPlMapY + dy;
-    if (i >= 9) { d.fillCircle(x, y, 1, plHeightInk(p)); continue; }
-    const char n[2] = {char('1' + i), 0};
-    if (i == gPlSel) {
-      d.fillRoundRect(x - 4, y - 5, 9, 11, 2, TFT_WHITE);
-      d.setTextColor(TFT_BLACK);
-    } else {
-      d.fillRoundRect(x - 4, y - 5, 9, 11, 2, TFT_BLACK);
-      d.setTextColor(plHeightInk(p));
-    }
-    d.setCursor(x - 2, y - 3);
-    d.print(n);
-  }
+  d.setFont(&fonts::Font2);
+  d.setTextColor(ink);
+  plWrap(text, x, 26, 236 - x, 16, 6);
 }
-void plPlaneLine(char* out, size_t room, const planes::Plane& p) {
-  char dist[12], alt[12];
-  planes::distanceShort(dist, sizeof(dist), p.distM, plUnits());
-  planes::altitudeShort(alt, sizeof(alt), p.altFt, plUnits());
-  snprintf(out, room, "%s %s %s", planes::compass(p.bearing), dist, alt);
-}
+
 void plDrawSky() {
   auto& d = gCanvas;
-  String hint;
-  if (gPlSkyOk) hint = (gPlSky->count ? String(gPlSky->count) : String("none")) + " near " + plPlaceWords(gPlSky->place);
-  else hint = plUsingGps() ? "GPS" : gDeviceSettings.weatherPlace;
-  plHeader("Planes", plAccent(), hint);
+  plTop("Planes", plAccent());
   plDrawRound(false);
-  if (gPlSkyOk) plDrawPlaneDots();
-  char range[8];
-  planes::rangeLabel(range, sizeof(range), gPlRange, plUnits());
+  const uint32_t range = planes::rangeMeters(gPlRange, plUnits());
+  char text[48], ring[12];
+  planes::rangeLabel(text, sizeof(text), gPlRange, plUnits());
+  plSpaced(ring, sizeof(ring), text);
   d.setFont(&fonts::Font0);
   d.setTextColor(plDim());
-  d.setCursor(kPlMapX + kPlMapR - 22, kPlMapY + kPlMapR - 6);
-  d.print(range);
-  const int16_t listW = 238 - kPlListX;
-  if (!gPlSkyOk || !gPlSky->count) {
-    d.setFont(&fonts::Font2);
-    d.setTextColor(gPlProblem.length() ? plAmber() : plMuted());
-    String text;
-    if (gPlProblem.length()) text = gPlProblem;
-    else if (!wifiLocalAddress()) text = "Skywatch needs Wi-Fi";
-    else if (!gPlSkyOk) text = "Looking for planes...";
-    else text = String("No planes within ") + range + " right now. = makes the ring wider.";
-    plWrap(text, kPlListX + 4, 30, listW - 6, 17, 5);
-  } else {
-    const int first = max<int>(0, min<int>(gPlSel - 1, gPlSky->count - kPlRows));
-    for (int row = 0; row < kPlRows && first + row < gPlSky->count; ++row) {
-      const int i = first + row;
+  d.setCursor(kPlMapX + kPlMapR - d.textWidth(ring), kPlMapY + kPlMapR - 4);
+  d.print(ring);
+  if (gPlSkyOk) {
+    // Back to front, so the nearest and the chosen one are on top.
+    for (int i = gPlSky->count - 1; i >= 0; --i) {
+      if (i == gPlSel) continue;
       const planes::Plane& p = gPlSky->planes[i];
-      const int16_t y = 25 + row * kPlRowH;
-      const bool selected = i == gPlSel;
-      if (selected) d.fillRoundRect(kPlListX, y, listW + 1, kPlRowH - 1, 4, plAccent());
-      d.setFont(&fonts::Font0);
-      d.setTextColor(selected ? TFT_BLACK : plHeightInk(p));
-      d.setCursor(kPlListX + 3, y + 4);
-      d.print(i + 1);
-      d.setFont(&fonts::Font2);
-      d.setTextColor(selected ? TFT_BLACK : TFT_WHITE);
-      d.setCursor(kPlListX + 15, y);
-      d.print(fitCurrentFontToWidth(p.name, listW - 17));
-      char line[32];
-      plPlaneLine(line, sizeof(line), p);
-      d.setFont(&fonts::Font0);
-      d.setTextColor(selected ? TFT_BLACK : plMuted());
-      d.setCursor(kPlListX + 15, y + 15);
-      d.print(fitCurrentFontToWidth(line, listW - 17));
+      int dx, dy;
+      planes::mapPoint(p.distM, p.bearing, range, kPlMapR - 6, dx, dy);
+      plGlyph(kPlMapX + dx, kPlMapY + dy, p.track, plHeightInk(p), false);
+    }
+    if (gPlSel < gPlSky->count) {
+      const planes::Plane& p = gPlSky->planes[gPlSel];
+      int dx, dy;
+      planes::mapPoint(p.distM, p.bearing, range, kPlMapR - 6, dx, dy);
+      plGlyph(kPlMapX + dx, kPlMapY + dy, p.track, plHeightInk(p), true);
     }
   }
-  plFooter(";. pick Enter look -= ring ,/ more", true);
+  if (!gPlSkyOk || !gPlSky->count) {
+    String says;
+    if (gPlProblem.length()) says = gPlProblem;
+    else if (!wifiLocalAddress()) says = "Skywatch needs Wi-Fi";
+    else if (!gPlSkyOk) says = "Looking for planes...";
+    else says = String("No planes within ") + ring + " right now. = makes the ring bigger.";
+    plCardSays(says, gPlProblem.length() ? plAmber() : plMuted());
+    plKeys({{"-=", "Ring"}, {"R", "Look again"}, {",/", "Pages"}});
+    return;
+  }
+  const planes::Plane& p = gPlSky->planes[gPlSel];
+  const int16_t x = kPlCardX, w = 238 - kPlCardX;
+  d.setFont(&fonts::Font2);
+  d.setTextColor(TFT_WHITE);
+  d.setCursor(x, 23);
+  d.print(fitCurrentFontToWidth(p.name, w));
+  d.setFont(&fonts::Font0);
+  d.setTextColor(plMuted());
+  d.setCursor(x, 40);
+  d.print(fitCurrentFontToWidth(p.type[0] ? p.type : planes::isHelicopter(p) ? "Helicopter" : "Plane", w));
+  plDial(x + 13, 64, 13, p.bearing, plHeightInk(p));
+  d.setFont(&fonts::FreeSansBold9pt7b);
+  d.setTextColor(TFT_WHITE);
+  d.setCursor(x + 32, 52);
+  d.print(planes::compass(p.bearing));
+  planes::heightShort(text, sizeof(text), p.elev);
+  d.setFont(&fonts::Font2);
+  d.setTextColor(plAmber());
+  d.setCursor(x + 32, 68);
+  d.print(fitCurrentFontToWidth(text, w - 32));
+  char dist[16], alt[16];
+  plDistanceWords(dist, sizeof(dist), p.distM);
+  planes::altitudeShort(alt, sizeof(alt), p.altFt, plUnits());
+  plTile(x, 87, 62, "AWAY", dist);
+  plTile(x + 64, 87, 66, "HEIGHT", alt, plHeightInk(p));
+  snprintf(text, sizeof(text), "%u of %u near %s", unsigned(gPlSel + 1), unsigned(gPlSky->count), plPlaceWords(gPlSky->place));
+  d.setFont(&fonts::Font0);
+  d.setTextColor(plMuted());
+  d.setCursor(x, 114);
+  d.print(fitCurrentFontToWidth(text, w));
+  plKeys({{";.", "Pick"}, {"Enter", "More"}, {"S", "Keep"}, {",/", "Pages"}});
 }
 
 const planes::Plane* plSelected() {
   if (gPlSkyOk && gPlSel < gPlSky->count && !strcmp(gPlSky->planes[gPlSel].hex, gPlSelHex)) return &gPlSky->planes[gPlSel];
   return gPlShown.hex[0] ? &gPlShown : nullptr;
 }
+const char* plClimbLabel(const planes::Plane& p) {
+  if (p.climbFpm >= 300) return "CLIMBING";
+  if (p.climbFpm <= -300) return p.altFt < 12000 ? "COMING DOWN" : "DESCENDING";
+  return "HEIGHT";
+}
 void plDrawPlane() {
   auto& d = gCanvas;
   const planes::Plane* sel = plSelected();
   if (!sel) { gPlView = PlView::Sky; plDrawSky(); return; }
   const planes::Plane p = *sel;
-  const char* kind = planes::isDrone(p) ? "Drone" : planes::isHelicopter(p) ? "Helicopter" : "";
-  plHeader(p.name, plAccent(), gPlSelGone ? "out of range now" : kind);
+  String word = gPlSelGone ? String("out of range now") : planes::isDrone(p) ? String("drone")
+                : planes::isHelicopter(p) ? String("helicopter")
+                : gPlSkyOk && gPlSky->count ? String(gPlSel + 1) + " of " + gPlSky->count : String("plane");
+  plTop(p.name, plAccent(), word);
   d.setFont(&fonts::Font2);
   d.setTextColor(p.type[0] ? TFT_WHITE : plMuted());
-  d.setCursor(8, 26);
-  d.print(fitCurrentFontToWidth(p.type[0] ? p.type : "Type not known", 224));
-  if (p.from[0] || p.to[0]) {
-    const String from = p.from[0] ? p.from : "?", to = p.to[0] ? p.to : "?";
+  d.setCursor(5, 23);
+  d.print(fitCurrentFontToWidth(p.type[0] ? p.type : "Type not known", 230));
+  // Where it's going, in words: cities when they're known, else the airports' codes.
+  const char* from = p.fromCity[0] ? p.fromCity : p.from;
+  const char* to = p.toCity[0] ? p.toCity : p.to;
+  d.setCursor(5, 40);
+  if (from[0] || to[0]) {
     d.setTextColor(plAccent());
-    d.setCursor(8, 44);
-    d.print(from);
-    const int16_t fromEnd = 8 + d.textWidth(from) + 6, toX = 232 - d.textWidth(to);
-    d.setCursor(toX, 44);
-    d.print(to);
-    const int16_t lineY = 51, arrowX = toX - 6;
-    if (arrowX - fromEnd > 12) {
-      d.drawFastHLine(fromEnd, lineY, arrowX - fromEnd, plDim());
-      d.fillTriangle(arrowX, lineY, arrowX - 6, lineY - 4, arrowX - 6, lineY + 4, plAccent());
-      d.fillTriangle((fromEnd + arrowX) / 2 + 3, lineY, (fromEnd + arrowX) / 2 - 3, lineY - 3, (fromEnd + arrowX) / 2 - 3, lineY + 3, plDim());
-    }
-    d.setFont(&fonts::Font0);
-    d.setTextColor(plMuted());
-    d.setCursor(8, 61);
-    d.print(fitCurrentFontToWidth(p.fromCity, 110));
-    const String toCity = fitCurrentFontToWidth(p.toCity, 110);
-    d.setCursor(232 - d.textWidth(toCity), 61);
-    d.print(toCity);
+    d.print(fitCurrentFontToWidth(String(from[0] ? from : "?") + " to " + (to[0] ? to : "?"), 230));
   } else {
-    d.setFont(&fonts::Font0);
     d.setTextColor(plMuted());
-    d.setCursor(8, 48);
     d.print("Where it's going isn't known");
   }
-  d.setFont(&fonts::Font0);
-  d.setTextColor(plAmber());
-  d.setCursor(8, 78);
-  d.print("LOOK");
+  plDial(19, 72, 13, p.bearing, plHeightInk(p));
   d.setFont(&fonts::FreeSansBold9pt7b);
   d.setTextColor(TFT_WHITE);
-  d.setCursor(40, 72);
+  d.setCursor(40, 58);
   d.print(planes::compassWord(p.bearing));
-  char height[40];
-  planes::heightWords(height, sizeof(height), p.elev);
+  char text[40], dist[16], alt[16], speed[16];
+  planes::heightWords(text, sizeof(text), p.elev);
   d.setFont(&fonts::Font2);
   d.setTextColor(plAmber());
-  d.setCursor(40, 88);
-  d.print(height);
-  char alt[16], dist[16], speed[16], closest[24], line[64];
+  d.setCursor(40, 74);
+  d.print(fitCurrentFontToWidth(text, 196));
   planes::altitudeText(alt, sizeof(alt), p.altFt, plUnits());
-  units::distanceText(dist, sizeof(dist), int32_t(p.distM), plUnits());
+  plDistanceWords(dist, sizeof(dist), p.distM);
   planes::speedText(speed, sizeof(speed), p.speedKt, plUnits());
-  planes::closestText(closest, sizeof(closest), p.closestS);
-  d.setFont(&fonts::Font0);
-  d.setTextColor(plMuted());
-  snprintf(line, sizeof(line), "%s %s, %s away", alt, planes::climbWord(p.climbFpm, p.altFt), dist);
-  d.setCursor(8, 106);
-  d.print(fitCurrentFontToWidth(line, 228));
-  if (p.track >= 0) snprintf(line, sizeof(line), "%s heading %s, %s", speed, planes::compass(p.track), closest);
-  else snprintf(line, sizeof(line), "%s, %s", speed, closest);
-  d.setCursor(8, 115);
-  d.print(fitCurrentFontToWidth(line, 228));
-  plFooter(",/ other planes  S I saw it!  Esc", false);
+  plTile(5, 96, 80, plClimbLabel(p), alt, plHeightInk(p));
+  plTile(88, 96, 70, "AWAY", dist);
+  plTile(161, 96, 77, "SPEED", speed);
+  plKeys({{",/", "Other planes"}, {"S", "Keep"}, {"Esc", "Back"}});
 }
 
 void plDrawLookUp() {
@@ -800,15 +884,15 @@ void plDrawLookUp() {
   d.setTextColor(TFT_WHITE);
   plCentered(String(alt) + " up", 73);
   line[0] = 0;
-  if (p.climbFpm <= -300 && p.to[0]) snprintf(line, sizeof(line), "coming down to land at %s", p.to);
-  else if (p.climbFpm >= 300 && p.from[0]) snprintf(line, sizeof(line), "climbing out of %s", p.from);
+  if (p.climbFpm <= -300 && p.to[0]) snprintf(line, sizeof(line), "coming down to land at %s", p.toCity[0] ? p.toCity : p.to);
+  else if (p.climbFpm >= 300 && p.from[0]) snprintf(line, sizeof(line), "climbing out of %s", p.fromCity[0] ? p.fromCity : p.from);
   else if (p.to[0]) snprintf(line, sizeof(line), "on its way to %s", p.toCity[0] ? p.toCity : p.to);
   if (line[0]) plCentered(line, 90);
   if (p.type[0]) {
     d.setTextColor(plMuted());
     plCentered(p.type, line[0] ? 107 : 90);
   }
-  plFooter("Enter more   S I saw it!   Esc", false);
+  plKeys({{"Enter", "More"}, {"S", "I saw it!"}, {"Esc", "Back"}});
 }
 
 // Four stars, lit for the pass's brightness.
@@ -816,7 +900,7 @@ void plDrawStars(int16_t x, int16_t y, uint8_t lit, bool onBar) {
   auto& d = gCanvas;
   for (uint8_t i = 0; i < 4; ++i) {
     const int16_t cx = x + i * 9 + 3, cy = y + 7;
-    const uint16_t ink = i < lit ? (onBar ? TFT_BLACK : plGold()) : (onBar ? rgb565_local(40, 90, 120) : plFaint());
+    const uint16_t ink = i < lit ? (onBar ? TFT_BLACK : plGold()) : (onBar ? rgb565_local(150, 120, 40) : plFaint());
     d.fillTriangle(cx, cy - 4, cx - 4, cy + 2, cx + 4, cy + 2, ink);
     d.fillTriangle(cx, cy + 4, cx - 4, cy - 1, cx + 4, cy - 1, ink);
   }
@@ -828,66 +912,62 @@ void plDrawBell(int16_t x, int16_t y, uint16_t ink) {
   d.drawFastHLine(x - 1, y + 8, 9, ink);
   d.fillCircle(x + 3, y + 10, 1, ink);
 }
-String plSpaceHint() {
-  if (gPlSpaceOk) return String("near ") + plPlaceWords(gPlSpace->place);
-  return plUsingGps() ? "GPS" : gDeviceSettings.weatherPlace;
-}
-bool plSpaceWaiting(int16_t y) {
+bool plSpaceWaiting() {
   if (gPlSpaceOk) return false;
-  auto& d = gCanvas;
-  d.setFont(&fonts::Font2);
-  d.setTextColor(gPlSpaceProblem.length() ? plAmber() : plMuted());
-  plWrap(gPlSpaceProblem.length() ? gPlSpaceProblem : (wifiLocalAddress() ? String("Asking where the station is...") : String("Skywatch needs Wi-Fi")),
-         8, y, 224, 17, 5);
+  plCardSays(gPlSpaceProblem.length() ? gPlSpaceProblem
+                                      : (wifiLocalAddress() ? String("Asking where the space station is...") : String("Skywatch needs Wi-Fi")),
+             gPlSpaceProblem.length() ? plAmber() : plMuted(), 5);
   return true;
 }
 void plDrawPasses() {
   auto& d = gCanvas;
-  plHeader("Space station", plGold(), plSpaceHint());
-  if (!plSpaceWaiting(30)) {
-    const uint32_t now = plNowUnix();
-    if (!gPlSpace->count) {
-      d.setFont(&fonts::Font2);
-      d.setTextColor(TFT_WHITE);
-      plWrap("None you can see in the next 10 days.", 8, 30, 224, 17, 2);
-      d.setTextColor(plMuted());
-      plWrap("It shows near dusk and dawn, when the sky is dark but the station is still in sunlight.", 8, 66, 224, 17, 3);
-    } else {
-      d.setFont(&fonts::Font2);
-      d.setTextColor(plMuted());
-      d.setCursor(8, 26);
-      d.print("Next times you can see it:");
-      const int first = max<int>(0, min<int>(gPlPassSel - 1, gPlSpace->count - 4));
-      for (int row = 0; row < 4 && first + row < gPlSpace->count; ++row) {
-        const int i = first + row;
-        const planes::Pass& p = gPlSpace->passes[i];
-        const int16_t y = 44 + row * 18;
-        const bool selected = i == gPlPassSel;
-        const bool over = now && now >= p.end;
-        if (selected) d.fillRoundRect(2, y - 1, 236, 18, 4, plGold());
-        const uint16_t ink = selected ? TFT_BLACK : over ? plDim() : TFT_WHITE;
-        char day[16], at[16], len[12];
-        plDayOf(day, sizeof(day), p.start);
-        plTimeOf(at, sizeof(at), p.start);
-        snprintf(len, sizeof(len), "%lu min", static_cast<unsigned long>(planes::minutesLong(p)));
-        d.setFont(&fonts::Font2);
-        d.setTextColor(ink);
-        d.setCursor(8, y);
-        d.print(fitCurrentFontToWidth(now && now >= p.start && now < p.end ? String("Up now!") : String(day), 72));
-        d.setCursor(84, y);
-        d.print(at);
-        d.setCursor(150, y);
-        d.print(len);
-        if (plReminded(p)) plDrawBell(190, y + 2, selected ? TFT_BLACK : plGreen());
-        plDrawStars(201, y, planes::stars(p.magTenths), selected);
-      }
-      d.setFont(&fonts::Font0);
-      d.setTextColor(plMuted());
-      d.setCursor(8, 117);
-      d.print("More stars: brighter and higher");
-    }
+  plTop("Space station", plGold());
+  if (plSpaceWaiting()) { plKeys({{",/", "Pages"}}); return; }
+  const uint32_t now = plNowUnix();
+  if (!gPlSpace->count) {
+    d.setFont(&fonts::Font2);
+    d.setTextColor(TFT_WHITE);
+    plWrap("None you can see in the next 10 days.", 5, 26, 230, 16, 2);
+    d.setTextColor(plMuted());
+    plWrap("It shows near dusk and dawn, when the sky is dark but the station is still in sunlight.", 5, 62, 230, 16, 3);
+    plKeys({{",/", "Pages"}});
+    return;
   }
-  plFooter(gPlSpaceOk && gPlSpace->count ? "Enter path  R remind me  ,/ more" : ",/ more", true);
+  const char* place = plPlaceWords(gPlSpace->place);
+  d.setFont(&fonts::Font0);
+  d.setTextColor(plMuted());
+  d.setCursor(5, 24);
+  d.print(fitCurrentFontToWidth(strcmp(place, "you") ? String("When you can see it from ") + place : String("When you can see it"), 230));
+  const int first = max<int>(0, min<int>(gPlPassSel - 1, gPlSpace->count - 4));
+  for (int row = 0; row < 4 && first + row < gPlSpace->count; ++row) {
+    const int i = first + row;
+    const planes::Pass& p = gPlSpace->passes[i];
+    const int16_t y = 34 + row * 19;
+    const bool selected = i == gPlPassSel;
+    const bool over = now && now >= p.end;
+    if (selected) d.fillRoundRect(2, y - 1, 236, 18, 4, plGold());
+    const uint16_t ink = selected ? TFT_BLACK : over ? plDim() : TFT_WHITE;
+    char day[16], at[16], len[12];
+    plDayOf(day, sizeof(day), p.start);
+    plTimeOf(at, sizeof(at), p.start);
+    snprintf(len, sizeof(len), "%lu min", static_cast<unsigned long>(planes::minutesLong(p)));
+    d.setFont(&fonts::Font2);
+    d.setTextColor(ink);
+    d.setCursor(7, y);
+    d.print(fitCurrentFontToWidth(now && now >= p.start && now < p.end ? String("Up now!") : String(day), 72));
+    d.setCursor(82, y);
+    d.print(at);
+    d.setTextColor(selected ? TFT_BLACK : plMuted());
+    d.setCursor(148, y);
+    d.print(len);
+    if (plReminded(p)) plDrawBell(188, y + 2, selected ? TFT_BLACK : plGreen());
+    plDrawStars(200, y, planes::stars(p.magTenths), selected);
+  }
+  d.setFont(&fonts::Font0);
+  d.setTextColor(plMuted());
+  d.setCursor(5, 112);
+  d.print("More stars: brighter and higher");
+  plKeys({{";.", "Pick"}, {"Enter", "Path"}, {"R", "Remind"}, {",/", "Pages"}});
 }
 
 const planes::Pass* plPassShown() {
@@ -903,7 +983,7 @@ void plDrawPass() {
   char day[16], until[24];
   plDayOf(day, sizeof(day), p.start);
   planes::untilText(until, sizeof(until), plNowUnix(), p);
-  plHeader(day, plGold(), until);
+  plTop(day, plGold(), until);
   plDrawRound(true);
   // The path: the bridge's points, or the start, top and end when there are none.
   int16_t az[planes::kPathPoints];
@@ -925,190 +1005,176 @@ void plDrawPass() {
     if (i) {
       d.drawLine(px, py, x, y, plGold());
       d.drawLine(px + 1, py, x + 1, y, plGold());
+      d.drawLine(px, py + 1, x, y + 1, plGold());
     }
     px = x; py = y;
   }
-  const auto mark = [&](int azDeg, int elDeg, char label) {
-    int dx, dy;
-    planes::skyPoint(azDeg, elDeg, kPlMapR, dx, dy);
-    const int16_t x = kPlMapX + dx, y = kPlMapY + dy;
-    d.fillCircle(x, y, 5, TFT_WHITE);
+  const auto mark = [&](int16_t x, int16_t y, char label) {
+    d.fillCircle(x, y, 6, TFT_WHITE);
     d.setFont(&fonts::Font0);
     d.setTextColor(TFT_BLACK);
     d.setCursor(x - 2, y - 3);
     d.print(label);
   };
-  mark(az[0], el[0], '1');
-  mark(p.peakAz, p.peakEl, '2');
-  mark(az[n - 1], el[n - 1], '3');
-  const int16_t x = 114;
+  const auto markSky = [&](int azDeg, int elDeg, char label) {
+    int dx, dy;
+    planes::skyPoint(azDeg, elDeg, kPlMapR, dx, dy);
+    mark(int16_t(kPlMapX + dx), int16_t(kPlMapY + dy), label);
+  };
+  markSky(az[0], el[0], '1');
+  markSky(p.peakAz, p.peakEl, '2');
+  markSky(az[n - 1], el[n - 1], '3');
+  // Beside it, the same three: when, and where to look.
   char at[16], words[40], height[24];
   const auto entry = [&](int16_t y, char label, uint32_t when, const char* text) {
+    mark(117, int16_t(y + 8), label);
     plTimeOf(at, sizeof(at), when);
     d.setFont(&fonts::Font2);
     d.setTextColor(TFT_WHITE);
-    d.setCursor(x, y);
-    d.print(String(label) + "  " + at);
-    d.setFont(&fonts::Font0);
-    d.setTextColor(plMuted());
-    d.setCursor(x + 15, y + 16);
-    d.print(fitCurrentFontToWidth(text, 238 - x - 15));
+    d.setCursor(129, y);
+    d.print(at);
+    d.setTextColor(plAmber());
+    d.setCursor(129, y + 16);
+    d.print(fitCurrentFontToWidth(text, 236 - 129));
   };
-  snprintf(words, sizeof(words), "appears %s", planes::compassWord(p.startAz));
-  entry(26, '1', p.start, words);
+  snprintf(words, sizeof(words), "rises %s", planes::compass(p.startAz));
+  entry(23, '1', p.start, words);
   planes::heightShort(height, sizeof(height), p.peakEl);
   snprintf(words, sizeof(words), "%s %s", height, planes::compass(p.peakAz));
-  entry(54, '2', p.peak, words);
+  entry(56, '2', p.peak, words);
   snprintf(words, sizeof(words), "%s %s", p.shadow ? "vanishes" : "sets", planes::compass(p.endAz));
-  entry(82, '3', p.end, words);
-  d.setFont(&fonts::Font0);
-  if (plReminded(p)) {
-    plTimeOf(at, sizeof(at), gPlRemindAt);
-    d.setTextColor(plGreen());
-    d.setCursor(x, 114);
-    d.print(String("rings at ") + at);
-  } else if (p.points) {
-    plDrawStars(x, 109, planes::stars(p.magTenths), false);
-  }
-  plFooter(gPlPassFromReminder ? "R remind me  Esc" : "R remind me  ,/ other nights  Esc", false);
+  entry(89, '3', p.end, words);
+  String remind = "Remind me";
+  if (plReminded(p)) { plTimeOf(at, sizeof(at), gPlRemindAt); remind = String("Rings at ") + at; }
+  if (gPlPassFromReminder) plKeys({{"R", remind}, {"Esc", "Back"}});
+  else plKeys({{"R", remind}, {",/", "Other nights"}, {"Esc", "Back"}});
 }
 
 void plDrawNow() {
   auto& d = gCanvas;
-  plHeader("Space station", plGold(), "right now");
-  if (!plSpaceWaiting(30)) {
-    const planes::Station& s = gPlSpace->now;
-    d.setFont(&fonts::Font0);
-    d.setTextColor(plMuted());
-    d.setCursor(8, 28);
-    d.print("Over");
-    d.setFont(&fonts::FreeSansBold9pt7b);
-    d.setTextColor(TFT_WHITE);
-    d.setCursor(8, 38);
-    d.print(fitCurrentFontToWidth(s.known && s.over[0] ? String(s.over) : String("the Earth"), 224));
-    const bool us = plUnits() == units::System::US;
-    char number[16], line[48];
-    d.setFont(&fonts::Font2);
-    d.setTextColor(plGold());
-    planes::grouped(number, sizeof(number), us ? units::rounded(s.altKm * 0.621371) : s.altKm);
-    snprintf(line, sizeof(line), "%s %s up", number, us ? "miles" : "km");
-    d.setCursor(8, 60);
-    d.print(line);
-    planes::grouped(number, sizeof(number), us ? units::rounded(s.speedKmh * 0.621371 / 100.0) * 100 : units::rounded(s.speedKmh / 100.0) * 100);
-    snprintf(line, sizeof(line), "%s %s", number, us ? "mph" : "km/h");
-    d.setCursor(8, 76);
-    d.print(line);
-    d.setTextColor(TFT_WHITE);
-    snprintf(line, sizeof(line), "Around the whole Earth in %lu min", static_cast<unsigned long>(planes::orbitMinutes(s.altKm)));
-    d.setCursor(8, 92);
-    d.print(fitCurrentFontToWidth(line, 228));
-    d.setFont(&fonts::Font0);
-    const int next = planes::nextPass(*gPlSpace, plNowUnix());
-    if (next >= 0) {
-      char day[16], at[16];
-      plDayOf(day, sizeof(day), gPlSpace->passes[next].start);
-      plTimeOf(at, sizeof(at), gPlSpace->passes[next].start);
-      day[0] = char(tolower(static_cast<unsigned char>(day[0])));
-      d.setTextColor(plAmber());
-      d.setCursor(8, 108);
-      d.print(String("Next over us: ") + day + ", " + at);
-    }
-    if (s.crew > 0) {
-      d.setTextColor(plMuted());
-      d.setCursor(8, 117);
-      d.print(String(s.crew) + (s.crew == 1 ? " person is" : " people are") + " on board");
-    }
+  plTop("Station now", plGold());
+  if (plSpaceWaiting()) { plKeys({{",/", "Pages"}}); return; }
+  const planes::Station& s = gPlSpace->now;
+  d.setFont(&fonts::Font0);
+  d.setTextColor(plMuted());
+  d.setCursor(5, 24);
+  d.print("THE SPACE STATION IS OVER");
+  d.setFont(&fonts::FreeSansBold9pt7b);
+  d.setTextColor(TFT_WHITE);
+  d.setCursor(5, 34);
+  d.print(fitCurrentFontToWidth(s.known && s.over[0] ? String(s.over) : String("the Earth"), 230));
+  const bool us = plUnits() == units::System::US;
+  char number[16], text[48];
+  planes::grouped(number, sizeof(number), us ? units::rounded(s.altKm * 0.621371) : s.altKm);
+  plTile(5, 56, 66, "HEIGHT", String(number) + (us ? " mi" : " km"), plGold());
+  planes::grouped(number, sizeof(number), us ? units::rounded(s.speedKmh * 0.621371 / 100.0) * 100 : units::rounded(s.speedKmh / 100.0) * 100);
+  plTile(74, 56, 88, "SPEED", String(number) + (us ? " mph" : " km/h"), plGold());
+  snprintf(text, sizeof(text), "%lu min", static_cast<unsigned long>(planes::orbitMinutes(s.altKm)));
+  plTile(165, 56, 72, "ROUND EARTH", text, plGold());
+  d.setFont(&fonts::Font2);
+  const int next = planes::nextPass(*gPlSpace, plNowUnix());
+  if (next >= 0) {
+    char day[16], at[16];
+    plDayOf(day, sizeof(day), gPlSpace->passes[next].start);
+    plTimeOf(at, sizeof(at), gPlSpace->passes[next].start);
+    day[0] = char(tolower(static_cast<unsigned char>(day[0])));
+    d.setTextColor(plAmber());
+    d.setCursor(5, 86);
+    d.print(fitCurrentFontToWidth(String("Over you next: ") + day + ", " + at, 230));
   }
-  plFooter("R refresh  ,/ more", true);
+  if (s.crew > 0) {
+    d.setTextColor(TFT_WHITE);
+    d.setCursor(5, 104);
+    d.print(String(s.crew) + (s.crew == 1 ? " person is" : " people are") + " on board");
+  }
+  plKeys({{"R", "Refresh"}, {",/", "Pages"}});
 }
 
 void plDrawSpotted() {
   auto& d = gCanvas;
   plReadSpotted();
-  plHeader("Spotted", plGreen(), gPlStats && gPlStats->total ? "your collection" : "");
-  d.setFont(&fonts::Font2);
-  if (!gSdReady) {
-    d.setTextColor(plAmber());
-    plWrap("Spotted keeps the planes you saw on the SD card. Put one in to start.", 8, 30, 224, 17, 4);
-  } else if (!gPlStats) {
-    d.setTextColor(plAmber());
-    plWrap("Not enough memory to read the collection", 8, 30, 224, 17, 3);
-  } else if (!gPlStats->total) {
-    d.setTextColor(TFT_WHITE);
-    plWrap("Nothing spotted yet.", 8, 30, 224, 17, 1);
-    d.setTextColor(plMuted());
-    plWrap("When you see a plane in the sky, open it and press S. It joins your collection.", 8, 52, 224, 17, 4);
-  } else {
-    const planes::Stats& s = *gPlStats;
-    char line[64];
-    snprintf(line, sizeof(line), "%lu planes  %u airlines  %u types", static_cast<unsigned long>(s.total), unsigned(s.airlines.count),
-             unsigned(s.types.count));
-    d.setTextColor(TFT_WHITE);
-    d.setCursor(8, 26);
-    d.print(fitCurrentFontToWidth(line, 228));
-    const auto row = [&](int16_t y, const char* label, uint16_t labelInk, const String& what, const String& right) {
-      d.setFont(&fonts::Font0);
-      d.setTextColor(labelInk);
-      d.setCursor(8, y + 4);
-      d.print(label);
-      d.setFont(&fonts::Font2);
-      const int16_t rightW = right.length() ? d.textWidth(right) + 6 : 0;
+  plTop("Spotted", plGreen());
+  if (!gSdReady || !gPlStats || !gPlStats->total) {
+    d.setFont(&fonts::Font2);
+    if (!gSdReady) { d.setTextColor(plAmber()); plWrap("Spotted keeps what you saw on the SD card. Put one in to start.", 5, 26, 230, 16, 4); }
+    else if (!gPlStats) { d.setTextColor(plAmber()); plWrap("Not enough memory to read the collection", 5, 26, 230, 16, 3); }
+    else {
       d.setTextColor(TFT_WHITE);
-      d.setCursor(64, y);
-      d.print(fitCurrentFontToWidth(what, 232 - 64 - rightW));
-      if (right.length()) {
-        d.setTextColor(plMuted());
-        d.setCursor(232 - d.textWidth(right), y);
-        d.print(right);
-      }
-    };
-    const int newest = s.newestType();
-    if (newest >= 0) {
-      tm now, first;
-      const bool today = plLocal(plNowUnix(), now) && plLocal(s.types.first[newest], first) && now.tm_yday == first.tm_yday &&
-                         now.tm_year == first.tm_year;
-      char day[16];
-      plDayOf(day, sizeof(day), s.types.first[newest]);
-      row(46, today ? "NEW TODAY" : "NEWEST", today ? plAmber() : plMuted(), s.types.names[newest], today ? String() : String(day));
+      plWrap("Nothing spotted yet.", 5, 26, 230, 16, 1);
+      d.setTextColor(plMuted());
+      plWrap("When you see a plane or a drone, open it and press S. It joins your collection.", 5, 48, 230, 16, 4);
     }
-    char alt[16];
-    planes::altitudeShort(alt, sizeof(alt), s.highest.altFt, plUnits());
-    row(64, "HIGHEST", plMuted(), s.highest.type[0] ? s.highest.type : s.highest.name, alt);
-    planes::altitudeShort(alt, sizeof(alt), s.lowest.altFt, plUnits());
-    row(82, "LOWEST", plMuted(), s.lowest.type[0] ? s.lowest.type : s.lowest.name, alt);
-    const int top = s.airlines.top();
-    if (top >= 0) row(100, "MOST", plMuted(), s.airlines.names[top], String("x") + s.airlines.counts[top]);
+    plKeys({{",/", "Pages"}});
+    return;
   }
-  plFooter(gPlStats && gPlStats->total ? "Enter every sighting  ,/ more" : ",/ more", true);
+  const planes::Stats& s = *gPlStats;
+  plTile(5, 23, 76, "SEEN", String(s.total), plGreen());
+  plTile(83, 23, 76, "AIRLINES", String(s.airlines.count), plGreen());
+  plTile(161, 23, 76, "TYPES", String(s.types.count), plGreen());
+  const auto row = [&](int16_t y, const char* label, uint16_t labelInk, const String& what, const String& right) {
+    d.setFont(&fonts::Font0);
+    d.setTextColor(labelInk);
+    d.setCursor(5, y + 4);
+    d.print(label);
+    d.setFont(&fonts::Font2);
+    const int16_t rightW = right.length() ? d.textWidth(right) + 6 : 0;
+    d.setTextColor(TFT_WHITE);
+    d.setCursor(64, y);
+    d.print(fitCurrentFontToWidth(what, 236 - 64 - rightW));
+    if (right.length()) {
+      d.setTextColor(plMuted());
+      d.setCursor(236 - d.textWidth(right), y);
+      d.print(right);
+    }
+  };
+  const int newest = s.newestType();
+  if (newest >= 0) {
+    tm now, first;
+    const bool today = plLocal(plNowUnix(), now) && plLocal(s.types.first[newest], first) && now.tm_yday == first.tm_yday &&
+                       now.tm_year == first.tm_year;
+    char day[16];
+    plDayOf(day, sizeof(day), s.types.first[newest]);
+    row(54, today ? "NEW TODAY" : "NEWEST", today ? plAmber() : plMuted(), s.types.names[newest], today ? String() : String(day));
+  }
+  char alt[16];
+  planes::altitudeShort(alt, sizeof(alt), s.highest.altFt, plUnits());
+  row(73, "HIGHEST", plMuted(), s.highest.type[0] ? s.highest.type : s.highest.name, alt);
+  const int top = s.airlines.top();
+  if (top >= 0) row(92, "MOST SEEN", plMuted(), s.airlines.names[top], String("x") + s.airlines.counts[top]);
+  else {
+    planes::altitudeShort(alt, sizeof(alt), s.lowest.altFt, plUnits());
+    row(92, "LOWEST", plMuted(), s.lowest.type[0] ? s.lowest.type : s.lowest.name, alt);
+  }
+  plKeys({{"Enter", "Every sighting"}, {",/", "Pages"}});
 }
 void plDrawSightings() {
   auto& d = gCanvas;
   plReadSpotted();
-  plHeader("Spotted", plGreen(), gPlStats ? String(gPlStats->total) + " seen" : "");
+  plTop("Spotted", plGreen(), gPlStats ? String(gPlStats->total) + " seen" : String("seen"));
   if (!gPlRecent || !gPlRecentCount) { gPlView = PlView::Spotted; return; }
   gPlRecentTop = uint8_t(min<int>(gPlRecentTop, max<int>(0, gPlRecentCount - kPlRows)));
   for (int row = 0; row < kPlRows && gPlRecentTop + row < gPlRecentCount; ++row) {
     const planes::Sighting& s = gPlRecent[gPlRecentTop + row];
-    const int16_t y = 25 + row * kPlRowH;
+    const int16_t y = 24 + row * kPlRowH;
     char day[16], at[16];
     plDayOf(day, sizeof(day), s.at);
     plTimeOf(at, sizeof(at), s.at);
     const String when = String(day) + " " + at;
     d.setFont(&fonts::Font0);
     d.setTextColor(plMuted());
-    const int16_t whenX = 232 - d.textWidth(when);
+    const int16_t whenX = 236 - d.textWidth(when);
     d.setCursor(whenX, y + 4);
     d.print(when);
     d.setFont(&fonts::Font2);
     d.setTextColor(TFT_WHITE);
-    d.setCursor(8, y);
-    d.print(fitCurrentFontToWidth(s.name, whenX - 14));
+    d.setCursor(5, y);
+    d.print(fitCurrentFontToWidth(s.name, whenX - 11));
     d.setFont(&fonts::Font0);
     d.setTextColor(plAccent());
-    d.setCursor(8, y + 15);
-    d.print(fitCurrentFontToWidth(s.type[0] ? s.type : "type not known", 224));
+    d.setCursor(5, y + 15);
+    d.print(fitCurrentFontToWidth(s.type[0] ? s.type : "type not known", 230));
   }
-  plFooter(gPlRecentCount >= kPlRecent ? ";. scroll  the newest 40  Esc" : ";. scroll  Esc back", false);
+  plKeys({{";.", "Scroll"}, {"Esc", "Back"}});
 }
 
 void plDrawGoOut() {
@@ -1119,32 +1185,29 @@ void plDrawGoOut() {
   const bool flash = (millis() / 500) % 2 == 0;
   d.setFont(&fonts::FreeSansBold12pt7b);
   d.setTextColor(flash ? plGold() : TFT_WHITE);
-  plCentered("GO OUTSIDE NOW!", 8);
+  plCentered("GO OUTSIDE NOW!", 6);
   d.setFont(&fonts::Font2);
   d.setTextColor(TFT_WHITE);
   char line[64];
   if (now && now < p.start) {
     const uint32_t min = (p.start - now + 59) / 60;
     snprintf(line, sizeof(line), "The space station rises in the %s", planes::compassWord(p.startAz));
-    plCentered(line, 40);
+    plCentered(line, 38);
     snprintf(line, sizeof(line), "in %lu min", static_cast<unsigned long>(min));
+    d.setFont(&fonts::FreeSansBold9pt7b);
     d.setTextColor(plGold());
-    plCentered(line, 57);
+    plCentered(line, 55);
   } else if (now < p.end) {
     snprintf(line, sizeof(line), "It's up now, look %s!", planes::compassWord(now < p.peak ? p.startAz : p.endAz));
-    plCentered(line, 48);
+    plCentered(line, 46);
   } else {
-    plCentered("It has gone by. Next time!", 48);
+    plCentered("It has gone by. Next time!", 46);
   }
-  d.setFont(&fonts::Font0);
+  d.setFont(&fonts::Font2);
   d.setTextColor(plMuted());
-  plCentered("Look for a bright dot that moves fast", 80);
-  plCentered("and doesn't blink. Planes blink!", 90);
-  if (gPlSpaceOk && gPlSpace->now.crew > 0) {
-    d.setTextColor(plAccent());
-    plCentered(String(gPlSpace->now.crew) + " people are on board", 106);
-  }
-  plFooter("Enter path   Esc", false);
+  plCentered("A bright dot moving fast,", 77);
+  plCentered("and it doesn't blink.", 93);
+  plKeys({{"Enter", "Path"}, {"Esc", "Close"}});
 }
 
 // --- Drones --------------------------------------------------------------------------------
@@ -1246,9 +1309,7 @@ void plDroneDistance(char* out, size_t room, int32_t meters) {
 void plDroneDistanceWords(char* out, size_t room, int32_t meters) {
   char compact[16];
   plDroneDistance(compact, sizeof(compact), meters);
-  size_t k = 0;
-  while (compact[k] && ((compact[k] >= '0' && compact[k] <= '9') || compact[k] == '.')) ++k;
-  snprintf(out, room, "%.*s %s", int(k), compact, compact + k);
+  plSpaced(out, room, compact);
 }
 void plDroneHeight(char* out, size_t room, int32_t meters, bool compact) {
   const bool us = plUnits() == units::System::US;
@@ -1300,23 +1361,27 @@ void plSaveDrone(const drone_id::Heard& h) {
 
 void plDrawDrones() {
   auto& d = gCanvas;
-  String hint = plDroneListening() ? String("listening ch ") + drone_listen::channel()
-                : gPlDroneState == PlDroneState::Waiting ? String("starting...") : String("not listening");
-  plHeader("Drones", plPink(), hint);
+  plTop("Drones", plPink());
   plDrawRound(false);
-  const int16_t listW = 238 - kPlListX;
   if (!plDroneListening()) {
     d.setFont(&fonts::Font2);
+    if (gPlDroneState == PlDroneState::Waiting) {
+      d.setTextColor(plMuted());
+      plWrap("Getting Wi-Fi ready to listen...", kPlCardX, 26, 236 - kPlCardX, 16, 4);
+      plKeys({{"Esc", "Stop"}, {",/", "Pages"}});
+      return;
+    }
+    d.setTextColor(TFT_WHITE);
+    plWrap("Listen for drones nearby?", kPlCardX, 26, 236 - kPlCardX, 16, 2);
     d.setTextColor(plMuted());
-    plWrap(gPlDroneState == PlDroneState::Waiting ? String("Waiting for the network to finish...")
-                                                   : String("Drones send their ID over Wi-Fi. Enter listens for them, and the internet pauses while it does."),
-           kPlListX + 4, 28, listW - 6, 16, 6);
-    plFooter("Enter listen  ,/ more", true);
+    plWrap("The internet pauses while it listens.", kPlCardX, 66, 236 - kPlCardX, 16, 3);
+    plKeys({{"Enter", "Listen"}, {",/", "Pages"}});
     return;
   }
   // A sweep goes round while it listens.
   const double a = (millis() % 3000) / 3000.0 * 2 * 3.14159265358979;
-  d.drawLine(kPlMapX, kPlMapY, kPlMapX + int(lround(sin(a) * (kPlMapR - 2))), kPlMapY - int(lround(cos(a) * (kPlMapR - 2))), rgb565_local(110, 40, 90));
+  d.drawLine(kPlMapX, kPlMapY, kPlMapX + int(lround(sin(a) * (kPlMapR - 2))), kPlMapY - int(lround(cos(a) * (kPlMapR - 2))),
+             rgb565_local(150, 50, 120));
   uint8_t order[drone_id::Table::kMax];
   const uint8_t n = plDroneOrder(order);
   if (gPlDroneSel >= n) gPlDroneSel = n ? n - 1 : 0;
@@ -1326,65 +1391,84 @@ void plDrawDrones() {
     int32_t dist; int bearing, elev;
     if (plDroneFrom(gPlDrones->heard[order[i]].d, dist, bearing, elev)) while (ring < 3000 && dist > ring * 9 / 10) ring = ring == 300 ? 1000 : 3000;
   }
-  char text[40];
-  units::distanceText(text, sizeof(text), ring, plUnits());
+  char text[48], a1[16], a2[16];
+  plDroneDistanceWords(text, sizeof(text), ring);
   d.setFont(&fonts::Font0);
   d.setTextColor(plDim());
-  d.setCursor(kPlMapX + kPlMapR - 30, kPlMapY + kPlMapR - 6);
+  d.setCursor(kPlMapX + kPlMapR - d.textWidth(text), kPlMapY + kPlMapR - 4);
   d.print(text);
   for (int i = n - 1; i >= 0; --i) {
+    const drone_id::Drone& dr = gPlDrones->heard[order[i]].d;
     int32_t dist; int bearing, elev;
-    if (!plDroneFrom(gPlDrones->heard[order[i]].d, dist, bearing, elev)) continue;
+    if (!plDroneFrom(dr, dist, bearing, elev)) continue;
     int dx, dy;
-    planes::mapPoint(uint32_t(dist), bearing, uint32_t(ring), kPlMapR - 5, dx, dy);
-    const int16_t x = kPlMapX + dx, y = kPlMapY + dy;
-    const char label[2] = {char('1' + i), 0};
-    d.fillRoundRect(x - 4, y - 5, 9, 11, 2, i == gPlDroneSel ? TFT_WHITE : TFT_BLACK);
-    d.setTextColor(i == gPlDroneSel ? TFT_BLACK : plPink());
-    d.setCursor(x - 2, y - 3);
-    d.print(label);
+    planes::mapPoint(uint32_t(dist), bearing, uint32_t(ring), kPlMapR - 6, dx, dy);
+    plGlyph(int16_t(kPlMapX + dx), int16_t(kPlMapY + dy), dr.speedCms >= 50 ? dr.direction : -1, plPink(), i == gPlDroneSel);
   }
+  const int16_t x = kPlCardX, w = 238 - kPlCardX;
   if (!n) {
-    d.setFont(&fonts::Font2);
-    d.setTextColor(plMuted());
     const uint32_t secs = (millis() - gPlDroneSince) / 1000;
-    plWrap(String("Listening") + (secs < 60 ? String("...") : String(" for ") + (secs / 60) + " min.") +
-           " No drones yet. Only ones nearby can be heard.", kPlListX + 4, 28, listW - 6, 16, 6);
-  } else {
-    const int first = max<int>(0, min<int>(gPlDroneSel - 1, n - kPlRows));
-    for (int row = 0; row < kPlRows && first + row < n; ++row) {
-      const int i = first + row;
-      const drone_id::Heard& h = gPlDrones->heard[order[i]];
-      const int16_t y = 25 + row * kPlRowH;
-      const bool selected = i == gPlDroneSel;
-      if (selected) d.fillRoundRect(kPlListX, y, listW + 1, kPlRowH - 1, 4, plPink());
-      d.setFont(&fonts::Font0);
-      d.setTextColor(selected ? TFT_BLACK : plPink());
-      d.setCursor(kPlListX + 3, y + 4);
-      d.print(i + 1);
-      char name[24];
-      drone_id::shortName(name, sizeof(name), h.d);
-      d.setFont(&fonts::Font2);
-      d.setTextColor(selected ? TFT_BLACK : TFT_WHITE);
-      d.setCursor(kPlListX + 15, y);
-      d.print(fitCurrentFontToWidth(name, listW - 17));
-      char dist[12] = "", height[12] = "";
-      int32_t m, distM; int bearing, elev;
-      const bool high = drone_id::heightMeters(h.d, m);
-      if (high) plDroneHeight(height, sizeof(height), m, true);
-      if (plDroneFrom(h.d, distM, bearing, elev)) {
-        plDroneDistance(dist, sizeof(dist), distM);
-        snprintf(text, sizeof(text), "%s %s%s%s", planes::compass(bearing), dist, high ? " " : "", high ? height : "");
-      } else {
-        snprintf(text, sizeof(text), "%s%s%s", high ? height : "", high ? " up, " : "", drone_id::signalWord(h.rssi));
-      }
-      d.setFont(&fonts::Font0);
-      d.setTextColor(selected ? TFT_BLACK : plMuted());
-      d.setCursor(kPlListX + 15, y + 15);
-      d.print(fitCurrentFontToWidth(text, listW - 17));
-    }
+    d.setFont(&fonts::Font2);
+    d.setTextColor(TFT_WHITE);
+    d.setCursor(x, 26);
+    d.print(secs < 60 ? String("Listening...") : String("Listening ") + (secs / 60) + " min");
+    d.setTextColor(plMuted());
+    plWrap("No drones yet. Only ones nearby can be heard.", x, 46, w - 2, 16, 4);
+    d.setFont(&fonts::Font0);
+    d.setCursor(x, 114);
+    d.print(String("Wi-Fi channel ") + drone_listen::channel());
+    plKeys({{"Esc", "Stop"}, {",/", "Pages"}});
+    return;
   }
-  plFooter(n ? ";. pick Enter info S keep ,/ more" : "Esc stops listening  ,/ more", true);
+  const drone_id::Heard& h = gPlDrones->heard[order[gPlDroneSel]];
+  char name[24];
+  drone_id::shortName(name, sizeof(name), h.d);
+  d.setFont(&fonts::Font2);
+  d.setTextColor(TFT_WHITE);
+  d.setCursor(x, 23);
+  d.print(fitCurrentFontToWidth(name, w));
+  d.setFont(&fonts::Font0);
+  d.setTextColor(plMuted());
+  d.setCursor(x, 40);
+  d.print(fitCurrentFontToWidth(drone_id::typeName(h.d.uaType), w));
+  int32_t distM = 0, m = 0;
+  int bearing = 0, elev = -1;
+  const bool where = plDroneFrom(h.d, distM, bearing, elev);
+  if (where) {
+    plDial(x + 13, 64, 13, bearing, plPink());
+    d.setFont(&fonts::FreeSansBold9pt7b);
+    d.setTextColor(TFT_WHITE);
+    d.setCursor(x + 32, 52);
+    d.print(planes::compass(bearing));
+    if (elev >= 0) planes::heightShort(text, sizeof(text), elev);
+    else snprintf(text, sizeof(text), "height?");
+    d.setFont(&fonts::Font2);
+    d.setTextColor(plAmber());
+    d.setCursor(x + 32, 68);
+    d.print(fitCurrentFontToWidth(text, w - 32));
+  } else {
+    plBars(x, 55, h.rssi, plPink());
+    d.setFont(&fonts::Font2);
+    d.setTextColor(TFT_WHITE);
+    d.setCursor(x + 26, 52);
+    d.print(String(drone_id::signalWord(h.rssi)) + " signal");
+    d.setTextColor(plMuted());
+    d.setFont(&fonts::Font0);
+    d.setCursor(x, 72);
+    d.print(fitCurrentFontToWidth("No GPS for which way", w));
+  }
+  if (drone_id::heightMeters(h.d, m)) plDroneHeight(a1, sizeof(a1), m, false);
+  else snprintf(a1, sizeof(a1), "?");
+  if (where) plDroneDistanceWords(a2, sizeof(a2), distM);
+  plTile(x, 87, 62, "HEIGHT", a1, plPink());
+  if (where) plTile(x + 64, 87, 66, "AWAY", a2);
+  else plTile(x + 64, 87, 66, "STATUS", h.d.status ? drone_id::statusWord(h.d.status) : "?");
+  snprintf(text, sizeof(text), "%u of %u heard", unsigned(gPlDroneSel + 1), unsigned(n));
+  d.setFont(&fonts::Font0);
+  d.setTextColor(plMuted());
+  d.setCursor(x, 114);
+  d.print(text);
+  plKeys({{";.", "Pick"}, {"Enter", "More"}, {"S", "Keep"}, {",/", "Pages"}});
 }
 
 void plDrawDrone() {
@@ -1394,71 +1478,69 @@ void plDrawDrone() {
   const drone_id::Drone& dr = h->d;
   char name[24], line[72], a[16], b[16], c[16];
   drone_id::shortName(name, sizeof(name), dr);
-  plHeader(name, plPink(), drone_id::statusWord(dr.status));
+  plTop(name, plPink(), dr.status ? drone_id::statusWord(dr.status) : "drone");
   d.setFont(&fonts::Font2);
   d.setTextColor(TFT_WHITE);
-  d.setCursor(8, 26);
+  d.setCursor(5, 23);
   String kind = drone_id::typeName(dr.uaType);
   if (dr.selfId[0]) kind += String("  \"") + dr.selfId + "\"";
-  d.print(fitCurrentFontToWidth(kind, 224));
+  d.print(fitCurrentFontToWidth(kind, 230));
   d.setFont(&fonts::Font0);
   d.setTextColor(plMuted());
-  d.setCursor(8, 44);
-  d.print(fitCurrentFontToWidth(dr.id[0] ? String("ID ") + dr.id : String("No ID heard yet"), 224));
+  d.setCursor(5, 41);
+  d.print(fitCurrentFontToWidth(dr.id[0] ? String("ID ") + dr.id : String("No ID heard yet"), 230));
   int32_t distM = 0, m = 0;
   int bearing = 0, elev = -1;
   const bool where = plDroneFrom(dr, distM, bearing, elev);
   if (where) {
-    d.setTextColor(plAmber());
-    d.setCursor(8, 62);
-    d.print("LOOK");
+    plDial(19, 66, 13, bearing, plPink());
     d.setFont(&fonts::FreeSansBold9pt7b);
     d.setTextColor(TFT_WHITE);
-    d.setCursor(40, 56);
+    d.setCursor(40, 52);
     d.print(planes::compassWord(bearing));
     d.setFont(&fonts::Font2);
     d.setTextColor(plAmber());
-    d.setCursor(40, 74);
+    d.setCursor(40, 68);
     if (elev >= 0) { planes::heightWords(line, sizeof(line), elev); d.print(line); }
     else d.print("how high isn't known");
   } else {
+    plBars(5, 55, h->rssi, plPink());
     d.setFont(&fonts::Font2);
+    d.setTextColor(TFT_WHITE);
+    d.setCursor(31, 52);
+    d.print(String(drone_id::signalWord(h->rssi)) + " signal");
     d.setTextColor(plMuted());
-    plWrap(dr.located ? "Which way to look needs the Cap's GPS, outdoors." : "It hasn't said where it is yet.", 8, 55, 224, 15, 2);
+    d.setCursor(5, 69);
+    d.print(fitCurrentFontToWidth(dr.located ? "Which way to look needs the GPS" : "It hasn't said where it is", 230));
   }
-  // Height and distance, then speed: whichever it has said.
-  String facts;
-  if (drone_id::heightMeters(dr, m)) { plDroneHeight(a, sizeof(a), m, false); facts += String(a) + " up"; }
-  if (where) { plDroneDistanceWords(b, sizeof(b), distM); facts += (facts.length() ? ", " : "") + String(b) + " away"; }
-  d.setFont(&fonts::Font0);
-  d.setTextColor(TFT_WHITE);
-  d.setCursor(8, 90);
-  d.print(fitCurrentFontToWidth(facts.length() ? facts : String("It hasn't said how high it is"), 228));
+  if (drone_id::heightMeters(dr, m)) plDroneHeight(a, sizeof(a), m, false);
+  else snprintf(a, sizeof(a), "?");
+  if (where) plDroneDistanceWords(b, sizeof(b), distM);
+  else snprintf(b, sizeof(b), "?");
   if (dr.speedCms >= 0) {
     const bool us = plUnits() == units::System::US;
     snprintf(c, sizeof(c), "%ld %s", static_cast<long>(units::rounded(dr.speedCms * (us ? 0.0223694 : 0.036))), us ? "mph" : "km/h");
-    if (dr.speedCms < 50) snprintf(line, sizeof(line), "Hovering");
-    else if (dr.direction >= 0) snprintf(line, sizeof(line), "Moving %s to the %s", c, planes::compassWord(dr.direction));
-    else snprintf(line, sizeof(line), "Moving %s", c);
-    d.setCursor(8, 99);
-    d.print(fitCurrentFontToWidth(line, 228));
+  } else {
+    snprintf(c, sizeof(c), "?");
   }
+  plTile(5, 88, 72, "HEIGHT", a, plPink());
+  plTile(80, 88, 74, "AWAY", b);
+  plTile(157, 88, 80, dr.speedCms >= 50 && dr.direction >= 0 ? (String("SPEED, TO ") + planes::compass(dr.direction)).c_str() : "SPEED", c);
+  line[0] = 0;
   if (dr.hasOperator && dr.located) {
     const int32_t apart = lab_gps::metersBetween(dr.latE7 / 100, dr.lonE7 / 100, dr.opLatE7 / 100, dr.opLonE7 / 100);
     const int toward = lab_gps::bearingDeg(dr.latE7 / 100, dr.lonE7 / 100, dr.opLatE7 / 100, dr.opLonE7 / 100);
     plDroneDistanceWords(b, sizeof(b), apart);
-    if (toward < 0 || apart < 10) snprintf(line, sizeof(line), "%s right below it", dr.operatorType == 0 ? "Took off" : "Flown from");
-    else snprintf(line, sizeof(line), "%s %s to its %s", dr.operatorType == 0 ? "Took off" : "Flown from", b, planes::compassWord(toward));
-    d.setTextColor(plMuted());
-    d.setCursor(8, 108);
-    d.print(fitCurrentFontToWidth(line, 228));
+    const char* who = dr.operatorType == 0 ? "Took off" : "Pilot";
+    if (toward < 0 || apart < 10) snprintf(line, sizeof(line), "%s right below it", who);
+    else snprintf(line, sizeof(line), "%s %s to its %s", who, b, planes::compass(toward));
   }
-  snprintf(line, sizeof(line), "Signal %s, heard %lus ago, ch %u", drone_id::signalWord(h->rssi),
-           static_cast<unsigned long>((millis() - h->lastMs) / 1000), unsigned(h->channel));
+  const String heard = String("heard ") + ((millis() - h->lastMs) / 1000) + "s ago";
+  d.setFont(&fonts::Font0);
   d.setTextColor(plMuted());
-  d.setCursor(8, 117);
-  d.print(fitCurrentFontToWidth(line, 228));
-  plFooter(",/ other drones  S I saw it!  Esc", false);
+  d.setCursor(5, 114);
+  d.print(fitCurrentFontToWidth(line[0] ? String(line) + ", " + heard : heard, 230));
+  plKeys({{",/", "Other drones"}, {"S", "Keep"}, {"Esc", "Back"}});
 }
 
 void plDrawDroneAlert() {
@@ -1469,7 +1551,7 @@ void plDrawDroneAlert() {
   d.setFont(&fonts::FreeSansBold12pt7b);
   d.setTextColor(flash ? plPink() : TFT_WHITE);
   plCentered("DRONE NEARBY!", 6);
-  if (!h) { plFooter("Esc", false); return; }
+  if (!h) { plKeys({{"Esc", "Back"}}); return; }
   char name[24], text[48], a[16];
   drone_id::shortName(name, sizeof(name), h->d);
   d.setFont(&fonts::FreeSansBold9pt7b);
@@ -1483,7 +1565,7 @@ void plDrawDroneAlert() {
     plDroneDistanceWords(a, sizeof(a), distM);
     snprintf(text, sizeof(text), "to the %s, %s away", planes::compassWord(bearing), a);
   } else {
-    snprintf(text, sizeof(text), "signal %s", drone_id::signalWord(h->rssi));
+    snprintf(text, sizeof(text), "%s signal", drone_id::signalWord(h->rssi));
   }
   plCentered(text, 56);
   d.setTextColor(TFT_WHITE);
@@ -1496,7 +1578,7 @@ void plDrawDroneAlert() {
   }
   d.setTextColor(plMuted());
   plCentered(drone_id::typeName(h->d.uaType), 90);
-  plFooter("Enter more   S I saw it!   Esc", false);
+  plKeys({{"Enter", "More"}, {"S", "I saw it!"}, {"Esc", "Back"}});
 }
 
 // --- The app's life ------------------------------------------------------------------------

@@ -55,6 +55,13 @@ assert '(gUiMode == UiMode::Cameras || gUiMode == UiMode::Planes) && camera_net:
 guard = part('010_main.cpp.inc').split('void serviceMemoryGuard() {', 1)[1]
 assert guard.index('if (cameraHttpsBusy()) { criticalSinceMs = 0; return; }') < guard.index('ESP.restart();')
 assert 'gPlNearDueMs = now + (viaHome ? kPlNearEveryMs : kPlNearAwayMs);' in app
+# Every screen has the same frame: its keys on caps along the bottom, and the pages the top's icons.
+for fn in ['plDrawSky', 'plDrawPlane', 'plDrawLookUp', 'plDrawPasses', 'plDrawPass', 'plDrawNow', 'plDrawSpotted',
+           'plDrawSightings', 'plDrawGoOut', 'plDrawDrones', 'plDrawDrone', 'plDrawDroneAlert']:
+    body = app.split('void %s() {' % fn, 1)[1].split('\n}\n', 1)[0]
+    assert 'plKeys({' in body, fn
+keys = app.split('void plKeys(', 1)[1].split('\n}\n', 1)[0]
+assert 'if (x + capW + 3 + wordW > 238) break;' in keys, 'a key that would run off the screen is left off'
 # The canvas stays allocated, and no position is ever logged.
 assert 'releaseUiCanvasForNetwork' not in app and 'createSprite' not in app
 for line in app.splitlines():
