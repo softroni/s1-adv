@@ -113,6 +113,13 @@ assert 'Clips play on home Wi-Fi only' in app
 bridge_routes = (root / 'bridge/src/cameras.mjs').read_text().split('const WHAT = new Set([', 1)[1].split(']);', 1)[0]
 for route in sorted(set(_re2.findall(r'"(clips[a-z/]*)', app.replace('%sclips', '"clips')))):
     assert f'"{route}"' in bridge_routes, route
+# The list makes room for its clips only when they come, exactly as many: away from home the memory
+# is in pieces, and 150 clips' worth at once said "Not enough memory for clips" (0.2.321).
+assert 'new (std::nothrow) cameras::ClipDay' not in app and 'new (std::nothrow) cameras::Clip[lines]' in app
+assert 'if (e == camera_net::Error::NoMemory && job != CamJob::Frame && job != CamJob::Report) {' in app
+kinds = app.split('enum class CamJob : uint8_t {', 1)[1].split('};', 1)[0].replace('\n', ' ').split(',')
+words = _re2.findall(r'"(\w+)"', app.split('static const char* const kWords[] = {', 1)[1].split('};', 1)[0])
+assert len(kinds) == len(words), 'a word for each kind of request, in order'
 # Away from home every request is HTTPS. The memory guard lets those pass, as it does the inbox's:
 # counted, a few in a row restarted the Cardputer as Cameras opened (0.2.319). And away, opening the
 # app doesn't wake every camera for a picture over HTTPS.
@@ -301,8 +308,11 @@ int main() {
   assert(monthLead(2027, 2) == 0 && monthRows(2027, 2) == 4);
   assert(monthLead(2026, 6) == 0 && monthRows(2026, 6) == 5);
   {
-    // A day's list, newest first; a bad line is skipped, not the list.
-    static ClipDay day;
+    // A day's list, newest first; a bad line is skipped, not the list. The clips are the caller's.
+    static Clip storage[kMaxClips];
+    ClipDay day;
+    day.clips = storage;
+    day.cap = kMaxClips;
     const char* t = "clips\t20261106\t4\n"
                     "clip\t2026110600012\t60450\t41\tab12cd34\n"
                     "clip\t1234567890123456\t3600\t120\t0f0f0f0f\n"
@@ -324,7 +334,19 @@ int main() {
     size_t n = size_t(snprintf(many, room, "clips\t20261106\t200\n"));
     for (int i = 0; i < 200; ++i) n += size_t(snprintf(many + n, room - n, "clip\t%d\t%d\t30\tab12cd34\n", 1000 + i, 80000 - i * 300));
     assert(parseClips(many, n, day) && day.total == 200 && day.count == kMaxClips && !strcmp(day.clips[kMaxClips - 1].id, "1149"));
+    assert(clipLines(many, n) == kMaxClips);
     free(many);
+    // Room for exactly as many as the answer has: counted first, never more than that kept.
+    assert(clipLines(t, strlen(t)) == 6 && clipLines(none, strlen(none)) == 0 && clipLines("clip", 4) == 0);
+    Clip two[2];
+    ClipDay small;
+    small.clips = two;
+    small.cap = 2;
+    assert(parseClips(t, strlen(t), small) && small.count == 2);
+    small.cap = 1;
+    assert(parseClips(t, strlen(t), small) && small.count == 1 && !strcmp(two[0].id, "2026110600012"));
+    ClipDay roomless;
+    assert(parseClips(t, strlen(t), roomless) && roomless.count == 0 && roomless.day == 20261106);
   }
   {
     Month m;
@@ -352,7 +374,10 @@ int main() {
 #ifdef BRIDGE_LINES
   {
     // The bridge's own lines (cameras-archive.mjs), read the device's way.
-    static ClipDay day;
+    static Clip storage[kMaxClips];
+    ClipDay day;
+    day.clips = storage;
+    day.cap = clipLines(kBridgeClips, strlen(kBridgeClips));
     Month m;
     ClipState st;
     assert(parseClips(kBridgeClips, strlen(kBridgeClips), day) && day.day == 20261106 && day.count == 2);

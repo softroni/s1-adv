@@ -46,6 +46,10 @@ bool gCamListOk = false;                // A list has come since the app opened.
 uint32_t gCamListAtMs = 0;              // When it came: its ages count from then.
 uint8_t* gCamThumb[cameras::kMax] = {};
 bool gCamThumbAsked[cameras::kMax] = {}, gCamThumbNone[cameras::kMax] = {};
+uint8_t gCamThumbTries[cameras::kMax] = {};  // Asked again after running short of memory, a few times.
+uint32_t gCamThumbNotBefore = 0;
+uint32_t gCamClipThumbNotBefore = 0;
+uint32_t gCamMemReportedMs = 0;
 uint8_t gCamSel = 0;                    // The wall's selected tile.
 uint8_t gCamCur = 0;                    // The camera a picture or live view shows.
 uint8_t* gCamJpeg = nullptr;            // What's on screen in those views.
@@ -86,7 +90,8 @@ bool gCamWantAudio = false, gCamAudioPlaying = false, gCamAudioHeard = false, gC
 bool gCamAudioMuted = false;             // M; kept for the visit, so the next camera is muted too.
 uint32_t gCamAudioSamples = 0, gCamAudioGaps = 0;
 // Recordings: a day's list, the month, and a clip playing in the live view (gCamClipMode).
-cameras::ClipDay* gCamClips = nullptr;   // On the heap while the list is open.
+cameras::ClipDay gCamClipStore;          // The list; its clips on the heap, exactly as many as came.
+cameras::ClipDay* gCamClips = nullptr;   // &gCamClipStore while the list is open.
 uint32_t gCamToday = 0;                  // The Mac's today, from its first answer: 0 until then.
 uint32_t gCamClipsDay = 0, gCamClipsAsked = 0;
 uint8_t gCamClipRows[cameras::kMaxClips]; // The list's rows: its clips, the camera picked's only.
@@ -151,7 +156,8 @@ const cameras::Camera* camAt(int i) { return gCamList && i >= 0 && i < gCamList-
 bool camReady() { return gCamList && gCamListOk && gCamList->state == cameras::State::Ready; }
 
 void camFreeThumbs() {
-  for (size_t i = 0; i < cameras::kMax; ++i) { free(gCamThumb[i]); gCamThumb[i] = nullptr; gCamThumbAsked[i] = gCamThumbNone[i] = false; }
+  for (size_t i = 0; i < cameras::kMax; ++i) { free(gCamThumb[i]); gCamThumb[i] = nullptr; gCamThumbAsked[i] = gCamThumbNone[i] = false; gCamThumbTries[i] = 0; }
+  gCamThumbNotBefore = 0;
 }
 void camFreeJpeg() { free(gCamJpeg); gCamJpeg = nullptr; gCamJpegLen = 0; gCamJpegOf = -1; }
 
@@ -208,6 +214,16 @@ void camQueueReport(const char* stage, const char* note, unsigned code) {
            unsigned(gCamLiveFrames ? (millis() - gCamLiveBeganMs) / gCamLiveFrames : 0),
            unsigned(gCamLiveFrames ? gCamLiveBytes / gCamLiveFrames : 0), fw, note && *note ? note : "-");
   for (char* p = gCamReport; *p; ++p) if (*p == ' ') *p = '_';
+}
+
+// What ran short of memory, with the heap's free and largest piece, for the bridge's log: once in a
+// while, not for every request that fails the same way.
+void camReportMemory(const char* what) {
+  if (gCamMemReportedMs && millis() - gCamMemReportedMs < 15000) return;
+  gCamMemReportedMs = millis();
+  char note[64];
+  snprintf(note, sizeof(note), "%s_%s", what, camera_net::memoryNote()[0] ? camera_net::memoryNote() : "heap");
+  camQueueReport("memory", note, 1);
 }
 
 // --- Sound ----------------------------------------------------------------------------------
@@ -410,10 +426,17 @@ void camClipSelect(int row) {
   gCamClipThumbAskedMs = 0;
   camInvalidate();
 }
+// The clips go back to the heap while the next day's are asked for.
+void camClipsFreeList() {
+  delete[] gCamClipStore.clips;
+  gCamClipStore.clips = nullptr;
+  gCamClipStore.cap = gCamClipStore.count = gCamClipStore.total = 0;
+  gCamClipRowCount = 0;
+}
 void camClipsLoadDay(uint32_t day) {
   gCamClipsDay = day;
   gCamClipsQuick = false;
-  if (gCamClips) { gCamClips->count = 0; gCamClips->total = 0; gCamClips->day = day; }
+  if (gCamClips) { camClipsFreeList(); gCamClips->day = day; }
   gCamClipRowCount = 0;
   gCamClipSel = 0;
   gCamClipsLoading = true;
@@ -424,8 +447,7 @@ void camClipsLoadDay(uint32_t day) {
 }
 // From the wall (every camera) or a picture (that camera's), today first.
 void camOpenClips(const char* filterId, CamView back) {
-  if (!gCamClips) gCamClips = new (std::nothrow) cameras::ClipDay();
-  if (!gCamClips) { camSay("Not enough memory for clips"); return; }
+  gCamClips = &gCamClipStore;  // Nothing to make room for yet: the clips get theirs when they come.
   snprintf(gCamClipFilterId, sizeof(gCamClipFilterId), "%s", filterId ? filterId : "");
   gCamClipsBack = back;
   snprintf(gCamClipsBackId, sizeof(gCamClipsBackId), "%s", camLiveId());
@@ -436,7 +458,7 @@ void camOpenClips(const char* filterId, CamView back) {
   camInvalidate();
 }
 void camCloseClips() {
-  delete gCamClips;
+  camClipsFreeList();
   gCamClips = nullptr;
   gCamClipRowCount = gCamClipSel = 0;
   camClipFreeThumb();
@@ -615,6 +637,13 @@ void camFinished() {
   const camera_net::Error e = camera_net::error();
   const unsigned status = camera_net::status();
   const bool cancelled = e == camera_net::Error::None && status == 0;
+  if (e == camera_net::Error::NoMemory && job != CamJob::Frame && job != CamJob::Report) {
+    static const char* const kWords[] = {"none", "ticket", "list", "thumb", "picture", "refresh", "livestart", "frame", "extend", "stop",
+                                         "turn", "code", "report", "setup", "zoom", "pan", "autorefresh", "audio", "clips", "clip_thumb",
+                                         "month", "clip_start", "clip_pause", "clip_seek"};
+    const size_t at = size_t(job);
+    camReportMemory(at < sizeof(kWords) / sizeof(kWords[0]) ? kWords[at] : "other");
+  }
   const bool viaHome = camera_net::overHome();
   size_t length = 0;
   uint8_t* data = camera_net::take(length);
@@ -696,6 +725,10 @@ void camFinished() {
       if (cam >= 0 && cam < camCount()) {
         if (e == camera_net::Error::None && data && length == cameras::kThumbBytes) { free(gCamThumb[cam]); gCamThumb[cam] = data; data = nullptr; }
         else if (e == camera_net::Error::NotFound) gCamThumbNone[cam] = true;
+        else if (e == camera_net::Error::NoMemory && ++gCamThumbTries[cam] < 4) {
+          gCamThumbAsked[cam] = false;  // Short of memory this once: asked again in a few seconds.
+          gCamThumbNotBefore = millis() + 6000;
+        }
         camInvalidate();
       }
       break;
@@ -839,6 +872,18 @@ void camFinished() {
       if (!gCamClips || cancelled) { gCamWantClips = gCamClips && cancelled; break; }
       if (gCamClipsAsked != gCamClipsDay) break;  // Another day was picked meanwhile: it's asked next.
       gCamClipsLoading = false;
+      camClipsFreeList();
+      if (e == camera_net::Error::None && data) {
+        const uint16_t lines = cameras::clipLines(reinterpret_cast<const char*>(data), length);
+        gCamClipStore.clips = lines ? new (std::nothrow) cameras::Clip[lines] : nullptr;
+        gCamClipStore.cap = gCamClipStore.clips ? lines : 0;
+        if (lines && !gCamClipStore.clips) {
+          camReportMemory("cliplist");
+          gCamClipsProblem = String("Not enough memory (") + ESP.getFreeHeap() / 1024 + "K/" + heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024 + "K)";
+          camInvalidate();
+          break;
+        }
+      }
       if (e == camera_net::Error::None && data && cameras::parseClips(reinterpret_cast<const char*>(data), length, *gCamClips)) {
         // Asked without a day, the answer's is the Mac's today.
         if (!gCamClipsDay) gCamClipsDay = gCamClips->day;
@@ -848,8 +893,7 @@ void camFinished() {
         gCamClipThumbAskedMs = 0;
         gCamClipsProblem = "";
       } else {
-        gCamClips->count = 0;
-        gCamClipRowCount = 0;
+        camClipsFreeList();
         gCamClipsProblem = e == camera_net::Error::None ? String("Odd answer from the bridge") : camProblemText(e, word);
       }
       camInvalidate();
@@ -862,6 +906,8 @@ void camFinished() {
         gCamClipThumb = data;
         data = nullptr;
         snprintf(gCamClipThumbId, sizeof(gCamClipThumbId), "%s", gCamClipThumbAsking);
+      } else if (e == camera_net::Error::NoMemory) {
+        gCamClipThumbNotBefore = millis() + 5000;  // Short of memory this once: asked again later.
       } else if (!(e == camera_net::Error::None && status == 204)) {
         // 204 is the Mac still getting the clip: asked again in a moment. Anything else, there's none.
         snprintf(gCamClipThumbNone, sizeof(gCamClipThumbNone), "%s", gCamClipThumbAsking);
@@ -1067,12 +1113,14 @@ bool camNextClipJob() {
   const uint32_t now = millis();
   if (!clip || !strcmp(gCamClipThumbId, clip->id) || !strcmp(gCamClipThumbNone, clip->id)) return false;
   if (now - gCamClipSelAtMs < 500 || (gCamClipThumbAskedMs && now - gCamClipThumbAskedMs < 1500)) return false;
+  if (gCamClipThumbNotBefore && int32_t(now - gCamClipThumbNotBefore) < 0) return false;
   gCamClipThumbAskedMs = now;
   snprintf(gCamClipThumbAsking, sizeof(gCamClipThumbAsking), "%s", clip->id);
   snprintf(path, sizeof(path), "%sclips/thumb?day=%lu&id=%s", cameras::kBase, static_cast<unsigned long>(gCamClipsDay), clip->id);
   return camStart(CamJob::ClipThumb, -1, path, cameras::kThumbBytes, 30000);
 }
 bool camNextThumb() {
+  if (gCamThumbNotBefore && int32_t(millis() - gCamThumbNotBefore) < 0) return false;
   const uint8_t page = cameras::pageOf(gCamSel);
   for (int pass = 0; pass < 2; ++pass) {
     for (uint8_t i = 0; i < camCount(); ++i) {

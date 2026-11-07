@@ -354,12 +354,22 @@ struct Clip {
   uint32_t start = 0;
   uint16_t seconds = 0;
 };
+// The clips themselves are the caller's, `cap` of them: the device makes room for exactly as many as
+// the answer has (clipLines), since away from home its memory is in small pieces.
 struct ClipDay {
   uint32_t day = 0;
   uint16_t total = 0;  // As the bridge counted, which can be more than fit.
   uint16_t count = 0;
-  Clip clips[kMaxClips];
+  uint16_t cap = 0;
+  Clip* clips = nullptr;
 };
+// How many clip lines an answer has, at most kMaxClips: the room to make before parseClips.
+inline uint16_t clipLines(const char* text, size_t len) {
+  uint16_t n = 0;
+  for (size_t i = 0; i + 5 <= len && n < kMaxClips; ++i)
+    if ((i == 0 || text[i - 1] == '\n') && !strncmp(text + i, "clip\t", 5)) ++n;
+  return n;
+}
 inline bool clipIdValid(const char* id) {
   size_t n = 0;
   for (; id[n]; ++n) if (n >= kClipIdBytes - 1 || id[n] < '0' || id[n] > '9') return false;
@@ -374,7 +384,7 @@ inline bool parseClips(const char* text, size_t len, ClipDay& out) {
     uint32_t a = 0, b = 0, c = 0;
     if (n == 3 && !strcmp(f[0], "clips") && podcast::readNumber(f[1], a) && validDay(a) && podcast::readNumber(f[2], b, 65535)) {
       out.day = a; out.total = uint16_t(b); head = true;
-    } else if (n == 5 && !strcmp(f[0], "clip") && out.count < kMaxClips && clipIdValid(f[1]) && podcast::readNumber(f[2], b, 86399) &&
+    } else if (n == 5 && !strcmp(f[0], "clip") && out.clips && out.count < out.cap && out.count < kMaxClips && clipIdValid(f[1]) && podcast::readNumber(f[2], b, 86399) &&
                podcast::readNumber(f[3], c, 65535) && idValid(f[4])) {
       Clip& clip = out.clips[out.count++];
       strcpy(clip.id, f[1]); strcpy(clip.cam, f[4]); clip.start = b; clip.seconds = uint16_t(c);
