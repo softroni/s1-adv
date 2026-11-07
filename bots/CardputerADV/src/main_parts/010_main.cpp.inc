@@ -69,11 +69,23 @@ bool compactMemoryForUi(const char* reason, bool force) {
   return true;
 }
 
+// Left in memory that survives the restart, for the next start-up to tell the bridge: why, the
+// memory free and its largest piece in KB, and the screen it happened on. Letters, digits and _ only.
+void noteRestart(const char* why, uint32_t freeHeap, uint32_t largest) {
+  snprintf(gRestartNote, sizeof(gRestartNote), "%s_f%u_b%u_%s", why, unsigned(freeHeap / 1024), unsigned(largest / 1024), uiModeName(gUiMode));
+  for (char* p = gRestartNote; *p; ++p) if (!isalnum(static_cast<unsigned char>(*p))) *p = '_';
+  gRestartNoteMagic = kRestartNoteMagic;
+}
+
 void serviceMemoryGuard() {
   static uint32_t lastCheckMs = 0;
   static uint32_t criticalSinceMs = 0;
   uint32_t now = millis();
   if (gInboxHttpBusy || radioBusy()) return;
+  // Cameras away from home asks the bridge over HTTPS, whose handshake takes about 40 KB while it
+  // runs: like the inbox's, that low is expected and passes. Counted, a few requests in a row
+  // restarted the Cardputer as Cameras opened.
+  if (cameraHttpsBusy()) { criticalSinceMs = 0; return; }
   if (now - lastCheckMs < 1000) {
     return;
   }
@@ -93,6 +105,7 @@ void serviceMemoryGuard() {
       logf("[MEM] critical free=%u largest=%u", static_cast<unsigned>(freeHeap), static_cast<unsigned>(largest));
     } else if (now - criticalSinceMs > 5000) {
       logf("[MEM] critical restart free=%u largest=%u", static_cast<unsigned>(freeHeap), static_cast<unsigned>(largest));
+      noteRestart("memory", freeHeap, largest);
       delay(80);
       ESP.restart();
     }

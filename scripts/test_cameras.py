@@ -113,6 +113,19 @@ assert 'Clips play on home Wi-Fi only' in app
 bridge_routes = (root / 'bridge/src/cameras.mjs').read_text().split('const WHAT = new Set([', 1)[1].split(']);', 1)[0]
 for route in sorted(set(_re2.findall(r'"(clips[a-z/]*)', app.replace('%sclips', '"clips')))):
     assert f'"{route}"' in bridge_routes, route
+# Away from home every request is HTTPS. The memory guard lets those pass, as it does the inbox's:
+# counted, a few in a row restarted the Cardputer as Cameras opened (0.2.319). And away, opening the
+# app doesn't wake every camera for a picture over HTTPS.
+guard = part('010_main.cpp.inc').split('void serviceMemoryGuard() {', 1)[1].split('\n}\n', 1)[0]
+assert guard.index('if (cameraHttpsBusy()) { criticalSinceMs = 0; return; }') < guard.index('ESP.restart();')
+assert guard.index('noteRestart("memory", freeHeap, largest);') < guard.index('ESP.restart();')
+assert 'bool cameraHttpsBusy() { return gUiMode == UiMode::Cameras && camera_net::busy() && !camera_net::overHome(); }' in app
+auto = app.split('if (camNextThumb()) return;', 1)[1]
+assert auto.index('if (!camHomeIp()) return;') < auto.index('if (!gCamAutoPlanned) {')
+# The start-up reason goes with the first update check, once.
+check = part('020_main.cpp.inc').split('bool startBackgroundManifestCheck(', 1)[1].split('\n}\n', 1)[0]
+assert 'payload->url += "?" + gBootReport;' in check and 'gBootReport = "";' in check
+assert 'gBootReport = String("boot=") + static_cast<int>(esp_reset_reason());' in part('061_main.cpp.inc')
 # The serial number, name or address of a camera is never logged; only counts and words.
 for line in app.splitlines():
     if 'appendRuntimeLog(' in line or 'logf(' in line: assert 'name' not in line and '.id' not in line, line

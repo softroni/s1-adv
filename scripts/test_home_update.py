@@ -69,6 +69,7 @@ bool gOtaApplyCheckRunning=false,gInboxCancelRequested=false,gInboxCanvasRelease
 uint32_t gOtaLastAutoCheckMs=0;
 constexpr uint32_t kOtaAutoCheckIntervalMs=20000,kOtaScreenCheckIntervalMs=5000;
 const char* kFirmwareManifestFetchPath="/firmware";
+String gBootReport;
 String gDeviceToken;
 String hubBaseUrl(){return "https://bridge.test";}
 void prepareNetworkMemory(const char*,bool){}

@@ -411,6 +411,7 @@ bool startBackgroundManifestCheck(bool applyAfter, bool announce) {
   if (!payload) return false;
   payload->token = gDeviceToken;
   payload->url = hubBaseUrl() + kFirmwareManifestFetchPath;
+  if (!gBootReport.isEmpty()) payload->url += "?" + gBootReport;  // The first one after start-up says why.
   payload->otaManifest = true;
   payload->applyAfter = applyAfter;
   payload->announce = announce;
@@ -418,6 +419,7 @@ bool startBackgroundManifestCheck(bool applyAfter, bool announce) {
     gInboxRetryAfterMs = millis() + 4000U;
     return false;
   }
+  gBootReport = "";
   gOtaLastAutoCheckMs = millis();
   gOtaApplyCheckRunning = applyAfter;
   logf("[OTA_AUTO] GET at_ms=%u interval_ms=%u apply=%d", static_cast<unsigned>(millis()),

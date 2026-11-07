@@ -536,3 +536,13 @@ test("a device's log upload with a raw tab in a line is kept, not refused", asyn
   assert.equal(parseDeviceLogs(Buffer.from("not json")), null);
   assert.equal(parseDeviceLogs(null), null);
 });
+
+test("a device's start-up reason reaches the log in words", async () => {
+  const { bootReportLine } = await import("./server.mjs");
+  const line = (q) => bootReportLine("dev-1", new URLSearchParams(q));
+  assert.equal(line("boot=4"), "[device] started device=dev-1 reset=crash");
+  assert.equal(line("boot=3&note=memory_f14_b6_Cameras"), "[device] started device=dev-1 reset=software note=memory_f14_b6_Cameras");
+  assert.equal(line("boot=3&note=a%20b%3Cscript%3E"), "[device] started device=dev-1 reset=software note=abscript");
+  assert.equal(line(""), "");
+  assert.equal(line("boot=abc"), "");
+});

@@ -1125,6 +1125,17 @@ async function readRequestBuffer(req, maxBytes = 128 * 1024) {
   return Buffer.concat(chunks);
 }
 
+// The first update check after a device starts says why it started (ESP-IDF's reset reason) and,
+// when the firmware restarted itself, its note: "memory_f14_b6_Cameras". One line in the log.
+const RESET_WORDS = { 0: "unknown", 1: "power-on", 2: "reset-pin", 3: "software", 4: "crash", 5: "interrupt-watchdog",
+  6: "task-watchdog", 7: "watchdog", 8: "deep-sleep", 9: "brownout", 10: "sdio" };
+export function bootReportLine(deviceId, params) {
+  const boot = params.get("boot");
+  if (boot === null || !/^\d{1,2}$/u.test(boot)) return "";
+  const note = String(params.get("note") || "").replace(/[^A-Za-z0-9_]/gu, "").slice(0, 48);
+  return `[device] started device=${deviceId} reset=${RESET_WORDS[Number(boot)] || boot}${note ? ` note=${note}` : ""}`;
+}
+
 // A device's log upload. Its lines can carry a tab or another control character the device doesn't
 // escape, which strict JSON refuses: those become spaces rather than losing the whole upload.
 export function parseDeviceLogs(raw) {
@@ -7092,6 +7103,8 @@ async function main() {
     }
 
     if (req.method === "GET" && url.pathname === "/api/cardputer/firmware/manifest") {
+      const started = bootReportLine(device.device_id, url.searchParams);
+      if (started) console.info(started);
       try {
         const manifest = await runtime.readFirmwareManifest(device, req);
         if (!manifest) {

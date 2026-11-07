@@ -1020,7 +1020,10 @@ void camNextJob() {
   if (gCamView != CamView::Wall) return;
   // Thumbnails, the selected one's first, then the rest of its page.
   if (camNextThumb()) return;
-  // Then, once the last pictures are up, a new one from each camera, the selected one first.
+  // Then, once the last pictures are up, a new one from each camera, the selected one first. Only at
+  // home: away, each is a picture of up to 32 KB over HTTPS, and wakes a battery camera, for a wall
+  // that's only glanced at. R still takes one.
+  if (!camHomeIp()) return;
   if (!gCamAutoPlanned) {
     gCamAutoPlanned = true;
     for (uint8_t i = 0; i < camCount(); ++i) {
@@ -1944,4 +1947,7 @@ void renderCamerasUi() {
 }
 
 bool camerasOn() { return gUiMode == UiMode::Cameras; }
+// The worker is asking the bridge over HTTPS: away from home, or the home door's ticket. The memory
+// guard lets that pass (010), as it does the inbox's.
+bool cameraHttpsBusy() { return gUiMode == UiMode::Cameras && camera_net::busy() && !camera_net::overHome(); }
 }  // namespace

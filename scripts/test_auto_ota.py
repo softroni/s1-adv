@@ -39,6 +39,7 @@ std::deque<String> gPendingTextTurns,gInboxAckQueue;
 uint32_t now=30000,gOtaLastAutoCheckMs=0,gLastUserActivityMs=0,gLastUserInputMs=0,gLastInboxAutoPollMs=0,gInboxRetryAfterMs=0;
 constexpr uint32_t kOtaAutoCheckIntervalMs=20000,kOtaScreenCheckIntervalMs=5000,kInboxAutoPollIntervalMs=15000,kReplyWaitTimeoutMs=1800000;
 constexpr const char* kFirmwareManifestFetchPath="/api/cardputer/firmware/manifest";
+String gBootReport;  // Empty: the start-up reason went with an earlier check.
 constexpr const char* kAppVersion="0.2.167-dev";constexpr const char* kBuildGitSha="test";
 bool gInboxHttpBusy=false,gVoiceReplyPending=false,gPendingOtaCheckAction=false,gPendingOtaApplyAction=false,failStart=false;
 uint32_t gVoiceReplyPendingMs=0,gActivitySeq=0;

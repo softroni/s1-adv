@@ -122,14 +122,15 @@ it another 45. When it ends, its last frame becomes the camera's picture. The Ma
 video when the Cardputer stops asking for frames for six seconds, for example when it sleeps or loses
 Wi-Fi, and after ten minutes however often it's extended.
 
-A new picture (R) wakes the camera for a few seconds, and so does opening the app, once for each
-camera whose picture is over a minute old. Looking at the wall or a picture again doesn't.
+A new picture (R) wakes the camera for a few seconds, and so does opening the app at home, once for
+each camera whose picture is over a minute old. Looking at the wall or a picture again doesn't.
 
 ## Where it works
 
 At home, pictures and live video come straight from the Mac over your Wi-Fi, the way podcasts do.
-Away from home, pictures come over the bridge's HTTPS address, and live view says it works on home
-Wi-Fi only: a live frame and HTTPS don't fit in the Cardputer's memory together.
+Away from home, pictures come over the bridge's HTTPS address, and live view and clips say they work
+on home Wi-Fi only: a live frame and HTTPS don't fit in the Cardputer's memory together. Away, opening
+the app shows the last pictures without waking each camera for a new one; R still takes one.
 
 ## Motion pictures
 

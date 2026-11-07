@@ -690,6 +690,14 @@ void serviceCameras();
 bool handleCamerasKey(char key, const Keyboard_Class::KeysState& keys);
 void renderCamerasUi();
 bool cameraDrawsDirect();
+bool cameraHttpsBusy();
+// Why the last start-up happened, for the bridge's log: the chip's reset reason and, when the
+// firmware restarted itself, a note it left in memory that survives the restart.
+RTC_NOINIT_ATTR uint32_t gRestartNoteMagic;
+RTC_NOINIT_ATTR char gRestartNote[48];
+constexpr uint32_t kRestartNoteMagic = 0x52535452u;
+String gBootReport;  // "boot=<reason>&note=<note>", sent with the first update check, then cleared.
+void noteRestart(const char* why, uint32_t freeHeap, uint32_t largest);
 bool tvRemoteTakesText();
 bool tvRemoteHoldsWifi();
 bool tvRemoteEscape();

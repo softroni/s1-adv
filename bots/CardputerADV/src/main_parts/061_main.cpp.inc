@@ -248,6 +248,15 @@ void setup() {
   Serial.begin(115200);
   Serial.println("[BOOT] serial ready");
   Serial.printf("[BOOT] reset_reason=%d\n", static_cast<int>(esp_reset_reason()));
+  // For the bridge's log, with the first update check: why this start-up, and the firmware's own
+  // note when it restarted itself (the memory guard). The note is read once and forgotten.
+  gBootReport = String("boot=") + static_cast<int>(esp_reset_reason());
+  if (gRestartNoteMagic == kRestartNoteMagic) {
+    gRestartNote[sizeof(gRestartNote) - 1] = 0;
+    for (char* p = gRestartNote; *p; ++p) if (!isalnum(static_cast<unsigned char>(*p))) *p = '_';
+    gBootReport += String("&note=") + gRestartNote;
+  }
+  gRestartNoteMagic = 0;
   delay(800);
   ensureDeviceTimezone();
 
