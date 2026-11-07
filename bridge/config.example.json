@@ -3,6 +3,14 @@
     "host": "127.0.0.1",
     "port": 31889
   },
+  "ui": {
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 31891,
+    "allowRestart": false,
+    "logFile": "",
+    "allowedHosts": []
+  },
   "stateDir": "./data",
   "playbackFormat": "wav_pcm16_16k_mono",
   "historyBootstrapLimit": 80,

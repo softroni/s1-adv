@@ -30,12 +30,13 @@ for (const file of files) {
   assert(allowedRoot.has(file) || /^src\/[a-z0-9-]+\.mjs$/.test(file) ||
     /^scripts\/(?:setup|agent-status|publish-firmware|firmware-[a-z0-9-]+)\.mjs$/.test(file) ||
     file === "scripts/kokoro-worker.py" ||
+    /^ui\/(?:index\.html|app\.js|style\.css|icon\.svg)$/.test(file) ||
     ["skills/s1-adv/SKILL.md", "skills/s1-adv-firmware/SKILL.md"].includes(file) || audioFiles.has(file) ||
     file === "assets/focus-audio/manifest.json", `Unexpected package file: ${file}`);
 }
 for (const file of [...audioFiles, "assets/focus-audio/manifest.json"])
   assert(files.includes(file), `Required Focus asset missing: ${file}`);
 await loadFocusAudioBundle(); // Inspect bytes/checksums, not just package filenames.
-for (const file of ["index.mjs", "openclaw.plugin.json", "config.example.json", "src/server.mjs", "src/install.mjs", "scripts/setup.mjs", "skills/s1-adv/SKILL.md", "skills/s1-adv-firmware/SKILL.md", "TURN-OUTBOX.md", "LICENSE", "CREDITS.md"])
+for (const file of ["index.mjs", "openclaw.plugin.json", "config.example.json", "src/server.mjs", "src/web-ui.mjs", "ui/index.html", "ui/app.js", "src/install.mjs", "scripts/setup.mjs", "skills/s1-adv/SKILL.md", "skills/s1-adv-firmware/SKILL.md", "TURN-OUTBOX.md", "LICENSE", "CREDITS.md"])
   assert(files.includes(file), `Required public file missing: ${file}`);
 console.log(JSON.stringify({ok:true,name:artifact.name,version:artifact.version,files:files.length,packedBytes:artifact.size,unpackedBytes:artifact.unpackedSize}));

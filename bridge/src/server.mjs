@@ -56,6 +56,10 @@ import { CARDPUTER_EXECUTION_POLICY, voiceThinking, unwrapCardputerEnvelope, aud
 import { DurableTurnOutbox } from "./turn-outbox.mjs";
 import { SemanticFront, frontPrompt, FRONT_RECEIPT, validateModelRouting } from './semantic-front.mjs';
 import { decodeVoiceUpload } from "./voice-upload-codec.mjs";
+import { LabLiveService, labLanRoute, labTicketRoute } from "./lab-live.mjs";
+import { DeviceActivity } from "./device-activity.mjs";
+import { LogRing, installLogRing } from "./log-ring.mjs";
+import { WebUi } from "./web-ui.mjs";
 import { LAB_CHAT_POLICY, LAB_LIVE_CHAT_POLICY, LAB_RULE_POLICY, VOICE_TOOLS, answerVoiceTool, readLabState, readVoiceContext } from "./voice-tools.mjs";
 import { RealtimePacingBudget, REALTIME_MAX_AUDIO_LEAD_MS } from "./realtime-pacing-budget.mjs";
 
@@ -170,6 +174,8 @@ async function loadConfig() {
     throw new Error(`config not found: ${configPath}`);
   }
   const baseDir = path.dirname(configPath);
+  // The web page's Settings write back to this file, and only to the keys it shows.
+  config.configPath = configPath;
   config.stateDir = resolvePath(baseDir, config.stateDir);
   config.media.inboundDir = resolvePath(baseDir, config.media.inboundDir || path.join(config.stateDir,"inbound"));
   config.media.canonicalDir = resolvePath(baseDir, config.media.canonicalDir);
@@ -3738,6 +3744,8 @@ class BridgeRuntime {
 	      : { id: "openclaw:main", name: "OpenClaw" };
 	    this.clients = new Set();
 	    this.labStates = new Map();
+    this.labStateAt = new Map();
+    this.labStateSaved = new Map();
 	    this.weather = new WeatherService(config.weather || {});
 	    this.podcasts = new PodcastService(config.podcasts || {});
 	    this.cameras = new CameraService(config.cameras || {});
@@ -3792,7 +3800,26 @@ class BridgeRuntime {
   // device was short of memory for a moment, keeps the last one rather than saying nothing is saved.
   rememberLabState(topic, header) {
     const state = readLabState(header);
-    if (state) this.labStates.set(topic.session_key, state);
+    if (!state) return;
+    this.labStates.set(topic.session_key, state);
+    this.labStateAt.set(topic.session_key, Date.now());
+    // Kept for the web page's Lab screen, which would otherwise be empty after every restart.
+    if (this.config.ui?.enabled !== true) return;
+    const file = path.join(this.config.stateDir, "lab-state.json");
+    void writeJsonAtomic(file, { [topic.session_key]: { state, at: Date.now() } }).catch(() => {});
+  }
+
+  // What the page shows: this run's, or the last one saved before a restart. Claude only ever gets
+  // this run's, which every chat message refreshes anyway.
+  async loadLabState() {
+    const saved = await readJsonFile(path.join(this.config.stateDir, "lab-state.json"), null);
+    for (const [sessionKey, entry] of Object.entries(saved || {}))
+      if (typeof entry?.state === "string") this.labStateSaved.set(sessionKey, { state: entry.state.slice(0, 8000), at: Number(entry.at) || null });
+  }
+
+  labStateForPage(sessionKey) {
+    if (this.labStates.has(sessionKey)) return { state: this.labStates.get(sessionKey), at: this.labStateAt.get(sessionKey) || null };
+    return this.labStateSaved.get(sessionKey) || { state: "", at: null };
   }
 
   recentChatMessages(sessionKey) {
@@ -3841,6 +3868,7 @@ class BridgeRuntime {
       }
     }
     await this.store.load();
+    await this.loadLabState();
     this.upstream.on("event", (frame) => void this.handleUpstreamEvent(frame));
     this.upstream.on("activity", (frame) => this.noteTurnActivity(frame));
     this.upstream.on("reconnected", () => {
@@ -6420,7 +6448,13 @@ class BridgeRuntime {
 async function main() {
   process.umask(0o077);
   const config = await loadConfig();
+  // With the web page on, every log line gets its time and the newest stay in memory for it.
+  const uiConfig = config.ui || {};
+  const logRing = new LogRing();
+  if (uiConfig.enabled === true) installLogRing(logRing);
   const runtime = new BridgeRuntime(config);
+  const labLive = new LabLiveService();
+  const deviceActivity = new DeviceActivity();
   const realtimeAdmission = new RealtimeAdmissionController(config);
   const requestAdmission = new RealtimeAdmissionController({ realtimeVoice: {
     maxActivePerDevice: config.security.maxActiveRequestsPerDevice,
@@ -6438,6 +6472,7 @@ async function main() {
       const url = parseRequestUrl(req);
       const token = parseOmnibotAuthToken(req);
       const device = runtime.store.findDeviceByToken(token);
+      if (device) deviceActivity.seen(url.pathname);
 
       applyCors(req, res, config);
 
@@ -6618,6 +6653,12 @@ async function main() {
     // position and place asked about aren't logged.
     if (req.method === "GET" && url.pathname.startsWith("/api/cardputer/planes/")) {
       await handlePlanesRoute(runtime.planes, url.pathname, url.searchParams, device.device_id, res);
+      return;
+    }
+
+    // The Lab, live on the web page: the device's ticket for the home door it reports over.
+    if (req.method === "GET" && url.pathname === "/api/cardputer/lab/ticket") {
+      labTicketRoute(labLive, device.device_id, res);
       return;
     }
 
@@ -7113,7 +7154,10 @@ async function main() {
 
     if (req.method === "GET" && url.pathname === "/api/cardputer/firmware/manifest") {
       const started = bootReportLine(device.device_id, url.searchParams);
-      if (started) console.info(started);
+      if (started) {
+        console.info(started);
+        deviceActivity.started(started);
+      }
       try {
         const manifest = await runtime.readFirmwareManifest(device, req);
         if (!manifest) {
@@ -7895,23 +7939,48 @@ async function main() {
   // Podcast audio for a Cardputer at home, over plain HTTP with a ticket from the HTTPS side.
   // Set podcasts.lanPort to 0 to keep it closed; the device then streams over HTTPS.
   const lanPort = config.podcasts?.lanPort === undefined ? LAN_PORT : Number(config.podcasts.lanPort);
+  let lan = null;
   if (Number.isInteger(lanPort) && lanPort > 0 && lanPort < 65536) {
     const podcastsDoor = lanHandler(runtime.podcasts);
-    const lan = createServer((req, res) => {
-      if (!cameraLanRoute(runtime.cameras, req, res) && !planesLanRoute(runtime.planes, req, res)) podcastsDoor(req, res);
+    lan = createServer((req, res) => {
+      if (!labLanRoute(labLive, req, res) && !cameraLanRoute(runtime.cameras, req, res) && !planesLanRoute(runtime.planes, req, res)) podcastsDoor(req, res);
     });
     lan.on("error", (error) => {
       runtime.podcasts.lanPort = 0;
       runtime.cameras.lanPort = 0;
       runtime.planes.lanPort = 0;
+      labLive.lanPort = 0;
       console.warn(`[podcasts] home network audio off: ${String(error.code || error.message || error).slice(0, 80)}`);
     });
     lan.listen(lanPort, "0.0.0.0", () => {
       runtime.podcasts.lanPort = lanPort;
       runtime.cameras.lanPort = lanPort;
       runtime.planes.lanPort = lanPort;
+      labLive.lanPort = lanPort;
       console.log(`[podcasts] home network audio on port ${lanPort}`);
     });
+  }
+
+  // The web page, on its own loopback port (docs/BRIDGE-UI.md). Off unless ui.enabled is true.
+  let webUi = null;
+  // Settings and the page's Restart button start a fresh bridge the same way it was started, two
+  // seconds after this one has let go of its ports, with the same log. Only with ui.allowRestart.
+  const restart = (who) => {
+    console.info(`[bridge] restarting, asked by ${who}`);
+    const child = spawn("/bin/sh", ["-c", 'sleep 2; exec "$0" "$@"', process.execPath, ...process.argv.slice(1)],
+      { cwd: process.cwd(), env: process.env, detached: true, stdio: ["ignore", "inherit", "inherit"] });
+    child.unref();
+    webUi?.close();
+    lan?.close();
+    server.close();
+    runtime.cameras.stop();
+    runtime.kokoro?.stop?.();
+    void Promise.resolve(runtime.upstream.stop()).finally(() => process.exit(0));
+  };
+  if (uiConfig.enabled === true) {
+    webUi = new WebUi({ runtime, config, labLive, deviceActivity, logRing, storageBudget,
+      extractActions: extractDeviceActionsFromText, sanitizeAction: sanitizeDeviceAction, restart });
+    webUi.start();
   }
 
   // The camera helper, if this Mac has it set up (docs/CAMERAS.md).

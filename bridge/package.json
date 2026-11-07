@@ -19,7 +19,8 @@
     "test:install": "node --test src/install.test.mjs src/plugin-service.test.mjs src/firmware-automation.test.mjs",
     "setup": "node scripts/setup.mjs",
     "check:package": "node scripts/check-package.mjs",
-    "test:models": "node --test src/model-roles.test.mjs src/semantic-front.test.mjs src/native-front.test.mjs"
+    "test:models": "node --test src/model-roles.test.mjs src/semantic-front.test.mjs src/native-front.test.mjs",
+    "test:ui": "node --test src/web-ui.test.mjs"
   },
   "dependencies": {
     "busboy": "^1.6.0",
@@ -46,6 +47,7 @@
     "index.mjs",
     "openclaw.plugin.json",
     "src/**/*.mjs",
+    "ui",
     "!src/**/*.test.mjs",
     "!src/*smoke*.mjs",
     "!src/mock-upstream.mjs",
