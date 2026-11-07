@@ -21,23 +21,25 @@ are is written to its log.
 
 ## The pages
 
-`,` and `/` flip between five pages. The dots in the bottom corner show which one you're on. Esc
-on any of them goes back to the sky map, and Esc on the sky map leaves the app.
+`,` and `/` flip between five pages: Planes, Space station, Station now, Spotted and Drones. The
+icons at the top show them, with the one you're on lit, and the keys for each screen are along the
+bottom on little caps. Esc on any page goes back to the sky map, and Esc on the sky map leaves the app.
 
 ### The sky map
 
-![The sky map: a round map with numbered planes, and a list beside it](assets/planes/sky.png)
+![The sky map: planes as arrows on a round map, and the chosen one's card beside it](assets/planes/sky.png)
 
-The round map is north up, with you at the `+` in the middle. Each plane is a number, nearest first,
-the same number as in the list beside it. The number's colour is its height: green under 3,000 feet,
-amber under 15,000 feet, and blue above that. A drone that broadcasts ADS-B shows in pink, but few do.
-The list gives each plane's name, the direction it's in, how far away it is and how high.
+The round map is north up, with you at the `+` in the middle. Each plane is an arrow pointing the way
+it's flying, coloured by its height: green under 3,000 feet, amber under 15,000 feet, and blue above
+that. A drone that broadcasts ADS-B shows in pink, but few do. The chosen plane has a white ring, and
+its card beside the map says which way to look, with an arrow pointing that way and how many fists up,
+then how far away it is and how high. It starts on the nearest.
 
-- **`;` and `.`** pick a plane, and **Enter** opens it.
+- **`;` and `.`** go to the next or the one before, and **Enter** opens it.
 - **`-` and `=`** make the ring smaller or bigger: 10, 25 or 50 miles (15, 40 or 80 km).
-- **S** keeps the picked plane in Spotted, and **R** looks again now.
+- **S** keeps the chosen plane in Spotted, and **R** looks again now.
 
-The list updates every 10 seconds.
+The map updates every 10 seconds.
 
 ### A plane
 
@@ -127,9 +129,9 @@ leaves your network to work as a receiver: the plane list, the chat and updates 
 network again as soon as you leave the page. Listening needs no internet, so it works away from home
 too.
 
-- **The map** shows the drones heard, numbered, strongest signal first, with the Cap's GPS fix. Without
-  one, the list still shows each drone's height and how strong its signal is.
-- **`;` and `.`** pick a drone, **Enter** opens it, and **S** keeps it in Spotted.
+- **The map** shows the drones heard as pink arrows, with the Cap's GPS fix, and the chosen one's card
+  beside it says which way to look. Without a fix, the card shows its height and how strong its signal is.
+- **`;` and `.`** go from drone to drone, strongest signal first, **Enter** opens one, and **S** keeps it.
 - **A drone** says what kind it is, the pilot's own words if they gave any, its ID, which way to look
   and how many fists up, its height, distance and speed, and how far it is from where it's flown from.
 - **Drone nearby!** comes with a chime the first time each drone is heard while the page is open.

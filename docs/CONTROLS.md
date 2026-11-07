@@ -242,11 +242,13 @@ to pair it.
 ## Skywatch
 
 Skywatch is under Tab, Tools, and `/skywatch` (or `/planes`, `/iss`) opens it. It needs Wi-Fi and the bridge, and looks
-around the Cap's GPS fix, or the Weather city without one. `,` and `/` flip between its four pages,
-and Esc goes back to the sky map, whose Esc leaves. [Skywatch](SKYWATCH.md) has the details.
+around the Cap's GPS fix, or the Weather city without one. `,` and `/` flip between its five pages,
+whose icons are along the top, and Esc goes back to the sky map, whose Esc leaves. Each screen's keys
+are on caps along the bottom. [Skywatch](SKYWATCH.md) has the details.
 
-- **The sky map:** a round map with you in the middle and the planes numbered, nearest first, with a
-  list beside it. `;` and `.` pick one, Enter opens it, S keeps it in Spotted, `-` and `=` make the ring
+- **The sky map:** a round map with you in the middle and the planes as arrows, coloured by height, and
+  beside it the chosen plane's card: which way to look, fists up, how far and how high. `;` and `.` go
+  from plane to plane, nearest first, Enter opens one, S keeps it in Spotted, `-` and `=` make the ring
   smaller or bigger (10, 25 or 50 miles), and R looks again.
 - **A plane:** its type and route, which way to LOOK and how many fists above the horizon, its height,
   speed and when it comes closest. `,` and `/` go to the other planes, and S keeps it.
