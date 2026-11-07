@@ -17,7 +17,7 @@
 namespace lab_live_net {
 namespace {
 enum class Phase : uint8_t { Idle, Connecting, Sending, Reading, Done };
-constexpr size_t kAnswerBytes = 256;  // A status line, a few headers and "watch 1".
+constexpr size_t kAnswerBytes = 512;  // A status line, a few headers, "watch 1" and up to 8 of the page's sets.
 
 Phase phase = Phase::Idle;
 int fd = -1;

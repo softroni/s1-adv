@@ -16,8 +16,11 @@
 //   out <key> <value>             each output: switches 0 or 1, the rest -1 when nothing drives it
 //   gps <fix> <used> <in view> <altitude m or -> <hdop x10 or -1>   only with the Cap's GPS heard
 //   strip_test <solid|rainbow|chase>   sweeping 1   firing <rule,rule>   seq <name>
+//   did <id> <ok, or why not>     what became of each of the page's sets in the last answer, once
 // The bridge answers   watch 1   while the page is open, so the next report comes in a second,
-// or   watch 0   for one in 15 seconds. Pure functions over plain data, so it all runs on the host.
+// or   watch 0   for one in 15 seconds, and then up to 8 of the page's buttons, in order:
+//   set <id 1-65535> <output key> <value>      in the Lab's units; labPageSet applies them
+// Pure functions over plain data, so it all runs on the host.
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -33,6 +36,34 @@ constexpr uint32_t kRequestMs = 2500;    // A report that takes longer than this
 constexpr uint8_t kMaxFailures = 3;      // Then it stops until the ticket changes or the Lab reopens.
 constexpr const char kTicketPath[] = "/api/cardputer/lab/ticket";
 constexpr const char kStripTests[][8] = {"solid", "rainbow", "chase"};
+constexpr uint8_t kMaxSets = 8;          // The page's buttons in one answer; more are ignored.
+
+// One of the page's buttons, read from an answer. check says if it can't be done whatever the Lab
+// is doing: an output it doesn't know, or a value past the output's range.
+struct Set {
+  uint16_t id = 0;
+  lab::Out out = lab::Out::Servo;
+  int16_t value = 0;
+  lab::PageSet check = lab::PageSet::Done;
+};
+// What became of one, for the next report. The 8 an answer can hold, and no more.
+struct Did {
+  uint16_t id = 0;
+  lab::PageSet result = lab::PageSet::Done;
+};
+class Dids {
+ public:
+  void add(uint16_t id, lab::PageSet result) {
+    if (mCount < kMaxSets) mDid[mCount++] = Did{id, result};
+  }
+  uint8_t count() const { return mCount; }
+  const Did* list() const { return mDid; }
+  void clear() { mCount = 0; }
+
+ private:
+  Did mDid[kMaxSets];
+  uint8_t mCount = 0;
+};
 
 // The Lab, read off its globals by the firmware for one report.
 struct Snapshot {
@@ -55,6 +86,8 @@ struct Snapshot {
   bool sweeping = false;
   uint8_t firing = 0;            // Rules firing, one bit each, rule 1 the lowest.
   const char* seq = nullptr;     // The sequence running.
+  const Did* did = nullptr;      // The page's last buttons, answered once.
+  uint8_t dids = 0;
 };
 
 // Whole lines only: the first that wouldn't fit is left out, never cut, and so is all after it.
@@ -95,6 +128,11 @@ inline size_t body(const Snapshot& s, char* buffer, size_t room) {
   Lines out(buffer, room);
   out.add("lab\t1\nview\t%s\n", s.view ? s.view : "other");
   if (out.full()) return 0;
+  // First, so a long report can't leave out what the page is waiting to hear.
+  for (uint8_t i = 0; s.did && i < s.dids; ++i) {
+    const uint8_t result = static_cast<uint8_t>(s.did[i].result);
+    out.add("did\t%u\t%s\n", unsigned(s.did[i].id), lab::kPageSetWords[result < uint8_t(lab::PageSet::Count) ? result : 0]);
+  }
   if (s.open && *s.open) {
     out.add("open\t%s\n", s.open);
     if (s.page >= 0) out.add("page\t%d\n", s.page);
@@ -151,8 +189,53 @@ inline size_t head(char* buffer, size_t room, uint32_t ip, uint16_t port, const 
   return out.full() ? 0 : out.length();
 }
 
-// What came back: the status, and whether anyone is watching (1, 0, or -1 when it didn't say).
-struct Answer { int status = 0; int8_t watch = -1; };
+// What came back: the status, whether anyone is watching (1, 0, or -1 when it didn't say), and
+// the page's buttons, in order.
+struct Answer {
+  int status = 0;
+  int8_t watch = -1;
+  uint8_t sets = 0;
+  Set set[kMaxSets];
+};
+// A whole number from field, digits with an optional minus and nothing else, within limit.
+inline bool readInt(const char* field, size_t n, long limit, long& out) {
+  if (!n || n > 7) return false;
+  size_t i = field[0] == '-' ? 1 : 0;
+  if (i == n) return false;
+  long value = 0;
+  for (; i < n; ++i) {
+    if (field[i] < '0' || field[i] > '9') return false;
+    value = value * 10 + (field[i] - '0');
+  }
+  out = field[0] == '-' ? -value : value;
+  return out >= -limit && out <= limit;
+}
+// "set <id> <key> <value>": an id it can't read can't be answered, so the line is dropped.
+inline void readSet(const char* line, size_t n, Answer& a) {
+  const char* field[4] = {};
+  size_t length[4] = {};
+  uint8_t fields = 0;
+  for (size_t at = 0; at <= n && fields < 4;) {
+    const char* tab = static_cast<const char*>(memchr(line + at, '\t', n - at));
+    const size_t stop = tab ? size_t(tab - line) : n;
+    field[fields] = line + at;
+    length[fields++] = stop - at;
+    at = stop + 1;
+    if (!tab) break;
+  }
+  long id = 0;
+  if (fields < 2 || length[0] != 3 || memcmp(field[0], "set", 3) || !readInt(field[1], length[1], 65535, id) || id < 1) return;
+  if (a.sets >= kMaxSets) return;
+  Set& set = a.set[a.sets++];
+  set.id = uint16_t(id);
+  char key[24] = "";
+  if (fields >= 3 && length[2] < sizeof(key)) { memcpy(key, field[2], length[2]); key[length[2]] = 0; }
+  long value = 0;
+  if (!lab::outFromKey(key, set.out) || !lab::pageCanSet(set.out)) set.check = lab::PageSet::UnknownOutput;
+  else if (fields < 4 || !readInt(field[3], length[3], 32000, value) || !lab::pageValueValid(set.out, int(value)))
+    set.check = lab::PageSet::OutOfRange;
+  else set.value = int16_t(value);
+}
 inline Answer readAnswer(const char* text, size_t len) {
   Answer a;
   unsigned major = 0, minor = 0, code = 0;
@@ -163,10 +246,12 @@ inline Answer readAnswer(const char* text, size_t len) {
     if (memcmp(p, "\r\n\r\n", 4)) continue;
     for (const char* line = p + 4; line < end;) {
       const char* stop = static_cast<const char*>(memchr(line, '\n', size_t(end - line)));
-      const size_t n = size_t((stop ? stop : end) - line);
-      if (n >= 7 && !memcmp(line, "watch\t", 6) && (line[6] == '0' || line[6] == '1') &&
-          (n == 7 || line[7] == '\r')) a.watch = int8_t(line[6] - '0');
-      line += n + 1;
+      size_t n = size_t((stop ? stop : end) - line);
+      const size_t next = n + 1;
+      if (n && line[n - 1] == '\r') --n;
+      if (n == 7 && !memcmp(line, "watch\t", 6) && (line[6] == '0' || line[6] == '1')) a.watch = int8_t(line[6] - '0');
+      else if (n > 4 && !memcmp(line, "set\t", 4)) readSet(line, n, a);
+      line += next;
     }
     break;
   }

@@ -39,6 +39,14 @@ for gate in ['gInboxHttpBusy', 'labAllowsNetwork()', 'autoInboxPollAllowed()', '
     assert gate in ask, gate
 send = live.split('void serviceLabLive(uint32_t now) {', 1)[1].split('\n}\n', 1)[0]
 assert 'gInboxHttpBusy' in send and 'labLiveHomeIp()' in send, 'a report waits for TLS, and only goes at home'
+# The page's buttons: applied as the answer is read, only at 200, answered in the very next report, once.
+assert 'const bool answering = gLabLiveDids.count() && !gLabLiveCadence.stopped();' in send
+assert '(!gLabLiveCadence.due(now) && !answering)' in send and 'else gLabLiveDids.clear();' in send
+net = live.split('void serviceLabLiveNet() {', 1)[1].split('\n}\n', 1)[0]
+assert net.index('if (gLabLiveLast) {') < net.index('if (answer.status != 200) return;') < net.index('labPageSet(set.out, set.value, millis())')
+assert 'gLabLiveDids.clear();' in live.split('void labLiveOpened() {', 1)[1].split('\n}\n', 1)[0]
+assert 's.did = gLabLiveDids.list();' in live
+assert 'kAnswerBytes = 512;' in (src / 'lab_live_net.cpp').read_text()
 # No task, no TLS: the Lab's memory stays the chat's.
 for text in [live, (src / 'lab_live_net.cpp').read_text(), (src / 'lab_live.h').read_text()]:
     assert 'xTaskCreate' not in text and 'WiFiClientSecure' not in text
@@ -101,9 +109,14 @@ int main() {
   for (int i = 0; i < lab::kOutCount; ++i) { most.driven[i] = true; most.out[i] = -32000; }
   for (int i = 0; i < lab::kUnitCount; ++i) most.found[i] = true;
   most.firing = 0xFF; most.seq = "ABCDEFGHIJKLMNO"; most.open = "Cardputer LED";
+  Dids answered;  // And the page's 8 buttons answered with the longest words.
+  for (int i = 0; i < kMaxSets; ++i) answered.add(65535, lab::PageSet::SequenceScreen);
+  most.did = answered.list(); most.dids = answered.count();
   const std::string longest = body(most);
+  assert(longest.find("did\t65535\tsequence screen open\n") != std::string::npos);
   printf("longest report %zu bytes\n", longest.size());
-  assert(longest.size() < kMaxBody * 2 / 3 && longest.find("firing\t1,2,3,4,5,6,7,8\n") != std::string::npos);
+  // With the page's 8 answers on top, a quarter of the room is still to spare.
+  assert(longest.size() < kMaxBody * 3 / 4 && longest.find("firing\t1,2,3,4,5,6,7,8\n") != std::string::npos);
   // Too little room drops whole lines and never cuts one.
   for (size_t room = 0; room < full.size() + 2; ++room) {
     char out[2048];
@@ -133,6 +146,56 @@ int main() {
   a = read("HTTP/1.1 200 OK\r\n\r\nwatch\t12\n"); assert(a.watch == -1);
   a = read("HTTP/1.1 404 Not Found\r\n\r\nnot_found\n"); assert(a.status == 404 && a.watch == -1);
   a = read("HTTP/1.1 200 OK\r\n"); assert(a.status == 200 && a.watch == -1);  // Cut off before the body.
+  // The page's buttons: set <id> <output> <value>, read in order, each with what's wrong with it, if anything.
+  a = read("HTTP/1.1 200 OK\r\n\r\nwatch\t1\nset\t1\tservo\t90\nset\t2\tstrip_color\t-1\r\nset\t65535\trelay_1\t1\n"
+           "set\t4\tled\t-1\nset\t5\tspeaker\t0\nset\t6\tspeaker\t2000\nset\t7\tlamp_bright\t100\nset\t8\tac_daikin\t0\n");
+  assert(a.status == 200 && a.watch == 1 && a.sets == 8);
+  const struct { unsigned id; lab::Out out; int value; } want[] = {{1, lab::Out::Servo, 90}, {2, lab::Out::StripColor, -1},
+      {65535, lab::Out::Relay1, 1}, {4, lab::Out::Led, -1}, {5, lab::Out::Tone, 0}, {6, lab::Out::Tone, 2000},
+      {7, lab::Out::LampBright, 100}, {8, lab::Out::AcDaikin, 0}};
+  for (int i = 0; i < 8; ++i) assert(a.set[i].id == want[i].id && a.set[i].out == want[i].out && a.set[i].value == want[i].value &&
+                                     a.set[i].check == lab::PageSet::Done);
+  // Every output the page can set, at both ends of its range, and one past each end refused.
+  for (uint8_t i = 0; i < lab::kOutCount; ++i) {
+    const lab::Out out = static_cast<lab::Out>(i);
+    char text[160];
+    const lab::OutInfo& o = lab::kOuts[i];
+    snprintf(text, sizeof(text), "HTTP/1.1 200 OK\r\n\r\nset\t1\t%s\t%d\nset\t2\t%s\t%d\nset\t3\t%s\t%d\nset\t4\t%s\t%d\n",
+             o.key, o.lo, o.key, o.hi, o.key, o.lo - (out == lab::Out::StripColor || out == lab::Out::Led ? 2 : 1), o.key, o.hi + 1);
+    a = read(text);
+    assert(a.sets == 4);
+    const lab::PageSet ok = lab::pageCanSet(out) ? lab::PageSet::Done : lab::PageSet::UnknownOutput;
+    const lab::PageSet past = lab::pageCanSet(out) ? lab::PageSet::OutOfRange : lab::PageSet::UnknownOutput;
+    assert(a.set[0].check == ok && a.set[1].check == ok && a.set[2].check == past && a.set[3].check == past);
+  }
+  assert(!lab::pageValueValid(lab::Out::Tone, 199) && lab::pageValueValid(lab::Out::Tone, 0) && !lab::pageValueValid(lab::Out::Servo, -1));
+  // Unknown outputs and bad values are answered as such; a line with no id it can read is dropped.
+  a = read("HTTP/1.1 200 OK\r\n\r\nset\t9\tghost\t1\nset\t10\tsay\t1\nset\t11\tservo\tninety\nset\t12\tservo\nset\t13\tservo\t1.5\n"
+           "set\t0\tservo\t1\nset\t65536\tservo\t1\nset\tx\tservo\t1\nset\t-3\tservo\t1\nset\t\tservo\t1\nhello\t1\nset\t14\t\t1\n"
+           "set\t15\tservo\t-0\nset\t16\tservo\t99999999\n");
+  assert(a.sets == 8);
+  const lab::PageSet bad[] = {lab::PageSet::UnknownOutput, lab::PageSet::UnknownOutput, lab::PageSet::OutOfRange,
+      lab::PageSet::OutOfRange, lab::PageSet::OutOfRange, lab::PageSet::UnknownOutput, lab::PageSet::Done, lab::PageSet::OutOfRange};
+  const unsigned badIds[] = {9, 10, 11, 12, 13, 14, 15, 16};
+  for (int i = 0; i < 8; ++i) assert(a.set[i].id == badIds[i] && a.set[i].check == bad[i]);
+  assert(a.set[6].value == 0);  // "-0" is 0.
+  // More than 8 in one answer: the first 8, in order, and the rest ignored.
+  std::string many = "HTTP/1.1 200 OK\r\n\r\nwatch\t0\n";
+  for (int i = 1; i <= 11; ++i) many += "set\t" + std::to_string(i) + "\tservo\t" + std::to_string(i * 10) + "\n";
+  a = read(many.c_str());
+  assert(a.watch == 0 && a.sets == 8 && a.set[0].id == 1 && a.set[7].id == 8 && a.set[7].value == 80);
+  // A 404's body isn't read for buttons any more than for watch.
+  a = read("HTTP/1.1 404 Not Found\r\n\r\nset\t1\tservo\t9\n"); assert(a.status == 404 && a.sets == 1);  // Read, but 097 applies only at 200.
+  // What became of them goes first in the next report, once.
+  Dids dids;
+  dids.add(1, lab::PageSet::Done); dids.add(65535, lab::PageSet::RulesPlaying); dids.add(3, lab::PageSet::NotSetUp);
+  Snapshot d; d.did = dids.list(); d.dids = dids.count();
+  const std::string withDids = body(d);
+  assert(withDids.rfind("lab\t1\nview\tother\ndid\t1\tok\ndid\t65535\trules are playing\ndid\t3\tnot set up\nunits\t", 0) == 0);
+  for (int i = 0; i < 12; ++i) dids.add(uint16_t(100 + i), lab::PageSet::OutOfRange);
+  assert(dids.count() == kMaxSets);  // Never more than an answer can hold.
+  dids.clear(); assert(dids.count() == 0);
+  for (uint8_t i = 0; i < uint8_t(lab::PageSet::Count); ++i) assert(!strchr(lab::kPageSetWords[i], '\t') && strlen(lab::kPageSetWords[i]) < 24);
   assert(read("").status == 0 && read("garbage that is long").status == 0 && read("HTTP/1.1 999 Huh\r\n\r\n").status == 0);
   // Tickets, as Planes reads its own.
   podcast::HomeTicket t;

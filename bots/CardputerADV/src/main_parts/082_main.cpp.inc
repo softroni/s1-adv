@@ -1905,6 +1905,91 @@ bool labVoiceSet(const char* output, int value) {
   }
   return true;
 }
+// The bridge's page setting a part, from its live report's answer (lab_live.h reads the buttons).
+// With the part's own screen open it goes through that screen, so the screen shows it; otherwise
+// straight into the Lab's outputs, where it stays until the Lab takes it back, as a check from the
+// chat's does: a part's screen closing, rules or a sequence taking the output, or the Lab closing.
+// Unlike that check, the relays, the lamp and the air conditioners switch here with no confirm
+// anywhere, because the owner asked for the page to work that way.
+uint32_t gLabPageBeepUntilMs = 0;  // A beep the page asked for away from the Speaker's screen.
+lab::PageSet labPageSet(Out out, int value, uint32_t now) {
+  using lab::PageSet;
+  if (!lab::pageCanSet(out)) return PageSet::UnknownOutput;
+  if (!lab::pageValueValid(out, value)) return PageSet::OutOfRange;
+  if (!labMode(gUiMode) || !gLabOpen || gLauncherVisible) return PageSet::LabClosed;
+  if (gLabPlaying) return PageSet::RulesPlaying;     // They decide every output on every pass.
+  if (labSeqOnScreen()) return PageSet::SequenceScreen;  // So does a sequence on its own screen.
+  if (gLabSeqRun.holds(out)) return PageSet::SequenceHolds;
+  LabUi& ui = gLabUi;
+  const bool device = ui.view == LabView::Device;
+  const Dev dev = static_cast<Dev>(ui.devRow);
+  const lab::Part part = lab::partOf(out) != lab::Part::None ? lab::partOf(out)
+                         : out == Out::Relay1 || out == Out::Relay2 ? lab::Part::Relay : lab::Part::None;
+  // A part on its own screen is driven even unseen, as its keys drive it; elsewhere it has to be set up.
+  if (part != lab::Part::None && !labPartReady(part) && !(device && lab::partFor(dev) == part)) return PageSet::NotSetUp;
+  switch (out) {
+    case Out::Servo:
+      if (device && dev == Dev::Servo) {
+        ui.sweeping = false;
+        labServoGoTo(value);
+      } else {
+        labDriveSet(out, value);
+      }
+      break;
+    case Out::StripColor:
+    case Out::StripBright:
+      if (value < 0) {  // The strip's color at -1 is the strip off.
+        for (Out o : {Out::StripColor, Out::StripBright, Out::StripLength}) labDriveOff(o);
+      } else if (device && dev == Dev::Strip) {
+        (out == Out::StripColor ? ui.stripHue : ui.stripBright) = value;
+        labStripPick(gLabStripTest);
+      } else {
+        labDriveSet(out, value);
+        // A color with no brightness asked for would light nothing, so it takes the strip screen's.
+        if (out == Out::StripColor && !gLabDrive[static_cast<uint8_t>(Out::StripBright)].on) labDriveSet(Out::StripBright, ui.stripBright);
+      }
+      break;
+    case Out::Led:
+      if (device && dev == Dev::Led) {
+        ui.ledOn = value >= 0;
+        if (value >= 0) ui.ledHue = value;
+      }
+      if (value >= 0) labDriveSet(out, value);
+      else labDriveOff(out);
+      break;
+    case Out::Tone:  // One beep, never held.
+      gLabPageBeepUntilMs = 0;
+      if (!value) {
+        ui.beepUntilMs = 0;
+        labDriveOff(out);
+        break;
+      }
+      if (device && dev == Dev::Speaker) {
+        ui.toneHz = value;
+        ui.beepUntilMs = now + kLabBeepMs;
+      } else {
+        gLabPageBeepUntilMs = (now + kLabOnceBeepMs) | 1u;  // As short as the chat's check beeps.
+      }
+      labDriveSet(out, value);
+      break;
+    case Out::Relay1:
+    case Out::Relay2:
+      if (device && dev == Dev::Relay) ui.relays[out == Out::Relay1 ? 0 : 1] = value > 0;
+      labDriveSet(out, value);
+      break;
+    default:  // The strip's length, the lamp and the air conditioners: nothing on a screen to follow.
+      labDriveSet(out, value);
+      break;
+  }
+  labRedraw();
+  return PageSet::Done;
+}
+// Ends the page's beep, on every pass of the Lab.
+void labPageService(uint32_t now) {
+  if (!gLabPageBeepUntilMs || static_cast<int32_t>(now - gLabPageBeepUntilMs) < 0) return;
+  gLabPageBeepUntilMs = 0;
+  if (!gLabUi.beepUntilMs) labDriveOff(Out::Tone);
+}
 // The screens where Alt talks to Claude. The steps have keys of their own, and an offer waits for Enter.
 bool labVoiceScreen() {
   if (!labMode(gUiMode)) return false;

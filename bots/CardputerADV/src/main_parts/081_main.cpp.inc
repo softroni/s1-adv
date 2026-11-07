@@ -55,6 +55,7 @@ bool labRescanAllowed();
 bool labBusWanted();
 void labSaveBook();
 bool labSeqOnScreen();
+void labPageService(uint32_t now);
 void labOnceSay(const char* text, bool speak);
 void labOnceMirror(const lab::SeqStep& step);
 
@@ -1180,6 +1181,7 @@ void serviceLab() {
     gLabTrends.sample(gLabInputs);
   }
   serviceLabTests();
+  labPageService(now);
   if (gLabPlaying && !gLabPaused) {
     lab::step(gLabBook.rules, gLabBook.count, gLabStates, gLabSeen, now, gLabDrive, labNamedNow());
     lab::runSequences(gLabBook.rules, gLabBook.count, gLabStates, gLabSeqFires, gLabSeqs, gLabSeqCount, gLabSeqRun, now);

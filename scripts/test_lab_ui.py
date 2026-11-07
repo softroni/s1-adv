@@ -1057,6 +1057,82 @@ void testSay() {
     assert(gLabUi.view == LabView::Device && std::string(gQueuedVoiceReplySpeech).empty()); labCloseDevice();
     gLabUi.view = LabView::Rules; goToRow(gLabBook.count + 1);
   }
+  // The bridge's page setting a part: any output, through the part's screen when that's open, else
+  // straight into the Lab's outputs, until the Lab takes it back. Relays, lamp and AC need no confirm.
+  {
+    using lab::PageSet;
+    const auto openPart = [](Dev dev) { gLabUi.devRow = int(dev); labOpenDevice(dev); };
+    const auto drive = [](Out out) { return gLabDrive[int(out)]; };
+    gLabUi.view = LabView::Devices;
+    openPart(Dev::Servo); gLabUi.sweeping = true;
+    assert(labPageSet(Out::Servo, 45, nowMs) == PageSet::Done && gLabUi.servoAngle == 45 && !gLabUi.sweeping && drive(Out::Servo).value == 45);
+    assert(labPageSet(Out::Servo, 181, nowMs) == PageSet::OutOfRange && gLabUi.servoAngle == 45);  // Never clamped.
+    assert(labPageSet(Out::Servo, 0, nowMs) == PageSet::Done && gLabUi.servoAngle == 0);
+    labCloseDevice(); assert(!drive(Out::Servo).on);  // Its screen closing takes it back.
+    openPart(Dev::Strip);
+    assert(labPageSet(Out::StripColor, 240, nowMs) == PageSet::Done && gLabUi.stripHue == 240 && drive(Out::StripColor).value == 240);
+    assert(labPageSet(Out::StripBright, 70, nowMs) == PageSet::Done && gLabUi.stripBright == 70 && drive(Out::StripBright).value == 70);
+    assert(labPageSet(Out::StripColor, -1, nowMs) == PageSet::Done && !drive(Out::StripColor).on && !drive(Out::StripBright).on);
+    labCloseDevice();
+    openPart(Dev::Relay); show("relay-page");
+    assert(labPageSet(Out::Relay2, 1, nowMs) == PageSet::Done && gLabUi.relays[1] && drive(Out::Relay2).on && drive(Out::Relay2).value == 1);
+    assert(labPageSet(Out::Relay2, 2, nowMs) == PageSet::OutOfRange && gLabUi.relays[1]);
+    assert(labPageSet(Out::Relay2, 0, nowMs) == PageSet::Done && !gLabUi.relays[1]);
+    assert(labPageSet(Out::Relay1, 1, nowMs) == PageSet::Done && gLabUi.relays[0]);
+    labCloseDevice(); assert(!drive(Out::Relay1).on);
+    openPart(Dev::Led);
+    assert(labPageSet(Out::Led, 120, nowMs) == PageSet::Done && gLabUi.ledOn && gLabUi.ledHue == 120 && drive(Out::Led).value == 120);
+    assert(labPageSet(Out::Led, -1, nowMs) == PageSet::Done && !gLabUi.ledOn && !drive(Out::Led).on);
+    assert(labPageSet(Out::Led, -2, nowMs) == PageSet::OutOfRange);
+    labCloseDevice();
+    openPart(Dev::Speaker);
+    assert(labPageSet(Out::Tone, 880, nowMs) == PageSet::Done && gLabUi.toneHz == 880 && gLabUi.beepUntilMs && drive(Out::Tone).on);
+    run(600); assert(!drive(Out::Tone).on);  // One beep, never held.
+    assert(labPageSet(Out::Tone, 199, nowMs) == PageSet::OutOfRange && labPageSet(Out::Tone, 0, nowMs) == PageSet::Done && !drive(Out::Tone).on);
+    labCloseDevice();
+    // Off any part's screen: straight in, and it stays while other screens come and go.
+    gLabUi.view = LabView::Devices;
+    assert(labPageSet(Out::LampPower, 1, nowMs) == PageSet::Done && drive(Out::LampPower).on && drive(Out::LampPower).value == 1);
+    assert(labPageSet(Out::LampBright, 100, nowMs) == PageSet::Done && drive(Out::LampBright).value == 100);
+    assert(labPageSet(Out::AcTcl, 1, nowMs) == PageSet::Done && labPageSet(Out::AcDaikin, 1, nowMs) == PageSet::Done && drive(Out::AcDaikin).on);
+    assert(labPageSet(Out::Led, 30, nowMs) == PageSet::Done && drive(Out::Led).value == 30);
+    run(200); assert(drive(Out::Led).on && drive(Out::LampPower).on && drive(Out::AcTcl).on);
+    assert(labPageSet(Out::Tone, 600, nowMs) == PageSet::Done && drive(Out::Tone).on); run(400); assert(!drive(Out::Tone).on);
+    assert(labPageSet(Out::Say, 1, nowMs) == PageSet::UnknownOutput && labPageSet(Out::Sequence, 0, nowMs) == PageSet::UnknownOutput);
+    // A part that isn't set up can't be driven from here; on its own screen it's driven blind, as its keys are.
+    if (labPartReady(lab::Part::Strip)) {
+      assert(labPageSet(Out::StripColor, 120, nowMs) == PageSet::Done && drive(Out::StripBright).on);  // A color comes with brightness.
+    } else {
+      assert(labPageSet(Out::StripColor, 120, nowMs) == PageSet::NotSetUp && !drive(Out::StripColor).on);
+    }
+    // What owns an output now keeps it.
+    gLabPlaying = true; assert(labPageSet(Out::Led, 0, nowMs) == PageSet::RulesPlaying); gLabPlaying = false;
+    gLabUi.view = LabView::SeqPlay; assert(labPageSet(Out::Led, 0, nowMs) == PageSet::SequenceScreen); gLabUi.view = LabView::Devices;
+    {
+      const lab::Sequence saved = gLabSeqs[0];
+      const uint8_t savedCount = gLabSeqCount;
+      lab::Sequence& seq = gLabSeqs[0];
+      seq = lab::Sequence{};
+      seq.count = 2;
+      seq.steps[0].kind = lab::SeqKind::Set; seq.steps[0].out = Out::Led; seq.steps[0].value = 200;
+      seq.steps[1].kind = lab::SeqKind::Wait; seq.steps[1].value = 50;
+      if (!gLabSeqCount) gLabSeqCount = 1;
+      gLabSeqRun.start(0, -1, nowMs);
+      gLabSeqRun.service(gLabSeqs, gLabSeqCount, nowMs);
+      assert(gLabSeqRun.holds(Out::Led) && !gLabSeqRun.holds(Out::LampPower));
+      assert(labPageSet(Out::Led, 0, nowMs) == PageSet::SequenceHolds && labPageSet(Out::LampPower, 0, nowMs) == PageSet::Done);
+      gLabSeqRun.stop();
+      seq = saved;
+      gLabSeqCount = savedCount;
+    }
+    // Behind the menu, nothing.
+    gLauncherVisible = true; assert(labPageSet(Out::Led, 0, nowMs) == PageSet::LabClosed); gLauncherVisible = false;
+    // And all of it goes back to rest as the Lab lets go, relays, lamp and air conditioners included.
+    assert(labPageSet(Out::LampPower, 1, nowMs) == PageSet::Done);
+    labReleaseOutputs();
+    for (const lab::Drive& d : gLabDrive) assert(!d.on);
+    gLabUi.view = LabView::Rules; goToRow(gLabBook.count + 1);
+  }
   // With no Wi-Fi it says so instead of trying.
   key(ENTER); gWifiReady = false; show("say-offline"); assert(gCanvas.shows("Needs Wi-Fi")); { const int t = gVoiceTaps; key(ENTER); assert(gVoiceTaps == t); } gWifiReady = true; esc();
   // A rule arriving elsewhere still reaches this screen, and stops rules that are playing.
