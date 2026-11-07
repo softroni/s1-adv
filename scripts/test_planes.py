@@ -71,6 +71,15 @@ assert 'PlView::LookUp' not in app and 'PlView::DroneAlert' not in app and 'focu
 note = app.split('void plNoteOverhead() {', 1)[1].split('\n}\n', 1)[0]
 assert 'gPlView' not in note.replace('plWantsSky()', '') and 'plChime(planes::Chime::LookUp);' in note
 assert "else if (lower == 'u' && plOverhead() >= 0)" in app
+# The bridge out of reach: said at once with why (the worker's note), the ticket asked again in a
+# while, and reported once the bridge answers again.
+fin = app.split('void plFinished() {', 1)[1].split('\n}\n', 1)[0]
+ticket = fin.split('case PlJob::Ticket: {', 1)[1].split('case PlJob::Near:', 1)[0]
+assert ticket.index('if (unreachable) {') < ticket.index('gPlTicketFor = mine;') and 'gPlTicketNotBefore = now + kPlRetryMs;' in ticket
+assert 'camera_net::failureNote()' in fin and 'if (gPlReport[0] && gPlTicketFor == wifiLocalAddress())' in app
+assert 'if (int32_t(now - gPlTicketNotBefore) < 0) return false;' in app
+net = (src / 'camera_net.cpp').read_text()
+assert 'noteFailure("tls", code);' in net and 'tlsOutOfMemory(code) ? Error::NoMemory : Error::Connect' in net
 # Where it's going: the destination by name in the bigger font, its code at the path's arrow.
 route = app.split('String plRouteWords(', 1)[1].split('\n}\n', 1)[0]
 assert 'String("to ") + to' in route and 'fitCurrentFontToWidth' in route

@@ -59,11 +59,27 @@ uint8_t* body = nullptr;
 size_t bodyLength = 0;
 bool bodyInSlot = false;
 char memNote[48] = "";
+char failNote[48] = "";
 char lastClip[40] = "";
 
 void noteMemory(const char* what) {
   snprintf(memNote, sizeof(memNote), "%s %uK/%uK", what, unsigned(ESP.getFreeHeap() / 1024),
            unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024));
+}
+void noteFailure(const char* how, int code) {
+  snprintf(failNote, sizeof(failNote), "%s %d %uK/%uK", how, code, unsigned(ESP.getFreeHeap() / 1024),
+           unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024));
+}
+// mbedTLS's ways of saying it ran out of memory, beyond the TLS layer's own: a certificate, a
+// number, a key or a cipher that couldn't be made is memory too, not an unreachable bridge.
+bool tlsOutOfMemory(int code) {
+  switch (code) {
+    case MBEDTLS_ERR_SSL_ALLOC_FAILED: case -0x2880: /* X509 */ case -0x0010: /* MPI */ case -0x3F80: /* PK */
+    case -0x006A: /* ASN1 */ case -0x6180: /* cipher */ case -0x4D80: /* ECP */ case -0x5180: /* MD */
+      return true;
+    default:
+      return false;
+  }
 }
 void dropKept() {
   if (!kept) return;
@@ -203,7 +219,7 @@ Error runHome() {
       kept = new (std::nothrow) WiFiClient();
       if (!kept) { noteMemory("client"); return Error::NoMemory; }
       const IPAddress ip(uint8_t(homeIp >> 24), uint8_t(homeIp >> 16), uint8_t(homeIp >> 8), uint8_t(homeIp));
-      if (!kept->connect(ip, homePort, 3000)) { dropKept(); return Error::Connect; }
+      if (!kept->connect(ip, homePort, 3000)) { noteFailure("home", -1); dropKept(); return Error::Connect; }
       kept->setNoDelay(true);
       keptIp = homeIp;
       keptPort = homePort;
@@ -233,7 +249,9 @@ Error runHttps() {
       keptTls->setHandshakeTimeout(15);
       if (!keptTls->connect(bridgeHost, bridgePort)) {
         char detail[32] = {};
-        const Error e = keptTls->lastError(detail, sizeof(detail)) == MBEDTLS_ERR_SSL_ALLOC_FAILED ? Error::NoMemory : Error::Connect;
+        const int code = keptTls->lastError(detail, sizeof(detail));
+        noteFailure("tls", code);
+        const Error e = tlsOutOfMemory(code) ? Error::NoMemory : Error::Connect;
         if (e == Error::NoMemory) noteMemory("TLS");
         dropTls();
         return e;
@@ -424,6 +442,7 @@ bool isSlot(const uint8_t* p) {
 bool tlsOpen() { return tlsHeld.load(); }
 void cancel() { if (busy()) cancelled.store(true); }
 const char* memoryNote() { return memNote; }
+const char* failureNote() { return failNote; }
 const char* clipHeader() { return busy() ? "" : lastClip; }
 const char* errorText(Error e) {
   switch (e) {

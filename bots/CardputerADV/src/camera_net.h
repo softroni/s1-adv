@@ -47,4 +47,8 @@ bool tlsOpen();
 const char* clipHeader();
 // After NoMemory: what ran short, then the memory free and its largest piece, like "TLS 61K/15K".
 const char* memoryNote();
+// Why the last connection that couldn't be made failed: how it was tried, the code (-1 when the
+// network itself didn't connect; an mbedTLS one when TLS failed) and the memory free and its largest
+// piece then, like "tls -10368 52K/18K" or "home -1 61K/30K". "" until one fails.
+const char* failureNote();
 }  // namespace camera_net

@@ -65,6 +65,9 @@ PlJob gPlJob = PlJob::None;
 uint32_t gPlNearDueMs = 0, gPlIssDueMs = 0;
 bool gPlAskedByGps = false;               // The last near/iss went with the GPS's position.
 String gPlProblem, gPlSpaceProblem, gPlNotice;
+String gPlProblemNote;                    // Why, in the worker's words, under a problem: a code and the memory.
+uint32_t gPlJobSinceMs = 0;               // When the request under way started, for its seconds on screen.
+uint32_t gPlTicketNotBefore = 0;          // A ticket that couldn't be asked for is asked again from here.
 uint16_t gPlNoticeInk = 0;
 uint32_t gPlNoticeUntil = 0, gPlOpenSince = 0;
 char gPlReport[200] = "";
@@ -161,15 +164,22 @@ bool plStart(PlJob job, const char* httpsPath, size_t maxBytes, uint32_t waitMs)
   }
   if (!camera_net::start(viaHome ? home : httpsPath, viaHome, ip, gPlTicket.port, maxBytes, waitMs)) return false;
   gPlJob = job;
+  gPlJobSinceMs = millis();
   return true;
 }
 // What ran short, with the heap's free and largest piece, for the bridge's log: once in a while.
-void plQueueReport(const char* stage, unsigned code) {
+void plQueueReport(const char* stage, unsigned code, const char* note) {
   if (gPlMemReportedMs && millis() - gPlMemReportedMs < 30000) return;
   gPlMemReportedMs = millis();
+  // The bridge keeps only letters, digits and _.:- in a report: "tls -1 52K/18K" goes as "tls_-1_52K:18K".
+  char safe[48];
+  size_t n = 0;
+  for (const char* p = note ? note : ""; *p && n + 1 < sizeof(safe); ++p) safe[n++] = *p == ' ' ? '_' : *p == '/' ? ':' : *p;
+  safe[n] = 0;
+  note = safe;
   snprintf(gPlReport, sizeof(gPlReport), "/api/cardputer/planes/report?stage=%s&e=%u&free=%u&big=%u&via=%s&fw=%s&note=%s", stage, code,
            unsigned(ESP.getFreeHeap()), unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)),
-           camera_net::overHome() ? "home" : "https", APP_VERSION, camera_net::memoryNote()[0] ? camera_net::memoryNote() : "-");
+           camera_net::overHome() ? "home" : "https", APP_VERSION, note && *note ? note : "-");
   for (char* p = gPlReport; *p; ++p) if (*p == ' ') *p = '_';
 }
 
@@ -183,13 +193,17 @@ bool plWantsSpace() {
 bool plNextJob() {
   if (gPlDroneState != PlDroneState::Off || !wifiLocalAddress()) return false;
   const uint32_t now = millis();
-  if (gPlReport[0]) {
+  // A report goes once the bridge has answered on this network: it says why it couldn't before.
+  if (gPlReport[0] && gPlTicketFor == wifiLocalAddress()) {
     char path[sizeof(gPlReport)];
     strcpy(path, gPlReport);
     gPlReport[0] = 0;
     if (plStart(PlJob::Report, path, 256, 8000)) return true;
   }
-  if (plTicketWanted()) return plStart(PlJob::Ticket, planes::kTicketPath, 1024, 8000);
+  if (plTicketWanted()) {
+    if (int32_t(now - gPlTicketNotBefore) < 0) return false;
+    return plStart(PlJob::Ticket, planes::kTicketPath, 1024, 8000);
+  }
   char where[96], path[200];
   // A fix that came after asking by the city is worth asking again at once.
   if (plUsingGps() && !gPlAskedByGps) { gPlNearDueMs = 0; gPlIssDueMs = 0; }
@@ -325,8 +339,12 @@ void plFinished() {
     if (job == PlJob::Iss) gPlIssDueMs = now;
     return;
   }
-  if (e == camera_net::Error::NoMemory && job != PlJob::Report)
-    plQueueReport(job == PlJob::Near ? "near" : job == PlJob::Iss ? "iss" : "ticket", unsigned(e));
+  const bool unreachable = e == camera_net::Error::Connect || e == camera_net::Error::NoMemory || e == camera_net::Error::Timeout;
+  if (unreachable && job != PlJob::Report) {
+    gPlProblemNote = e == camera_net::Error::NoMemory ? camera_net::memoryNote() : camera_net::failureNote();
+    plQueueReport(job == PlJob::Near ? "near" : job == PlJob::Iss ? "iss" : "ticket", unsigned(e), gPlProblemNote.c_str());
+    appendRuntimeLog("PLANES", String("couldn't reach: ") + camera_net::errorText(e) + " " + gPlProblemNote);
+  }
   if (viaHome && !status && (e == camera_net::Error::Connect || e == camera_net::Error::Timeout)) {
     // Another Wi-Fi, or a Mac that's away: HTTPS from now on, on this network.
     gPlHomeOffFor = mine;
@@ -340,13 +358,22 @@ void plFinished() {
     switch (job) {
       case PlJob::Ticket: {
         podcast::HomeTicket ticket;
+        if (unreachable) {
+          // The bridge couldn't be reached at all: say so now rather than try the list over HTTPS too,
+          // and ask for the ticket again in a while (or on R).
+          gPlProblem = gPlSpaceProblem = plProblemText(e, word);
+          gPlTicketNotBefore = now + kPlRetryMs;
+          break;
+        }
         if (e == camera_net::Error::None && data && planes::parseTicket(reinterpret_cast<const char*>(data), length, ticket)) gPlTicket = ticket;
         else gPlTicket = podcast::HomeTicket{};  // An older bridge, or no home door: HTTPS on this network.
         gPlTicketFor = mine;
+        gPlProblemNote = "";
         break;
       }
       case PlJob::Near:
         if (e == camera_net::Error::None) {
+          gPlProblemNote = "";
           plTakeNear(data, length);
           gPlNearDueMs = now + (viaHome ? kPlNearEveryMs : kPlNearAwayMs);
           appendRuntimeLog("PLANES", String("near ") + (gPlSky ? gPlSky->count : 0) + " " + tookMs + "ms " + (viaHome ? "home" : "https"));
@@ -778,7 +805,7 @@ void plWhereWords(char* out, size_t room, const char* place, uint16_t& ink) {
   } else if (byGps) {
     ink = plGreen(); snprintf(out, room, "Using GPS, %lu min old", static_cast<unsigned long>((now - gPlHere.atMs) / 60000));
   } else if (fix) {
-    ink = plGreen(); snprintf(out, room, "GPS fix: updating...");
+    ink = plGreen(); snprintf(out, room, "Using GPS (%u sats)", unsigned(gLabGps.fix.satellites));
   } else if (hearing) {
     ink = plAmber(); snprintf(out, room, "Using %s, no fix", city.c_str());
   } else {
@@ -839,9 +866,17 @@ void plDrawSky() {
     String says;
     if (gPlProblem.length()) says = gPlProblem;
     else if (!wifiLocalAddress()) says = "Skywatch needs Wi-Fi";
+    else if (!gPlSkyOk && gPlJob != PlJob::None)
+      says = String(gPlJob == PlJob::Ticket ? "Connecting to the bridge... " : "Asking for planes... ") + ((millis() - gPlJobSinceMs) / 1000) + "s";
     else if (!gPlSkyOk) says = "Looking for planes...";
     else says = String("No planes within ") + ring + " right now. = makes the ring bigger.";
     plCardSays(says, gPlProblem.length() ? plAmber() : plMuted());
+    if (gPlProblem.length() && gPlProblemNote.length()) {
+      d.setFont(&fonts::Font0);
+      d.setTextColor(plMuted());
+      d.setCursor(kPlCardX, 100);
+      d.print(fitCurrentFontToWidth(String("why: ") + gPlProblemNote, 238 - kPlCardX));
+    }
     plWhereLine(kPlCardX, 114, 238 - kPlCardX, gPlSkyOk ? gPlSky->place : "");
     plKeys({{"-=", "Ring"}, {"R", "Look again"}, {",/", "Pages"}});
     return;
@@ -1885,7 +1920,7 @@ bool handlePlanesKey(char key, const Keyboard_Class::KeysState& keys) {
         planes::rangeLabel(range, sizeof(range), gPlRange, plUnits());
         plSay(String("Ring: ") + range);
       } else if (lower == 's' && gPlSkyOk && gPlSel < gPlSky->count) plSaveSighting(gPlSky->planes[gPlSel]);
-      else if (lower == 'r') { gPlNearDueMs = millis(); plSay("Looking again..."); }
+      else if (lower == 'r') { gPlNearDueMs = gPlTicketNotBefore = millis(); plSay("Looking again..."); }
       break;
     case PlView::PlaneList:
       if (up || down) plSelectPlane(gPlSel + (up ? -1 : 1));
@@ -1911,7 +1946,7 @@ bool handlePlanesKey(char key, const Keyboard_Class::KeysState& keys) {
       break;
     case PlView::Now:
       if (left || right) plFlip(left);
-      else if (lower == 'r') { gPlIssDueMs = millis(); plSay("Asking again..."); }
+      else if (lower == 'r') { gPlIssDueMs = gPlTicketNotBefore = millis(); plSay("Asking again..."); }
       break;
     case PlView::Spotted:
       if (left || right) plFlip(left);
