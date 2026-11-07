@@ -569,13 +569,22 @@ Needs firmware and a bridge from 0.2.259 or later.
 
 ## On the bridge's page
 
-While the Lab is open on your home Wi-Fi, the bridge's web page shows it live: every part it found and how it's wired, every reading, what each output is doing, which screen you're on, and which rules are firing. Open the page on a phone or computer and watch it follow along as you turn the knob or wave at the sensor.
+While the Lab is open on your home Wi-Fi, [the bridge's web page](BRIDGE-UI.md) shows it live: every part it found and how it's wired, every reading, what each output is doing, which screen you're on, and which rules are firing. Open the page on a phone or computer and watch it follow along as you turn the knob or wave at the sensor.
+
+<table>
+<tr>
+<td width="33%"><img src="assets/bridge-ui/lab-parts.png" alt="The bridge's page on a phone: the Ultrasonic open on the Cardputer with its distance and a graph, then the ENV III, Joystick 2, Tilt and the Cardputer's LED, each live" width="100%"><br><sub><b>Parts, on the bridge's page.</b> The part open on the Cardputer comes first, then the ones that are there.</sub></td>
+<td>The page draws each part as its test screen does: the distance with a graph of the last two minutes, the temperature and humidity, the joystick's dot, the knob's dial, the servo's angle, the strip's colors, the relays, the I/O hub's ports, the GPS and the built-in tilt, LED and speaker. Its dots mean what the Devices list's do. The Rules and Sequences tabs show what's saved, play a sequence, and build a rule with menus for you to check on the Cardputer.</td>
+</tr>
+</table>
 
 - **It only goes over your home Wi-Fi.** The Cardputer sends to the bridge's computer directly, the way Podcasts and Cameras do at home. Away from home, nothing is sent.
 - **About once a second while the page is open.** With nobody looking, it checks in every 15 seconds, so the page knows the Lab is open.
 - **Your position isn't sent.** From the GPS, the page gets what rules use, like speed and the distance from your spot, plus how many satellites it hears and its height.
 - **The first time on a network**, the Lab asks the bridge where it is at home. That waits while rules or a sequence play, so the page catches up once they stop.
 - **If the bridge stops answering**, the Lab gives up after three tries and starts again next time you open it. The Lab itself carries on as usual either way.
+
+Needs firmware 0.2.326 or later, and the bridge's page turned on.
 
 ## If a part doesn't answer
 
