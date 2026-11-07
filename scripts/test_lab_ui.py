@@ -367,6 +367,11 @@ bool handleScreensaverWake() { ++gWakes; return false; }
 void renderLauncherOverlay() {}
 void renderDebugOverlay() {}
 bool labMode(UiMode mode) { return mode == UiMode::LabDevices || mode == UiMode::LabRules || mode == UiMode::LabSequences; }
+// The bridge's live page (097, tested in test_lab_live.py): only when the Lab opens, closes and runs.
+int gLiveOpens = 0, gLiveCloses = 0, gLivePasses = 0;
+void labLiveOpened() { ++gLiveOpens; }
+void labLiveClosing() { ++gLiveCloses; }
+void serviceLabLive(uint32_t) { ++gLivePasses; }
 namespace { void beginLab(); void stopLab(); void labOnceLeaving(UiMode next); }
 void setUiMode(UiMode mode) { if (mode != gUiMode) labOnceLeaving(mode); if (labMode(gUiMode) && mode != gUiMode) stopLab(); gUiMode = mode; if (labMode(mode)) beginLab(); }
 ''' + (parts / '081_main.cpp.inc').read_text() + (parts / '082_main.cpp.inc').read_text() + (parts / '084_main.cpp.inc').read_text() + (parts / '085_main.cpp.inc').read_text() + r'''
@@ -1998,6 +2003,11 @@ int main(int argc, char** argv) {
   if (argc > 1) gDump = std::fopen(argv[1], "w");
   for (bool& live : gLabHistoryLive) live = false;
   testDevices(); testPages(); testMissing(); testWiring(); testBuildRule(); testEditRule(); testPlay(); testPractice(); testRecipes(); testSay(); testRemotes(); testSaving(); testGrove(); testAnySetup(); testSonic(); testGuidePictures(); testSequences(); testChat(); testOnce(); testPlayFromChat(); setUiMode(UiMode::LabRules); run(1500); testGuards(); testLedPower(); testStickLearn(); testGpsReadings(); testGpsPages();
+  { setUiMode(UiMode::Home); const int opens = gLiveOpens, closes = gLiveCloses;
+    setUiMode(UiMode::LabDevices); assert(gLiveOpens == opens + 1 && gLiveCloses == closes);
+    const int passes = gLivePasses; run(300); assert(gLivePasses > passes);
+    setUiMode(UiMode::Home); assert(gLiveCloses == closes + 1);
+    const int idle = gLivePasses; run(300); assert(gLivePasses == idle); }
   if (gDump) std::fclose(gDump);
   std::puts("PASS Lab screens: every device test, the wiring screen, building and changing a rule by steps, playing it through a simulated hub, practice with nothing plugged in, recipes, a rule said aloud, sequences on their own and from a rule, what the chat can see and offer, one check from the chat, a sequence played from the chat, the lamp and AC guards, units leaving and returning, saving and damage, the LED waiting for full screen light, learning which way the joystick is held, GPS speed, heading and distance from a saved spot, the sky and the radios Mesh heard, and every screen stays on the display");
 }

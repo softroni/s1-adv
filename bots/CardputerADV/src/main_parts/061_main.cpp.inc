@@ -506,6 +506,7 @@ void loop() {
   serviceBalloon();
   serviceBallCatch();
   serviceLab();
+  serviceLabLiveNet();  // From any screen, so the Lab's last report goes out after it closes.
   servicePulseGps(millis());  // After the Lab, which may have just taken or given back the GPS.
   serviceBrainFlow();
   serviceTetris();

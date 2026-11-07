@@ -254,6 +254,7 @@ InboxHttpResult* performInboxHttpRequest(void* arg) {
   result->announce = request->announce;
   result->logsUpload = request->logsUpload;
   result->weather = request->weather;
+  result->done = request->done;
   std::unique_ptr<WiFiClientSecure> secure;
   HTTPClient http;  // Last in, first out: its destructor still uses the client.
   http.setConnectTimeout(2500);
@@ -324,6 +325,10 @@ void serviceInboxNetworkCompletion() {
   // Weather is a nicety, so missing it says nothing about the link and needs no retry here.
   if (result->weather) {
     applyWeatherResponse(cancelled ? 0 : result->code, result->body);
+    return;
+  }
+  if (result->done) {
+    result->done(cancelled ? 0 : result->code, result->body);
     return;
   }
   if (result->code >= 200 && result->code < 300) {

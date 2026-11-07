@@ -329,16 +329,20 @@ inline bool parseIpv4(const char* s, uint32_t& out) {
   out = value;
   return true;
 }
-inline bool ticketPathValid(const char* path) {
-  static const char kStart[] = "/podcasts/";
-  if (strncmp(path, kStart, sizeof(kStart) - 1)) return false;
-  const char* id = path + sizeof(kStart) - 1;
+// A home door's path: the app's start, like "/podcasts/", and 32 lowercase hex digits.
+inline bool homePathValid(const char* path, const char* start) {
+  const size_t skip = strlen(start);
+  if (strncmp(path, start, skip)) return false;
+  const char* id = path + skip;
   size_t n = 0;
   for (; id[n]; ++n) if (n >= 32 || !((id[n] >= '0' && id[n] <= '9') || (id[n] >= 'a' && id[n] <= 'f'))) return false;
   return n == 32;
 }
-// False when the answer isn't a ticket at all, so an old bridge reads as having none.
-inline bool parseTicket(const char* text, size_t len, HomeTicket& out) {
+inline bool ticketPathValid(const char* path) { return homePathValid(path, "/podcasts/"); }
+// Any app's ticket answer, with its own check of the path. False when the answer isn't a ticket
+// at all, so an old bridge reads as having none.
+template <class PathValid>
+inline bool parseHomeTicket(const char* text, size_t len, HomeTicket& out, PathValid pathValid) {
   out = HomeTicket{};
   bool none = false, ticket = false, bad = false;
   eachLine(text, len, [&](char* line, size_t) {
@@ -346,7 +350,7 @@ inline bool parseTicket(const char* text, size_t len, HomeTicket& out) {
     const size_t n = splitFields(line, f, 3);
     uint32_t number = 0, ip = 0;
     if (n == 1 && !strcmp(f[0], "none")) none = true;
-    else if (n == 3 && !strcmp(f[0], "ticket") && readNumber(f[1], number, 65535) && number && ticketPathValid(f[2]) && strlen(f[2]) < sizeof(out.path)) {
+    else if (n == 3 && !strcmp(f[0], "ticket") && readNumber(f[1], number, 65535) && number && pathValid(f[2]) && strlen(f[2]) < sizeof(out.path)) {
       out.port = uint16_t(number); strcpy(out.path, f[2]); ticket = true;
     } else if (n == 3 && !strcmp(f[0], "lan") && parseIpv4(f[1], ip) && readNumber(f[2], number, 30) && number >= 8) {
       if (out.count < 4) { out.ip[out.count] = ip; out.prefix[out.count] = uint8_t(number); ++out.count; }
@@ -356,6 +360,7 @@ inline bool parseTicket(const char* text, size_t len, HomeTicket& out) {
   out.none = none || !ticket || !out.count;
   return none || ticket;
 }
+inline bool parseTicket(const char* text, size_t len, HomeTicket& out) { return parseHomeTicket(text, len, out, ticketPathValid); }
 // The bridge's address on the same network as `mine`, or 0 when none is.
 inline uint32_t homeFor(const HomeTicket& t, uint32_t mine) {
   if (t.none || !mine) return 0;

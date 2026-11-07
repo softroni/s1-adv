@@ -1,6 +1,8 @@
 // Network workers publish immutable results; only loopTask owns UI/history.
-struct InboxHttpPayload { String url, token, eventId, body; bool otaManifest = false, applyAfter = false, announce = false, logsUpload = false, weather = false; };
-struct InboxHttpResult { int code=0; String body, eventId; bool otaManifest = false, applyAfter = false, announce = false, logsUpload = false, weather = false, noMemory = false; };
+// done, when set, gets the answer instead of the inbox: the code (0 when the network failed or it
+// was cancelled) and the body. Like weather, it says nothing about the link.
+struct InboxHttpPayload { String url, token, eventId, body; bool otaManifest = false, applyAfter = false, announce = false, logsUpload = false, weather = false; void (*done)(int code, const String& body) = nullptr; };
+struct InboxHttpResult { int code=0; String body, eventId; bool otaManifest = false, applyAfter = false, announce = false, logsUpload = false, weather = false, noMemory = false; void (*done)(int code, const String& body) = nullptr; };
 constexpr uint32_t kOtaAutoCheckIntervalMs = 20000U;
 constexpr uint32_t kOtaScreenCheckIntervalMs = 5000U;
 uint32_t gOtaLastAutoCheckMs = 0;
@@ -613,6 +615,10 @@ void serviceLabPlayAsked();
 void labOnceLeaving(UiMode next);
 void serviceLabOnce();
 String labChatContext();
+void labLiveOpened();
+void labLiveClosing();
+void serviceLabLive(uint32_t now);
+void serviceLabLiveNet();
 const lab::Sequence* labSequences();
 uint8_t labSequenceCount();
 bool labVoiceSet(const char* output, int value);
