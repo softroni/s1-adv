@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, rename, writeFile, chown, chmod } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile, chown, chmod } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -100,4 +100,20 @@ const tmpPath = `${manifestPath}.${process.pid}.${Date.now()}.tmp`;
 await writeFile(tmpPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 await protectPublishedFile(tmpPath);
 await rename(tmpPath, manifestPath);
-process.stdout.write(`${JSON.stringify({ manifest_path: manifestPath, firmware_path: destPath, ...manifest }, null, 2)}\n`);
+// Older images go: a device only downloads the manifest's, and each is about 3 MB of the bridge's
+// storage budget (storage-budget.mjs). A hundred of them filled it, and the bridge then refused
+// every message, voice note and log upload. The newest few stay, the one just published among them.
+const keep = Math.max(1, Math.floor(Number(firmwareConfig.keepImages)) || 3);
+const older = [];
+for (const name of await readdir(destDir)) {
+  if (name === filename || !/^[a-z0-9][a-z0-9._-]{0,63}\.bin$/u.test(name)) continue;
+  const info = await stat(path.join(destDir, name));
+  if (info.isFile()) older.push({ name, at: info.mtimeMs });
+}
+older.sort((a, b) => b.at - a.at);
+const removed = [];
+for (const { name } of older.slice(keep - 1)) {
+  await rm(path.join(destDir, name), { force: true });
+  removed.push(name);
+}
+process.stdout.write(`${JSON.stringify({ manifest_path: manifestPath, firmware_path: destPath, ...manifest, removed }, null, 2)}\n`);

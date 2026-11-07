@@ -1125,6 +1125,20 @@ async function readRequestBuffer(req, maxBytes = 128 * 1024) {
   return Buffer.concat(chunks);
 }
 
+// A device's log upload. Its lines can carry a tab or another control character the device doesn't
+// escape, which strict JSON refuses: those become spaces rather than losing the whole upload.
+export function parseDeviceLogs(raw) {
+  if (!raw || !raw.length) return null;
+  const text = raw.toString("utf8");
+  for (const candidate of [text, text.replace(/[\u0000-\u001f]/gu, " ")]) {
+    try {
+      const payload = JSON.parse(candidate);
+      if (payload && typeof payload === "object" && !Array.isArray(payload)) return payload;
+    } catch {}
+  }
+  return null;
+}
+
 async function readJsonBody(req, maxBytes = 128 * 1024) {
   const raw = await readRequestBuffer(req, maxBytes);
   if (raw === null) {
@@ -6524,6 +6538,7 @@ async function main() {
       if (persistentRequest) {
         const storage = await storageBudget.acquire();
         if (!storage.ok) {
+          console.warn(`[bridge] storage budget full: refused ${req.method} ${url.pathname.replace(/\/[^/]{24,}/gu, "/…")}`);
           json(res, 507, { error:"bridge_storage_limit", detail:"Private storage is full or unavailable. Archive old bridge data or increase the reviewed storage budget before retrying." });
           return;
         }
@@ -7134,12 +7149,15 @@ async function main() {
     }
 
     if (req.method === "POST" && url.pathname === "/api/cardputer/logs") {
-      const payload = await readJsonBody(req, config.security.maxLogBytes);
-      if (!payload || typeof payload !== "object") {
+      const raw = await readRequestBuffer(req, config.security.maxLogBytes);
+      const payload = parseDeviceLogs(raw);
+      if (!payload) {
+        console.warn(`[device] logs upload rejected device=${device.device_id}: not JSON (${raw ? raw.length : 0} bytes)`);
         requestError(res, 400, "invalid_json");
         return;
       }
       await runtime.appendDeviceLogs(device, payload);
+      console.info(`[device] logs uploaded device=${device.device_id} events=${Array.isArray(payload.events) ? payload.events.length : 0}`);
       res.writeHead(204);
       res.end();
       return;

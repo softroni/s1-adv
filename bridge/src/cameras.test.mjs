@@ -527,3 +527,12 @@ test("the archive's rows become clips, and the device's lines", () => {
   assert.equal(monthLines("202611", new Map([["20261104", 47], ["20261106", 0], ["20261201", 3]])), "month\t202611\nday\t4\t47\n");
   assert.equal(clipStateLine({ pos: 5037.4, dur: 11000, playing: true, ended: false }), "clip\t5037\t11000\t1\t0\n");
 });
+
+test("a device's log upload with a raw tab in a line is kept, not refused", async () => {
+  const { parseDeviceLogs } = await import("./server.mjs");
+  assert.deepEqual(parseDeviceLogs(Buffer.from('{"events":[{"message":"a\tb"}]}')), { events: [{ message: "a b" }] });
+  assert.deepEqual(parseDeviceLogs(Buffer.from('{"events":[]}')), { events: [] });
+  assert.equal(parseDeviceLogs(Buffer.from("[1]")), null);
+  assert.equal(parseDeviceLogs(Buffer.from("not json")), null);
+  assert.equal(parseDeviceLogs(null), null);
+});

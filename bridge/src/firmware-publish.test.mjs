@@ -142,6 +142,35 @@ test("the note comes from the release notes, and a bad file can't stop an update
   assert.equal(await releaseNote(root, "1.2.3"), "");
 });
 
+test("publishing keeps the newest few images and removes the rest", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "s1-keep-publish-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const bin = path.join(root, "firmware.bin");
+  await writeFile(bin, image());
+  const stateDir = path.join(root, "state");
+  const folder = path.join(stateDir, "firmware", "cardputer_adv");
+  await mkdir(folder, { recursive: true });
+  // Ten published before, oldest first, and a file that isn't an image.
+  for (let i = 0; i < 10; i += 1) {
+    const file = path.join(folder, `cardputer-adv-0.2.${100 + i}-dev.bin`);
+    await writeFile(file, "old");
+    const when = new Date(Date.now() - (20 - i) * 60000);
+    await (await import("node:fs/promises")).utimes(file, when, when);
+  }
+  await writeFile(path.join(folder, "notes.txt"), "kept");
+  const configPath = path.join(root, "config.json");
+  await writeFile(configPath, JSON.stringify({ stateDir }));
+  const script = fileURLToPath(new URL("../scripts/publish-firmware.mjs", import.meta.url));
+  const out = JSON.parse((await promisify(execFile)(process.execPath, [script, "--config", configPath, "--bin", bin, "--version", "0.2.200-dev"])).stdout);
+  assert.equal(out.removed.length, 8);
+  assert.deepEqual((await readdir(folder)).sort(),
+    ["cardputer-adv-0.2.108-dev.bin", "cardputer-adv-0.2.109-dev.bin", "cardputer-adv-0.2.200-dev.bin", "manifest.json", "notes.txt"]);
+  // Configurable, and never below the one just published.
+  await writeFile(configPath, JSON.stringify({ stateDir, firmware: { keepImages: 1 } }));
+  await promisify(execFile)(process.execPath, [script, "--config", configPath, "--bin", bin, "--version", "0.2.201-dev"]);
+  assert.deepEqual((await readdir(folder)).filter(n => n.endsWith(".bin")), ["cardputer-adv-0.2.201-dev.bin"]);
+});
+
 test("publishing puts the note in the manifest the device reads", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "s1-note-publish-"));
   t.after(() => rm(root, { recursive: true, force: true }));
