@@ -28,6 +28,8 @@ The original `Copyright (c) 2026 Omnibot contributors` notice remains in
 - Arduino ESP32 / FreeRTOS: embedded runtime.
 - ArduinoJson, arduinoWebSockets, Arduino-IRremote and MFRC522: device libraries.
 - ws and Busboy: bridge WebSocket and upload handling.
+- [satellite.js](https://github.com/shashwatak/satellite-js), MIT: the bridge's SGP4 orbit model for the
+  space station's passes in Planes.
 - [eufy-sdk](https://github.com/mega-yfue/eufy-sdk), Apache-2.0: the optional camera helper's eufy client. It
   is installed beside the bridge's data, not shipped with it, and is independent of Anker and eufy.
 - The firmware's `third_party/` directory retains applicable protocol notices.
@@ -44,6 +46,20 @@ The project-local `bots/CardputerADV/lib/WebServer` is derived from Espressif
 Arduino ESP32 2.0.14 WebServer, LGPL-2.1-or-later. Its source headers, license
 and [security backport notes](bots/CardputerADV/lib/WebServer/S1-ADV-PATCHES.md)
 are retained.
+
+## Planes data
+
+The bridge asks these free services for the Planes app and keeps their answers for a short while.
+Each keeps its own terms; none of them is affiliated with S1-ADV.
+
+- [adsb.lol](https://adsb.lol): aircraft positions, **ODbL 1.0**.
+- [adsbdb](https://www.adsbdb.com): flight routes, airlines and aircraft types.
+- [CelesTrak](https://celestrak.org): the space station's orbital elements.
+- [OpenStreetMap](https://www.openstreetmap.org/copyright) through Nominatim: the country under the station,
+  © OpenStreetMap contributors, **ODbL 1.0**.
+- [Open-Meteo](https://open-meteo.com): the ground's height, for how high a plane looks, **CC BY 4.0**.
+- [International Space Station APIs](https://github.com/corquaid/international-space-station-APIs) by corquaid:
+  who is on board, MIT.
 
 ## NES and bundled homebrew
 

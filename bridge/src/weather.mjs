@@ -53,7 +53,7 @@ export function parsePlace(text) {
   return { city: clean, state: null };
 }
 
-const comparable = text => String(text || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+export const comparable = text => String(text || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 
 // Many towns share a name, and the service doesn't put the biggest first. A state
 // that was asked for is never swapped for another, and parks aren't places to live.

@@ -2,6 +2,7 @@ import { REPLY_LANGUAGE_POLICY, requestedReplyLanguage } from "./reply-language.
 import { WeatherService, parseCoordinates, validPlace } from "./weather.mjs";
 import { LAN_PORT, PodcastError, PodcastService, lanHandler, showLines } from "./podcasts.mjs";
 import { CameraService, cameraLanRoute, handleCameraRoute } from "./cameras.mjs";
+import { PlanesService, handlePlanesRoute, planesLanRoute } from "./planes.mjs";
 import { handleSetupPage } from "./cameras-setup.mjs";
 import { startFirmwareJob, updateFirmwareJob, publicFirmwareJob, firmwareJobDeliveryUncertain } from "./firmware-job-status.mjs";
 import { firmwareCapability, firmwareWorkflowPaths } from "./firmware-automation.mjs";
@@ -3740,6 +3741,7 @@ class BridgeRuntime {
 	    this.weather = new WeatherService(config.weather || {});
 	    this.podcasts = new PodcastService(config.podcasts || {});
 	    this.cameras = new CameraService(config.cameras || {});
+	    this.planes = new PlanesService({ ...(config.planes || {}), stateDir: config.stateDir, weather: this.weather });
 	    this.turnActivity = new Map();
 	    this.activitySeq = 0;
 	    this.heldPolls = new Set();
@@ -6612,6 +6614,13 @@ async function main() {
       return;
     }
 
+    // Planes: what's flying near the device and when the space station passes, as lines. The
+    // position and place asked about aren't logged.
+    if (req.method === "GET" && url.pathname.startsWith("/api/cardputer/planes/")) {
+      await handlePlanesRoute(runtime.planes, url.pathname, url.searchParams, device.device_id, res);
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/cardputer/device-actions") {
       json(res, 200, buildDeviceActionsPayload());
       return;
@@ -7888,15 +7897,19 @@ async function main() {
   const lanPort = config.podcasts?.lanPort === undefined ? LAN_PORT : Number(config.podcasts.lanPort);
   if (Number.isInteger(lanPort) && lanPort > 0 && lanPort < 65536) {
     const podcastsDoor = lanHandler(runtime.podcasts);
-    const lan = createServer((req, res) => { if (!cameraLanRoute(runtime.cameras, req, res)) podcastsDoor(req, res); });
+    const lan = createServer((req, res) => {
+      if (!cameraLanRoute(runtime.cameras, req, res) && !planesLanRoute(runtime.planes, req, res)) podcastsDoor(req, res);
+    });
     lan.on("error", (error) => {
       runtime.podcasts.lanPort = 0;
       runtime.cameras.lanPort = 0;
+      runtime.planes.lanPort = 0;
       console.warn(`[podcasts] home network audio off: ${String(error.code || error.message || error).slice(0, 80)}`);
     });
     lan.listen(lanPort, "0.0.0.0", () => {
       runtime.podcasts.lanPort = lanPort;
       runtime.cameras.lanPort = lanPort;
+      runtime.planes.lanPort = lanPort;
       console.log(`[podcasts] home network audio on port ${lanPort}`);
     });
   }
