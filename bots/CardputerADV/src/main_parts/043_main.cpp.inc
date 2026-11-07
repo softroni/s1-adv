@@ -1478,6 +1478,11 @@ bool handleLocalCommand(const String& input) {
     return true;
   }
 
+  if (cmd == "/planes" || cmd == "/plane" || cmd == "/iss") {
+    setUiMode(UiMode::Planes);
+    return true;
+  }
+
   if (cmd == "/syncassets") {
     fetchRemoteAssetManifest();
     syncAssetsFromManifest();

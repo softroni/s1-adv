@@ -1309,6 +1309,26 @@ constexpr uint8_t kCamera[32] = {
     0b00000000, 0b00000000,
 };
 
+// An airliner from above, nose up: Planes.
+constexpr uint8_t kAirliner[32] = {
+    0b00000001, 0b10000000,
+    0b00000011, 0b11000000,
+    0b00000011, 0b11000000,
+    0b00000011, 0b11000000,
+    0b00000011, 0b11000000,
+    0b00000111, 0b11100000,
+    0b00011111, 0b11111000,
+    0b01111111, 0b11111110,
+    0b11111111, 0b11111111,
+    0b11000011, 0b11000011,
+    0b00000011, 0b11000000,
+    0b00000011, 0b11000000,
+    0b00000111, 0b11100000,
+    0b00001111, 0b11110000,
+    0b00011100, 0b00111000,
+    0b00000000, 0b00000000,
+};
+
 // Same order as kLauncherGroups.
 constexpr const uint8_t* kGroups[] = {kStar, kRobot, kMusic, kStopwatch, kWrench, kHouse,
                                       kGamepad, kJoystick, kGear, kChip, kLab};

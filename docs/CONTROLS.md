@@ -239,6 +239,23 @@ an arrow or the volume keeps it going. Bluetooth (B) and typing
 HTTPS. [TV Remote](TV-REMOTE.md) has the details, including how
 to pair it.
 
+## Planes
+
+Planes is under Tab, Tools, and `/planes` or `/iss` opens it. It needs Wi-Fi and the bridge, and looks
+around the Cap's GPS fix, or the Weather city without one. `,` and `/` flip between its four pages,
+and Esc goes back to the sky map, whose Esc leaves. [Planes](PLANES.md) has the details.
+
+- **The sky map:** a round map with you in the middle and the planes numbered, nearest first, with a
+  list beside it. `;` and `.` pick one, Enter opens it, S keeps it in Spotted, `-` and `=` make the ring
+  smaller or bigger (10, 25 or 50 miles), and R looks again.
+- **A plane:** its type and route, which way to LOOK and how many fists above the horizon, its height,
+  speed and when it comes closest. `,` and `/` go to the other planes, and S keeps it.
+- **Look up!** comes with a chime when a plane is high overhead: Enter opens it, S keeps it.
+- **The space station:** its next passes you can see, with stars for brightness. `;` and `.` pick one,
+  Enter draws its path across the sky, and R rings 10 minutes before it, from any screen. On the path,
+  `,` and `/` go to the other passes. The next page shows where the station is right now.
+- **Spotted:** what you've kept, counted up. Enter lists the newest 40, and `;` and `.` scroll.
+
 ## NFC Notes
 
 NFC Notes is under Tab, Tools, and `/nfc` opens it. It needs the M5Stack NFC unit

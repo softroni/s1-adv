@@ -19,7 +19,7 @@ for f, s in [('002_main.cpp.inc', '  Podcasts,\n  TvRemote,\n'),
              ('022_main.cpp.inc', 'out = UiMode::TvRemote;'),
              ('043_main.cpp.inc', 'setUiMode(UiMode::TvRemote);'),
              ('047_main.cpp.inc', 'gUiMode == UiMode::TvRemote && !gLauncherVisible && tvRemoteEscape()'),
-             ('049_main.cpp.inc', '(gUiMode == UiMode::TvRemote || gUiMode == UiMode::Cameras) && (upDown || downDown || leftDown || rightDown)'),
+             ('049_main.cpp.inc', '(gUiMode == UiMode::TvRemote || gUiMode == UiMode::Cameras'),
              ('052_main.cpp.inc', 'case UiMode::TvRemote: return kTv;'),
              ('061_main.cpp.inc', 'renderTvRemoteUi();'),
              ('063_main.cpp.inc', 'case UiMode::TvRemote: return false;'),
@@ -42,7 +42,7 @@ assert typing.index('if (tvRemoteTakesText() && !keys.tab && handleTvRemoteKey(k
 assert typing.index('if (key == \'`\'') < typing.index('if (gUiMode == UiMode::TvRemote && !gLauncherVisible && !keys.tab && handleTvRemoteKey(key, keys)) return;') \
        < typing.index('if (handleFocusShortcut(lowerKey,keys)) return;')
 saver = part('009_main.cpp.inc')
-assert '(radioBusy() || radioOn() || podcastOn() || gUiMode == UiMode::TvRemote || gUiMode == UiMode::Cameras)' in saver, 'the saver would leave the app and stop Bluetooth'
+assert '(radioBusy() || radioOn() || podcastOn() || gUiMode == UiMode::TvRemote || gUiMode == UiMode::Cameras ||' in saver, 'the saver would leave the app and stop Bluetooth'
 wake = saver.split('bool handleScreensaverWake() {', 1)[1].split('\n}\n', 1)[0]
 assert wake.index('gUiMode == UiMode::TvRemote') < wake.index('setUiMode(target);'), "a dimmed remote's key goes through"
 ini = (root / 'bots/CardputerADV/platformio.ini').read_text()

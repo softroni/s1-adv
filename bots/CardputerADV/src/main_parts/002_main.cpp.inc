@@ -74,6 +74,7 @@ enum class UiMode : uint8_t {
   Podcasts,
   TvRemote,
   Cameras,
+  Planes,
 };
 
 enum class FocusState : uint8_t {

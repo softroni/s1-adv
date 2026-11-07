@@ -9,6 +9,7 @@ const char* uiModeName(UiMode mode) {
     case UiMode::Podcasts: return "Podcasts";
     case UiMode::TvRemote: return "TV Remote";
     case UiMode::Cameras: return "Cameras";
+    case UiMode::Planes: return "Planes";
     case UiMode::VlcRemote: return "VLC Remote";
     case UiMode::ChessMind: return "Chess Mind";
     case UiMode::PocketSynth: return "Pocket Synth";

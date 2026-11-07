@@ -12,13 +12,13 @@ part = lambda name: (parts / name).read_text()
 app = part('095_main.cpp.inc')
 
 # Wired in like the other apps.
-for f, s in [('002_main.cpp.inc', '  TvRemote,\n  Cameras,\n};'),
+for f, s in [('002_main.cpp.inc', '  TvRemote,\n  Cameras,\n'),
              ('004_main.cpp.inc', '{"House", "Cameras and remotes", rgb565_local(85, 146, 255), 4,'),
              ('004_main.cpp.inc', '{{"Cameras", UiMode::Cameras}, {"TV Remote", UiMode::TvRemote}, {"smartLamp", UiMode::SmartLamp},'),
              ('007_main.cpp.inc', 'case UiMode::Cameras: return "Cameras";'),
              ('022_main.cpp.inc', 'out = UiMode::Cameras;'),
              ('047_main.cpp.inc', 'gUiMode == UiMode::Cameras && !gLauncherVisible && camerasEscape()'),
-             ('049_main.cpp.inc', '(gUiMode == UiMode::TvRemote || gUiMode == UiMode::Cameras) && (upDown || downDown || leftDown || rightDown)'),
+             ('049_main.cpp.inc', '(gUiMode == UiMode::TvRemote || gUiMode == UiMode::Cameras'),
              ('052_main.cpp.inc', 'case UiMode::Cameras: return kCamera;'),
              ('061_main.cpp.inc', 'renderCamerasUi();'),
              ('063_main.cpp.inc', 'case UiMode::Cameras: return false;')]:
@@ -43,7 +43,7 @@ typing = part('048_main.cpp.inc').split('void handleTypingKey(', 1)[1]
 assert typing.index("if (key == '`'") < typing.index('handleCamerasKey(key, keys)) return;') < typing.index('if (handleFocusShortcut(lowerKey,keys)) return;'), \
     'its L, R and S come before the shortcuts that use them elsewhere, but after Esc'
 saver = part('009_main.cpp.inc')
-assert 'gUiMode == UiMode::TvRemote || gUiMode == UiMode::Cameras)) {' in saver, 'the saver would leave the app and its picture'
+assert 'gUiMode == UiMode::TvRemote || gUiMode == UiMode::Cameras ||' in saver, 'the saver would leave the app and its picture'
 wake = saver.split('bool handleScreensaverWake() {', 1)[1].split('\n}\n', 1)[0]
 assert wake.index('gUiMode == UiMode::Cameras') < wake.index('setUiMode(target);')
 # A picture drawn straight to the screen isn't covered by the canvas.

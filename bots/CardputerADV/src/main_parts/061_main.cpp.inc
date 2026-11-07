@@ -11,6 +11,9 @@
       case UiMode::Cameras:
         renderCamerasUi();
         break;
+      case UiMode::Planes:
+        renderPlanesUi();
+        break;
       case UiMode::VlcRemote:
         renderVlcRemoteUi();
         break;
@@ -411,6 +414,8 @@ void loop() {
   servicePodcasts();
   serviceTvRemote();
   serviceCameras();
+  servicePlanes();
+  servicePlanesReminder();  // The station reminder rings from any screen, the radio playing or not.
   serviceVlcRemote();
   if (vlcBusy()) {
     // Bounded DNS/TCP owner; keep input/timers alive, defer background TLS/OTA.

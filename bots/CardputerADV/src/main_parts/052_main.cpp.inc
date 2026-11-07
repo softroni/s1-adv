@@ -85,6 +85,7 @@ const uint8_t* launcherItemIcon(const LauncherSubItem& item) {
     case UiMode::IrRemote: return kRemote;
     case UiMode::TvRemote: return kTv;
     case UiMode::Cameras: return kCamera;
+    case UiMode::Planes: return kAirliner;
     case UiMode::SmartLamp: return kBulb;
     case UiMode::Sonar: return kSonar;
     case UiMode::Mesh: return kMesh;

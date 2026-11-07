@@ -13,7 +13,7 @@ code=r'''
 #include <cstdint>
 #include <string>
 using String=std::string;
-enum class UiMode {Home,Clock,Face,ChatFull,CMatrix,ChessMind,Tetris,TvRemote,Cameras};
+enum class UiMode {Home,Clock,Face,ChatFull,CMatrix,ChessMind,Tetris,TvRemote,Cameras,Planes};
 UiMode gUiMode=UiMode::Tetris,gScreensaverPreviousMode=UiMode::Home;
 bool gScreensaverActive=false,gScreensaverDimmed=false,gScreenOffActive=false,gRealtimeScreenVisible=false;
 struct {bool screensaverClockOnWake=false;} gDeviceSettings;
