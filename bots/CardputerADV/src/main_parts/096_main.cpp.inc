@@ -890,6 +890,23 @@ const planes::Plane* plSelected() {
   if (gPlSkyOk && gPlSel < gPlSky->count && !strcmp(gPlSky->planes[gPlSel].hex, gPlSelHex)) return &gPlSky->planes[gPlSel];
   return gPlShown.hex[0] ? &gPlShown : nullptr;
 }
+// Where a plane's going, to fit width in the current font: "DEN to London" (the origin's code, the
+// destination's name), then "to London", then the codes alone; "" when no route is known.
+String plRouteWords(const planes::Plane& p, int16_t width) {
+  auto& d = gCanvas;
+  const char* to = p.toCity[0] ? p.toCity : p.to;
+  const char* from = p.from[0] ? p.from : p.fromCity;
+  if (!to[0]) return from[0] ? fitCurrentFontToWidth(String("from ") + from, width) : String();
+  String words = from[0] ? String(from) + " to " + to : String("to ") + to;
+  if (d.textWidth(words) <= width) return words;
+  words = String("to ") + to;
+  if (d.textWidth(words) <= width) return words;
+  if (p.from[0] && p.to[0]) {
+    words = String(p.from) + " to " + p.to;
+    if (d.textWidth(words) <= width) return words;
+  }
+  return fitCurrentFontToWidth(String("to ") + to, width);
+}
 void plDrawPlane() {
   auto& d = gCanvas;
   const planes::Plane* sel = plSelected();
@@ -915,84 +932,97 @@ void plDrawPlane() {
   if (p.track >= 0 && p.speedKt >= 20) {
     // Its path, flying straight on: two minutes back, faint, and five ahead, bright, with a dot for
     // each minute and an arrow where it reaches the horizon or the five minutes end.
-    int px = 0, py = 0, lx = 0, ly = 0, ahead = 0;
+    int px = 0, py = 0;
     bool have = false;
+    int16_t fx[32], fy[32];  // The path ahead, from the plane, for its arrow.
+    uint8_t fn = 0;
     for (int32_t s = -120; s <= 300; s += 10) {
       const planes::SkySpot spot = planes::skyAt(p, s);
       if (spot.el < 0) { if (s > 0) break; have = false; continue; }
       planes::skyPoint(spot.az, spot.el, kPlMapR, dx, dy);
       const int x = kPlMapX + dx, y = kPlMapY + dy;
       if (have && s <= 0 && (s / 10) % 2) d.drawLine(px, py, x, y, plMuted());  // Dashed: where it came from.
-      if (have && s > 0) {
-        d.drawLine(px, py, x, y, ink);
-        d.drawLine(px + 1, py, x + 1, y, ink);
-        ++ahead;
-      }
+      if (have && s > 0)
+        for (int o = -1; o <= 1; ++o) { d.drawLine(px + o, py, x + o, y, ink); d.drawLine(px, py + o, x, y + o, ink); }
+      if (s >= 0 && fn < 32) { fx[fn] = int16_t(x); fy[fn] = int16_t(y); ++fn; }
       if (s > 0 && s % 60 == 0) d.fillCircle(x, y, 1, TFT_WHITE);
       if (s == 10) heading = planes::normalDeg(int(lround(atan2(double(x - planeX), double(planeY - y)) * 180.0 / 3.14159265358979)));
-      lx = px; ly = py; px = x; py = y; have = true;
+      px = x; py = y; have = true;
     }
-    if (ahead >= 2 && (px != lx || py != ly)) {
-      const double a = atan2(double(px - lx), double(ly - py)), s = sin(a), c = -cos(a);
-      const int bx = px - int(lround(s * 6)), by = py - int(lround(c * 6));
-      d.fillTriangle(px + int(lround(s * 2)), py + int(lround(c * 2)), bx - int(lround(c * 4)), by + int(lround(s * 4)),
-                     bx + int(lround(c * 4)), by - int(lround(s * 4)), ink);
+    // The arrow points the way the path last went: near the horizon a plane flying away hardly
+    // moves on the circle, so from a point at least 6 pixels back, not from the one before.
+    int k = int(fn) - 2;
+    if (fn >= 2) while (k > 0 && abs(fx[k] - fx[fn - 1]) + abs(fy[k] - fy[fn - 1]) < 6) --k;
+    if (fn >= 2 && (fx[k] != fx[fn - 1] || fy[k] != fy[fn - 1])) {
+      px = fx[fn - 1];
+      py = fy[fn - 1];
+      const double a = atan2(double(px - fx[k]), double(fy[k] - py)), s = sin(a), c = -cos(a);
+      const int bx = px - int(lround(s * 7)), by = py - int(lround(c * 7));
+      d.fillTriangle(px + int(lround(s * 3)), py + int(lround(c * 3)), bx - int(lround(c * 6)), by + int(lround(s * 6)),
+                     bx + int(lround(c * 6)), by - int(lround(s * 6)), ink);
+      // Where it's going, beside the arrow: above it, or below near the top, kept on the map.
+      if (p.to[0]) {
+        d.setFont(&fonts::Font0);
+        const int16_t tw = d.textWidth(p.to);
+        double ux = c, uy = -s;  // Square to the path.
+        if ((uy > 0) != (py < 40)) { ux = -ux; uy = -uy; }
+        int16_t tx = int16_t(px - lround(s * 4) + lround(ux * 11) - tw / 2), ty = int16_t(py - lround(c * 4) + lround(uy * 11) - 4);
+        tx = max<int16_t>(1, min<int16_t>(tx, int16_t(kPlCardX - 3 - tw)));
+        ty = max<int16_t>(23, min<int16_t>(ty, 114));
+        d.fillRect(tx - 1, ty - 1, tw + 2, 10, TFT_BLACK);
+        d.setTextColor(ink);
+        d.setCursor(tx, ty);
+        d.print(p.to);
+      }
     }
   }
   if (overhead) plPulse(planeX, planeY, plAmber());
-  plGlyph(planeX, planeY, heading, ink, true);
+  plGlyph(planeX, planeY, heading, TFT_WHITE, false);
   // Beside it: what it is, where it's going, which way and how high to look, and its numbers.
   const int16_t x = kPlCardX, w = 238 - kPlCardX;
   d.setFont(&fonts::Font2);
   d.setTextColor(p.type[0] ? TFT_WHITE : plMuted());
-  d.setCursor(x, 23);
+  d.setCursor(x, 22);
   d.print(fitCurrentFontToWidth(p.type[0] ? p.type : "Type not known", w));
-  const char* from = p.fromCity[0] ? p.fromCity : p.from;
-  const char* to = p.toCity[0] ? p.toCity : p.to;
-  d.setFont(&fonts::Font0);
-  d.setCursor(x, 40);
-  if (from[0] || to[0]) {
-    d.setTextColor(plAccent());
-    d.print(fitCurrentFontToWidth(String(from[0] ? from : "?") + " to " + (to[0] ? to : "?"), w));
-  } else {
-    d.setTextColor(plMuted());
-    d.print("Route not known");
-  }
+  d.setCursor(x, 38);
+  String route = plRouteWords(p, w);
+  d.setTextColor(route.length() ? plAccent() : plMuted());
+  d.print(route.length() ? route : String("Route not known"));
   char text[48], alt[16], dist[16], speed[16];
   if (overhead) {
     // Look up: big, and which way it's crossing the sky.
     d.setFont(&fonts::FreeSansBold12pt7b);
     d.setTextColor(plFlashOn() ? plAmber() : TFT_WHITE);
-    d.setCursor(x, 48);
+    d.setCursor(x, 54);
     d.print("LOOK UP!");
     if (p.track >= 0) snprintf(text, sizeof(text), "from %s, going %s", planes::compass(p.track + 180), planes::compass(p.track));
     else planes::heightShort(text, sizeof(text), p.elev);
     d.setFont(&fonts::Font2);
     d.setTextColor(plAmber());
-    d.setCursor(x, 69);
+    d.setCursor(x, 72);
     d.print(fitCurrentFontToWidth(text, w));
   } else {
     d.setFont(&fonts::FreeSansBold9pt7b);
     d.setTextColor(TFT_WHITE);
-    d.setCursor(x, 51);
+    d.setCursor(x, 56);
     d.print(fitCurrentFontToWidth(planes::compassWord(p.bearing), w));
     planes::heightShort(text, sizeof(text), p.elev);
     d.setFont(&fonts::Font2);
     d.setTextColor(plAmber());
-    d.setCursor(x, 68);
+    d.setCursor(x, 71);
     d.print(fitCurrentFontToWidth(text, w));
   }
   planes::altitudeText(alt, sizeof(alt), p.altFt, plUnits());
   plDistanceWords(dist, sizeof(dist), p.distM);
-  plTile(x, 87, 78, "HEIGHT", alt, ink);
+  plTile(x, 88, 78, "HEIGHT", alt, ink);
   if (p.climbFpm >= 300 || p.climbFpm <= -300) {
     // Climbing or coming down: a small arrow after the height.
     d.setFont(&fonts::Font2);
-    const int16_t ax = x + d.textWidth(alt) + 5, ay = 87 + 9 + 8;
+    const int16_t ax = x + d.textWidth(alt) + 5, ay = 88 + 9 + 8;
     if (p.climbFpm > 0) d.fillTriangle(ax, ay + 3, ax + 6, ay + 3, ax + 3, ay - 3, ink);
     else d.fillTriangle(ax, ay - 3, ax + 6, ay - 3, ax + 3, ay + 3, ink);
   }
-  plTile(x + 82, 87, 48, "AWAY", dist);
+  plTile(x + 82, 88, 48, "AWAY", dist);
   planes::speedText(speed, sizeof(speed), p.speedKt, plUnits());
   const char* toPlace = p.toCity[0] ? p.toCity : p.to;
   const char* fromPlace = p.fromCity[0] ? p.fromCity : p.from;
@@ -1002,7 +1032,7 @@ void plDrawPlane() {
   else snprintf(text, sizeof(text), "%s", speed);
   d.setFont(&fonts::Font0);
   d.setTextColor(plMuted());
-  d.setCursor(x, 114);
+  d.setCursor(x, 115);
   d.print(fitCurrentFontToWidth(text, w));
   plKeys({{",/", "Other planes"}, {"S", "Keep"}, {"Esc", "Back"}});
 }

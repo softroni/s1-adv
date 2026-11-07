@@ -71,6 +71,10 @@ assert 'PlView::LookUp' not in app and 'PlView::DroneAlert' not in app and 'focu
 note = app.split('void plNoteOverhead() {', 1)[1].split('\n}\n', 1)[0]
 assert 'gPlView' not in note.replace('plWantsSky()', '') and 'plChime(planes::Chime::LookUp);' in note
 assert "else if (lower == 'u' && plOverhead() >= 0)" in app
+# Where it's going: the destination by name in the bigger font, its code at the path's arrow.
+route = app.split('String plRouteWords(', 1)[1].split('\n}\n', 1)[0]
+assert 'String("to ") + to' in route and 'fitCurrentFontToWidth' in route
+assert 'd.print(p.to);' in app.split('void plDrawPlane() {', 1)[1].split('\n}\n', 1)[0]
 for fn in ['plDrawSky', 'plDrawPlane', 'plDrawPasses', 'plDrawPass', 'plDrawNow', 'plDrawSpotted',
            'plDrawSightings', 'plDrawGoOut', 'plDrawDrones', 'plDrawDrone', 'plDrawPlaneList']:
     body = app.split('void %s() {' % fn, 1)[1].split('\n}\n', 1)[0]

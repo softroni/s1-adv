@@ -73,10 +73,12 @@ out. It's placed from where you are (the Cap's GPS, or the Weather city without 
 direction from you and how high it looks.
 
 Its **path** is drawn across it, flying straight on: dashed where it came from over the last two
-minutes, and bright for the next five, with a white dot each minute and an arrow where it ends or
-goes below the horizon. So you can see which way it's going, and whether it's about to pass over.
+minutes, and a thick bright line for the next five, with a white dot each minute and an arrow where
+it ends or goes below the horizon, the code of the airport it's going to beside the arrow. So you can
+see which way it's going, and whether it's about to pass over.
 
-Beside it: the plane's type and route (when the flight data has one; small planes usually don't),
+Beside it: the plane's type and where it's going, like "JFK to London" (the airport it left by its code,
+where it's going by name, or just "to London" when both don't fit; small planes usually have no route),
 which way to look in big letters, and how high in **fists**: hold your arm out straight with a fist,
 put the bottom of your fist on the horizon, and stack fists on top, each about 10 degrees of sky.
 Then its height, with a small arrow when it's climbing or coming down, how far away it is, and its
