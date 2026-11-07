@@ -21,6 +21,8 @@ enum class PlJob : uint8_t { None, Ticket, Near, Iss, Report };
 constexpr uint8_t kGpsForPlanes = 16;            // Beside 081's holders: Lab 1, once 2, Pulse 4, Mesh 8.
 constexpr uint32_t kPlNearEveryMs = 10000;       // Planes move a mile in about ten seconds.
 constexpr uint32_t kPlIssEveryMs = 10UL * 60UL * 1000UL, kPlNowEveryMs = 20000;
+// Away from home each ask is an HTTPS handshake of about 40 KB and seconds of work: less often.
+constexpr uint32_t kPlNearAwayMs = 30000, kPlNowAwayMs = 60000;
 constexpr uint32_t kPlRetryMs = 15000;
 constexpr uint32_t kPlLookUpShowMs = 20000, kPlLookUpGapMs = 45000;
 constexpr uint32_t kPlNoticeMs = 3000;
@@ -340,7 +342,7 @@ void plFinished() {
       case PlJob::Near:
         if (e == camera_net::Error::None) {
           plTakeNear(data, length);
-          gPlNearDueMs = now + kPlNearEveryMs;
+          gPlNearDueMs = now + (viaHome ? kPlNearEveryMs : kPlNearAwayMs);
           appendRuntimeLog("PLANES", String("near ") + (gPlSky ? gPlSky->count : 0) + " " + tookMs + "ms " + (viaHome ? "home" : "https"));
         } else {
           gPlProblem = plProblemText(e, word);
@@ -351,7 +353,7 @@ void plFinished() {
       case PlJob::Iss:
         if (e == camera_net::Error::None) {
           plTakeIss(data, length);
-          gPlIssDueMs = now + (gPlView == PlView::Now ? kPlNowEveryMs : kPlIssEveryMs);
+          gPlIssDueMs = now + (gPlView == PlView::Now ? (viaHome ? kPlNowEveryMs : kPlNowAwayMs) : kPlIssEveryMs);
         } else {
           gPlSpaceProblem = plProblemText(e, word);
           gPlIssDueMs = now + (word == "unknown_place" || word == "not_found" ? 60000 : kPlRetryMs);

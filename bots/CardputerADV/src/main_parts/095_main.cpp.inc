@@ -1996,6 +1996,8 @@ void renderCamerasUi() {
 
 bool camerasOn() { return gUiMode == UiMode::Cameras; }
 // The worker is asking the bridge over HTTPS: away from home, or the home door's ticket. The memory
-// guard lets that pass (010), as it does the inbox's.
-bool cameraHttpsBusy() { return gUiMode == UiMode::Cameras && camera_net::busy() && !camera_net::overHome(); }
+// guard lets that pass (010), as it does the inbox's. Planes asks through the same worker.
+bool cameraHttpsBusy() {
+  return (gUiMode == UiMode::Cameras || gUiMode == UiMode::Planes) && camera_net::busy() && !camera_net::overHome();
+}
 }  // namespace

@@ -126,7 +126,7 @@ assert len(kinds) == len(words), 'a word for each kind of request, in order'
 guard = part('010_main.cpp.inc').split('void serviceMemoryGuard() {', 1)[1].split('\n}\n', 1)[0]
 assert guard.index('if (cameraHttpsBusy()) { criticalSinceMs = 0; return; }') < guard.index('ESP.restart();')
 assert guard.index('noteRestart("memory", freeHeap, largest);') < guard.index('ESP.restart();')
-assert 'bool cameraHttpsBusy() { return gUiMode == UiMode::Cameras && camera_net::busy() && !camera_net::overHome(); }' in app
+assert '(gUiMode == UiMode::Cameras || gUiMode == UiMode::Planes) && camera_net::busy() && !camera_net::overHome();' in app
 net = (src / 'camera_net.cpp').read_text()
 assert 'vTaskPrioritySet(nullptr, wantHome ? kHomePriority : kHttpsPriority);' in net and 'kHttpsPriority = tskIDLE_PRIORITY' in net, \
     'HTTPS on the worker runs at idle priority, so a handshake cannot starve the idle task'

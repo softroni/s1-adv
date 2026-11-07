@@ -140,8 +140,8 @@ What a drone says about itself is what you see: the Cardputer can't check it.
 
 ## How it works
 
-The Cardputer asks the bridge every 10 seconds while the sky map or a plane is on screen, and for the
-station when its pages are. At home it goes over the bridge's plain-HTTP door on your Wi-Fi, as
+The Cardputer asks the bridge every 10 seconds while the sky map or a plane is on screen (every 30
+away from home, where each ask is a heavier HTTPS one), and for the station when its pages are. At home it goes over the bridge's plain-HTTP door on your Wi-Fi, as
 Podcasts and Cameras do, and away from home over HTTPS. The bridge
 (`bridge/src/planes.mjs`) answers in short lines of text:
 
