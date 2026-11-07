@@ -338,8 +338,18 @@ export function sendCameraError(res, error, where = "") {
 }
 
 // The HTTPS side's route, with the device already known from its token. True when it answered.
+// Each of the device's requests, but its frames and sound, in the log: which way it came, the route,
+// the answer and how long it took. No camera, clip or name is in it.
+const QUIET = new Set(["live/frame", "live/audio"]);
+function traceRequest(via, what, res) {
+  if (QUIET.has(what)) return;
+  const started = Date.now();
+  res.once("finish", () => console.info(`[cameras] device ${via} ${String(what).slice(0, 16)} ${res.statusCode} ${Date.now() - started}ms`));
+}
+
 export async function handleCameraRoute(service, pathname, params, device, res) {
   const what = pathname.slice("/api/cardputer/cameras/".length);
+  traceRequest("https", /^[a-z/]+$/u.test(what) ? what : "?", res);
   try {
     if (what === "ticket") { lines(res, service.ticketLines(device)); return; }
     if (what === "setup") { lines(res, service.setupLines()); return; }
@@ -360,6 +370,7 @@ export function cameraLanRoute(service, req, res) {
   const remote = String(req.socket?.remoteAddress || "").replace(/^::ffff:/u, "");
   const held = req.method === "GET" && match && WHAT.has(match[2]) && (homeAddress(remote) || remote === "127.0.0.1")
     ? service.redeem(match[1]) : null;
+  traceRequest("home", match && WHAT.has(match[2]) ? match[2] : "?", res);
   if (!held) {
     res.writeHead(404, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
     res.end("not_found\n");
