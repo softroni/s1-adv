@@ -691,6 +691,7 @@ bool handleCamerasKey(char key, const Keyboard_Class::KeysState& keys);
 void renderCamerasUi();
 bool cameraDrawsDirect();
 bool planesEscape();
+bool planesHoldsWifi();
 void beginPlanes();
 void stopPlanes();
 void servicePlanes();

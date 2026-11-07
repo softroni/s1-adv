@@ -131,6 +131,7 @@ jobs:
       - run: python scripts/test_tv_remote.py
       - run: python scripts/test_cameras.py
       - run: python scripts/test_planes.py
+      - run: python scripts/test_drones.py
       - run: python scripts/test_smartlamp_direct.py
       - run: python scripts/test_pulse_chat_geometry.py
       - run: python scripts/test_home_update.py

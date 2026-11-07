@@ -164,6 +164,7 @@ void serviceSetupPortal() {}
 bool wifiSettingsOwnsRadio() { return false; }
 bool gTvHoldsWifi = false;
 bool tvRemoteHoldsWifi() { return gTvHoldsWifi; }
+bool planesHoldsWifi() { return false; }
 bool ensureCaptivePortalAccess(bool, const char*) { return true; }
 void syncClockFromNtp(bool) {}
 void startHubWebSocket() {}

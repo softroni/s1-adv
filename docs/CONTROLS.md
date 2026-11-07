@@ -255,6 +255,9 @@ and Esc goes back to the sky map, whose Esc leaves. [Planes](PLANES.md) has the 
   Enter draws its path across the sky, and R rings 10 minutes before it, from any screen. On the path,
   `,` and `/` go to the other passes. The next page shows where the station is right now.
 - **Spotted:** what you've kept, counted up. Enter lists the newest 40, and `;` and `.` scroll.
+- **Drones:** Enter listens for drones' Remote ID over Wi-Fi, with no bridge or internet. While it
+  listens, Wi-Fi leaves your network, and it rejoins when you leave the page. `;` and `.` pick a drone,
+  Enter opens it and S keeps it in Spotted. A new drone chimes with "Drone nearby!".
 
 ## NFC Notes
 

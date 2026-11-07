@@ -1,11 +1,13 @@
 # Planes
 
 Planes shows what's flying over you right now, says which way to look and how high, and tells you
-when the International Space Station passes overhead where you can see it. It keeps a collection of
-the planes you've spotted. It's under Tab, Tools, and `/planes` (or `/iss`) opens it.
+when the International Space Station passes overhead where you can see it. It hears drones nearby
+too, and keeps a collection of what you've spotted. It's under Tab, Tools, and `/planes` (or `/iss`)
+opens it.
 
-It needs Wi-Fi and the bridge. The Cardputer asks the bridge, and the bridge asks the flight
-trackers and works out the station's passes.
+Planes and the station need Wi-Fi and the bridge: the Cardputer asks the bridge, and the bridge asks
+the flight trackers and works out the station's passes. Drones need neither: the Cardputer hears them
+itself.
 
 ## Where it looks
 
@@ -19,7 +21,7 @@ are is written to its log.
 
 ## The pages
 
-`,` and `/` flip between four pages. The dots in the bottom corner show which one you're on. Esc
+`,` and `/` flip between five pages. The dots in the bottom corner show which one you're on. Esc
 on any of them goes back to the sky map, and Esc on the sky map leaves the app.
 
 ### The sky map
@@ -111,6 +113,31 @@ airlines and types, the type that's newest in the collection, the highest and lo
 airline seen most. **Enter** lists the newest 40, and `;` and `.` scroll. A plane can be kept once
 each time Planes is opened.
 
+### Drones
+
+![Drones heard nearby, on the map and in a list](assets/planes/drones.png)
+
+In the US nearly every drone has to broadcast **Remote ID** while it's on: who it is, where it is,
+how high and how fast, and where it's flown from. The Cardputer can hear the ones that send it over
+Wi-Fi, which DJI's drones do, from a few hundred feet away, sometimes more. Drones that send it only
+over Bluetooth can't be heard yet.
+
+The page doesn't listen until you press **Enter**, because while it listens the Cardputer's Wi-Fi
+leaves your network to work as a receiver: the plane list, the chat and updates wait. It joins your
+network again as soon as you leave the page. Listening needs no internet, so it works away from home
+too.
+
+- **The map** shows the drones heard, numbered, strongest signal first, with the Cap's GPS fix. Without
+  one, the list still shows each drone's height and how strong its signal is.
+- **`;` and `.`** pick a drone, **Enter** opens it, and **S** keeps it in Spotted.
+- **A drone** says what kind it is, the pilot's own words if they gave any, its ID, which way to look
+  and how many fists up, its height, distance and speed, and how far it is from where it's flown from.
+- **Drone nearby!** comes with a chime the first time each drone is heard while the page is open.
+
+![A drone: which way to look, how high and where it's flown from](assets/planes/drone.png)
+
+What a drone says about itself is what you see: the Cardputer can't check it.
+
 ## How it works
 
 The Cardputer asks the bridge every 10 seconds while the sky map or a plane is on screen, and for the
@@ -130,6 +157,12 @@ Podcasts and Cameras do, and away from home over HTTPS. The bridge
 
 The bridge needs satellite.js, so after updating, run `npm install` in `bridge/` before restarting it.
 
+**Drones** don't go through the bridge. While the page listens, the Wi-Fi radio stays off any network
+in a listening mode, mostly on channel 6, where drones send Remote ID by Wi-Fi Aware, and visits the
+other channels in turn for drones that send it in beacons, staying longer where one was heard.
+`drone_id.h` reads the ASTM F3411 messages, following the layouts in the Open Drone ID reference code
+(opendroneid-core-c).
+
 ## If something goes wrong
 
 - **"The bridge needs an update for Planes":** the bridge is older than this firmware. Update it, run
@@ -138,3 +171,5 @@ The bridge needs satellite.js, so after updating, run `npm install` in `bridge/`
   a state, works best.
 - **No passes:** there may be none you can see this week. Try again in a few days.
 - **A route that looks wrong:** the routes come from a shared database and are sometimes out of date.
+- **No drones heard:** a drone has to be on and close, and send Remote ID over Wi-Fi. Some send it only
+  over Bluetooth, which the Cardputer doesn't listen to yet.

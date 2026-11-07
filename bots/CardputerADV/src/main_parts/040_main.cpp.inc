@@ -405,6 +405,7 @@ bool ensureWifiForHttp(const char* reason, uint32_t timeoutMs) {
   }
   // Or take back the memory TV Remote's Bluetooth is using. It gives Wi-Fi back when it stops.
   if (tvRemoteHoldsWifi()) return false;
+  if (planesHoldsWifi()) return false;  // Listening for drones; the network comes back after.
   if (gWifiSsid.isEmpty()) {
     activateTemporaryMidaWifi("http-missing-wifi");
   }

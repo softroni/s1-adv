@@ -47,6 +47,12 @@ Arduino ESP32 2.0.14 WebServer, LGPL-2.1-or-later. Its source headers, license
 and [security backport notes](bots/CardputerADV/lib/WebServer/S1-ADV-PATCHES.md)
 are retained.
 
+## Drones
+
+The Drones page reads ASTM F3411 Remote ID itself, with its own decoder. Its message and frame
+layouts follow [opendroneid-core-c](https://github.com/opendroneid/opendroneid-core-c), the Open Drone
+ID reference implementation (Apache-2.0); none of its code is included.
+
 ## Planes data
 
 The bridge asks these free services for the Planes app and keeps their answers for a short while.
