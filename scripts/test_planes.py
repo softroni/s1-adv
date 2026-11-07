@@ -15,11 +15,11 @@ app = part('096_main.cpp.inc')
 
 # Wired in like the other apps.
 for f, s in [('002_main.cpp.inc', '  Cameras,\n  Planes,\n'),
-             ('004_main.cpp.inc', '{"Pocket Synth", UiMode::PocketSynth}, {"Planes", UiMode::Planes}}},'),
+             ('004_main.cpp.inc', '{"Pocket Synth", UiMode::PocketSynth}, {"Skywatch", UiMode::Planes}}},'),
              ('004_main.cpp.inc', '{"Tools", "Local hardware tools", rgb565_local(255, 210, 64), 7,'),
-             ('007_main.cpp.inc', 'case UiMode::Planes: return "Planes";'),
+             ('007_main.cpp.inc', 'case UiMode::Planes: return "Skywatch";'),
              ('022_main.cpp.inc', 'out = UiMode::Planes;'),
-             ('043_main.cpp.inc', 'cmd == "/planes"'),
+             ('043_main.cpp.inc', 'cmd == "/skywatch" || cmd == "/planes"'),
              ('047_main.cpp.inc', 'gUiMode == UiMode::Planes && !gLauncherVisible && planesEscape()'),
              ('049_main.cpp.inc', 'gUiMode == UiMode::Cameras || gUiMode == UiMode::Planes) && (upDown || downDown || leftDown || rightDown)'),
              ('052_main.cpp.inc', 'case UiMode::Planes: return kAirliner;'),

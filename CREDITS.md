@@ -29,7 +29,7 @@ The original `Copyright (c) 2026 Omnibot contributors` notice remains in
 - ArduinoJson, arduinoWebSockets, Arduino-IRremote and MFRC522: device libraries.
 - ws and Busboy: bridge WebSocket and upload handling.
 - [satellite.js](https://github.com/shashwatak/satellite-js), MIT: the bridge's SGP4 orbit model for the
-  space station's passes in Planes.
+  space station's passes in Skywatch.
 - [eufy-sdk](https://github.com/mega-yfue/eufy-sdk), Apache-2.0: the optional camera helper's eufy client. It
   is installed beside the bridge's data, not shipped with it, and is independent of Anker and eufy.
 - The firmware's `third_party/` directory retains applicable protocol notices.
@@ -53,9 +53,9 @@ The Drones page reads ASTM F3411 Remote ID itself, with its own decoder. Its mes
 layouts follow [opendroneid-core-c](https://github.com/opendroneid/opendroneid-core-c), the Open Drone
 ID reference implementation (Apache-2.0); none of its code is included.
 
-## Planes data
+## Skywatch data
 
-The bridge asks these free services for the Planes app and keeps their answers for a short while.
+The bridge asks these free services for the Skywatch app and keeps their answers for a short while.
 Each keeps its own terms; none of them is affiliated with S1-ADV.
 
 - [adsb.lol](https://adsb.lol): aircraft positions, **ODbL 1.0**.

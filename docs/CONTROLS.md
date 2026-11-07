@@ -239,11 +239,11 @@ an arrow or the volume keeps it going. Bluetooth (B) and typing
 HTTPS. [TV Remote](TV-REMOTE.md) has the details, including how
 to pair it.
 
-## Planes
+## Skywatch
 
-Planes is under Tab, Tools, and `/planes` or `/iss` opens it. It needs Wi-Fi and the bridge, and looks
+Skywatch is under Tab, Tools, and `/skywatch` (or `/planes`, `/iss`) opens it. It needs Wi-Fi and the bridge, and looks
 around the Cap's GPS fix, or the Weather city without one. `,` and `/` flip between its four pages,
-and Esc goes back to the sky map, whose Esc leaves. [Planes](PLANES.md) has the details.
+and Esc goes back to the sky map, whose Esc leaves. [Skywatch](SKYWATCH.md) has the details.
 
 - **The sky map:** a round map with you in the middle and the planes numbered, nearest first, with a
   list beside it. `;` and `.` pick one, Enter opens it, S keeps it in Spotted, `-` and `=` make the ring

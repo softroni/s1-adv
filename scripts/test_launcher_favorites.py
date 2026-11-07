@@ -96,6 +96,9 @@ int main() {
   assert(load("").count == 0 && load(nullptr).count == 0);
   // Names must match whole: a prefix or a longer name is someone else.
   assert(load("Games/Tet\nGames/Tetris2\nGame/Snake\n").count == 1 && !std::strcmp(label(load("Game/Snake\n"), 0), "Snake"));
+  // A renamed app keeps its place: Planes became Skywatch.
+  assert(load("Tools/Planes\n").count == 1 && !std::strcmp(label(load("Tools/Planes\n"), 0), "Skywatch"));
+  assert(load("Tools/Skywatch\nTools/Planes\n").count == 1);
   // Past nine, the rest are dropped.
   std::string many;
   for (const char* name : {"Tetris", "NES", "Checkers", "Minesweeper", "Snake"}) many += std::string("Games/") + name + "\n";

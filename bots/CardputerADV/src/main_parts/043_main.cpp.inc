@@ -1480,7 +1480,7 @@ bool handleLocalCommand(const String& input) {
     return true;
   }
 
-  if (cmd == "/planes" || cmd == "/plane" || cmd == "/iss") {
+  if (cmd == "/skywatch" || cmd == "/planes" || cmd == "/plane" || cmd == "/iss") {
     setUiMode(UiMode::Planes);
     return true;
   }

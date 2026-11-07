@@ -113,7 +113,7 @@ constexpr LauncherGroup kLauncherGroups[kLauncherGroupCount] = {
       {"Chess", UiMode::Chess}, {"BrainFlow", UiMode::BrainFlow}, {"KeyRush", UiMode::KeyRush}}},
     {"Tools", "Local hardware tools", rgb565_local(255, 210, 64), 7,
      {{"Calculator", UiMode::Calculator}, {"NFC Notes", UiMode::NfcNotes}, {"RFID Lab", UiMode::RfidLab},
-      {"Sonar", UiMode::Sonar}, {"Mesh", UiMode::Mesh}, {"Pocket Synth", UiMode::PocketSynth}, {"Planes", UiMode::Planes}}},
+      {"Sonar", UiMode::Sonar}, {"Mesh", UiMode::Mesh}, {"Pocket Synth", UiMode::PocketSynth}, {"Skywatch", UiMode::Planes}}},
     {"House", "Cameras and remotes", rgb565_local(85, 146, 255), 4,
      {{"Cameras", UiMode::Cameras}, {"TV Remote", UiMode::TvRemote}, {"smartLamp", UiMode::SmartLamp},
       {"IR Remote", UiMode::IrRemote}}},

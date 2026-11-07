@@ -52,6 +52,19 @@ struct List {
 inline bool sameText(const char* text, const char* other, size_t otherLength) {
   return strlen(text) == otherLength && strncmp(text, other, otherLength) == 0;
 }
+// Apps that changed name, so a line saved with the old one still finds the app.
+struct Renamed {
+  const char* was;
+  const char* now;
+};
+constexpr Renamed kRenamed[] = {{"Planes", "Skywatch"}};  // 0.2.327
+// Whether a saved name is the app called current: its name now, or the one it had before.
+inline bool sameApp(const char* current, const char* saved, size_t savedLength) {
+  if (sameText(current, saved, savedLength)) return true;
+  for (const Renamed& r : kRenamed)
+    if (!strcmp(current, r.now) && sameText(r.was, saved, savedLength)) return true;
+  return false;
+}
 
 // The app called label in the tab called title. If that tab no longer has it, the one tab that
 // does, so an app that moved tab stays a favorite. A name in two tabs, like Pomodoro, needs both.
@@ -62,7 +75,7 @@ bool locate(const Group* groups, uint8_t groupCount, const char* title, size_t t
   Ref only{0, 0};
   for (uint8_t g = 0; g < groupCount; ++g) {
     for (uint8_t i = 0; i < groups[g].count; ++i) {
-      if (!sameText(groups[g].items[i].label, label, labelLength)) continue;
+      if (!sameApp(groups[g].items[i].label, label, labelLength)) continue;
       if (sameText(groups[g].title, title, titleLength)) {
         found = Ref{g, i};
         return true;

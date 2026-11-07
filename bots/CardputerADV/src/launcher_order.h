@@ -53,7 +53,7 @@ void read(uint8_t order[][kMax], const Group* groups, uint8_t groupCount, const 
         if (!launcher_favorites::sameText(groups[g].title, text, titleLength)) continue;
         for (uint8_t i = 0; i < groups[g].count && i < kMax; ++i) {
           const unsigned bit = g * kMax + i;
-          if (!launcher_favorites::sameText(groups[g].items[i].label, slash + 1, labelLength) ||
+          if (!launcher_favorites::sameApp(groups[g].items[i].label, slash + 1, labelLength) ||
               (placed[bit / 8] & (1u << (bit % 8))))
             continue;
           placed[bit / 8] |= static_cast<uint8_t>(1u << (bit % 8));

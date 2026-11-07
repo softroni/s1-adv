@@ -238,7 +238,7 @@ bool mapActionUiMode(String mode, UiMode& out) {
     out = UiMode::TvRemote;
   } else if (mode == "cameras" || mode == "camera" || mode == "eufy") {
     out = UiMode::Cameras;
-  } else if (mode == "planes" || mode == "plane" || mode == "plane_spotter" || mode == "space_station" || mode == "iss") {
+  } else if (mode == "skywatch" || mode == "sky_watch" || mode == "planes" || mode == "plane" || mode == "plane_spotter" || mode == "space_station" || mode == "iss") {
     out = UiMode::Planes;
   } else if (mode == "minesweeper" || mode == "mines") {
     out = UiMode::Minesweeper;

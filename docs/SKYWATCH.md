@@ -1,9 +1,9 @@
-# Planes
+# Skywatch
 
-Planes shows what's flying over you right now, says which way to look and how high, and tells you
+Skywatch shows what's flying over you right now, says which way to look and how high, and tells you
 when the International Space Station passes overhead where you can see it. It hears drones nearby
-too, and keeps a collection of what you've spotted. It's under Tab, Tools, and `/planes` (or `/iss`)
-opens it.
+too, and keeps a collection of what you've spotted. It's under Tab, Tools, and `/skywatch`
+(or `/planes`, `/iss`) opens it. Until 0.2.327 it was called Planes.
 
 Planes and the station need Wi-Fi and the bridge: the Cardputer asks the bridge, and the bridge asks
 the flight trackers and works out the station's passes. Drones need neither: the Cardputer hears them
@@ -11,7 +11,7 @@ itself.
 
 ## Where it looks
 
-With the Cap LoRa-1262 on and a GPS fix, Planes looks around where you are, and its screens say
+With the Cap LoRa-1262 on and a GPS fix, Skywatch looks around where you are, and its screens say
 "near you". Without one, it uses your **Weather city** (Settings, Device, Weather city), and the
 screens name that city. A fix that arrives while it's open is used straight away.
 
@@ -58,7 +58,7 @@ plane flies out of the ring, its screen says so and keeps what it last knew.
 
 When a plane is high above you, more than about 50 degrees up, the Cardputer chimes and shows
 **Look up!** with which way it's coming from and where it's going. Each plane does this once, and
-at most one every 45 seconds. It comes up on the sky map and a plane's screen. While Planes is open,
+at most one every 45 seconds. It comes up on the sky map and a plane's screen. While Skywatch is open,
 the screen dims at the screensaver's time instead of going to the clock, so Look up! can still light it.
 **Enter** opens the plane, **S** keeps it, and Esc goes back.
 
@@ -111,7 +111,7 @@ Every plane you keep with **S** goes into `/planes/spotted.txt` on the SD card, 
 time, the plane's code, its name, its type and its height. Spotted counts them up: how many planes,
 airlines and types, the type that's newest in the collection, the highest and lowest planes, and the
 airline seen most. **Enter** lists the newest 40, and `;` and `.` scroll. A plane can be kept once
-each time Planes is opened.
+each time Skywatch is opened.
 
 ### Drones
 
@@ -165,7 +165,7 @@ other channels in turn for drones that send it in beacons, staying longer where 
 
 ## If something goes wrong
 
-- **"The bridge needs an update for Planes":** the bridge is older than this firmware. Update it, run
+- **"The bridge needs an update for Skywatch":** the bridge is older than this firmware. Update it, run
   `npm install` in `bridge/`, and restart it.
 - **"Can't find" your town:** change the Weather city in Settings, Device. "Salem, MA" style, a town and
   a state, works best.

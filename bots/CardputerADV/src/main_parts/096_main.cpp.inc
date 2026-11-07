@@ -1,4 +1,5 @@
-// Planes: what's flying over the Cardputer and when the space station passes, from the bridge
+// Skywatch (UiMode::Planes; it was called Planes until 0.2.327): what's flying over the Cardputer
+// and when the space station passes, from the bridge
 // (bridge/src/planes.mjs). Four pages, flipped with , and /: the sky map with the nearest planes,
 // the station's next passes you can see, where the station is right now, and what the kids have
 // spotted. Enter on a plane says which way to look and how high; Enter on a pass draws its path
@@ -223,7 +224,7 @@ String plProblemText(camera_net::Error e, const String& word) {
   if (word == "unknown_place") return "Can't find " + gDeviceSettings.weatherPlace + ": change Weather city in Settings";
   if (word == "bad_position") return "The position looks wrong";
   if (word == "planes_unavailable") return "The flight data isn't answering. Trying again...";
-  if (word == "not_found" || e == camera_net::Error::NotFound) return "The bridge needs an update for Planes";
+  if (word == "not_found" || e == camera_net::Error::NotFound) return "The bridge needs an update for Skywatch";
   if (e == camera_net::Error::NoBridge) return "The bridge didn't accept this Cardputer";
   if (e == camera_net::Error::Connect) return "Can't reach the bridge";
   if (e == camera_net::Error::Timeout) return "The bridge didn't answer in time";
@@ -674,7 +675,7 @@ void plDrawSky() {
     d.setTextColor(gPlProblem.length() ? plAmber() : plMuted());
     String text;
     if (gPlProblem.length()) text = gPlProblem;
-    else if (!wifiLocalAddress()) text = "Planes needs Wi-Fi";
+    else if (!wifiLocalAddress()) text = "Skywatch needs Wi-Fi";
     else if (!gPlSkyOk) text = "Looking for planes...";
     else text = String("No planes within ") + range + " right now. = makes the ring wider.";
     plWrap(text, kPlListX + 4, 30, listW - 6, 17, 5);
@@ -836,7 +837,7 @@ bool plSpaceWaiting(int16_t y) {
   auto& d = gCanvas;
   d.setFont(&fonts::Font2);
   d.setTextColor(gPlSpaceProblem.length() ? plAmber() : plMuted());
-  plWrap(gPlSpaceProblem.length() ? gPlSpaceProblem : (wifiLocalAddress() ? String("Asking where the station is...") : String("Planes needs Wi-Fi")),
+  plWrap(gPlSpaceProblem.length() ? gPlSpaceProblem : (wifiLocalAddress() ? String("Asking where the station is...") : String("Skywatch needs Wi-Fi")),
          8, y, 224, 17, 5);
   return true;
 }
@@ -1524,7 +1525,7 @@ void beginPlanes() {
   plLoadReminder();
   camera_net::setBridge(gHubHost.c_str(), gHubPort, gDeviceToken.c_str(), kTlsRootCaPem);
   gPlOpenSince = millis();
-  if (!gPlSky || !gPlSpace) gPlProblem = gPlSpaceProblem = "Not enough memory for Planes";
+  if (!gPlSky || !gPlSpace) gPlProblem = gPlSpaceProblem = "Not enough memory for Skywatch";
   else camera_net::open();  // Or once the last app's worker has gone: servicePlanes tries again.
   if (!gPlHoldsGps) { gpsHold(kGpsForPlanes); gPlHoldsGps = true; }
   appendRuntimeLog("PLANES", "open");
@@ -1564,7 +1565,7 @@ void servicePlanes() {
       lastTry = now;
       if (camera_net::open()) { gPlProblem = gPlSpaceProblem = ""; plInvalidate(); }
       else if (now - gPlOpenSince > 3000 && gPlProblem.isEmpty()) {
-        gPlProblem = gPlSpaceProblem = String("Not enough memory for Planes (") + camera_net::memoryNote() + ")";
+        gPlProblem = gPlSpaceProblem = String("Not enough memory for Skywatch (") + camera_net::memoryNote() + ")";
         plInvalidate();
       }
     }
