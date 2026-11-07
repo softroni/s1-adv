@@ -116,9 +116,12 @@ The readings only come over your home Wi-Fi, and only while the Lab is open. See
 
 - **The relays, the lamp and the air conditioners switch the moment you tap,** with no question on the page or the Cardputer. Those can switch mains power, so mind what's plugged in.
 - **Each card says what became of your last tap:** sent, done, or not done and why, such as a sequence holding that part.
+- **Some taps are refused:** anything while rules play, since they decide every part, and a servo, strip or relays the Lab hasn't been told about in Devices, unless that part's screen is open on the Cardputer.
 - **A tap the Cardputer hasn't collected within 5 seconds is dropped,** so nothing happens later on its own.
 - **What you set lasts until the Lab takes it back,** as a test screen's does: a rule or a sequence taking the part, its screen closing, or the Lab closing, when everything goes back to rest, relays and lamp off included.
 - **Away from home, or with the Lab closed,** the controls are greyed out.
+
+Controls need firmware 0.2.330 or later.
 
 **Rules** and **Sequences** show what's saved on the Cardputer, as it last told the bridge with a chat message. Play starts a sequence, and New rule builds one with menus, in the units you read. Like everything Claude sends, a rule from here waits on the Cardputer until you check it there.
 

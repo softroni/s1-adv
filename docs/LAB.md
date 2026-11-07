@@ -573,7 +573,7 @@ While the Lab is open on your home Wi-Fi, [the bridge's web page](BRIDGE-UI.md) 
 
 <table>
 <tr>
-<td width="33%"><img src="assets/bridge-ui/lab-parts.png" alt="The bridge's page on a phone: the Ultrasonic open on the Cardputer with its distance and a graph, then the ENV III, Joystick 2, Tilt and the Cardputer's LED, each live" width="100%"><br><sub><b>Parts, on the bridge's page.</b> The part open on the Cardputer comes first, then the ones that are there.</sub></td>
+<td width="33%"><img src="assets/bridge-ui/lab-parts.png" alt="The bridge's page on a phone: the Servo open on the Cardputer at 120 degrees with an angle slider and 0, Center and 180 buttons, then the Ultrasonic, ENV III, Joystick 2, Tilt and the Cardputer's LED with its colors, each live" width="100%"><br><sub><b>Parts, on the bridge's page.</b> The part open on the Cardputer comes first, then the ones that are there.</sub></td>
 <td>The page draws each part as its test screen does: the distance with a graph of the last two minutes, the temperature and humidity, the joystick's dot, the knob's dial, the servo's angle, the strip's colors, the relays, the I/O hub's ports, the GPS and the built-in tilt, LED and speaker. Its dots mean what the Devices list's do. The Rules and Sequences tabs show what's saved, play a sequence, and build a rule with menus for you to check on the Cardputer.</td>
 </tr>
 </table>
@@ -597,7 +597,7 @@ The page's part cards have controls too: the servo's angle, the LED strip's colo
 - **Some things it says no to:** while rules play, since they decide every part; on a sequence's own screen; for a part a running sequence is driving; for a servo, strip or relays that aren't set up in Devices; and for anything past a part's range.
 - **The speaker beeps once** for each tap, and never keeps playing.
 
-Needs firmware 0.2.329 or later.
+Needs firmware 0.2.330 or later.
 
 ## If a part doesn't answer
 

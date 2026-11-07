@@ -602,7 +602,7 @@ function controlNote(part, live) {
   const mine = (live.controls || []).filter((c) => PART_OUTPUTS[part.name]?.includes(c.output) && c.age_ms < 15000).at(-1);
   if (!mine) return "";
   const words = { waiting: "Sending…", sent: "Sent", done: "Done", replaced: "Sent", dropped: "Not sent: the Lab wasn't reporting",
-    refused: `Not done: ${mine.why}`, unanswered: "No answer. The Cardputer needs firmware 0.2.329 or later" }[mine.state] || "";
+    refused: `Not done: ${mine.why}`, unanswered: "No answer. The Cardputer needs firmware 0.2.330 or later" }[mine.state] || "";
   return `<span class="${mine.state === "refused" || mine.state === "unanswered" || mine.state === "dropped" ? "err" : ""}">${esc(words)}</span>`;
 }
 
