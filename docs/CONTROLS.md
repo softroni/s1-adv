@@ -249,7 +249,8 @@ are on caps along the bottom. [Skywatch](SKYWATCH.md) has the details.
 - **The sky map:** a round map with you in the middle and the planes as arrows, coloured by height, and
   beside it the chosen plane's card: which way to look, fists up, how far and how high. `;` and `.` go
   from plane to plane, nearest first, Enter opens one, S keeps it in Spotted, `-` and `=` make the ring
-  smaller or bigger (10, 25 or 50 miles), and R looks again.
+  smaller or bigger (5, the start, 10, 25 or 50 miles), and R looks again. The card's last line says
+  whether it's using the GPS or the saved Weather city.
 - **A plane:** its type and route, which way to LOOK and how many fists above the horizon, its height,
   speed and when it comes closest. `,` and `/` go to the other planes, and S keeps it.
 - **Look up!** comes with a chime when a plane is high overhead: Enter opens it, S keeps it.

@@ -139,9 +139,6 @@ bool plWhere(char* out, size_t room) {
   if (plUsingGps()) { weather_gps::query(out, room, gPlHere); return true; }
   return planes::placeQuery(out, room, gDeviceSettings.weatherPlace.c_str());
 }
-const char* plPlaceWords(const char* place) {
-  return !place || !*place || !strcmp(place, "Here") ? "you" : place;
-}
 uint32_t plHomeIp() {
   const uint32_t mine = wifiLocalAddress();
   return mine && gPlTicketFor == mine && gPlHomeOffFor != mine ? podcast::homeFor(gPlTicket, mine) : 0;
@@ -731,6 +728,42 @@ uint16_t plHeightInk(const planes::Plane& p) {
   if (p.altFt < 15000) return plAmber();
   return plAccent();
 }
+// Where the page is looking from: the GPS or the saved Weather city, and what the GPS is doing, with
+// a dot in green (the GPS), amber (the city for now, or searching) or grey (no GPS at all). place is
+// what the list on screen was asked about, "Here" for the GPS; null for drones, which only use the GPS.
+void plWhereWords(char* out, size_t room, const char* place, uint16_t& ink) {
+  const uint32_t now = millis();
+  const bool hearing = gLabGps.hearing(now), fix = hearing && gLabGps.fix.valid;
+  const bool byGps = place && !strcmp(place, "Here");
+  String city = gDeviceSettings.weatherPlace;
+  if (city.indexOf(',') > 0) city = city.substring(0, city.indexOf(','));
+  if (!place) {
+    if (fix) { ink = plGreen(); snprintf(out, room, "GPS fix (%u sats)", unsigned(gLabGps.fix.satellites)); }
+    else if (hearing) { ink = plAmber(); snprintf(out, room, "No fix, %d sats seen", gLabGps.inView(now)); }
+    else { ink = plMuted(); snprintf(out, room, "No GPS: no directions"); }
+  } else if (byGps && fix) {
+    ink = plGreen(); snprintf(out, room, "Using GPS (%u sats)", unsigned(gLabGps.fix.satellites));
+  } else if (byGps) {
+    ink = plGreen(); snprintf(out, room, "Using GPS, %lu min old", static_cast<unsigned long>((now - gPlHere.atMs) / 60000));
+  } else if (fix) {
+    ink = plGreen(); snprintf(out, room, "GPS fix: updating...");
+  } else if (hearing) {
+    ink = plAmber(); snprintf(out, room, "Using %s, no fix", city.c_str());
+  } else {
+    ink = plAmber(); snprintf(out, room, "Using %s, no GPS", city.c_str());
+  }
+}
+void plWhereLine(int16_t x, int16_t y, int16_t w, const char* place) {
+  auto& d = gCanvas;
+  char text[64];
+  uint16_t ink = plMuted();
+  plWhereWords(text, sizeof(text), place, ink);
+  d.fillCircle(x + 2, y + 3, 2, ink);
+  d.setFont(&fonts::Font0);
+  d.setTextColor(ink);
+  d.setCursor(x + 8, y);
+  d.print(fitCurrentFontToWidth(text, w - 8));
+}
 // A message where a page's card goes, in the bigger font.
 void plCardSays(const String& text, uint16_t ink, int16_t x = kPlCardX) {
   auto& d = gCanvas;
@@ -774,15 +807,22 @@ void plDrawSky() {
     else if (!gPlSkyOk) says = "Looking for planes...";
     else says = String("No planes within ") + ring + " right now. = makes the ring bigger.";
     plCardSays(says, gPlProblem.length() ? plAmber() : plMuted());
+    plWhereLine(kPlCardX, 114, 238 - kPlCardX, gPlSkyOk ? gPlSky->place : "");
     plKeys({{"-=", "Ring"}, {"R", "Look again"}, {",/", "Pages"}});
     return;
   }
   const planes::Plane& p = gPlSky->planes[gPlSel];
   const int16_t x = kPlCardX, w = 238 - kPlCardX;
+  snprintf(text, sizeof(text), "%u/%u", unsigned(gPlSel + 1), unsigned(gPlSky->count));
+  d.setFont(&fonts::Font0);
+  const int16_t countW = d.textWidth(text);
+  d.setTextColor(plMuted());
+  d.setCursor(238 - countW, 27);
+  d.print(text);
   d.setFont(&fonts::Font2);
   d.setTextColor(TFT_WHITE);
   d.setCursor(x, 23);
-  d.print(fitCurrentFontToWidth(p.name, w));
+  d.print(fitCurrentFontToWidth(p.name, w - countW - 4));
   d.setFont(&fonts::Font0);
   d.setTextColor(plMuted());
   d.setCursor(x, 40);
@@ -802,11 +842,7 @@ void plDrawSky() {
   planes::altitudeShort(alt, sizeof(alt), p.altFt, plUnits());
   plTile(x, 87, 62, "AWAY", dist);
   plTile(x + 64, 87, 66, "HEIGHT", alt, plHeightInk(p));
-  snprintf(text, sizeof(text), "%u of %u near %s", unsigned(gPlSel + 1), unsigned(gPlSky->count), plPlaceWords(gPlSky->place));
-  d.setFont(&fonts::Font0);
-  d.setTextColor(plMuted());
-  d.setCursor(x, 114);
-  d.print(fitCurrentFontToWidth(text, w));
+  plWhereLine(x, 114, w, gPlSky->place);
   plKeys({{";.", "Pick"}, {"Enter", "More"}, {"S", "Keep"}, {",/", "Pages"}});
 }
 
@@ -933,11 +969,12 @@ void plDrawPasses() {
     plKeys({{",/", "Pages"}});
     return;
   }
-  const char* place = plPlaceWords(gPlSpace->place);
+  const bool byGps = !strcmp(gPlSpace->place, "Here");
   d.setFont(&fonts::Font0);
-  d.setTextColor(plMuted());
+  d.setTextColor(byGps ? plGreen() : plAmber());
   d.setCursor(5, 24);
-  d.print(fitCurrentFontToWidth(strcmp(place, "you") ? String("When you can see it from ") + place : String("When you can see it"), 230));
+  d.print(fitCurrentFontToWidth(byGps ? String("When you can see it here, by GPS")
+                                      : String("When you can see it from ") + gPlSpace->place + ", no GPS", 230));
   const int first = max<int>(0, min<int>(gPlPassSel - 1, gPlSpace->count - 4));
   for (int row = 0; row < 4 && first + row < gPlSpace->count; ++row) {
     const int i = first + row;
@@ -1414,9 +1451,7 @@ void plDrawDrones() {
     d.print(secs < 60 ? String("Listening...") : String("Listening ") + (secs / 60) + " min");
     d.setTextColor(plMuted());
     plWrap("No drones yet. Only ones nearby can be heard.", x, 46, w - 2, 16, 4);
-    d.setFont(&fonts::Font0);
-    d.setCursor(x, 114);
-    d.print(String("Wi-Fi channel ") + drone_listen::channel());
+    plWhereLine(x, 114, w, nullptr);
     plKeys({{"Esc", "Stop"}, {",/", "Pages"}});
     return;
   }

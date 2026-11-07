@@ -55,6 +55,11 @@ assert '(gUiMode == UiMode::Cameras || gUiMode == UiMode::Planes) &&\n         (
 guard = part('010_main.cpp.inc').split('void serviceMemoryGuard() {', 1)[1]
 assert guard.index('if (cameraHttpsBusy()) { criticalSinceMs = 0; return; }') < guard.index('ESP.restart();')
 assert 'gPlNearDueMs = now + (viaHome ? kPlNearEveryMs : kPlNearAwayMs);' in app
+# The sky page always says where it's looking from: the GPS or the saved city.
+sky = app.split('void plDrawSky() {', 1)[1].split('\n}\n', 1)[0]
+assert sky.count('plWhereLine(') == 2, 'with planes and without'
+where = app.split('void plWhereWords(', 1)[1].split('\n}\n', 1)[0]
+assert 'Using GPS' in where and ', no GPS' in where and ', no fix' in where
 # Every screen has the same frame: its keys on caps along the bottom, and the pages the top's icons.
 for fn in ['plDrawSky', 'plDrawPlane', 'plDrawLookUp', 'plDrawPasses', 'plDrawPass', 'plDrawNow', 'plDrawSpotted',
            'plDrawSightings', 'plDrawGoOut', 'plDrawDrones', 'plDrawDrone', 'plDrawDroneAlert']:
@@ -180,10 +185,12 @@ int main() {
   Plane high; high.elev = 55; high.altFt = 3000; assert(wantsLookUp(high));
   high.elev = 49; assert(!wantsLookUp(high));
   Plane parked; parked.elev = 80; parked.altFt = 0; assert(!wantsLookUp(parked));
-  assert(rangeMeters(1, units::System::US) == 40234 && rangeMeters(0, units::System::Metric) == 15000 &&
+  assert(kDefaultRange == 0 && rangeMeters(kDefaultRange, units::System::US) == 8047);  // 5 miles to begin with.
+  assert(rangeMeters(2, units::System::US) == 40234 && rangeMeters(0, units::System::Metric) == 8000 &&
          rangeMeters(9, units::System::US) == rangeMeters(kDefaultRange, units::System::US));
-  rangeLabel(s, sizeof(s), 2, units::System::US); assert(text(s) == "50mi");
-  rangeLabel(s, sizeof(s), 2, units::System::Metric); assert(text(s) == "80km");
+  rangeLabel(s, sizeof(s), 0, units::System::US); assert(text(s) == "5mi");
+  rangeLabel(s, sizeof(s), 3, units::System::US); assert(text(s) == "50mi");
+  rangeLabel(s, sizeof(s), 3, units::System::Metric); assert(text(s) == "80km");
 
   // The round map: north up, east right, and nothing outside the ring.
   int dx, dy;

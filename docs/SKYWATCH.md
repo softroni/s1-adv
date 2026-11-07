@@ -11,9 +11,20 @@ itself.
 
 ## Where it looks
 
-With the Cap LoRa-1262 on and a GPS fix, Skywatch looks around where you are, and its screens say
-"near you". Without one, it uses your **Weather city** (Settings, Device, Weather city), and the
-screens name that city. A fix that arrives while it's open is used straight away.
+With the Cap LoRa-1262 on and a GPS fix, Skywatch looks around where you are. Without one, it uses
+your **Weather city** (Settings, Device, Weather city), so directions are from the middle of that
+town, not from you. A fix that arrives while it's open is used straight away.
+
+The line at the bottom of the sky map's card always says which, with a coloured dot:
+
+- **Green, "Using GPS (8 sats)":** it's using your position. "Using GPS, 5 min old" means the fix
+  was lost and it's using the last one, which it keeps for up to two hours.
+- **Amber, "Using Salem, no fix":** the Cap's GPS is talking but has no fix yet, so it uses the
+  city for now. A first fix outdoors can take a few minutes; indoors, often never.
+- **Amber, "Using Salem, no GPS":** nothing is coming from a GPS. Check the Cap is on.
+
+The station's passes say the same at the top of their list, and the Drones page says what the GPS is
+doing, since it needs a fix for which way to look.
 
 Your position leaves the Cardputer rounded to about a kilometre, as the weather's does, and goes only
 to your bridge. The bridge passes that rounded position to the flight tracker. Nothing about where you
@@ -36,7 +47,8 @@ its card beside the map says which way to look, with an arrow pointing that way 
 then how far away it is and how high. It starts on the nearest.
 
 - **`;` and `.`** go to the next or the one before, and **Enter** opens it.
-- **`-` and `=`** make the ring smaller or bigger: 10, 25 or 50 miles (15, 40 or 80 km).
+- **`-` and `=`** make the ring smaller or bigger: 5, 10, 25 or 50 miles (8, 15, 40 or 80 km). It starts
+  at 5 miles each time.
 - **S** keeps the chosen plane in Spotted, and **R** looks again now.
 
 The map updates every 10 seconds.

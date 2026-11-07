@@ -20,7 +20,7 @@
 
 namespace planes {
 constexpr uint8_t kMaxPlanes = 24, kMaxPasses = 8, kPathPoints = 9;
-constexpr uint8_t kRanges = 3, kDefaultRange = 1;
+constexpr uint8_t kRanges = 4, kDefaultRange = 0;  // 5 miles (8 km) to begin with.
 constexpr int8_t kLookUpDegrees = 50;      // A plane this high in the sky is "right above you".
 
 struct Plane {
@@ -333,14 +333,14 @@ inline bool isDrone(const Plane& p) { return !strcmp(p.category, "B6"); }
 inline bool isHelicopter(const Plane& p) { return !strcmp(p.category, "A7"); }
 inline bool wantsLookUp(const Plane& p) { return p.elev >= kLookUpDegrees && p.altFt > 0; }
 
-// The rings, in the owner's units: 10, 25 or 50 miles; 15, 40 or 80 km.
+// The rings, in the owner's units: 5, 10, 25 or 50 miles; 8, 15, 40 or 80 km.
 inline uint32_t rangeMeters(uint8_t step, units::System system) {
-  static const uint16_t kMiles[kRanges] = {10, 25, 50}, kKm[kRanges] = {15, 40, 80};
+  static const uint16_t kMiles[kRanges] = {5, 10, 25, 50}, kKm[kRanges] = {8, 15, 40, 80};
   step = step < kRanges ? step : kDefaultRange;
   return system == units::System::US ? uint32_t(kMiles[step] * 1609.344 + 0.5) : uint32_t(kKm[step]) * 1000u;
 }
 inline void rangeLabel(char* out, size_t room, uint8_t step, units::System system) {
-  static const uint16_t kMiles[kRanges] = {10, 25, 50}, kKm[kRanges] = {15, 40, 80};
+  static const uint16_t kMiles[kRanges] = {5, 10, 25, 50}, kKm[kRanges] = {8, 15, 40, 80};
   step = step < kRanges ? step : kDefaultRange;
   if (system == units::System::US) snprintf(out, room, "%umi", unsigned(kMiles[step]));
   else snprintf(out, room, "%ukm", unsigned(kKm[step]));
