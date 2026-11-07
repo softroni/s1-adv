@@ -7,7 +7,7 @@ The bridge has its own web page: the Cardputer's status, the chat, a remote, the
 <td width="20%"><img src="assets/bridge-ui/status.png" alt="Status: the Cardputer online with its check-ins for the last hour, its starts, Claude idle, replies picked up, storage and services" width="100%"><br><sub><b>Status.</b> Is everything working?</sub></td>
 <td width="20%"><img src="assets/bridge-ui/chat.png" alt="Chat: messages from the Cardputer and from the page, Claude's replies with their Lab actions, and when the Cardputer picked each one up" width="100%"><br><sub><b>Chat.</b> The Cardputer's conversation.</sub></td>
 <td width="20%"><img src="assets/bridge-ui/remote.png" alt="Remote: buttons that open a screen on the Cardputer and change its update settings" width="100%"><br><sub><b>Remote.</b> Run the Cardputer from here.</sub></td>
-<td width="20%"><img src="assets/bridge-ui/lab-parts.png" alt="Lab: every part live, the Ultrasonic open on the Cardputer with a graph of its distance" width="100%"><br><sub><b>Lab.</b> Every part, live.</sub></td>
+<td width="20%"><img src="assets/bridge-ui/lab-parts.png" alt="Lab: the Servo open on the Cardputer at 120 degrees with a slider and Center buttons, then the other parts live, the LED with its colors" width="100%"><br><sub><b>Lab.</b> Every part, live, and controls.</sub></td>
 <td width="20%"><img src="assets/bridge-ui/firmware.png" alt="Firmware: installed and offered versions, how full the app slot is with a chart of build sizes, and the builds kept" width="100%"><br><sub><b>Firmware.</b> What's installed, and room left.</sub></td>
 </tr>
 </table>
@@ -101,6 +101,24 @@ Three tabs: Parts, Rules and Sequences.
 **Parts** draws every part the Lab knows, live, while the Lab is open on the Cardputer at home: distance with a graph of the last two minutes, temperature and humidity, the joystick's position, the knob's dial, light, motion, the relays, the servo's angle, the LED strip's colors, the I/O hub's ports, the GPS, tilt, the Cardputer's LED and speaker, the smartLamp and the air conditioners. The part open on the Cardputer comes first, then those that are there. A dot says what the Lab knows, as on its Devices list: solid is there, a ring is set up but can't confirm it, grey isn't found. The bar at the top says whether it's live and what the Cardputer shows, and which rules are firing.
 
 The readings only come over your home Wi-Fi, and only while the Lab is open. See [the Lab guide](LAB.md#on-the-bridges-page) for what the Cardputer sends and when.
+
+**Controls** sit under each part that can be driven, and act within about a second, while the Lab is open on the Cardputer at home:
+
+| Part | Controls |
+| --- | --- |
+| Servo | An angle slider, and 0°, Center and 180° |
+| LED strip | Eight colors and Off, brightness and how many LEDs |
+| Cardputer LED | Eight colors and Off |
+| Speaker | A pitch, and Beep |
+| 2 relays | Turn each on or off |
+| smartLamp | On, Off and brightness |
+| IR for AC | TCL on or off, Daikin on or off |
+
+- **The relays, the lamp and the air conditioners switch the moment you tap,** with no question on the page or the Cardputer. Those can switch mains power, so mind what's plugged in.
+- **Each card says what became of your last tap:** sent, done, or not done and why, such as a sequence holding that part.
+- **A tap the Cardputer hasn't collected within 5 seconds is dropped,** so nothing happens later on its own.
+- **What you set lasts until the Lab takes it back,** as a test screen's does: a rule or a sequence taking the part, its screen closing, or the Lab closing, when everything goes back to rest, relays and lamp off included.
+- **Away from home, or with the Lab closed,** the controls are greyed out.
 
 **Rules** and **Sequences** show what's saved on the Cardputer, as it last told the bridge with a chat message. Play starts a sequence, and New rule builds one with menus, in the units you read. Like everything Claude sends, a rule from here waits on the Cardputer until you check it there.
 

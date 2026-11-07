@@ -536,26 +536,122 @@ function liveBanner(live) {
   const playing = s.playing ? ` · rules playing${firing.length ? `, ${firing.length === 1 ? `rule ${firing[0]}` : `rules ${firing.join(", ")}`} firing` : ""}` : "";
   return `<div class="livebar live"><span class="dot"></span><span>Live from the Cardputer${s.open ? ` · ${esc(s.open)} is open` : views[s.view] ? ` · on ${views[s.view]}` : ""}${playing}${s.extra.seq ? ` · playing “${esc(s.extra.seq)}”` : ""}</span></div>`;
 }
+// --- Parts, live, with controls for what can be driven ---
+// Each card is made once and its reading redrawn in place, so a slider isn't lost mid-drag.
+const partCards = new Map();
+// The outputs each card can set, and how. Sliders send as they move, a few times a second.
+const CONTROLS = {
+  "Servo": () => `${slider("servo", 0, 180, 90, "°")}<div class="btnrow">${btn("servo", 0, "0°")}${btn("servo", 90, "Center")}${btn("servo", 180, "180°")}</div>`,
+  "LED strip": () => `<div class="btnrow">${swatches("strip_color")}${btn("strip_color", -1, "Off")}</div>${slider("strip_bright", 0, 100, 60, "%", "Brightness")}${slider("strip_length", 0, 30, 30, " LEDs", "Length")}`,
+  "Cardputer LED": () => `<div class="btnrow">${swatches("led")}${btn("led", -1, "Off")}</div>`,
+  "Speaker": () => `${slider("speaker", 200, 2000, 880, " Hz", "Pitch", true)}<div class="btnrow"><button class="btn small" data-beep>Beep</button></div>`,
+  "2 relays": () => `<div class="btnrow">${toggle("relay_1", "Relay 1")}${toggle("relay_2", "Relay 2")}</div>`,
+  "smartLamp": () => `<div class="btnrow">${btn("lamp_power", 1, "On")}${btn("lamp_power", 0, "Off")}</div>${slider("lamp_bright", 0, 100, 60, "%", "Brightness")}`,
+  "IR for AC": () => `<div class="btnrow"><span class="sub">TCL</span>${btn("ac_tcl", 1, "On")}${btn("ac_tcl", 0, "Off")}<span class="sub">Daikin</span>${btn("ac_daikin", 1, "On")}${btn("ac_daikin", 0, "Off")}</div>`
+};
+const PART_OUTPUTS = { "Servo": ["servo"], "LED strip": ["strip_color", "strip_bright", "strip_length"], "Cardputer LED": ["led"], "Speaker": ["speaker"],
+  "2 relays": ["relay_1", "relay_2"], "smartLamp": ["lamp_power", "lamp_bright"], "IR for AC": ["ac_tcl", "ac_daikin"] };
+const btn = (output, value, label) => `<button class="btn small" data-out="${output}" data-val="${value}">${esc(label)}</button>`;
+const toggle = (output, label) => `<button class="btn small relaybtn" data-toggle="${output}" data-label="${esc(label)}">${esc(label)}</button>`;
+const swatches = (output) => HUES.map(([v, n]) => `<button class="sw" title="${n}" data-out="${output}" data-val="${v}" style="background:hsl(${v},100%,50%)"></button>`).join("");
+const slider = (output, min, max, value, unit, label = "", hold = false) => `<label class="sl"><span>${esc(label || OUT[output]?.name || output)}</span>
+  <input type="range" min="${min}" max="${max}" value="${value}" data-slide="${output}" ${hold ? "data-hold" : ""}><b data-show="${output}">${value}${unit}</b></label>`;
+
+async function sendControl(output, value) {
+  try { await api("lab/control", { output, value: Number(value) }); setTimeout(() => refresh(), 150); }
+  catch (e) { toast(e.message === "lab_not_live" ? "Open the Lab on the Cardputer, at home, to use the controls." : `Not sent: ${e.message}`); }
+}
+function wireControls(card, part) {
+  card.querySelectorAll("[data-out]").forEach((b) => b.addEventListener("click", () => sendControl(b.dataset.out, b.dataset.val)));
+  card.querySelectorAll("[data-toggle]").forEach((b) => b.addEventListener("click", () => {
+    const now = labData.live.snapshot?.outs?.[b.dataset.toggle];
+    sendControl(b.dataset.toggle, now ? 0 : 1);
+  }));
+  const pitch = card.querySelector('[data-slide="speaker"]');
+  card.querySelector("[data-beep]")?.addEventListener("click", () => sendControl("speaker", pitch.value));
+  card.querySelectorAll("input[data-slide]").forEach((input) => {
+    const show = card.querySelector(`[data-show="${input.dataset.slide}"]`);
+    const unit = show.textContent.replace(/^-?\d+/u, "");
+    let last = 0, timer = 0;
+    const go = () => { last = Date.now(); if (!input.hasAttribute("data-hold")) sendControl(input.dataset.slide, input.value); };
+    input.addEventListener("input", () => {
+      show.textContent = `${input.value}${unit}`;
+      input.dataset.touched = String(Date.now());
+      clearTimeout(timer);
+      if (Date.now() - last > 250) go(); else timer = setTimeout(go, 250);
+    });
+    input.addEventListener("change", () => { clearTimeout(timer); go(); });
+  });
+}
+// A slider follows the Cardputer's value, unless it was moved in the last few seconds.
+function syncControls(card, s) {
+  card.querySelectorAll("input[data-slide]").forEach((input) => {
+    const v = s.outs?.[input.dataset.slide];
+    if (v === undefined || v < 0 || Date.now() - Number(input.dataset.touched || 0) < 3000 || input.hasAttribute("data-hold")) return;
+    input.value = v;
+    const show = card.querySelector(`[data-show="${input.dataset.slide}"]`);
+    show.textContent = `${v}${show.textContent.replace(/^-?\d+/u, "")}`;
+  });
+  card.querySelectorAll("[data-toggle]").forEach((b) => {
+    // Says what a tap does, since the card above already shows which way it is.
+    const on = Boolean(s.outs?.[b.dataset.toggle]);
+    b.textContent = `Turn ${b.dataset.label.toLowerCase()} ${on ? "off" : "on"}`;
+  });
+}
+function controlNote(part, live) {
+  const mine = (live.controls || []).filter((c) => PART_OUTPUTS[part.name]?.includes(c.output) && c.age_ms < 15000).at(-1);
+  if (!mine) return "";
+  const words = { waiting: "Sending…", sent: "Sent", done: "Done", replaced: "Sent", dropped: "Not sent: the Lab wasn't reporting",
+    refused: `Not done: ${mine.why}`, unanswered: "No answer. The Cardputer needs firmware 0.2.329 or later" }[mine.state] || "";
+  return `<span class="${mine.state === "refused" || mine.state === "unanswered" || mine.state === "dropped" ? "err" : ""}">${esc(words)}</span>`;
+}
+
+function drawParts(body) {
+  const live = labData.live;
+  const s = live.snapshot || { found: [], sigs: {}, outs: {}, extra: {}, hub: null, wires: null, gps: null };
+  const h = live.history || {};
+  if (body.dataset.tab !== "parts" || !body.querySelector(".parts")) {
+    body.dataset.tab = "parts";
+    body.innerHTML = `<div id="liveBar"></div><div class="parts"></div>`;
+    partCards.clear();
+  }
+  $("#liveBar", body).innerHTML = liveBanner(live) + (live.reported && !live.can_control
+    ? `<div class="tiny muted" style="margin:-4px 4px 10px">Controls work while the Lab is open on the Cardputer at home.</div>` : "");
+  const grid = $(".parts", body);
+  const order = [];
+  for (const part of PARTS) {
+    const [dot, where] = presence(part, s);
+    const open = s.open === part.name;
+    let card = partCards.get(part.name);
+    if (!card) {
+      card = document.createElement("div");
+      card.innerHTML = `<div class="head"></div><div class="pv"></div>${CONTROLS[part.name] ? `<div class="pc">${CONTROLS[part.name]()}<div class="pnote"></div></div>` : ""}`;
+      if (CONTROLS[part.name]) wireControls(card, part);
+      partCards.set(part.name, card);
+    }
+    card.className = `part${open ? " open" : ""}${!dot && !open ? " absent" : ""}`;
+    card.querySelector(".head").innerHTML = `<span class="pdot ${dot}"></span><b>${esc(part.name)}</b><span class="where">${open ? "Open on the Cardputer" : esc(where)}</span>`;
+    card.querySelector(".pv").innerHTML = part.draw(s, h);
+    const controls = card.querySelector(".pc");
+    if (controls) {
+      controls.classList.toggle("off", !live.can_control);
+      syncControls(card, s);
+      card.querySelector(".pnote").innerHTML = controlNote(part, live);
+    }
+    order.push({ card, rank: open ? 0 : dot === "here" ? 1 : dot === "ring" ? 2 : 3 });
+  }
+  // The part open on the Cardputer first, then the ones that are there, then the rest. Cards only
+  // move when the order changes, so one being used stays put.
+  order.sort((a, b) => a.rank - b.rank);
+  const wanted = order.map((o) => o.card);
+  if (wanted.some((card, i) => grid.children[i] !== card)) wanted.forEach((card) => grid.appendChild(card));
+}
+
 function drawLabBody(first) {
   document.querySelectorAll("#lab [data-tab]").forEach((a) => a.classList.toggle("on", a.dataset.tab === labTab));
   const body = $("#labBody");
   if (!body) return;
-  if (labTab === "parts") {
-    const live = labData.live;
-    const s = live.snapshot || { found: [], sigs: {}, outs: {}, extra: {}, hub: null, wires: null, gps: null };
-    const h = live.history || {};
-    const cards = PARTS.map((part) => {
-      const [dot, where] = presence(part, s);
-      const open = s.open === part.name;
-      return { open, dot, html: `<div class="part${open ? " open" : ""}${!dot && !open ? " absent" : ""}">
-        <div class="head"><span class="pdot ${dot}"></span><b>${esc(part.name)}</b><span class="where">${open ? "Open on the Cardputer" : esc(where)}</span></div>
-        ${part.draw(s, h)}</div>` };
-    });
-    // The part open on the Cardputer first, then the ones that are there, then the rest.
-    const order = (c) => (c.open ? 0 : c.dot === "here" ? 1 : c.dot === "ring" ? 2 : 3);
-    body.innerHTML = liveBanner(live) + `<div class="parts">${cards.sort((a, b) => order(a) - order(b)).map((c) => c.html).join("")}</div>`;
-    return;
-  }
+  if (labTab === "parts") { drawParts(body); return; }
   if (!first && body.dataset.tab === labTab) return; // Rules and sequences only change when asked.
   body.dataset.tab = labTab;
   const saved = labData.saved;

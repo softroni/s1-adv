@@ -10,6 +10,12 @@
 //   lab 1 | view <name> | open <part> | page <n> | units us|metric | playing 0|1
 //   found <unit,unit> | wires <white> <yellow> | hub <p0,...,p5>
 //   sig <key> <int> | out <key> <int> | gps <fix> <used> <in view> <altitude m> <hdop x10>
+//   did <id> ok|<why>        what became of a control the page sent
+//
+// Controls from the page ride the answer to the next report, after the watch line, at most 8:
+//   set <id> <output> <int>
+// They're only taken while the Lab is live, and one not collected within a few seconds is dropped,
+// so a tap never lands later on its own.
 import { randomBytes } from "node:crypto";
 import { homeAddress, lanAddresses } from "./podcasts.mjs";
 
@@ -23,6 +29,21 @@ const WATCH_MS = 8000;
 const HISTORY = 120;
 // A part that hasn't reported in this long is drawn as the last reading, not as live.
 export const STALE_MS = 20000;
+// Controls: only to a Lab that reported this recently, and dropped if not collected in time.
+const CONTROL_LIVE_MS = 4000;
+const CONTROL_TTL_MS = 5000;
+const MAX_SETS = 8;
+// What the page may set, and the values each takes. The firmware checks them again.
+export const CONTROLS = Object.freeze({
+  servo: [0, 180], strip_color: [-1, 359], strip_bright: [0, 100], strip_length: [0, 30], led: [-1, 359],
+  speaker: [0, 2000], relay_1: [0, 1], relay_2: [0, 1], lamp_power: [0, 1], lamp_bright: [0, 100],
+  ac_tcl: [0, 1], ac_daikin: [0, 1]
+});
+export function controlValid(output, value) {
+  const range = CONTROLS[output];
+  if (!range || !Number.isInteger(value) || value < range[0] || value > range[1]) return false;
+  return output !== "speaker" || value === 0 || value >= 200;
+}
 
 const word = (value, max = 32) => String(value ?? "").replace(/[\u0000-\u001f\u007f]/gu, "").trim().slice(0, max);
 const integer = (value) => {
@@ -56,6 +77,9 @@ export function parseSnapshot(text) {
       const [fix, used, view, altitude, hdop] = f.slice(1).map(integer);
       out.gps = { fix: fix === 1, used: used ?? 0, inView: view ?? 0, altitude: altitude ?? null,
         hdop: hdop === null || hdop === undefined || hdop < 0 ? null : hdop / 10 };
+    } else if (key === "did") {
+      const id = integer(f[1]);
+      if (id !== null && id > 0) (out.did ||= []).push({ id, result: word(f[2], 48) || "ok" });
     } else if (/^[a-z0-9_]+$/u.test(key) && Object.keys(out.extra).length < 24) {
       out.extra[key] = f.slice(1).map((item) => word(item, 48)).join(" ");
     }
@@ -72,6 +96,55 @@ export class LabLiveService {
     this.history = new Map(); // sig key -> [[at, value], ...]
     this.watchedAt = 0;
     this.reports = 0;
+    this.nextId = 1;
+    this.pending = [];        // { id, output, value, at } waiting for the next report's answer
+    this.sent = new Map();    // id -> { output, value, at, sentAt, result }
+  }
+
+  // --- Controls from the page ---
+  control(output, value) {
+    if (!controlValid(output, value)) return { ok: false, error: "bad_control" };
+    const now = this.now();
+    const latest = this.latest;
+    if (!latest || latest.snapshot.view === "closed" || now - latest.at > CONTROL_LIVE_MS) return { ok: false, error: "lab_not_live" };
+    // The newest setting of an output wins: a slider dragged sends many, and only the last matters.
+    for (const item of this.pending) if (item.output === output) this.result(item.id, "replaced");
+    this.pending = this.pending.filter((item) => item.output !== output);
+    const id = this.nextId;
+    this.nextId = this.nextId >= 65535 ? 1 : this.nextId + 1;
+    this.pending.push({ id, output, value, at: now });
+    while (this.pending.length > MAX_SETS) this.pending.shift();
+    this.sent.set(id, { output, value, at: now, sentAt: 0, result: "" });
+    this.trimSent(now);
+    return { ok: true, id };
+  }
+
+  // The lines for this answer: what's still fresh, oldest first. Taken once.
+  takeSets() {
+    const now = this.now();
+    const fresh = this.pending.filter((item) => now - item.at <= CONTROL_TTL_MS);
+    for (const item of this.pending) if (!fresh.includes(item)) this.result(item.id, "too late, not sent");
+    this.pending = [];
+    for (const item of fresh) { const sent = this.sent.get(item.id); if (sent) sent.sentAt = now; }
+    return fresh.map((item) => `set\t${item.id}\t${item.output}\t${item.value}\n`).join("");
+  }
+
+  result(id, result) {
+    const sent = this.sent.get(id);
+    if (sent && !sent.result) sent.result = result;
+  }
+
+  trimSent(now) {
+    for (const [id, item] of this.sent) if (now - item.at > 60000) this.sent.delete(id);
+    while (this.sent.size > 64) this.sent.delete(this.sent.keys().next().value);
+  }
+
+  controls() {
+    const now = this.now();
+    return [...this.sent].map(([id, item]) => ({ id, output: item.output, value: item.value, age_ms: now - item.at,
+      state: item.result ? (item.result === "ok" ? "done" : item.result === "replaced" ? "replaced" : "refused") : item.sentAt ? (now - item.sentAt > 4000 ? "unanswered" : "sent")
+        : now - item.at > CONTROL_TTL_MS ? "dropped" : "waiting",
+      why: item.result && !["ok", "replaced"].includes(item.result) ? item.result : "" })).slice(-16);
   }
 
   // --- The home door's tickets, as Planes hands them out ---
@@ -104,6 +177,7 @@ export class LabLiveService {
     else if (snapshot.view === "closed") console.info("[lab-live] the Cardputer's Lab is closed");
     this.latest = { at, snapshot };
     this.reports += 1;
+    for (const { id, result } of snapshot.did || []) this.result(id, result);
     for (const [key, value] of Object.entries(snapshot.sigs)) {
       const points = this.history.get(key) || [];
       points.push([at, value]);
@@ -130,6 +204,8 @@ export class LabLiveService {
       age_ms: latest ? now - latest.at : null,
       live: Boolean(latest) && latest.snapshot.view !== "closed" && now - latest.at < STALE_MS,
       lan_port: this.lanPort,
+      can_control: Boolean(latest) && latest.snapshot.view !== "closed" && now - latest.at <= CONTROL_LIVE_MS,
+      controls: this.controls(),
       snapshot: latest?.snapshot || null,
       history
     };
@@ -171,7 +247,7 @@ export function labLanRoute(service, req, res) {
   req.on("end", () => {
     if (size > MAX_BODY) return;
     if (!service.accept(Buffer.concat(chunks).toString("utf8"))) { plain(res, 400, "bad_snapshot\n"); return; }
-    plain(res, 200, `watch\t${service.watching() ? 1 : 0}\n`);
+    plain(res, 200, `watch\t${service.watching() ? 1 : 0}\n${service.takeSets()}`);
   });
   req.on("error", () => res.destroy());
   return true;

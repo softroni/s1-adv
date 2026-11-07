@@ -358,3 +358,73 @@ test("the link is ui.url when set, else Tailscale's, asked at most every 30 seco
   none.run = async () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); };
   assert.equal(linkLines(await none.link()), "none\tTailscale isn't running\n");
 });
+
+// --- Controls from the page ---
+test("a control rides the next report's answer once, and its result comes back in the report after", () => {
+  let now = 1000;
+  const live = new LabLiveService({ now: () => now });
+  assert.deepEqual(live.control("relay_1", 1), { ok: false, error: "lab_not_live" });
+  live.accept("lab\t1\nview\tdevice\nopen\t2 relays\n");
+  assert.deepEqual(live.control("relay_1", 2), { ok: false, error: "bad_control" });
+  assert.deepEqual(live.control("speaker", 100), { ok: false, error: "bad_control" });
+  assert.deepEqual(live.control("say", 1), { ok: false, error: "bad_control" });
+  assert.deepEqual(live.control("servo", 90.5), { ok: false, error: "bad_control" });
+  const relay = live.control("relay_1", 1);
+  assert.equal(relay.ok, true);
+  live.control("servo", 10);
+  live.control("servo", 120);  // A dragged slider: only the last goes.
+  live.control("strip_color", -1);
+  assert.equal(live.takeSets(), `set\t${relay.id}\trelay_1\t1\nset\t${relay.id + 2}\tservo\t120\nset\t${relay.id + 3}\tstrip_color\t-1\n`);
+  assert.equal(live.takeSets(), "");
+  assert.equal(live.controls().find((c) => c.id === relay.id).state, "sent");
+  now += 900;
+  live.accept(`lab\t1\nview\tdevice\nout\trelay_1\t1\ndid\t${relay.id}\tok\ndid\t${relay.id + 2}\ta sequence has it\n`);
+  const states = Object.fromEntries(live.controls().map((c) => [c.id, c]));
+  assert.equal(states[relay.id].state, "done");
+  assert.equal(states[relay.id + 2].state, "refused");
+  assert.equal(states[relay.id + 2].why, "a sequence has it");
+  assert.equal(states[relay.id + 1].state, "replaced");  // Replaced before it went: never sent.
+  now += 5000;
+  assert.equal(states[relay.id + 3].state, "sent");
+  assert.equal(live.controls().find((c) => c.id === relay.id + 3).state, "unanswered");
+});
+
+test("a control not collected in time is dropped, and a closed Lab takes none", () => {
+  let now = 1000;
+  const live = new LabLiveService({ now: () => now });
+  live.accept("lab\t1\nview\tdevices\n");
+  const late = live.control("led", 120);
+  now += 3500;
+  live.accept("lab\t1\nview\tdevices\n");
+  now += 2000;
+  assert.equal(live.takeSets(), "");
+  assert.equal(live.controls().find((c) => c.id === late.id).state, "refused");
+  live.accept("lab\t1\nview\tclosed\n");
+  assert.equal(live.control("led", 120).error, "lab_not_live");
+});
+
+test("the home door's answer carries the page's controls after the watch line", async () => {
+  service = new LabLiveService();
+  service.lanPort = 31890;
+  const lines = service.ticketLines("cardputer-test", { en0: [{ family: "IPv4", address: "192.168.0.10", cidr: "192.168.0.10/24", internal: false }] });
+  const ticket = /\/lab\/([0-9a-f]{32})/u.exec(lines)[1];
+  await lanRequest(`/lab/${ticket}/live`, "lab\t1\nview\tdevice\n");
+  const { id } = service.control("lamp_power", 1);
+  service.watch();
+  assert.deepEqual(await lanRequest(`/lab/${ticket}/live`, "lab\t1\nview\tdevice\n"), { status: 200, text: `watch\t1\nset\t${id}\tlamp_power\t1\n` });
+  assert.deepEqual(await lanRequest(`/lab/${ticket}/live`, "lab\t1\nview\tdevice\n"), { status: 200, text: "watch\t1\n" });
+});
+
+test("the page's control route checks the part and the value, and needs the page's header", async () => {
+  const { ui, labLive } = makeUi();
+  assert.equal((await call(ui, "POST", "/api/lab/control", { body: { output: "servo", value: 90 } })).status, 403);
+  assert.equal((await call(ui, "POST", "/api/lab/control", { body: { output: "servo", value: 90 }, headers: write })).status, 409);
+  labLive.accept("lab\t1\nview\tdevice\n");
+  const ok = await call(ui, "POST", "/api/lab/control", { body: { output: "ac_daikin", value: 1 }, headers: write });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.json.ok, true);
+  assert.equal((await call(ui, "POST", "/api/lab/control", { body: { output: "servo", value: 999 }, headers: write })).status, 400);
+  const { json } = await call(ui, "GET", "/api/lab");
+  assert.equal(json.live.can_control, true);
+  assert.equal(json.live.controls[0].output, "ac_daikin");
+});

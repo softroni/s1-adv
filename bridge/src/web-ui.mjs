@@ -269,6 +269,7 @@ export class WebUi {
         case "POST /api/remote": send(res, 200, await this.remote(body, REMOTE_ACTIONS)); return;
         case "GET /api/lab": send(res, 200, this.lab()); return;
         case "POST /api/lab/action": send(res, 200, await this.remote(body, LAB_ACTIONS)); return;
+        case "POST /api/lab/control": this.labControl(body, res); return;
         case "GET /api/logs": send(res, 200, await this.logs(url.searchParams)); return;
         case "GET /api/device-logs": send(res, 200, await this.deviceLogs()); return;
         case "GET /api/firmware": send(res, 200, await this.firmware()); return;
@@ -432,6 +433,18 @@ export class WebUi {
       text: `${words} [[cardputer_actions:${JSON.stringify([action])}]]`, source: "web_ui" });
     console.info(`[ui] sent ${action.type} to the Cardputer (seq ${message.seq})`);
     return { ok: true, seq: message.seq, action };
+  }
+
+  // A part set from the page: it rides the answer to the Cardputer's next report, about a second
+  // away while the Lab is open at home. Relays, the lamp and the air conditioners too, with no
+  // confirm, because the owner asked for that.
+  labControl(body, res) {
+    const output = String(body?.output || "");
+    const value = Number(body?.value);
+    const result = this.labLive.control(output, value);
+    if (!result.ok) { fail(res, result.error === "lab_not_live" ? 409 : 400, result.error); return; }
+    console.info(`[ui] lab control ${output}=${value} (${result.id})`);
+    send(res, 200, result);
   }
 
   lab() {
