@@ -1214,6 +1214,8 @@ void maintainConnectivity() {
   }
   // TV Remote turned Wi-Fi off to give Bluetooth its memory, and turns it back on when it's done.
   if (tvRemoteHoldsWifi()) return;
+  // Planes' Drones page has Wi-Fi off its network, listening, and rejoins when it's left.
+  if (planesHoldsWifi()) return;
 
   bool wifiNow = WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0);
   const bool idleForRecovery = !gBootBackgroundActive && networkWorkIdle();

@@ -82,9 +82,9 @@ void serviceMemoryGuard() {
   static uint32_t criticalSinceMs = 0;
   uint32_t now = millis();
   if (gInboxHttpBusy || radioBusy()) return;
-  // Cameras away from home asks the bridge over HTTPS, whose handshake takes about 40 KB while it
-  // runs: like the inbox's, that low is expected and passes. Counted, a few requests in a row
-  // restarted the Cardputer as Cameras opened.
+  // Cameras and Planes away from home ask the bridge over HTTPS, whose handshake takes about 40 KB
+  // while it runs: like the inbox's, that low is expected and passes. Counted, a few requests in a
+  // row restarted the Cardputer as Cameras opened, and Planes' first, its ticket, did on 0.2.323.
   if (cameraHttpsBusy()) { criticalSinceMs = 0; return; }
   if (now - lastCheckMs < 1000) {
     return;

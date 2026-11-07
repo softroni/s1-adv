@@ -3,7 +3,8 @@
 // the station's next passes you can see, where the station is right now, and what the kids have
 // spotted. Enter on a plane says which way to look and how high; Enter on a pass draws its path
 // across the sky. A plane high overhead brings up "Look up!", S keeps a plane in Spotted on the
-// SD card, and R on a pass rings ten minutes before it, from any screen.
+// SD card, and R on a pass rings ten minutes before it, from any screen. A fifth page listens for
+// drones' Remote ID over Wi-Fi itself, with no bridge (drone_id.h, drone_listen.cpp).
 //
 // Where: the Cap's GPS when it has a fix, else the Weather city in Settings. The position leaves
 // the device rounded to about a kilometre, as weather's does, and only to the owner's bridge.
@@ -11,13 +12,17 @@
 // time: at home over the bridge's plain-HTTP door with a ticket, else over HTTPS.
 #include "../planes_catalog.h"
 #include "../camera_net.h"
+#include "../drone_id.h"
+#include "../drone_listen.h"
 namespace {
-enum class PlView : uint8_t { Sky, Plane, Passes, Pass, Now, Spotted, Sightings, LookUp, GoOut };
+enum class PlView : uint8_t { Sky, Plane, Passes, Pass, Now, Spotted, Sightings, LookUp, GoOut, Drones, Drone, DroneAlert };
 enum class PlJob : uint8_t { None, Ticket, Near, Iss, Report };
 
 constexpr uint8_t kGpsForPlanes = 16;            // Beside 081's holders: Lab 1, once 2, Pulse 4, Mesh 8.
 constexpr uint32_t kPlNearEveryMs = 10000;       // Planes move a mile in about ten seconds.
 constexpr uint32_t kPlIssEveryMs = 10UL * 60UL * 1000UL, kPlNowEveryMs = 20000;
+// Away from home each ask is an HTTPS handshake of about 40 KB and seconds of work: less often.
+constexpr uint32_t kPlNearAwayMs = 30000, kPlNowAwayMs = 60000;
 constexpr uint32_t kPlRetryMs = 15000;
 constexpr uint32_t kPlLookUpShowMs = 20000, kPlLookUpGapMs = 45000;
 constexpr uint32_t kPlNoticeMs = 3000;
@@ -83,6 +88,18 @@ planes::Pass gPlRemPass;
 planes::Pass gPlGoPass;                   // The pass the "Go outside" notice is for.
 bool gPlPassFromReminder = false;         // The path screen shows gPlGoPass, not a listed pass.
 struct PlChirp { uint32_t nextMs = 0; uint8_t left = 0, step = 0; } gPlChirp;
+// Drones: listening takes Wi-Fi off its network, which planesHoldsWifi() keeps the reconnects away
+// from, and gives it back when the page is left. Enter starts it, so flipping past never drops Wi-Fi.
+enum class PlDroneState : uint8_t { Off, Waiting, Listening };
+PlDroneState gPlDroneState = PlDroneState::Off;
+bool gPlDroneHold = false, gPlDroneWifiWasOff = false;
+drone_id::Table* gPlDrones = nullptr;       // On the heap while listening.
+drone_listen::Frame* gPlDroneFrame = nullptr;
+uint8_t gPlDroneSel = 0;
+uint8_t gPlDroneShown[6] = {}, gPlDroneAlertMac[6] = {};  // By address: the table reorders.
+uint32_t gPlDroneSince = 0, gPlDroneLastAlertMs = 0, gPlDroneAlertUntil = 0;
+PlView gPlDroneBack = PlView::Drones;
+constexpr uint32_t kPlDroneAlertMs = 20000, kPlDroneAlertGapMs = 20000;
 
 void plInvalidate() { gLastRenderMs = 0; gUiFramePolicy.invalidate(); }
 void plSay(const String& text, uint16_t ink = 0) {
@@ -159,7 +176,7 @@ bool plWantsSpace() {
 }
 
 bool plNextJob() {
-  if (!wifiLocalAddress()) return false;
+  if (gPlDroneState != PlDroneState::Off || !wifiLocalAddress()) return false;
   const uint32_t now = millis();
   if (gPlReport[0]) {
     char path[sizeof(gPlReport)];
@@ -325,7 +342,7 @@ void plFinished() {
       case PlJob::Near:
         if (e == camera_net::Error::None) {
           plTakeNear(data, length);
-          gPlNearDueMs = now + kPlNearEveryMs;
+          gPlNearDueMs = now + (viaHome ? kPlNearEveryMs : kPlNearAwayMs);
           appendRuntimeLog("PLANES", String("near ") + (gPlSky ? gPlSky->count : 0) + " " + tookMs + "ms " + (viaHome ? "home" : "https"));
         } else {
           gPlProblem = plProblemText(e, word);
@@ -336,7 +353,7 @@ void plFinished() {
       case PlJob::Iss:
         if (e == camera_net::Error::None) {
           plTakeIss(data, length);
-          gPlIssDueMs = now + (gPlView == PlView::Now ? kPlNowEveryMs : kPlIssEveryMs);
+          gPlIssDueMs = now + (gPlView == PlView::Now ? (viaHome ? kPlNowEveryMs : kPlNowAwayMs) : kPlIssEveryMs);
         } else {
           gPlSpaceProblem = plProblemText(e, word);
           gPlIssDueMs = now + (word == "unknown_place" || word == "not_found" ? 60000 : kPlRetryMs);
@@ -559,6 +576,7 @@ uint8_t plPage() {
     case PlView::Passes: case PlView::Pass: return 1;
     case PlView::Now: return 2;
     case PlView::Spotted: case PlView::Sightings: return 3;
+    case PlView::Drones: case PlView::Drone: case PlView::DroneAlert: return 4;
     default: return 0;
   }
 }
@@ -568,10 +586,10 @@ void plFooter(const char* keys, bool dots) {
   d.setFont(&fonts::Font0);
   d.setTextColor(plMuted());
   d.setCursor(4, kPlFootY);
-  d.print(fitCurrentFontToWidth(keys, dots ? 208 : 232));
+  d.print(fitCurrentFontToWidth(keys, dots ? 206 : 232));
   if (!dots) return;
-  for (uint8_t i = 0; i < 4; ++i) {
-    const int16_t x = 216 + i * 7, y = kPlFootY + 3;
+  for (uint8_t i = 0; i < 5; ++i) {
+    const int16_t x = 213 + i * 6, y = kPlFootY + 3;
     if (i == plPage()) d.fillCircle(x, y, 2, plAccent());
     else d.drawCircle(x, y, 2, plDim());
   }
@@ -1128,7 +1146,361 @@ void plDrawGoOut() {
   plFooter("Enter path   Esc", false);
 }
 
+// --- Drones --------------------------------------------------------------------------------
+bool plDroneView() { return gPlView == PlView::Drones || gPlView == PlView::Drone || gPlView == PlView::DroneAlert; }
+bool plDroneListening() { return gPlDroneState == PlDroneState::Listening; }
+void plDroneGiveBack() {
+  if (!gPlDroneHold) return;
+  gPlDroneHold = false;
+  if (gPlDroneWifiWasOff) WiFi.mode(WIFI_OFF);
+  else beginWifiStationConnect("Wi-Fi back on");
+}
+void plDroneStop() {
+  if (gPlDroneState == PlDroneState::Off) return;
+  const bool was = plDroneListening();
+  drone_listen::stop();
+  plDroneGiveBack();
+  delete gPlDrones;
+  gPlDrones = nullptr;
+  delete gPlDroneFrame;
+  gPlDroneFrame = nullptr;
+  gPlDroneState = PlDroneState::Off;
+  gPlNearDueMs = gPlIssDueMs = millis() + 4000;  // Wi-Fi rejoins first.
+  if (was) appendRuntimeLog("PLANES", String("drones stop frames=") + drone_listen::frames() + " lost=" + drone_listen::dropped());
+  plInvalidate();
+}
+// Enter on the page: a request under way ends first, then Wi-Fi is taken.
+void plDroneAsk() {
+  if (gPlDroneState != PlDroneState::Off) return;
+  gPlDroneState = PlDroneState::Waiting;
+  if (camera_net::busy()) camera_net::cancel();
+  plInvalidate();
+}
+void plDroneTake() {
+  if (camera_net::busy() || camera_net::finished() || !networkWorkIdle()) return;  // Next time round.
+  if (!gPlDrones) gPlDrones = new (std::nothrow) drone_id::Table();
+  if (!gPlDroneFrame) gPlDroneFrame = new (std::nothrow) drone_listen::Frame();
+  if (!gPlDrones || !gPlDroneFrame) {
+    plDroneStop();
+    plSay("Not enough memory to listen", plAmber());
+    return;
+  }
+  gPlDroneHold = true;
+  gPlDroneWifiWasOff = WiFi.getMode() == WIFI_OFF;
+  if (gPlDroneWifiWasOff) WiFi.mode(WIFI_STA);
+  else WiFi.disconnect(false, false);
+  gWifiReady = false;
+  if (!drone_listen::start()) {
+    plDroneStop();
+    plSay("Wi-Fi wouldn't listen", plAmber());
+    appendRuntimeLog("PLANES", "drones start failed", true);
+    return;
+  }
+  gPlDroneState = PlDroneState::Listening;
+  gPlDroneSince = millis();
+  gPlDroneSel = 0;
+  appendRuntimeLog("PLANES", "drones listening");
+  plInvalidate();
+}
+const drone_id::Heard* plDroneByMac(const uint8_t mac[6]) {
+  if (!gPlDrones) return nullptr;
+  const int i = gPlDrones->byMac(mac);
+  return i < 0 ? nullptr : &gPlDrones->heard[i];
+}
+// The drones heard, strongest signal first: about nearest first, without a GPS.
+uint8_t plDroneOrder(uint8_t* order) {
+  if (!gPlDrones) return 0;
+  const uint8_t n = gPlDrones->count;
+  for (uint8_t i = 0; i < n; ++i) order[i] = i;
+  for (uint8_t i = 1; i < n; ++i)
+    for (uint8_t j = i; j && gPlDrones->heard[order[j]].rssi > gPlDrones->heard[order[j - 1]].rssi; --j) {
+      const uint8_t k = order[j]; order[j] = order[j - 1]; order[j - 1] = k;
+    }
+  return n;
+}
+// Where a drone is from here: needs the Cap's fix and the drone's position.
+bool plDroneFrom(const drone_id::Drone& dr, int32_t& distM, int& bearing, int& elev) {
+  if (!plUsingGps() || !dr.located) return false;
+  const int32_t latE5 = dr.latE7 / 100, lonE5 = dr.lonE7 / 100;
+  distM = lab_gps::metersBetween(gPlHere.latE5, gPlHere.lonE5, latE5, lonE5);
+  bearing = lab_gps::bearingDeg(gPlHere.latE5, gPlHere.lonE5, latE5, lonE5);
+  if (bearing < 0) bearing = 0;
+  int32_t height = 0;
+  elev = drone_id::heightMeters(dr, height) ? int(lround(atan2(double(height), double(distM > 1 ? distM : 1)) * 180.0 / 3.14159265358979)) : -1;
+  return true;
+}
+// "590ft", "0.6mi"; "180m", "1.2km": short, for the list.
+void plDroneDistance(char* out, size_t room, int32_t meters) {
+  if (plUnits() == units::System::US) {
+    const int32_t ft = units::feet(meters);
+    if (ft < 1000) snprintf(out, room, "%ldft", static_cast<long>(ft));
+    else { char n[12]; units::tenthsText(n, sizeof(n), units::rounded(meters / 160.9344)); snprintf(out, room, "%smi", n); }
+  } else if (meters < 1000) {
+    snprintf(out, room, "%ldm", static_cast<long>(meters));
+  } else {
+    char n[12]; units::tenthsText(n, sizeof(n), units::rounded(meters / 100.0)); snprintf(out, room, "%skm", n);
+  }
+}
+// The same with a space before the unit, for sentences: "591 ft", "0.4 mi", "180 m".
+void plDroneDistanceWords(char* out, size_t room, int32_t meters) {
+  char compact[16];
+  plDroneDistance(compact, sizeof(compact), meters);
+  size_t k = 0;
+  while (compact[k] && ((compact[k] >= '0' && compact[k] <= '9') || compact[k] == '.')) ++k;
+  snprintf(out, room, "%.*s %s", int(k), compact, compact + k);
+}
+void plDroneHeight(char* out, size_t room, int32_t meters, bool compact) {
+  const bool us = plUnits() == units::System::US;
+  snprintf(out, room, compact ? "%ld%s" : "%ld %s", static_cast<long>(us ? units::feet(meters) : meters), us ? "ft" : "m");
+}
+void plDroneAlert(const drone_id::Heard& h) {
+  if (gPlView != PlView::Drones && gPlView != PlView::Drone) return;
+  if (gPlDroneLastAlertMs && millis() - gPlDroneLastAlertMs < kPlDroneAlertGapMs) return;
+  gPlDroneLastAlertMs = millis();
+  memcpy(gPlDroneAlertMac, h.d.mac, 6);
+  gPlDroneBack = gPlView;
+  gPlView = PlView::DroneAlert;
+  gPlDroneAlertUntil = millis() + kPlDroneAlertMs;
+  plWakeScreen();
+  plChirp(3);
+}
+void plDroneService(uint32_t now) {
+  if (gPlDroneState != PlDroneState::Off && !plDroneView()) { plDroneStop(); return; }
+  if (gPlDroneState == PlDroneState::Waiting) { plDroneTake(); return; }
+  if (!plDroneListening()) return;
+  drone_listen::service(now);
+  for (int n = 0; n < 6 && drone_listen::take(*gPlDroneFrame); ++n) {
+    const drone_listen::Frame& f = *gPlDroneFrame;
+    uint8_t mac[6];
+    const uint8_t* pack = nullptr;
+    size_t packLen = 0;
+    drone_id::Via via;
+    if (!drone_id::findPack(f.data, f.length, mac, pack, packLen, via)) continue;
+    const int i = gPlDrones->hear(mac, f.rssi, f.channel, via, pack, packLen, now);
+    if (i < 0) continue;
+    drone_listen::heardOn(f.channel, now);
+    drone_id::Heard& h = gPlDrones->heard[i];
+    if (h.frames == 1)
+      appendRuntimeLog("PLANES", String("drone heard ch") + f.channel + (via == drone_id::Via::Nan ? " nan " : " beacon ") + h.rssi + "dBm");
+    if (!h.alerted) { h.alerted = true; plDroneAlert(h); }
+  }
+  gPlDrones->forget(now);
+  if (gPlView == PlView::DroneAlert && int32_t(now - gPlDroneAlertUntil) >= 0) { gPlView = gPlDroneBack; plInvalidate(); }
+}
+void plSaveDrone(const drone_id::Heard& h) {
+  planes::Plane p;
+  snprintf(p.hex, sizeof(p.hex), "%02x%02x%02x", h.d.mac[3], h.d.mac[4], h.d.mac[5]);
+  drone_id::shortName(p.name, sizeof(p.name), h.d);
+  snprintf(p.type, sizeof(p.type), "%s", drone_id::typeName(h.d.uaType));
+  int32_t m = 0;
+  p.altFt = drone_id::heightMeters(h.d, m) ? units::feet(m) : 0;
+  plSaveSighting(p);
+}
+
+void plDrawDrones() {
+  auto& d = gCanvas;
+  String hint = plDroneListening() ? String("listening ch ") + drone_listen::channel()
+                : gPlDroneState == PlDroneState::Waiting ? String("starting...") : String("not listening");
+  plHeader("Drones", plPink(), hint);
+  plDrawRound(false);
+  const int16_t listW = 238 - kPlListX;
+  if (!plDroneListening()) {
+    d.setFont(&fonts::Font2);
+    d.setTextColor(plMuted());
+    plWrap(gPlDroneState == PlDroneState::Waiting ? String("Waiting for the network to finish...")
+                                                   : String("Drones send their ID over Wi-Fi. Enter listens for them, and the internet pauses while it does."),
+           kPlListX + 4, 28, listW - 6, 16, 6);
+    plFooter("Enter listen  ,/ more", true);
+    return;
+  }
+  // A sweep goes round while it listens.
+  const double a = (millis() % 3000) / 3000.0 * 2 * 3.14159265358979;
+  d.drawLine(kPlMapX, kPlMapY, kPlMapX + int(lround(sin(a) * (kPlMapR - 2))), kPlMapY - int(lround(cos(a) * (kPlMapR - 2))), rgb565_local(110, 40, 90));
+  uint8_t order[drone_id::Table::kMax];
+  const uint8_t n = plDroneOrder(order);
+  if (gPlDroneSel >= n) gPlDroneSel = n ? n - 1 : 0;
+  // The ring: 300 m, 1 km or 3 km, whichever holds them all.
+  int32_t ring = 300;
+  for (uint8_t i = 0; i < n; ++i) {
+    int32_t dist; int bearing, elev;
+    if (plDroneFrom(gPlDrones->heard[order[i]].d, dist, bearing, elev)) while (ring < 3000 && dist > ring * 9 / 10) ring = ring == 300 ? 1000 : 3000;
+  }
+  char text[40];
+  units::distanceText(text, sizeof(text), ring, plUnits());
+  d.setFont(&fonts::Font0);
+  d.setTextColor(plDim());
+  d.setCursor(kPlMapX + kPlMapR - 30, kPlMapY + kPlMapR - 6);
+  d.print(text);
+  for (int i = n - 1; i >= 0; --i) {
+    int32_t dist; int bearing, elev;
+    if (!plDroneFrom(gPlDrones->heard[order[i]].d, dist, bearing, elev)) continue;
+    int dx, dy;
+    planes::mapPoint(uint32_t(dist), bearing, uint32_t(ring), kPlMapR - 5, dx, dy);
+    const int16_t x = kPlMapX + dx, y = kPlMapY + dy;
+    const char label[2] = {char('1' + i), 0};
+    d.fillRoundRect(x - 4, y - 5, 9, 11, 2, i == gPlDroneSel ? TFT_WHITE : TFT_BLACK);
+    d.setTextColor(i == gPlDroneSel ? TFT_BLACK : plPink());
+    d.setCursor(x - 2, y - 3);
+    d.print(label);
+  }
+  if (!n) {
+    d.setFont(&fonts::Font2);
+    d.setTextColor(plMuted());
+    const uint32_t secs = (millis() - gPlDroneSince) / 1000;
+    plWrap(String("Listening") + (secs < 60 ? String("...") : String(" for ") + (secs / 60) + " min.") +
+           " No drones yet. Only ones nearby can be heard.", kPlListX + 4, 28, listW - 6, 16, 6);
+  } else {
+    const int first = max<int>(0, min<int>(gPlDroneSel - 1, n - kPlRows));
+    for (int row = 0; row < kPlRows && first + row < n; ++row) {
+      const int i = first + row;
+      const drone_id::Heard& h = gPlDrones->heard[order[i]];
+      const int16_t y = 25 + row * kPlRowH;
+      const bool selected = i == gPlDroneSel;
+      if (selected) d.fillRoundRect(kPlListX, y, listW + 1, kPlRowH - 1, 4, plPink());
+      d.setFont(&fonts::Font0);
+      d.setTextColor(selected ? TFT_BLACK : plPink());
+      d.setCursor(kPlListX + 3, y + 4);
+      d.print(i + 1);
+      char name[24];
+      drone_id::shortName(name, sizeof(name), h.d);
+      d.setFont(&fonts::Font2);
+      d.setTextColor(selected ? TFT_BLACK : TFT_WHITE);
+      d.setCursor(kPlListX + 15, y);
+      d.print(fitCurrentFontToWidth(name, listW - 17));
+      char dist[12] = "", height[12] = "";
+      int32_t m, distM; int bearing, elev;
+      const bool high = drone_id::heightMeters(h.d, m);
+      if (high) plDroneHeight(height, sizeof(height), m, true);
+      if (plDroneFrom(h.d, distM, bearing, elev)) {
+        plDroneDistance(dist, sizeof(dist), distM);
+        snprintf(text, sizeof(text), "%s %s%s%s", planes::compass(bearing), dist, high ? " " : "", high ? height : "");
+      } else {
+        snprintf(text, sizeof(text), "%s%s%s", high ? height : "", high ? " up, " : "", drone_id::signalWord(h.rssi));
+      }
+      d.setFont(&fonts::Font0);
+      d.setTextColor(selected ? TFT_BLACK : plMuted());
+      d.setCursor(kPlListX + 15, y + 15);
+      d.print(fitCurrentFontToWidth(text, listW - 17));
+    }
+  }
+  plFooter(n ? ";. pick Enter info S keep ,/ more" : "Esc stops listening  ,/ more", true);
+}
+
+void plDrawDrone() {
+  auto& d = gCanvas;
+  const drone_id::Heard* h = plDroneByMac(gPlDroneShown);
+  if (!h) { gPlView = PlView::Drones; plDrawDrones(); return; }
+  const drone_id::Drone& dr = h->d;
+  char name[24], line[72], a[16], b[16], c[16];
+  drone_id::shortName(name, sizeof(name), dr);
+  plHeader(name, plPink(), drone_id::statusWord(dr.status));
+  d.setFont(&fonts::Font2);
+  d.setTextColor(TFT_WHITE);
+  d.setCursor(8, 26);
+  String kind = drone_id::typeName(dr.uaType);
+  if (dr.selfId[0]) kind += String("  \"") + dr.selfId + "\"";
+  d.print(fitCurrentFontToWidth(kind, 224));
+  d.setFont(&fonts::Font0);
+  d.setTextColor(plMuted());
+  d.setCursor(8, 44);
+  d.print(fitCurrentFontToWidth(dr.id[0] ? String("ID ") + dr.id : String("No ID heard yet"), 224));
+  int32_t distM = 0, m = 0;
+  int bearing = 0, elev = -1;
+  const bool where = plDroneFrom(dr, distM, bearing, elev);
+  if (where) {
+    d.setTextColor(plAmber());
+    d.setCursor(8, 62);
+    d.print("LOOK");
+    d.setFont(&fonts::FreeSansBold9pt7b);
+    d.setTextColor(TFT_WHITE);
+    d.setCursor(40, 56);
+    d.print(planes::compassWord(bearing));
+    d.setFont(&fonts::Font2);
+    d.setTextColor(plAmber());
+    d.setCursor(40, 74);
+    if (elev >= 0) { planes::heightWords(line, sizeof(line), elev); d.print(line); }
+    else d.print("how high isn't known");
+  } else {
+    d.setFont(&fonts::Font2);
+    d.setTextColor(plMuted());
+    plWrap(dr.located ? "Which way to look needs the Cap's GPS, outdoors." : "It hasn't said where it is yet.", 8, 55, 224, 15, 2);
+  }
+  // Height and distance, then speed: whichever it has said.
+  String facts;
+  if (drone_id::heightMeters(dr, m)) { plDroneHeight(a, sizeof(a), m, false); facts += String(a) + " up"; }
+  if (where) { plDroneDistanceWords(b, sizeof(b), distM); facts += (facts.length() ? ", " : "") + String(b) + " away"; }
+  d.setFont(&fonts::Font0);
+  d.setTextColor(TFT_WHITE);
+  d.setCursor(8, 90);
+  d.print(fitCurrentFontToWidth(facts.length() ? facts : String("It hasn't said how high it is"), 228));
+  if (dr.speedCms >= 0) {
+    const bool us = plUnits() == units::System::US;
+    snprintf(c, sizeof(c), "%ld %s", static_cast<long>(units::rounded(dr.speedCms * (us ? 0.0223694 : 0.036))), us ? "mph" : "km/h");
+    if (dr.speedCms < 50) snprintf(line, sizeof(line), "Hovering");
+    else if (dr.direction >= 0) snprintf(line, sizeof(line), "Moving %s to the %s", c, planes::compassWord(dr.direction));
+    else snprintf(line, sizeof(line), "Moving %s", c);
+    d.setCursor(8, 99);
+    d.print(fitCurrentFontToWidth(line, 228));
+  }
+  if (dr.hasOperator && dr.located) {
+    const int32_t apart = lab_gps::metersBetween(dr.latE7 / 100, dr.lonE7 / 100, dr.opLatE7 / 100, dr.opLonE7 / 100);
+    const int toward = lab_gps::bearingDeg(dr.latE7 / 100, dr.lonE7 / 100, dr.opLatE7 / 100, dr.opLonE7 / 100);
+    plDroneDistanceWords(b, sizeof(b), apart);
+    if (toward < 0 || apart < 10) snprintf(line, sizeof(line), "%s right below it", dr.operatorType == 0 ? "Took off" : "Flown from");
+    else snprintf(line, sizeof(line), "%s %s to its %s", dr.operatorType == 0 ? "Took off" : "Flown from", b, planes::compassWord(toward));
+    d.setTextColor(plMuted());
+    d.setCursor(8, 108);
+    d.print(fitCurrentFontToWidth(line, 228));
+  }
+  snprintf(line, sizeof(line), "Signal %s, heard %lus ago, ch %u", drone_id::signalWord(h->rssi),
+           static_cast<unsigned long>((millis() - h->lastMs) / 1000), unsigned(h->channel));
+  d.setTextColor(plMuted());
+  d.setCursor(8, 117);
+  d.print(fitCurrentFontToWidth(line, 228));
+  plFooter(",/ other drones  S I saw it!  Esc", false);
+}
+
+void plDrawDroneAlert() {
+  auto& d = gCanvas;
+  d.fillScreen(TFT_BLACK);
+  const drone_id::Heard* h = plDroneByMac(gPlDroneAlertMac);
+  const bool flash = (millis() / 400) % 2 == 0;
+  d.setFont(&fonts::FreeSansBold12pt7b);
+  d.setTextColor(flash ? plPink() : TFT_WHITE);
+  plCentered("DRONE NEARBY!", 6);
+  if (!h) { plFooter("Esc", false); return; }
+  char name[24], text[48], a[16];
+  drone_id::shortName(name, sizeof(name), h->d);
+  d.setFont(&fonts::FreeSansBold9pt7b);
+  d.setTextColor(TFT_WHITE);
+  plCentered(name, 34);
+  d.setFont(&fonts::Font2);
+  int32_t distM = 0, m = 0;
+  int bearing = 0, elev = -1;
+  d.setTextColor(plAccent());
+  if (plDroneFrom(h->d, distM, bearing, elev)) {
+    plDroneDistanceWords(a, sizeof(a), distM);
+    snprintf(text, sizeof(text), "to the %s, %s away", planes::compassWord(bearing), a);
+  } else {
+    snprintf(text, sizeof(text), "signal %s", drone_id::signalWord(h->rssi));
+  }
+  plCentered(text, 56);
+  d.setTextColor(TFT_WHITE);
+  if (drone_id::heightMeters(h->d, m)) {
+    plDroneHeight(a, sizeof(a), m, false);
+    snprintf(text, sizeof(text), "%s up%s%s", a, h->d.status ? ", " : "", drone_id::statusWord(h->d.status));
+    plCentered(text, 73);
+  } else if (h->d.status) {
+    plCentered(drone_id::statusWord(h->d.status), 73);
+  }
+  d.setTextColor(plMuted());
+  plCentered(drone_id::typeName(h->d.uaType), 90);
+  plFooter("Enter more   S I saw it!   Esc", false);
+}
+
 // --- The app's life ------------------------------------------------------------------------
+bool planesHoldsWifi() { return gPlDroneHold; }
+
 void beginPlanes() {
   if (!gPlSky) gPlSky = new (std::nothrow) planes::Sky();
   if (!gPlSpace) gPlSpace = new (std::nothrow) planes::Space();
@@ -1159,6 +1531,7 @@ void beginPlanes() {
   plInvalidate();
 }
 void stopPlanes() {
+  plDroneStop();  // Wi-Fi goes back to its network.
   camera_net::close();
   delete gPlSky;
   gPlSky = nullptr;
@@ -1184,6 +1557,7 @@ void servicePlanes() {
       gPlHere.atMs = now;
     }
   }
+  plDroneService(now);
   if (!camera_net::opened()) {
     static uint32_t lastTry = 0;
     if (gPlSky && gPlSpace && now - lastTry > 300) {
@@ -1215,6 +1589,9 @@ bool planesEscape() {
     case PlView::Plane: gPlView = PlView::Sky; break;
     case PlView::Pass: gPlView = PlView::Passes; gPlPassFromReminder = false; break;
     case PlView::Sightings: gPlView = PlView::Spotted; break;
+    case PlView::DroneAlert: gPlView = gPlDroneBack; break;
+    case PlView::Drone: gPlView = PlView::Drones; break;
+    case PlView::Drones: plDroneStop(); gPlView = PlView::Sky; break;
     case PlView::Passes: case PlView::Now: case PlView::Spotted: gPlView = PlView::Sky; plFreeSpotted(); break;
     case PlView::Sky: return false;
   }
@@ -1223,12 +1600,14 @@ bool planesEscape() {
 }
 
 void plOpenPage(uint8_t page) {
-  static const PlView kPages[4] = {PlView::Sky, PlView::Passes, PlView::Now, PlView::Spotted};
-  gPlView = kPages[page % 4];
+  static const PlView kPages[5] = {PlView::Sky, PlView::Passes, PlView::Now, PlView::Spotted, PlView::Drones};
+  gPlView = kPages[page % 5];
   if (gPlView != PlView::Spotted) plFreeSpotted();
   if (gPlView == PlView::Now && gPlSpaceOk && millis() - gPlSpaceAtMs > kPlNowEveryMs) gPlIssDueMs = millis();
   plInvalidate();
 }
+// , and / step through the five pages, round and round.
+void plFlip(bool left) { plOpenPage(uint8_t((plPage() + (left ? 4 : 1)) % 5)); }
 void plSelectPlane(int i) {
   if (!gPlSkyOk || !gPlSky->count) return;
   gPlSel = uint8_t((i + gPlSky->count) % gPlSky->count);
@@ -1249,7 +1628,7 @@ bool handlePlanesKey(char key, const Keyboard_Class::KeysState& keys) {
     case PlView::Sky:
       if (up) plSelectPlane(gPlSel - 1);
       else if (down) plSelectPlane(gPlSel + 1);
-      else if (left || right) plOpenPage(left ? 3 : 1);
+      else if (left || right) plFlip(left);
       else if (enter && gPlSkyOk && gPlSky->count) { plSelectPlane(gPlSel); gPlView = PlView::Plane; }
       else if (key == '-' || key == '_' || key == '=' || key == '+') {
         const bool wider = key == '=' || key == '+';
@@ -1277,7 +1656,7 @@ bool handlePlanesKey(char key, const Keyboard_Class::KeysState& keys) {
       break;
     case PlView::Passes:
       if (gPlSpaceOk && gPlSpace->count && (up || down)) gPlPassSel = uint8_t((gPlPassSel + (up ? gPlSpace->count - 1 : 1)) % gPlSpace->count);
-      else if (left || right) plOpenPage(left ? 0 : 2);
+      else if (left || right) plFlip(left);
       else if (enter && gPlSpaceOk && gPlSpace->count) { gPlPassFromReminder = false; gPlView = PlView::Pass; }
       else if (lower == 'r' && gPlSpaceOk && gPlPassSel < gPlSpace->count) plToggleReminder(gPlSpace->passes[gPlPassSel]);
       break;
@@ -1287,16 +1666,44 @@ bool handlePlanesKey(char key, const Keyboard_Class::KeysState& keys) {
       else if (lower == 'r') { if (const planes::Pass* p = plPassShown()) plToggleReminder(*p); }
       break;
     case PlView::Now:
-      if (left || right) plOpenPage(left ? 1 : 3);
+      if (left || right) plFlip(left);
       else if (lower == 'r') { gPlIssDueMs = millis(); plSay("Asking again..."); }
       break;
     case PlView::Spotted:
-      if (left || right) plOpenPage(left ? 2 : 0);
+      if (left || right) plFlip(left);
       else if (enter && gPlRecentCount) { gPlRecentTop = 0; gPlView = PlView::Sightings; }
       break;
     case PlView::Sightings:
       if (up && gPlRecentTop) --gPlRecentTop;
       else if (down && gPlRecentTop + kPlRows < gPlRecentCount) ++gPlRecentTop;
+      break;
+    case PlView::Drones: {
+      uint8_t order[drone_id::Table::kMax];
+      const uint8_t n = plDroneOrder(order);
+      if (left || right) plFlip(left);
+      else if (!plDroneListening()) { if (enter) plDroneAsk(); }
+      else if ((up || down) && n) gPlDroneSel = uint8_t((gPlDroneSel + (up ? n - 1 : 1)) % n);
+      else if (enter && n && gPlDroneSel < n) { memcpy(gPlDroneShown, gPlDrones->heard[order[gPlDroneSel]].d.mac, 6); gPlView = PlView::Drone; }
+      else if (lower == 's' && n && gPlDroneSel < n) plSaveDrone(gPlDrones->heard[order[gPlDroneSel]]);
+      break;
+    }
+    case PlView::Drone: {
+      uint8_t order[drone_id::Table::kMax];
+      const uint8_t n = plDroneOrder(order);
+      if ((left || right) && n) {
+        int at = 0;
+        for (uint8_t i = 0; i < n; ++i) if (!memcmp(gPlDrones->heard[order[i]].d.mac, gPlDroneShown, 6)) at = i;
+        at = (at + (left ? n - 1 : 1)) % n;
+        gPlDroneSel = uint8_t(at);
+        memcpy(gPlDroneShown, gPlDrones->heard[order[at]].d.mac, 6);
+      } else if (lower == 's') {
+        if (const drone_id::Heard* h = plDroneByMac(gPlDroneShown)) plSaveDrone(*h);
+      }
+      break;
+    }
+    case PlView::DroneAlert:
+      if (enter) { memcpy(gPlDroneShown, gPlDroneAlertMac, 6); gPlView = PlView::Drone; }
+      else if (lower == 's') { if (const drone_id::Heard* h = plDroneByMac(gPlDroneAlertMac)) plSaveDrone(*h); }
       break;
     case PlView::GoOut:
       if (enter) {
@@ -1323,6 +1730,9 @@ void renderPlanesUi() {
     case PlView::Spotted: plDrawSpotted(); break;
     case PlView::Sightings: plDrawSightings(); break;
     case PlView::GoOut: plDrawGoOut(); break;
+    case PlView::Drones: plDrawDrones(); break;
+    case PlView::Drone: plDrawDrone(); break;
+    case PlView::DroneAlert: plDrawDroneAlert(); break;
   }
   if (plNoticeShowing()) drawBigNotice(gPlNotice, gPlNoticeInk);
   renderLauncherOverlay();
