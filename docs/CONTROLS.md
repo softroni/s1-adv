@@ -255,14 +255,15 @@ are on caps along the bottom. [Skywatch](SKYWATCH.md) has the details.
   it is and its path for the last two minutes and the next five. Beside it, its type and route, which
   way to look and how many fists up, its height, distance and speed. `,` and `/` go to the other
   planes, and S keeps it.
-- **Look up!** comes with a chime when a plane is high overhead: Enter opens it, S keeps it.
+- **Look up:** a plane high overhead flashes on the sky map with a soft chime, and U goes to it. Its
+  screen then says LOOK UP!, which way it's crossing and whether it's landing. Nothing pops up.
 - **The space station:** its next passes you can see, with stars for brightness. `;` and `.` pick one,
   Enter draws its path across the sky, and R rings 10 minutes before it, from any screen. On the path,
   `,` and `/` go to the other passes. The next page shows where the station is right now.
 - **Spotted:** what you've kept, counted up. Enter lists the newest 40, and `;` and `.` scroll.
 - **Drones:** Enter listens for drones' Remote ID over Wi-Fi, with no bridge or internet. While it
   listens, Wi-Fi leaves your network, and it rejoins when you leave the page. `;` and `.` pick a drone,
-  Enter opens it and S keeps it in Spotted. A new drone chimes with "Drone nearby!".
+  Enter opens it and S keeps it in Spotted. A new drone chimes softly and flashes, marked NEW.
 
 ## NFC Notes
 

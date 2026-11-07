@@ -87,13 +87,17 @@ If the plane flies out of the ring, its screen says so and keeps what it last kn
 
 ### Look up!
 
-![Look up! for a plane high overhead](assets/planes/look-up.png)
+![A plane right above you: LOOK UP!, which way it's crossing, and where it's landing](assets/planes/look-up.png)
 
-When a plane is high above you, more than about 50 degrees up, the Cardputer chimes and shows
-**Look up!** with which way it's coming from and where it's going. Each plane does this once, and
-at most one every 45 seconds. It comes up on the sky map and a plane's screen. While Skywatch is open,
-the screen dims at the screensaver's time instead of going to the clock, so Look up! can still light it.
-**Enter** opens the plane, **S** keeps it, and Esc goes back.
+When a plane is high above you, more than about 50 degrees up, it **flashes on the sky map** with an
+amber ring pulsing round it, and the Cardputer plays a soft chime, once for each plane and not more
+than once in 30 seconds. Nothing opens or closes by itself. If it's the plane on the card, the card
+says **LOOK UP!**; if it isn't, **U** goes straight to it.
+
+A plane's own screen, while it's overhead, says **LOOK UP!** in big letters, which way it's crossing
+the sky ("from E, going W"), and whether it's landing somewhere near or has just taken off, with the
+pulsing ring round it on your sky. In the list, it says LOOK UP in amber. While Skywatch is open the
+screen dims at the screensaver's time instead of going to the clock, so the chime can light it again.
 
 ### The space station's next passes
 
@@ -166,7 +170,8 @@ too.
 - **`;` and `.`** go from drone to drone, strongest signal first, **Enter** opens one, and **S** keeps it.
 - **A drone** says what kind it is, the pilot's own words if they gave any, its ID, which way to look
   and how many fists up, its height, distance and speed, and how far it is from where it's flown from.
-- **Drone nearby!** comes with a chime the first time each drone is heard while the page is open.
+- **A new drone** chimes softly the first time it's heard while the page is open, and for 20 seconds
+  flashes on the map with a pink ring, with NEW beside its name on the card. Nothing pops up.
 
 ![A drone: which way to look, how high and where it's flown from](assets/planes/drone.png)
 

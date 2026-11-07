@@ -66,8 +66,13 @@ assert sky.count('plWhereLine(') == 2, 'with planes and without'
 where = app.split('void plWhereWords(', 1)[1].split('\n}\n', 1)[0]
 assert 'Using GPS' in where and ', no GPS' in where and ', no fix' in where
 # Every screen has the same frame: its keys on caps along the bottom, and the pages the top's icons.
-for fn in ['plDrawSky', 'plDrawPlane', 'plDrawLookUp', 'plDrawPasses', 'plDrawPass', 'plDrawNow', 'plDrawSpotted',
-           'plDrawSightings', 'plDrawGoOut', 'plDrawDrones', 'plDrawDrone', 'plDrawDroneAlert']:
+# Nothing pops up or closes by itself: a plane overhead flashes on the map and chimes once, softly.
+assert 'PlView::LookUp' not in app and 'PlView::DroneAlert' not in app and 'focusTone(' not in app
+note = app.split('void plNoteOverhead() {', 1)[1].split('\n}\n', 1)[0]
+assert 'gPlView' not in note.replace('plWantsSky()', '') and 'plChime(planes::Chime::LookUp);' in note
+assert "else if (lower == 'u' && plOverhead() >= 0)" in app
+for fn in ['plDrawSky', 'plDrawPlane', 'plDrawPasses', 'plDrawPass', 'plDrawNow', 'plDrawSpotted',
+           'plDrawSightings', 'plDrawGoOut', 'plDrawDrones', 'plDrawDrone', 'plDrawPlaneList']:
     body = app.split('void %s() {' % fn, 1)[1].split('\n}\n', 1)[0]
     assert 'plKeys({' in body, fn
 keys = app.split('void plKeys(', 1)[1].split('\n}\n', 1)[0]
@@ -217,6 +222,24 @@ int main() {
   Plane still = over; still.track = -1; assert(skyAt(still, 300).az == 80 && skyAt(still, 300).el < 50);  // No track: it only sinks.
   Plane far; far.distM = 160000; far.bearing = 0; far.elev = 2; far.track = 0; far.speedKt = 450; far.climbFpm = 0;
   assert(skyAt(far, 300).el < 2 && skyAt(far, 300).az == 0);              // Going away, the Earth's curve takes it down.
+  }
+
+  {
+    // Chimes are soft bells: quiet, starting from nothing and fading to nothing, nothing low.
+    for (int k = 0; k < 3; ++k) {
+      const Chime c = Chime(k);
+      const ChimeShape shape = chimeShape(c);
+      int16_t* buf = new int16_t[8000];
+      const size_t n = renderChime(c, buf, 8000, 8000);
+      assert(n == size_t(8 * shape.ms) && n <= 8000);
+      int peak = 0;
+      for (size_t i = 0; i < n; ++i) peak = abs(buf[i]) > peak ? abs(buf[i]) : peak;
+      assert(peak > 300 && peak < 3000);                     // Far under full scale (32767), and not silent.
+      assert(abs(buf[0]) < 50 && abs(buf[n - 1]) < 50);      // No click at either end.
+      for (uint8_t i = 0; i < shape.count; ++i) assert(shape.hz[i] >= 1000);
+      assert(renderChime(c, buf, 100, 8000) == 100);         // Never past the room it's given.
+      delete[] buf;
+    }
   }
 
   // --- The station ---------------------------------------------------------------------------

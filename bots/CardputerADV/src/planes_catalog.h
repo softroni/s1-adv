@@ -388,6 +388,46 @@ inline SkySpot skyAt(const Plane& p, int32_t seconds) {
   return s;
 }
 
+// --- Chimes ----------------------------------------------------------------------------------
+// Soft bells for the speaker, in place of beeps: each note starts gently, rings and fades, with a
+// quieter octave above it for warmth, and the whole fades to nothing at its end. Well under the
+// level of the update chime, and none below about 1 kHz, where this small speaker says little.
+enum class Chime : uint8_t { LookUp, Drone, Saved };
+struct ChimeShape {
+  uint8_t count;
+  float hz[3], at[3], gain[3];
+  float ring;    // Seconds for a note to fall to about a third.
+  float level;   // Out of 32767.
+  uint16_t ms;
+};
+inline ChimeShape chimeShape(Chime c) {
+  switch (c) {
+    case Chime::Drone: return {2, {1568, 1175, 0}, {0, 0.14f, 0}, {0.9f, 1, 0}, 0.2f, 1100, 560};   // G down to D.
+    case Chime::Saved: return {2, {1319, 1760, 0}, {0, 0.08f, 0}, {0.7f, 0.8f, 0}, 0.12f, 900, 340};  // E up to A, short.
+    default: return {3, {1047, 1319, 1568}, {0, 0.12f, 0.24f}, {0.75f, 0.8f, 1}, 0.22f, 1200, 700};  // C, E, G, rising.
+  }
+}
+inline size_t renderChime(Chime c, int16_t* out, size_t room, uint32_t rate) {
+  const ChimeShape s = chimeShape(c);
+  size_t n = size_t(rate) * s.ms / 1000;
+  if (n > room) n = room;
+  const float length = float(n) / float(rate), twoPi = 6.2831853f;
+  for (size_t i = 0; i < n; ++i) {
+    const float t = float(i) / float(rate);
+    const float left = (length - t) / 0.04f, tail = left < 1 ? left : 1;
+    float mix = 0;
+    for (uint8_t k = 0; k < s.count; ++k) {
+      const float u = t - s.at[k];
+      if (u < 0) continue;
+      const float attack = 1 - expf(-u / 0.004f);
+      mix += s.gain[k] * attack * (expf(-u / s.ring) * sinf(twoPi * s.hz[k] * u) +
+                                   0.18f * expf(-u / (s.ring * 0.5f)) * sinf(twoPi * 2 * s.hz[k] * u));
+    }
+    out[i] = int16_t(s.level * tail * mix);
+  }
+  return n;
+}
+
 // --- The space station -------------------------------------------------------------------
 // Brighter is a lower magnitude: four stars for a pass brighter than any star.
 inline uint8_t stars(int16_t magTenths) {
