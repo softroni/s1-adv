@@ -59,7 +59,7 @@ import { decodeVoiceUpload } from "./voice-upload-codec.mjs";
 import { LabLiveService, labLanRoute, labTicketRoute } from "./lab-live.mjs";
 import { DeviceActivity } from "./device-activity.mjs";
 import { LogRing, installLogRing } from "./log-ring.mjs";
-import { WebUi } from "./web-ui.mjs";
+import { WebUi, linkLines } from "./web-ui.mjs";
 import { LAB_CHAT_POLICY, LAB_LIVE_CHAT_POLICY, LAB_RULE_POLICY, VOICE_TOOLS, answerVoiceTool, readLabState, readVoiceContext } from "./voice-tools.mjs";
 import { RealtimePacingBudget, REALTIME_MAX_AUDIO_LEAD_MS } from "./realtime-pacing-budget.mjs";
 
@@ -409,7 +409,8 @@ const DEVICE_UI_MODES = new Set([
   "calc",
   "battery",
   "ota",
-  "firmware"
+  "firmware",
+  "bridge_page"
 ]);
 
 function clampNumber(value, min, max, fallback = min) {
@@ -6455,6 +6456,7 @@ async function main() {
   const runtime = new BridgeRuntime(config);
   const labLive = new LabLiveService();
   const deviceActivity = new DeviceActivity();
+  let webUi = null;  // Made below, once the ports it restarts are open.
   const realtimeAdmission = new RealtimeAdmissionController(config);
   const requestAdmission = new RealtimeAdmissionController({ realtimeVoice: {
     maxActivePerDevice: config.security.maxActiveRequestsPerDevice,
@@ -6653,6 +6655,14 @@ async function main() {
     // position and place asked about aren't logged.
     if (req.method === "GET" && url.pathname.startsWith("/api/cardputer/planes/")) {
       await handlePlanesRoute(runtime.planes, url.pathname, url.searchParams, device.device_id, res);
+      return;
+    }
+
+    // The web page's address, for the Cardputer's System > Bridge page to show with a QR code.
+    if (req.method === "GET" && url.pathname === "/api/cardputer/ui/link") {
+      const lines = webUi ? linkLines(await webUi.link()) : linkLines({ enabled: false });
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+      res.end(lines);
       return;
     }
 
@@ -7962,7 +7972,6 @@ async function main() {
   }
 
   // The web page, on its own loopback port (docs/BRIDGE-UI.md). Off unless ui.enabled is true.
-  let webUi = null;
   // Settings and the page's Restart button start a fresh bridge the same way it was started, two
   // seconds after this one has let go of its ports, with the same log. Only with ui.allowRestart.
   const restart = (who) => {

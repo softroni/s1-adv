@@ -318,7 +318,7 @@ $("#chatInput").addEventListener("input", (e) => { e.target.style.height = ""; e
 // Remote: what the bridge can ask the Cardputer to do, outside the Lab
 const SCREENS_ON_DEVICE = [["home", "Home"], ["pulse", "Pulse"], ["chat", "Chat"], ["voice", "Voice notes"], ["library", "Library"],
   ["folders", "Folders"], ["assets", "Assets"], ["lab", "Lab"], ["rules", "Lab rules"], ["sequences", "Lab sequences"],
-  ["calculator", "Calculator"], ["battery", "Battery"], ["logs", "Logs"], ["settings", "Settings"], ["firmware", "Firmware"]];
+  ["calculator", "Calculator"], ["battery", "Battery"], ["logs", "Logs"], ["settings", "Settings"], ["firmware", "Firmware"], ["bridge_page", "Bridge page"]];
 let minBattery = 40;
 
 async function sendAction(action, words, path = "remote") {

@@ -28,6 +28,7 @@ Add a `ui` block to the bridge's `config.json` and restart the bridge:
 - `enabled` starts the page. It's off unless you turn it on.
 - `port` is where it listens, on `127.0.0.1` only, so nothing else on your network can reach it directly.
 - `allowRestart` lets the page restart the bridge: its Restart button and saving Settings. Leave it off when OpenClaw runs the bridge, because OpenClaw starts and stops it.
+- `url` is the address a phone opens, if you share the page some other way than `tailscale serve`. The Cardputer's Bridge page shows it.
 - `logFile` is where the bridge's output goes, if you send it to a file. The Logs screen then shows lines from before the last restart too. Without it, Logs shows this run's lines only.
 
 With the page on, every line the bridge writes starts with the date and time.
@@ -41,6 +42,27 @@ tailscale serve --bg --https=8443 http://127.0.0.1:31891
 ```
 
 Then open `https://<your computer's Tailscale name>:8443/` on any device signed in to your tailnet. On a phone, Add to Home Screen makes it an app icon.
+
+### Forgot the address?
+
+On the Cardputer, open **System**, then **Bridge page**. It asks the bridge where its page is each time it opens, and shows a QR code to scan with your phone, with the address beside it to type.
+
+<table>
+<tr>
+<td width="50%"><img src="assets/bridge-ui/cardputer-bridge-page.png" alt="The Cardputer's Bridge page: a QR code on white at the left, and the page's address broken over three lines at the right" width="100%"><br><sub><b>Bridge page.</b> Scan it, or type the address. R asks again.</sub></td>
+<td width="50%"><img src="assets/bridge-ui/cardputer-bridge-page-none.png" alt="The Cardputer's Bridge page saying Not shared on Tailscale yet" width="100%"><br><sub><b>Nothing to show yet.</b> The bridge says why.</sub></td>
+</tr>
+</table>
+
+The bridge finds the address in Tailscale's own settings: the `tailscale serve` site that points at the page's port. If you share the page some other way, put its address in `ui.url` in `config.json` and the Cardputer shows that instead. The address never goes into the firmware.
+
+- **Not shared on Tailscale yet:** run the `tailscale serve` line above.
+- **The page is off on the bridge:** set `ui.enabled` to true and restart the bridge.
+- **It's on Funnel: take it off:** the site that serves the page is public, so the Cardputer won't show it. Turn Funnel off for that port.
+- **Tailscale isn't running:** start Tailscale on the bridge's computer.
+- **The bridge didn't say:** the bridge is older than its page. Update it.
+
+Needs firmware 0.2.328 or later.
 
 Never put the page on Tailscale Funnel or any public address: it can send messages to Claude and change the bridge's settings. The page only answers requests addressed to `localhost`, `127.0.0.1` or a `.ts.net` name. For another private name, list it in `ui.allowedHosts`.
 

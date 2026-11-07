@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
-import { WebUi, hostAllowed, parseLabState, writeAllowed } from "./web-ui.mjs";
+import { WebUi, hostAllowed, linkFromServeStatus, linkLines, parseLabState, writeAllowed } from "./web-ui.mjs";
 import { LabLiveService, labLanRoute, parseSnapshot } from "./lab-live.mjs";
 import { DeviceActivity, describeStart } from "./device-activity.mjs";
 import { LogRing, installLogRing, lineTag, parseLogFileLines } from "./log-ring.mjs";
@@ -310,4 +310,51 @@ test("log lines get a time and a tag, from the console and from the file", () =>
   assert.equal(lines[1].tag, "device");
   assert.equal(new Date(lines[1].at).getMinutes(), 31);
   assert.equal(lines[2].level, "warn");
+});
+
+// --- The page's address, for the Cardputer's Bridge page ---
+const SERVE = {
+  TCP: { "8443": { HTTPS: true } },
+  Web: {
+    "mac.example-tail.ts.net:8443": { Handlers: { "/": { Proxy: "http://127.0.0.1:31891" } } },
+    "mac.example-tail.ts.net:10000": { Handlers: { "/": { Proxy: "http://127.0.0.1:31889" } } },
+    "mac.example-tail.ts.net:443": { Handlers: { "/bridge/": { Proxy: "http://localhost:31892" } } }
+  },
+  AllowFunnel: { "mac.example-tail.ts.net:10000": true }
+};
+
+test("the page's address comes from the serve site that proxies to its port, and never from Funnel", () => {
+  assert.deepEqual(linkFromServeStatus(SERVE, 31891), { url: "https://mac.example-tail.ts.net:8443/" });
+  assert.deepEqual(linkFromServeStatus(SERVE, 31892), { url: "https://mac.example-tail.ts.net/bridge/" });
+  assert.deepEqual(linkFromServeStatus(SERVE, 31889), { funnel: true });
+  assert.deepEqual(linkFromServeStatus(SERVE, 31899), {});
+  assert.deepEqual(linkFromServeStatus({}, 31891), {});
+  assert.deepEqual(linkFromServeStatus(null, 31891), {});
+});
+
+test("the Cardputer gets a link or a reason short enough for its screen", () => {
+  assert.equal(linkLines({ enabled: true, url: "https://mac.example-tail.ts.net:8443/" }), "url\thttps://mac.example-tail.ts.net:8443/\n");
+  for (const lines of [linkLines({ enabled: false }), linkLines({ enabled: true, funnel: true }), linkLines({ enabled: true }), linkLines({ enabled: true, tailscale: false })]) {
+    assert.match(lines, /^none\t[^\t\n]{8,30}\n$/u);
+  }
+});
+
+test("the link is ui.url when set, else Tailscale's, asked at most every 30 seconds", async () => {
+  const { ui } = makeUi({ ui: { enabled: true, port: 31891 } });
+  let asked = 0;
+  ui.run = async (command, args) => {
+    asked += 1;
+    if (command === "tailscale") throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    assert.deepEqual(args, ["serve", "status", "--json"]);
+    return { stdout: JSON.stringify(SERVE) };
+  };
+  assert.deepEqual(await ui.link(), { enabled: true, tailscale: true, url: "https://mac.example-tail.ts.net:8443/" });
+  await ui.link();
+  assert.equal(asked, 2);
+  const set = makeUi({ ui: { enabled: true, url: "https://bridge.example.com/" } }).ui;
+  set.run = async () => { throw new Error("not asked"); };
+  assert.deepEqual(await set.link(), { enabled: true, url: "https://bridge.example.com/" });
+  const none = makeUi().ui;
+  none.run = async () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); };
+  assert.equal(linkLines(await none.link()), "none\tTailscale isn't running\n");
 });

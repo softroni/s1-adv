@@ -6,10 +6,11 @@
 // Requests that change anything need a JSON body and an X-S1-UI header, which a browser only sends
 // from this page itself, so another site open in the same browser can't make them.
 import { createServer } from "node:http";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { open, readdir, readFile, rename, stat, statfs, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { describeStart } from "./device-activity.mjs";
 import { parseLogFileLines } from "./log-ring.mjs";
 import { makeId } from "./utils.mjs";
@@ -38,6 +39,32 @@ export const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 export const VOICES = ["af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky", "af_nova", "af_river",
   "am_adam", "am_michael", "am_echo", "am_eric", "am_liam", "bf_emma", "bf_isabella", "bf_alice", "bm_george", "bm_lewis", "bm_daniel"];
 const STORAGE_CHOICES = [128, 256, 512, 1024].map((mib) => mib * 1024 * 1024);
+const TAILSCALE = ["tailscale", "/usr/local/bin/tailscale", "/opt/homebrew/bin/tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"];
+const LINK_MS = 30_000;
+
+// The page's address on the tailnet, from `tailscale serve status --json`: the site whose handler
+// proxies to the page's own port. A site on Funnel is public, so it's reported as that, not as a link.
+export function linkFromServeStatus(status, port) {
+  for (const [hostPort, site] of Object.entries(status?.Web || {})) {
+    for (const [mount, handler] of Object.entries(site?.Handlers || {})) {
+      const proxy = /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\]):(\d+)\/?$/u.exec(String(handler?.Proxy || ""));
+      if (!proxy || Number(proxy[1]) !== port) continue;
+      if (status?.AllowFunnel?.[hostPort]) return { funnel: true };
+      const [host, sitePort] = hostPort.split(":");
+      if (!/^[a-z0-9.-]+$/iu.test(host)) continue;
+      return { url: `https://${host}${sitePort && sitePort !== "443" ? `:${sitePort}` : ""}${mount.startsWith("/") ? mount : "/"}` };
+    }
+  }
+  return {};
+}
+
+// For the Cardputer's Bridge page, as lines: "url <address>" or "none <why, for its screen>".
+export function linkLines({ enabled, url = "", funnel = false, tailscale = true }) {
+  if (!enabled) return "none\tThe page is off on the bridge\n";
+  if (funnel) return "none\tIt's on Funnel: take it off\n";
+  if (url) return `url\t${url}\n`;
+  return tailscale ? "none\tNot shared on Tailscale yet\n" : "none\tTailscale isn't running\n";
+}
 
 // --- Small helpers ------------------------------------------------------------------------------
 function send(res, status, payload) {
@@ -180,6 +207,27 @@ export class WebUi {
     this.commit = gitHead();
     this.startedAt = Date.now();
     this.server = null;
+    this.linkCache = null;
+    this.run = promisify(execFile);
+  }
+
+  // Where a phone opens the page: ui.url if the owner set one, or Tailscale's serve settings.
+  async link() {
+    const configured = String(this.settings.url || "").trim();
+    if (/^https?:\/\/[^\s]+$/u.test(configured)) return { enabled: true, url: configured };
+    if (this.linkCache && Date.now() - this.linkCache.at < LINK_MS) return this.linkCache.value;
+    let value = { enabled: true, tailscale: false };
+    for (const command of TAILSCALE) {
+      try {
+        const { stdout } = await this.run(command, ["serve", "status", "--json"], { timeout: 4000, maxBuffer: 256 * 1024 });
+        value = { enabled: true, tailscale: true, ...linkFromServeStatus(JSON.parse(stdout || "{}"), Number(this.settings.port) || UI_PORT) };
+        break;
+      } catch (error) {
+        if (error.code !== "ENOENT") break;
+      }
+    }
+    this.linkCache = { at: Date.now(), value };
+    return value;
   }
 
   device() { return Object.values(this.runtime.store.state.devices || {})[0] || null; }
@@ -227,6 +275,7 @@ export class WebUi {
         case "GET /api/settings": send(res, 200, this.readSettings()); return;
         case "POST /api/settings": send(res, 200, await this.saveSettings(body)); return;
         case "GET /api/cameras/link": send(res, 200, this.cameraLink()); return;
+        case "GET /api/link": send(res, 200, await this.link()); return;
         case "POST /api/restart": send(res, 200, this.requestRestart()); return;
         default: fail(res, 404, "not_found");
       }

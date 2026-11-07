@@ -66,6 +66,7 @@ void handleTypingKey(char key, const Keyboard_Class::KeysState& keys) {
   if (gUiMode == UiMode::TvRemote && !gLauncherVisible && !keys.tab && handleTvRemoteKey(key, keys)) return;
   if (gUiMode == UiMode::Cameras && !gLauncherVisible && !keys.tab && handleCamerasKey(key, keys)) return;
   if (gUiMode == UiMode::Planes && !gLauncherVisible && !keys.tab && handlePlanesKey(key, keys)) return;
+  if (gUiMode == UiMode::BridgePage && !gLauncherVisible && !keys.tab && handleBridgePageKey(key, keys)) return;
   if (handleFocusShortcut(lowerKey,keys)) return;
   if (handleUnreadAssistantKey(key,keys)) return;
   if (handleHomeLinkRetryKey(key,keys)) return;

@@ -75,6 +75,7 @@ enum class UiMode : uint8_t {
   TvRemote,
   Cameras,
   Planes,
+  BridgePage,
 };
 
 enum class FocusState : uint8_t {

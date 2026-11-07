@@ -305,6 +305,8 @@ bool mapActionUiMode(String mode, UiMode& out) {
     out = UiMode::Battery;
   } else if (mode == "ota" || mode == "firmware") {
     out = UiMode::Ota;
+  } else if (mode == "bridge_page" || mode == "bridge" || mode == "web_page" || mode == "bridge_ui") {
+    out = UiMode::BridgePage;
   } else {
     return false;
   }

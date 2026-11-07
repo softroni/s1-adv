@@ -704,6 +704,10 @@ void servicePlanes();
 void servicePlanesReminder();
 bool handlePlanesKey(char key, const Keyboard_Class::KeysState& keys);
 void renderPlanesUi();
+void beginBridgePage();
+void serviceBridgePage();
+bool handleBridgePageKey(char key, const Keyboard_Class::KeysState& keys);
+void renderBridgePageUi();
 bool cameraHttpsBusy();
 // Why the last start-up happened, for the bridge's log: the chip's reset reason and, when the
 // firmware restarted itself, a note it left in memory that survives the restart.

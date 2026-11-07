@@ -394,6 +394,7 @@ void setUiMode(UiMode mode) {
   if (modeChanged && mode == UiMode::TvRemote) beginTvRemote();
   if (modeChanged && mode == UiMode::Cameras) beginCameras();
   if (modeChanged && mode == UiMode::Planes) beginPlanes();
+  if (modeChanged && mode == UiMode::BridgePage) beginBridgePage();
   if (modeChanged && mode == UiMode::VlcRemote) beginVlcRemote();
   if (modeChanged && mode == UiMode::ChessMind) beginChessMind();
   if (modeChanged && mode == UiMode::PocketSynth) beginPocketSynth();

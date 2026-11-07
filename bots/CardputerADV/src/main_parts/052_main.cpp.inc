@@ -108,6 +108,7 @@ const uint8_t* launcherItemIcon(const LauncherSubItem& item) {
     case UiMode::Ota: return kDownload;
     case UiMode::Logs: return kLog;
     case UiMode::CMatrix: return kMatrix;
+    case UiMode::BridgePage: return kQr;
     default: return nullptr;
   }
 }
