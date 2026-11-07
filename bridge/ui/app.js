@@ -99,7 +99,7 @@ function topPill(s) {
   const pill = $("#topPill");
   let kind = "good", text = "All working";
   if (!s) { kind = "off"; text = "No bridge"; }
-  else if (!s.device?.online) { kind = "warn"; text = "Cardputer offline"; }
+  else if (!s.device?.online) { kind = "warn"; text = s.device?.last_seen_ms === null ? "Cardputer not seen yet" : "Cardputer offline"; }
   else if (s.claude.waiting_for_login) { kind = "warn"; text = "Claude signed out"; }
   else if (s.delivery.waiting.some((w) => w.waiting_ms > 180000)) { kind = "warn"; text = "Reply stuck"; }
   else if (s.storage.bytes / s.storage.max_bytes > 0.8) { kind = "warn"; text = "Storage nearly full"; }
@@ -144,8 +144,8 @@ async function drawStatus() {
   <div class="colA">
     <div class="h2"><h2>Cardputer</h2><span class="tiny muted">${esc(d?.id || "")}</span></div>
     <div class="card">
-      <div class="between"><div class="col"><span class="big">${d ? (d.online ? "Online" : "Offline") : "No Cardputer"}</span>
-        <span class="small ink2">${d ? `Last check-in ${ago(d.last_seen_ms)}` : "No device is set up on this bridge"}</span></div>
+      <div class="between"><div class="col"><span class="big">${d ? (d.online ? "Online" : d.last_seen_ms === null ? "Not seen yet" : "Offline") : "No Cardputer"}</span>
+        <span class="small ink2">${!d ? "No device is set up on this bridge" : d.last_seen_ms === null ? `Not since the bridge started at ${clock(s.bridge.started_at)}` : `Last check-in ${ago(d.last_seen_ms)}`}</span></div>
         ${d && !d.online && d.last_seen_ms !== null ? status("warn", "Not seen", ICON.warn) : ""}</div>
       ${d ? `<div class="label" style="margin-top:14px">Requests each minute, last hour</div>
       <div class="strip">${strip}</div>
