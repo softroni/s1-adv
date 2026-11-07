@@ -18,7 +18,7 @@ To open it, press **Tab**, then **L**. You can also type `/lab`, `/rules` or `/s
 
 On the Cardputer, the arrow keys are `;` up, `.` down, `,` left and `/` right, and Esc is the top-left key.
 
-[Try it with no parts](#try-it-with-no-parts) · [Connect a part](#connect-a-part) · [Test a part](#test-a-part) · [Build a rule](#build-a-rule) · [Play it](#play-it) · [Sequences](#sequences) · [Talk to it](#talk-to-it) · [From the chat](#from-the-chat) · [Check something once](#check-something-once) · [If a part doesn't answer](#if-a-part-doesnt-answer) · [Good to know](#good-to-know)
+[Try it with no parts](#try-it-with-no-parts) · [Connect a part](#connect-a-part) · [Test a part](#test-a-part) · [Build a rule](#build-a-rule) · [Play it](#play-it) · [Sequences](#sequences) · [Talk to it](#talk-to-it) · [From the chat](#from-the-chat) · [Check something once](#check-something-once) · [On the bridge's page](#on-the-bridges-page) · [If a part doesn't answer](#if-a-part-doesnt-answer) · [Good to know](#good-to-know)
 
 > The Lab needs firmware built from source, as in step 1 of the [README](../README.md#set-it-up). The older one-command flash doesn't have it.
 
@@ -566,6 +566,16 @@ Relays, the lamp and the air conditioners can switch mains, so they aren't on th
 - **A strip or servo on Grove can flicker or twitch** as the port is checked, the same as when the Lab opens. The strip goes back to its color straight away.
 
 Needs firmware and a bridge from 0.2.259 or later.
+
+## On the bridge's page
+
+While the Lab is open on your home Wi-Fi, the bridge's web page shows it live: every part it found and how it's wired, every reading, what each output is doing, which screen you're on, and which rules are firing. Open the page on a phone or computer and watch it follow along as you turn the knob or wave at the sensor.
+
+- **It only goes over your home Wi-Fi.** The Cardputer sends to the bridge's computer directly, the way Podcasts and Cameras do at home. Away from home, nothing is sent.
+- **About once a second while the page is open.** With nobody looking, it checks in every 15 seconds, so the page knows the Lab is open.
+- **Your position isn't sent.** From the GPS, the page gets what rules use, like speed and the distance from your spot, plus how many satellites it hears and its height.
+- **The first time on a network**, the Lab asks the bridge where it is at home. That waits while rules or a sequence play, so the page catches up once they stop.
+- **If the bridge stops answering**, the Lab gives up after three tries and starts again next time you open it. The Lab itself carries on as usual either way.
 
 ## If a part doesn't answer
 

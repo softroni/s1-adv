@@ -106,6 +106,7 @@ jobs:
       - run: python scripts/test_ball_catch.py
       - run: python scripts/test_lab.py
       - run: python scripts/test_lab_ui.py
+      - run: python scripts/test_lab_live.py
       - run: python scripts/test_lab_guide.py
       - run: python scripts/test_activity_cue.py
       - run: python scripts/test_assistant_activity.py

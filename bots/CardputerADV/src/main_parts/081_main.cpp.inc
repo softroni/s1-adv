@@ -1112,10 +1112,12 @@ void beginLab() {
   }
   labEnterView(gUiMode);
   gpsHold(kGpsForLab);
+  labLiveOpened();
   labRedraw();
 }
 void stopLab() {
   if (!gLabOpen) return;
+  labLiveClosing();
   labStopPlaying();
   labPartsOff();
   gpsRelease(kGpsForLab);
@@ -1190,6 +1192,7 @@ void serviceLab() {
   }
   labRunSequence(now);
   labWriteOutputs(now);
+  serviceLabLive(now);  // The bridge's page, when someone's looking, after what was read and driven.
   if (now - gLabRedrawMs >= kLabRedrawMs) {
     gLabRedrawMs = now;
     labRedraw();
