@@ -17,7 +17,7 @@
 #include "../drone_listen.h"
 #include <initializer_list>
 namespace {
-enum class PlView : uint8_t { Sky, Plane, Passes, Pass, Now, Spotted, Sightings, LookUp, GoOut, Drones, Drone, DroneAlert };
+enum class PlView : uint8_t { Sky, Plane, Passes, Pass, Now, Spotted, Sightings, LookUp, GoOut, Drones, Drone, DroneAlert, PlaneList };
 enum class PlJob : uint8_t { None, Ticket, Near, Iss, Report };
 
 constexpr uint8_t kGpsForPlanes = 16;            // Beside 081's holders: Lab 1, once 2, Pulse 4, Mesh 8.
@@ -47,6 +47,7 @@ uint16_t plGold() { return rgb565_local(255, 220, 100); }
 uint16_t plPink() { return rgb565_local(255, 110, 200); }
 
 PlView gPlView = PlView::Sky, gPlBack = PlView::Sky;
+PlView gPlPlaneBack = PlView::Sky;     // Where a plane's screen goes back to: the map or the list.
 PlView gPlOpenOn = PlView::Sky;           // Where the next opening starts: the reminder opens on its notice.
 planes::Sky* gPlSky = nullptr;            // On the heap while the app is open.
 planes::Space* gPlSpace = nullptr;
@@ -169,7 +170,9 @@ void plQueueReport(const char* stage, unsigned code) {
   for (char* p = gPlReport; *p; ++p) if (*p == ' ') *p = '_';
 }
 
-bool plWantsSky() { return gPlView == PlView::Sky || gPlView == PlView::Plane || gPlView == PlView::LookUp; }
+bool plWantsSky() {
+  return gPlView == PlView::Sky || gPlView == PlView::Plane || gPlView == PlView::LookUp || gPlView == PlView::PlaneList;
+}
 bool plWantsSpace() {
   return gPlView == PlView::Passes || gPlView == PlView::Pass || gPlView == PlView::Now || gPlView == PlView::GoOut;
 }
@@ -245,7 +248,7 @@ void plWakeScreen() {
 }
 // After a fresh list: a plane high overhead, not shown before, brings up "Look up!".
 void plCheckLookUp() {
-  if (gPlView != PlView::Sky && gPlView != PlView::Plane) return;
+  if (gPlView != PlView::Sky && gPlView != PlView::Plane && gPlView != PlView::PlaneList) return;
   if (gPlLastLookMs && millis() - gPlLastLookMs < kPlLookUpGapMs) return;
   for (uint8_t i = 0; i < gPlSky->count; ++i) {
     const planes::Plane& p = gPlSky->planes[i];
@@ -843,17 +846,12 @@ void plDrawSky() {
   plTile(x, 87, 62, "AWAY", dist);
   plTile(x + 64, 87, 66, "HEIGHT", alt, plHeightInk(p));
   plWhereLine(x, 114, w, gPlSky->place);
-  plKeys({{";.", "Pick"}, {"Enter", "More"}, {"S", "Keep"}, {",/", "Pages"}});
+  plKeys({{";.", "Pick"}, {"Enter", "More"}, {"L", "List"}, {",/", "Pages"}});
 }
 
 const planes::Plane* plSelected() {
   if (gPlSkyOk && gPlSel < gPlSky->count && !strcmp(gPlSky->planes[gPlSel].hex, gPlSelHex)) return &gPlSky->planes[gPlSel];
   return gPlShown.hex[0] ? &gPlShown : nullptr;
-}
-const char* plClimbLabel(const planes::Plane& p) {
-  if (p.climbFpm >= 300) return "CLIMBING";
-  if (p.climbFpm <= -300) return p.altFt < 12000 ? "COMING DOWN" : "DESCENDING";
-  return "HEIGHT";
 }
 void plDrawPlane() {
   auto& d = gCanvas;
@@ -864,39 +862,136 @@ void plDrawPlane() {
                 : planes::isHelicopter(p) ? String("helicopter")
                 : gPlSkyOk && gPlSky->count ? String(gPlSel + 1) + " of " + gPlSky->count : String("plane");
   plTop(p.name, plAccent(), word);
+  // The sky over you, seen from below: the ring is the horizon and the middle straight overhead.
+  plDrawRound(true);
+  d.setFont(&fonts::Font0);
+  d.setTextColor(plDim());
+  d.setCursor(kPlMapX + 8, kPlMapY + kPlMapR - 3);
+  d.print("horizon");
+  const uint16_t ink = plHeightInk(p);
+  int dx, dy;
+  planes::skyPoint(p.bearing, p.elev < 0 ? 0 : p.elev, kPlMapR, dx, dy);
+  const int16_t planeX = kPlMapX + dx, planeY = kPlMapY + dy;
+  int heading = -1;
+  if (p.track >= 0 && p.speedKt >= 20) {
+    // Its path, flying straight on: two minutes back, faint, and five ahead, bright, with a dot for
+    // each minute and an arrow where it reaches the horizon or the five minutes end.
+    int px = 0, py = 0, lx = 0, ly = 0, ahead = 0;
+    bool have = false;
+    for (int32_t s = -120; s <= 300; s += 10) {
+      const planes::SkySpot spot = planes::skyAt(p, s);
+      if (spot.el < 0) { if (s > 0) break; have = false; continue; }
+      planes::skyPoint(spot.az, spot.el, kPlMapR, dx, dy);
+      const int x = kPlMapX + dx, y = kPlMapY + dy;
+      if (have && s <= 0 && (s / 10) % 2) d.drawLine(px, py, x, y, plMuted());  // Dashed: where it came from.
+      if (have && s > 0) {
+        d.drawLine(px, py, x, y, ink);
+        d.drawLine(px + 1, py, x + 1, y, ink);
+        ++ahead;
+      }
+      if (s > 0 && s % 60 == 0) d.fillCircle(x, y, 1, TFT_WHITE);
+      if (s == 10) heading = planes::normalDeg(int(lround(atan2(double(x - planeX), double(planeY - y)) * 180.0 / 3.14159265358979)));
+      lx = px; ly = py; px = x; py = y; have = true;
+    }
+    if (ahead >= 2 && (px != lx || py != ly)) {
+      const double a = atan2(double(px - lx), double(ly - py)), s = sin(a), c = -cos(a);
+      const int bx = px - int(lround(s * 6)), by = py - int(lround(c * 6));
+      d.fillTriangle(px + int(lround(s * 2)), py + int(lround(c * 2)), bx - int(lround(c * 4)), by + int(lround(s * 4)),
+                     bx + int(lround(c * 4)), by - int(lround(s * 4)), ink);
+    }
+  }
+  plGlyph(planeX, planeY, heading, ink, true);
+  // Beside it: what it is, where it's going, which way and how high to look, and its numbers.
+  const int16_t x = kPlCardX, w = 238 - kPlCardX;
   d.setFont(&fonts::Font2);
   d.setTextColor(p.type[0] ? TFT_WHITE : plMuted());
-  d.setCursor(5, 23);
-  d.print(fitCurrentFontToWidth(p.type[0] ? p.type : "Type not known", 230));
-  // Where it's going, in words: cities when they're known, else the airports' codes.
+  d.setCursor(x, 23);
+  d.print(fitCurrentFontToWidth(p.type[0] ? p.type : "Type not known", w));
   const char* from = p.fromCity[0] ? p.fromCity : p.from;
   const char* to = p.toCity[0] ? p.toCity : p.to;
-  d.setCursor(5, 40);
+  d.setFont(&fonts::Font0);
+  d.setCursor(x, 40);
   if (from[0] || to[0]) {
     d.setTextColor(plAccent());
-    d.print(fitCurrentFontToWidth(String(from[0] ? from : "?") + " to " + (to[0] ? to : "?"), 230));
+    d.print(fitCurrentFontToWidth(String(from[0] ? from : "?") + " to " + (to[0] ? to : "?"), w));
   } else {
     d.setTextColor(plMuted());
-    d.print("Where it's going isn't known");
+    d.print("Route not known");
   }
-  plDial(19, 72, 13, p.bearing, plHeightInk(p));
   d.setFont(&fonts::FreeSansBold9pt7b);
   d.setTextColor(TFT_WHITE);
-  d.setCursor(40, 58);
-  d.print(planes::compassWord(p.bearing));
-  char text[40], dist[16], alt[16], speed[16];
-  planes::heightWords(text, sizeof(text), p.elev);
+  d.setCursor(x, 51);
+  d.print(fitCurrentFontToWidth(planes::compassWord(p.bearing), w));
+  char text[48], alt[16], dist[16], speed[16];
+  planes::heightShort(text, sizeof(text), p.elev);
   d.setFont(&fonts::Font2);
   d.setTextColor(plAmber());
-  d.setCursor(40, 74);
-  d.print(fitCurrentFontToWidth(text, 196));
+  d.setCursor(x, 68);
+  d.print(fitCurrentFontToWidth(text, w));
   planes::altitudeText(alt, sizeof(alt), p.altFt, plUnits());
   plDistanceWords(dist, sizeof(dist), p.distM);
+  plTile(x, 87, 78, "HEIGHT", alt, ink);
+  if (p.climbFpm >= 300 || p.climbFpm <= -300) {
+    // Climbing or coming down: a small arrow after the height.
+    d.setFont(&fonts::Font2);
+    const int16_t ax = x + d.textWidth(alt) + 5, ay = 87 + 9 + 8;
+    if (p.climbFpm > 0) d.fillTriangle(ax, ay + 3, ax + 6, ay + 3, ax + 3, ay - 3, ink);
+    else d.fillTriangle(ax, ay - 3, ax + 6, ay - 3, ax + 3, ay + 3, ink);
+  }
+  plTile(x + 82, 87, 48, "AWAY", dist);
   planes::speedText(speed, sizeof(speed), p.speedKt, plUnits());
-  plTile(5, 96, 80, plClimbLabel(p), alt, plHeightInk(p));
-  plTile(88, 96, 70, "AWAY", dist);
-  plTile(161, 96, 77, "SPEED", speed);
+  if (p.track >= 0) snprintf(text, sizeof(text), "%s heading %s", speed, planes::compass(p.track));
+  else snprintf(text, sizeof(text), "%s", speed);
+  d.setFont(&fonts::Font0);
+  d.setTextColor(plMuted());
+  d.setCursor(x, 114);
+  d.print(fitCurrentFontToWidth(text, w));
   plKeys({{",/", "Other planes"}, {"S", "Keep"}, {"Esc", "Back"}});
+}
+
+// Every plane in the ring, nearest first, as the bridge sends them.
+void plDrawPlaneList() {
+  auto& d = gCanvas;
+  char ring[12], text[64];
+  planes::rangeLabel(text, sizeof(text), gPlRange, plUnits());
+  plSpaced(ring, sizeof(ring), text);
+  plTop("Nearest", plAccent(), gPlSkyOk ? String(gPlSky->count) + " within " + ring : String("looking"));
+  if (!gPlSkyOk || !gPlSky->count) {
+    plCardSays(gPlProblem.length() ? gPlProblem : gPlSkyOk ? String("No planes within ") + ring + " right now." : String("Looking for planes..."),
+               gPlProblem.length() ? plAmber() : plMuted(), 5);
+    plKeys({{"Esc", "Back"}});
+    return;
+  }
+  const int first = max<int>(0, min<int>(gPlSel - 1, gPlSky->count - kPlRows));
+  for (int row = 0; row < kPlRows && first + row < gPlSky->count; ++row) {
+    const int i = first + row;
+    const planes::Plane& p = gPlSky->planes[i];
+    const int16_t y = 24 + row * kPlRowH;
+    const bool selected = i == gPlSel;
+    if (selected) d.fillRoundRect(2, y, 236, kPlRowH - 1, 4, plAccent());
+    char dist[16], high[24], alt[16];
+    plDistanceWords(dist, sizeof(dist), p.distM);
+    d.setFont(&fonts::Font0);
+    d.setTextColor(selected ? TFT_BLACK : plHeightInk(p));
+    d.setCursor(6, y + 4);
+    d.print(i + 1);
+    d.setFont(&fonts::Font2);
+    const int16_t distW = d.textWidth(dist);
+    d.setTextColor(selected ? TFT_BLACK : plAccent());
+    d.setCursor(234 - distW, y);
+    d.print(dist);
+    d.setTextColor(selected ? TFT_BLACK : TFT_WHITE);
+    d.setCursor(20, y);
+    d.print(fitCurrentFontToWidth(p.name, 234 - distW - 26));
+    planes::heightShort(high, sizeof(high), p.elev);
+    planes::altitudeShort(alt, sizeof(alt), p.altFt, plUnits());
+    snprintf(text, sizeof(text), "%s, %s, %s%s%s", planes::compass(p.bearing), high, alt, p.type[0] ? ", " : "", p.type);
+    d.setFont(&fonts::Font0);
+    d.setTextColor(selected ? TFT_BLACK : plMuted());
+    d.setCursor(20, y + 15);
+    d.print(fitCurrentFontToWidth(text, 214));
+  }
+  plKeys({{";.", "Pick"}, {"Enter", "More"}, {"S", "Keep"}, {"Esc", "Back"}});
 }
 
 void plDrawLookUp() {
@@ -1704,7 +1799,8 @@ bool planesEscape() {
   switch (gPlView) {
     case PlView::LookUp: gPlView = gPlBack; break;
     case PlView::GoOut: gPlView = PlView::Passes; gPlPassFromReminder = false; break;
-    case PlView::Plane: gPlView = PlView::Sky; break;
+    case PlView::Plane: gPlView = gPlPlaneBack == PlView::PlaneList ? PlView::PlaneList : PlView::Sky; break;
+    case PlView::PlaneList: gPlView = PlView::Sky; break;
     case PlView::Pass: gPlView = PlView::Passes; gPlPassFromReminder = false; break;
     case PlView::Sightings: gPlView = PlView::Spotted; break;
     case PlView::DroneAlert: gPlView = gPlDroneBack; break;
@@ -1747,7 +1843,8 @@ bool handlePlanesKey(char key, const Keyboard_Class::KeysState& keys) {
       if (up) plSelectPlane(gPlSel - 1);
       else if (down) plSelectPlane(gPlSel + 1);
       else if (left || right) plFlip(left);
-      else if (enter && gPlSkyOk && gPlSky->count) { plSelectPlane(gPlSel); gPlView = PlView::Plane; }
+      else if (enter && gPlSkyOk && gPlSky->count) { plSelectPlane(gPlSel); gPlPlaneBack = PlView::Sky; gPlView = PlView::Plane; }
+      else if (lower == 'l') { gPlView = PlView::PlaneList; }
       else if (key == '-' || key == '_' || key == '=' || key == '+') {
         const bool wider = key == '=' || key == '+';
         if ((wider && gPlRange + 1 < planes::kRanges) || (!wider && gPlRange > 0)) {
@@ -1761,6 +1858,13 @@ bool handlePlanesKey(char key, const Keyboard_Class::KeysState& keys) {
       } else if (lower == 's' && gPlSkyOk && gPlSel < gPlSky->count) plSaveSighting(gPlSky->planes[gPlSel]);
       else if (lower == 'r') { gPlNearDueMs = millis(); plSay("Looking again..."); }
       break;
+    case PlView::PlaneList:
+      if (up || down) plSelectPlane(gPlSel + (up ? -1 : 1));
+      else if ((left || right) && gPlSkyOk && gPlSky->count)  // A screenful at a time.
+        plSelectPlane(max<int>(0, min<int>(gPlSky->count - 1, gPlSel + (left ? -kPlRows : kPlRows))));
+      else if (enter && gPlSkyOk && gPlSky->count) { plSelectPlane(gPlSel); gPlPlaneBack = PlView::PlaneList; gPlView = PlView::Plane; }
+      else if (lower == 's' && gPlSkyOk && gPlSel < gPlSky->count) plSaveSighting(gPlSky->planes[gPlSel]);
+      break;
     case PlView::Plane:
       if (left || right) plSelectPlane(gPlSel + (left ? -1 : 1));
       else if (lower == 's') { if (const planes::Plane* p = plSelected()) plSaveSighting(*p); }
@@ -1769,6 +1873,7 @@ bool handlePlanesKey(char key, const Keyboard_Class::KeysState& keys) {
       if (enter) {
         for (uint8_t i = 0; gPlSkyOk && i < gPlSky->count; ++i) if (!strcmp(gPlSky->planes[i].hex, gPlLookHex)) plSelectPlane(i);
         if (!gPlSelHex[0] || strcmp(gPlSelHex, gPlLookHex)) { gPlShown = gPlLook; strcpy(gPlSelHex, gPlLookHex); }
+        gPlPlaneBack = gPlBack == PlView::PlaneList ? PlView::PlaneList : PlView::Sky;
         gPlView = PlView::Plane;
       } else if (lower == 's') plSaveSighting(gPlLook);
       break;
@@ -1841,6 +1946,7 @@ void renderPlanesUi() {
   switch (gPlView) {
     case PlView::Sky: plDrawSky(); break;
     case PlView::Plane: plDrawPlane(); break;
+    case PlView::PlaneList: plDrawPlaneList(); break;
     case PlView::LookUp: plDrawLookUp(); break;
     case PlView::Passes: plDrawPasses(); break;
     case PlView::Pass: plDrawPass(); break;

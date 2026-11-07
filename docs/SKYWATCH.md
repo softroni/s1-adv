@@ -49,22 +49,41 @@ then how far away it is and how high. It starts on the nearest.
 - **`;` and `.`** go to the next or the one before, and **Enter** opens it.
 - **`-` and `=`** make the ring smaller or bigger: 5, 10, 25 or 50 miles (8, 15, 40 or 80 km). It starts
   at 5 miles each time.
-- **S** keeps the chosen plane in Spotted, and **R** looks again now.
+- **L** lists every plane in the ring, nearest first, and **R** looks again now. **S** keeps the chosen
+  plane in Spotted.
 
 The map updates every 10 seconds.
 
+### The list
+
+![Every plane in the ring, nearest first](assets/planes/list.png)
+
+**L** on the sky map lists every plane in the ring, nearest first: its name and distance, then which
+way, how high to look, its height and its type. `;` and `.` move, `,` and `/` move a screenful,
+**Enter** opens one, **S** keeps it, and Esc goes back to the map.
+
 ### A plane
 
-![A plane: its type, where it's going, which way to look and how many fists up](assets/planes/plane.png)
+![A plane in the sky over you, with its path across it](assets/planes/plane.png)
 
-At the top are the plane's type and its route, when the flight data has one. Small planes usually
-don't. Below that, **LOOK** says which way to face, and how high to look in **fists**: hold your arm
-out straight with a fist, put the bottom of your fist on the horizon, and stack fists on top. Each
-one is about 10 degrees of sky. The last lines give its height, whether it's climbing, how far away it
-is, its speed, which way it's heading, and when it comes closest to you.
+The round picture is **your sky**, drawn like the map, north up and east right: the ring is the
+horizon all round you, and the middle is straight over your head. A plane right above you is in
+the middle; one low in the north-east is near the ring at the top right; one halfway up is halfway
+out. It's placed from where you are (the Cap's GPS, or the Weather city without a fix), the plane's
+direction from you and how high it looks.
 
-`,` and `/` go to the other planes, **S** keeps it in Spotted, and Esc goes back to the map. If the
-plane flies out of the ring, its screen says so and keeps what it last knew.
+Its **path** is drawn across it, flying straight on: dashed where it came from over the last two
+minutes, and bright for the next five, with a white dot each minute and an arrow where it ends or
+goes below the horizon. So you can see which way it's going, and whether it's about to pass over.
+
+Beside it: the plane's type and route (when the flight data has one; small planes usually don't),
+which way to look in big letters, and how high in **fists**: hold your arm out straight with a fist,
+put the bottom of your fist on the horizon, and stack fists on top, each about 10 degrees of sky.
+Then its height, with a small arrow when it's climbing or coming down, how far away it is, and its
+speed and heading.
+
+`,` and `/` go to the other planes, **S** keeps it in Spotted, and Esc goes back to the map or the list.
+If the plane flies out of the ring, its screen says so and keeps what it last knew.
 
 ### Look up!
 
@@ -93,7 +112,8 @@ in the sky are left out.
 
 ![The path across the sky: where it appears, its highest point and where it goes](assets/planes/pass-path.png)
 
-This map is the sky seen from below: the ring is the horizon and the middle is straight overhead. So
+This is your sky drawn like the map, north up and east right: the ring is the horizon and the middle is
+straight overhead. So
 the closer the path comes to the middle, the higher you look. **1** is where it appears, **2** its
 highest point (in fists) and **3** where it goes. "Sets" means it goes down to the horizon, and
 "vanishes" means it flies into the Earth's shadow, still high up, which is fun to watch.

@@ -248,11 +248,13 @@ are on caps along the bottom. [Skywatch](SKYWATCH.md) has the details.
 
 - **The sky map:** a round map with you in the middle and the planes as arrows, coloured by height, and
   beside it the chosen plane's card: which way to look, fists up, how far and how high. `;` and `.` go
-  from plane to plane, nearest first, Enter opens one, S keeps it in Spotted, `-` and `=` make the ring
+  from plane to plane, nearest first, Enter opens one, L lists them all nearest first, S keeps one in Spotted, `-` and `=` make the ring
   smaller or bigger (5, the start, 10, 25 or 50 miles), and R looks again. The card's last line says
   whether it's using the GPS or the saved Weather city.
-- **A plane:** its type and route, which way to LOOK and how many fists above the horizon, its height,
-  speed and when it comes closest. `,` and `/` go to the other planes, and S keeps it.
+- **A plane:** your sky as a circle, the horizon its ring and overhead its middle, with the plane where
+  it is and its path for the last two minutes and the next five. Beside it, its type and route, which
+  way to look and how many fists up, its height, distance and speed. `,` and `/` go to the other
+  planes, and S keeps it.
 - **Look up!** comes with a chime when a plane is high overhead: Enter opens it, S keeps it.
 - **The space station:** its next passes you can see, with stars for brightness. `;` and `.` pick one,
   Enter draws its path across the sky, and R rings 10 minutes before it, from any screen. On the path,

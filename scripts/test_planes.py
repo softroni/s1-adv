@@ -55,6 +55,11 @@ assert '(gUiMode == UiMode::Cameras || gUiMode == UiMode::Planes) &&\n         (
 guard = part('010_main.cpp.inc').split('void serviceMemoryGuard() {', 1)[1]
 assert guard.index('if (cameraHttpsBusy()) { criticalSinceMs = 0; return; }') < guard.index('ESP.restart();')
 assert 'gPlNearDueMs = now + (viaHome ? kPlNearEveryMs : kPlNearAwayMs);' in app
+# The plane's screen draws its sky and its path; L lists every plane, and Esc goes back to where it came from.
+plane_screen = app.split('void plDrawPlane() {', 1)[1].split('\n}\n', 1)[0]
+assert 'plDrawRound(true);' in plane_screen and 'planes::skyAt(p, s)' in plane_screen
+assert "else if (lower == 'l') { gPlView = PlView::PlaneList; }" in app
+assert 'case PlView::Plane: gPlView = gPlPlaneBack == PlView::PlaneList ? PlView::PlaneList : PlView::Sky; break;' in esc
 # The sky page always says where it's looking from: the GPS or the saved city.
 sky = app.split('void plDrawSky() {', 1)[1].split('\n}\n', 1)[0]
 assert sky.count('plWhereLine(') == 2, 'with planes and without'
@@ -201,6 +206,18 @@ int main() {
   skyPoint(270, 0, 46, dx, dy); assert(dx == -46 && dy == 0);
   skyPoint(180, -5, 46, dx, dy); assert(dx == 0 && dy == 46);
   skyPoint(90, 45, 46, dx, dy); assert(dx == 23 && dy == 0);
+
+  {
+  // Where a plane is in the sky over time: now where it's drawn, ahead along its track.
+  Plane over; over.distM = 1300; over.bearing = 80; over.elev = 50; over.track = 270; over.speedKt = 160; over.climbFpm = -800; over.altFt = 5200;
+  SkySpot now0 = skyAt(over, 0); assert(now0.az == 80 && now0.el == 50);
+  SkySpot next = skyAt(over, 15); assert(next.el > 70);                  // Crossing almost overhead...
+  SkySpot later = skyAt(over, 60); assert(later.az > 240 && later.az < 300 && later.el > 0 && later.el < 40);  // ...then low in the west.
+  SkySpot gone = skyAt(over, 600); assert(gone.el < 0);                   // Coming down: under the horizon in the end.
+  Plane still = over; still.track = -1; assert(skyAt(still, 300).az == 80 && skyAt(still, 300).el < 50);  // No track: it only sinks.
+  Plane far; far.distM = 160000; far.bearing = 0; far.elev = 2; far.track = 0; far.speedKt = 450; far.climbFpm = 0;
+  assert(skyAt(far, 300).el < 2 && skyAt(far, 300).az == 0);              // Going away, the Earth's curve takes it down.
+  }
 
   // --- The station ---------------------------------------------------------------------------
   assert(stars(-39) == 4 && stars(-25) == 3 && stars(-12) == 2 && stars(2) == 1);

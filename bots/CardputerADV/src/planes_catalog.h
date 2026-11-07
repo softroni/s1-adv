@@ -363,6 +363,31 @@ inline void skyPoint(int azDeg, int elDeg, int radius, int& dx, int& dy) {
   dy = int(lround(-cos(a) * r * radius));
 }
 
+// Where a plane is in the sky, or will be (or was), seconds from now: flying straight on at its
+// speed, track and climb. Its height over the eye comes from how high it looks now, so the path
+// starts where the plane is drawn; the Earth's curve lowers what's far away. el is in degrees, and
+// below 0 it's under the horizon.
+struct SkySpot {
+  int16_t az = 0, el = 0;
+};
+inline SkySpot skyAt(const Plane& p, int32_t seconds) {
+  constexpr double kDeg = 3.14159265358979 / 180.0, kEarth = 6371000.0;
+  const double d0 = p.distM, b = p.bearing * kDeg;
+  double east = d0 * sin(b), north = d0 * cos(b);
+  const double h0 = tan(p.elev * kDeg) * d0 + d0 * d0 / (2 * kEarth);
+  if (p.track >= 0) {
+    const double speed = p.speedKt * 0.514444, t = p.track * kDeg;
+    east += speed * sin(t) * seconds;
+    north += speed * cos(t) * seconds;
+  }
+  const double h = h0 + p.climbFpm * 0.00508 * seconds;
+  const double d = sqrt(east * east + north * north);
+  SkySpot s;
+  s.az = int16_t(normalDeg(int(lround(atan2(east, north) / kDeg))));
+  s.el = int16_t(lround(atan2(h - d * d / (2 * kEarth), d) / kDeg));
+  return s;
+}
+
 // --- The space station -------------------------------------------------------------------
 // Brighter is a lower magnitude: four stars for a pass brighter than any star.
 inline uint8_t stars(int16_t magTenths) {
