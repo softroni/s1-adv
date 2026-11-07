@@ -13,6 +13,10 @@
 namespace camera_net {
 namespace {
 constexpr uint32_t kStack = 10240;     // TLS's handshake runs on it; plain HTTP needs far less.
+// At home it asks a little above the main loop, for live view's frame rate. Over HTTPS it drops to
+// idle priority, as the voice upload's TLS does (001): a handshake is seconds of CPU work, and a core
+// whose idle task can't run for 5 s is restarted by the task watchdog.
+constexpr UBaseType_t kHomePriority = 2, kHttpsPriority = tskIDLE_PRIORITY;
 constexpr uint32_t kIdleMs = 10000;    // A body that stops for this long has failed.
 constexpr size_t kLineMax = 384;
 
@@ -218,6 +222,7 @@ void loop(void*) {
     if (phase.load() != Phase::Queued) continue;
     phase.store(Phase::Running);
     const uint32_t began = millis();
+    vTaskPrioritySet(nullptr, wantHome ? kHomePriority : kHttpsPriority);
     const Error e = wantHome ? runHome() : runHttps();
     took.store(millis() - began);
     portENTER_CRITICAL(&gate);
@@ -252,7 +257,7 @@ bool open() {
   if (heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < kStack + 2048) { noteMemory("worker"); return false; }
   stopping.store(false);
   phase.store(Phase::Idle);
-  if (xTaskCreate(loop, "cameras", kStack, nullptr, 2, &worker) != pdPASS) { worker = nullptr; return false; }
+  if (xTaskCreate(loop, "cameras", kStack, nullptr, kHomePriority, &worker) != pdPASS) { worker = nullptr; return false; }
   return true;
 }
 // Doesn't wait: a TLS handshake under way can take seconds to notice, and the screen shouldn't.

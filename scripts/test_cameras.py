@@ -120,6 +120,9 @@ guard = part('010_main.cpp.inc').split('void serviceMemoryGuard() {', 1)[1].spli
 assert guard.index('if (cameraHttpsBusy()) { criticalSinceMs = 0; return; }') < guard.index('ESP.restart();')
 assert guard.index('noteRestart("memory", freeHeap, largest);') < guard.index('ESP.restart();')
 assert 'bool cameraHttpsBusy() { return gUiMode == UiMode::Cameras && camera_net::busy() && !camera_net::overHome(); }' in app
+net = (src / 'camera_net.cpp').read_text()
+assert 'vTaskPrioritySet(nullptr, wantHome ? kHomePriority : kHttpsPriority);' in net and 'kHttpsPriority = tskIDLE_PRIORITY' in net, \
+    'HTTPS on the worker runs at idle priority, so a handshake cannot starve the idle task'
 auto = app.split('if (camNextThumb()) return;', 1)[1]
 assert auto.index('if (!camHomeIp()) return;') < auto.index('if (!gCamAutoPlanned) {')
 # The start-up reason goes with the first update check, once.
