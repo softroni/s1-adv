@@ -1207,6 +1207,8 @@ async function streamRequestToFile(req, filePath, maxBytes) {
     }
     if (!writer.closed) await once(writer, "close").catch(() => {});
     await rm(filePath, { force: true }).catch(() => {});
+    // How far an upload got before it failed tells a dropped stream from one that never started.
+    if (error && typeof error === "object") error.bytesReceived = bytes;
     throw error;
   }
 }
@@ -6894,11 +6896,16 @@ async function main() {
       const turnId = String(req.headers["x-turn-id"] || req.headers["x-client-msg-id"] || "").trim().slice(0, 96);
       const rawUploadPath = path.join(config.media.tmpDir, `${makeId("device-raw")}.bin`);
       let uploadedBytes = 0;
+      const uploadStartedMs = Date.now();
       try {
         uploadedBytes = await streamRequestToFile(req, rawUploadPath, config.maxUploadBytes);
       } catch (error) {
         if (error?.code === "ECONNRESET" || String(error?.message || "").toLowerCase().includes("aborted")) {
-          console.warn(`[voice-raw] aborted device=${device.device_id} turn=${turnId || "-"} err=${String(error?.message || error)}`);
+          console.warn(
+            `[voice-raw] aborted device=${device.device_id} turn=${turnId || "-"} ` +
+            `bytes=${Number(error?.bytesReceived) || 0} ms=${Date.now() - uploadStartedMs} ` +
+            `chunked=${req.headers["transfer-encoding"] ? 1 : 0} err=${String(error?.message || error)}`
+          );
           return;
         }
         if (isRequestTooLarge(error)) {
