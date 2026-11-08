@@ -154,15 +154,31 @@ bool plTicketWanted() {
   const uint32_t mine = wifiLocalAddress();
   return mine && gPlTicketFor != mine && gPlHomeOffFor != mine;
 }
+// An ask over HTTPS (away from home, and the ticket that finds the home door) borrows the canvas's
+// memory for its TLS (lendUiCanvasToTls): with the canvas kept, Skywatch has about 60 KB left and a
+// handshake takes about 50 KB, so Wi-Fi ran out halfway, or TLS itself said "Not enough memory".
+// (The handshake's other trouble, too little CPU, is camera_net's: kHttpsPriority.) It waits for a
+// chime, whose sound takes its own memory, and for the screen to show the last answer, since the
+// screen holds still while it runs.
+bool plHttpsWaits() {
+  if (plHomeIp()) return false;
+  if (gPlChimeLeft || gPlChimeBuf) return true;
+  return gCanvasSpriteActive && !uiCanvasReadyToLend();
+}
 bool plStart(PlJob job, const char* httpsPath, size_t maxBytes, uint32_t waitMs) {
   char home[240];
   const uint32_t ip = plHomeIp();
   const bool viaHome = ip && planes::homePath(home, sizeof(home), gPlTicket, httpsPath);
+  bool lent = false;
   if (!viaHome) {
     prepareNetworkMemory("planes", true);
     compactMemoryForUi("planes", true);
+    lent = lendUiCanvasToTls("planes");
   }
-  if (!camera_net::start(viaHome ? home : httpsPath, viaHome, ip, gPlTicket.port, maxBytes, waitMs)) return false;
+  if (!camera_net::start(viaHome ? home : httpsPath, viaHome, ip, gPlTicket.port, maxBytes, waitMs)) {
+    if (lent) takeUiCanvasBack();
+    return false;
+  }
   gPlJob = job;
   gPlJobSinceMs = millis();
   return true;
@@ -192,6 +208,7 @@ bool plWantsSpace() {
 
 bool plNextJob() {
   if (gPlDroneState != PlDroneState::Off || !wifiLocalAddress()) return false;
+  if (plHttpsWaits()) return false;  // A moment, before anything is due or dropped.
   const uint32_t now = millis();
   // A report goes once the bridge has answered on this network: it says why it couldn't before.
   if (gPlReport[0] && gPlTicketFor == wifiLocalAddress()) {
@@ -449,6 +466,7 @@ void plServiceChime() {
     gPlChimeBuf = nullptr;
   }
   if (!gPlChimeLeft || gPlChimeBuf || int32_t(now - gPlChimeNextMs) < 0) return;
+  if (gCanvasLent) return;  // TLS has the canvas's memory for a moment: the chime waits for it, not lost.
   --gPlChimeLeft;
   gPlChimeNextMs = now + 1500;
   if (!gCanvasSpriteActive || !focusToneAllowed() || gVoiceCapturePreparing || gVoiceDialBusy || gRealtimeDialBusy ||

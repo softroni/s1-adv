@@ -79,7 +79,7 @@ assert ticket.index('if (unreachable) {') < ticket.index('gPlTicketFor = mine;')
 assert 'camera_net::failureNote()' in fin and 'if (gPlReport[0] && gPlTicketFor == wifiLocalAddress())' in app
 assert 'if (int32_t(now - gPlTicketNotBefore) < 0) return false;' in app
 net = (src / 'camera_net.cpp').read_text()
-assert 'noteFailure("tls", code);' in net and 'tlsOutOfMemory(code) ? Error::NoMemory : Error::Connect' in net
+assert 'noteFailure("tls", code, tookConnect);' in net and 'tlsOutOfMemory(code) ? Error::NoMemory : Error::Connect' in net
 # Where it's going: the destination by name in the bigger font, its code at the path's arrow.
 route = app.split('String plRouteWords(', 1)[1].split('\n}\n', 1)[0]
 assert 'String("to ") + to' in route and 'fitCurrentFontToWidth' in route

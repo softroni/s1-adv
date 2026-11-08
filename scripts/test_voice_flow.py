@@ -39,7 +39,7 @@ bool gInboxUnread=false,gVoiceNoticeVisible=false,gRecording=false,gSubmitting=f
 bool gRealtimeActive=false,gRealtimeRecording=false,gRealtimeAwaiting=false;
 bool gRealtimeScreenVisible=false;
 struct UiFrameTrace{};void presentUiFrame(){}
-struct{bool full=true;bool needsFullFrame(bool,unsigned,bool){return full;}void invalidate(){}}gUiFramePolicy;
+struct{bool full=true;unsigned lastScene=0;bool needsFullFrame(bool,unsigned,bool){return full;}void invalidate(){}}gUiFramePolicy;bool gCanvasLent=false;
 unsigned uiSceneKey(){return 0;}bool gUiInputPending=false;
 bool gCanvasSpriteActive=true,gSetupPortalActive=false,gVoiceNoticePending=false;
 bool gLauncherVisible=false,gChatCommandsVisible=false;

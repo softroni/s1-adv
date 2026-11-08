@@ -51,4 +51,18 @@ const char* memoryNote();
 // network itself didn't connect; an mbedTLS one when TLS failed) and the memory free and its largest
 // piece then, like "tls -10368 52K/18K" or "home -1 61K/30K". "" until one fails.
 const char* failureNote();
+
+// Memory lent for one HTTPS request. A TLS handshake takes about 50 KB at its peak, more than an app
+// that also holds the screen's 32 KB canvas has left, and then Wi-Fi itself runs out and the
+// handshake stalls until it times out (Skywatch on 0.2.335: 60K free, the heap down to 188 bytes).
+// With memory lent, the TLS pieces made on the worker go into it first and the rest of the heap
+// keeps its room. Lend before start(); the memory isn't the caller's again until giveBack() says
+// so, and it must not be read, drawn into or freed until then. The connection closes after its
+// answer instead of being kept for the next request.
+bool lend(void* memory, size_t bytes);  // False when memory is lent already or a connection is open.
+bool lent();
+// True once nothing is lent: the request is over, its connection closed and every piece freed.
+bool giveBack();
+// Of the lent memory, the most the last loan used, in bytes.
+size_t lentPeak();
 }  // namespace camera_net

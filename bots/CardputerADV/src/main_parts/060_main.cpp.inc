@@ -350,6 +350,10 @@ void renderSetupPortalUi() {
 }
 
 void render() {
+  // The canvas is lent to TLS for a few seconds (Skywatch's HTTPS): the screen keeps its last whole
+  // frame rather than redraw itself straight on the TFT, flickering, as time passes. A key or a new
+  // screen still draws that way, so nothing seems stuck.
+  if (gCanvasLent && !gUiInputPending && uiSceneKey() == gUiFramePolicy.lastScene) return;
   UiFrameTrace frameTrace;
   uint32_t renderStartMs = millis();
   if (gStatusUntilMs != 0 && millis() > gStatusUntilMs) {

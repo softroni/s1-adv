@@ -171,8 +171,15 @@ bool releaseUiCanvasForNetwork(const char* reason) {
   return true;
 }
 
+bool takeUiCanvasBack();
+
 void restoreUiCanvasAfterNetwork() {
   if (gCanvasSpriteActive) {
+    return;
+  }
+  // Lent to an app's TLS, the canvas comes back as it is, never made again over it.
+  if (camera_net::lent()) {
+    takeUiCanvasBack();
     return;
   }
   gCanvasBuffer.setPsram(psramFound());
@@ -192,6 +199,48 @@ void restoreUiCanvasAfterNetwork() {
   logf("[MEM] ui canvas restored free=%u largest=%u",
        static_cast<unsigned>(ESP.getFreeHeap()),
        static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+}
+
+// The canvas lent to an app's HTTPS request (camera_net::lend): its 32 KB stay where they are, so
+// the heap isn't split the way freeing and remaking it did (0.2.173), and TLS's pieces go into
+// them. Meanwhile nothing draws into it: gCanvas is the screen itself, and render() keeps the last
+// whole frame up unless a key or a new screen asks for one. Lent only when the last frame is up to
+// date, so a fresh answer is seen before the next loan.
+bool gCanvasLent = false;
+uint32_t gCanvasLentAtMs = 0;
+bool uiCanvasReadyToLend() {
+  return gCanvasSpriteActive && !gCanvasLent && gUiFramePolicy.valid && gUiFramePolicy.lastScene == uiSceneKey();
+}
+bool lendUiCanvasToTls(const char* reason) {
+  if (!uiCanvasReadyToLend()) return false;
+  M5Cardputer.Display.waitDMA();
+  if (!camera_net::lend(gCanvasBuffer.getBuffer(), gCanvasBuffer.bufferLength())) return false;
+  gCanvasLent = true;
+  gCanvasSpriteActive = false;
+  gCanvasLentAtMs = millis();
+  logf("[MEM] ui canvas lent reason=%s free=%u largest=%u", reason ? reason : "tls",
+       static_cast<unsigned>(ESP.getFreeHeap()),
+       static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+  return true;
+}
+bool takeUiCanvasBack() {
+  if (!gCanvasLent) return true;
+  if (!camera_net::giveBack()) {
+    static uint32_t warnedMs = 0;
+    if (millis() - gCanvasLentAtMs > 60000 && millis() - warnedMs > 60000) {
+      warnedMs = millis();
+      logf("[MEM] ui canvas still lent ms=%u", static_cast<unsigned>(millis() - gCanvasLentAtMs));
+    }
+    return false;
+  }
+  gCanvasLent = false;
+  gCanvasSpriteActive = true;  // What TLS left in it is drawn over: every frame starts from a clear one.
+  gLastRenderMs = 0;
+  gUiFramePolicy.invalidate();
+  logf("[MEM] ui canvas back ms=%u peak=%u free=%u largest=%u", static_cast<unsigned>(millis() - gCanvasLentAtMs),
+       static_cast<unsigned>(camera_net::lentPeak()), static_cast<unsigned>(ESP.getFreeHeap()),
+       static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)));
+  return true;
 }
 
 String chipIdSuffix() {

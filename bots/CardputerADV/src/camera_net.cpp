@@ -4,6 +4,8 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <esp_heap_caps.h>
+#include <multi_heap.h>
+#include <mbedtls/platform.h>
 #include <mbedtls/ssl.h>
 #include <atomic>
 #include <new>
@@ -13,10 +15,13 @@
 namespace camera_net {
 namespace {
 constexpr uint32_t kStack = 10240;     // TLS's handshake runs on it; plain HTTP needs far less.
-// At home it asks a little above the main loop, for live view's frame rate. Over HTTPS it drops to
-// idle priority, as the voice upload's TLS does (001): a handshake is seconds of CPU work, and a core
-// whose idle task can't run for 5 s is restarted by the task watchdog.
-constexpr UBaseType_t kHomePriority = 2, kHttpsPriority = tskIDLE_PRIORITY;
+// At home it asks a little above the main loop, for live view's frame rate. Over HTTPS it runs beside
+// the main loop. It once dropped to idle priority, because a handshake is seconds of sums and a core
+// whose idle task can't run for 5 s is restarted by the task watchdog; but sharing core 0 with the
+// idle task, a handshake through Let's Encrypt's four-certificate chain took over 25 s and ran out its
+// 15 (Skywatch, 0.2.335), where the same handshake above idle takes about 6. Now core 0's idle task is
+// let off the watchdog for the handshake instead (tlsConnect).
+constexpr UBaseType_t kHomePriority = 2, kHttpsPriority = 1;
 constexpr uint32_t kIdleMs = 10000;    // A body that stops for this long has failed.
 constexpr size_t kLineMax = 384;
 constexpr size_t kLineRoom = kLineMax + 256;  // The request, then each line of the answer's head.
@@ -62,11 +67,53 @@ char memNote[48] = "";
 char failNote[48] = "";
 char lastClip[40] = "";
 
+// --- Lent memory (lend) ---
+// mbedTLS's own allocator, which every other TLS user keeps: the IDF's, in internal memory.
+extern "C" void* esp_mbedtls_mem_calloc(size_t n, size_t size);
+extern "C" void esp_mbedtls_mem_free(void* p);
+// Where the lent memory is, while it is: a piece inside it goes back to it.
+std::atomic<uint8_t*> lentStart{nullptr};
+size_t lentBytes = 0, lentFree = 0;
+multi_heap_handle_t lentHeap = nullptr;
+std::atomic<bool> lentTaking{false};  // New pieces made on the worker go into it.
+std::atomic<int> lentPieces{0};
+size_t lentPeakBytes = 0;
+bool allocatorSet = false;
+
+void* tlsCalloc(size_t n, size_t size) {
+  // Only the worker's, so a TLS connection on another task (the inbox, voice) never lands in it.
+  if (lentTaking.load() && worker && xTaskGetCurrentTaskHandle() == worker && size && n <= SIZE_MAX / size) {
+    if (void* p = multi_heap_malloc(lentHeap, n * size)) {
+      memset(p, 0, n * size);
+      lentPieces.fetch_add(1);
+      const size_t used = lentFree - multi_heap_free_size(lentHeap);
+      if (used > lentPeakBytes) lentPeakBytes = used;
+      return p;
+    }
+  }
+  return esp_mbedtls_mem_calloc(n, size);
+}
+void tlsFree(void* p) {
+  if (!p) return;
+  uint8_t* start = lentStart.load();
+  if (start && static_cast<uint8_t*>(p) >= start && static_cast<uint8_t*>(p) < start + lentBytes) {
+    multi_heap_free(lentHeap, p);
+    lentPieces.fetch_sub(1);
+    return;
+  }
+  esp_mbedtls_mem_free(p);
+}
+
 void noteMemory(const char* what) {
   snprintf(memNote, sizeof(memNote), "%s %uK/%uK", what, unsigned(ESP.getFreeHeap() / 1024),
            unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024));
 }
-void noteFailure(const char* how, int code) {
+void noteFailure(const char* how, int code, uint32_t ms = 0) {
+  if (ms) {
+    snprintf(failNote, sizeof(failNote), "%s %d %ums %uK/%uK", how, code, unsigned(ms), unsigned(ESP.getFreeHeap() / 1024),
+             unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024));
+    return;
+  }
   snprintf(failNote, sizeof(failNote), "%s %d %uK/%uK", how, code, unsigned(ESP.getFreeHeap() / 1024),
            unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024));
 }
@@ -234,6 +281,16 @@ Error runHome() {
   return Error::Connect;
 }
 
+// The handshake: four signatures to check in sums, seconds with nothing to wait on, so core 0's idle
+// task, which this task keeps from running meanwhile, is let off the task watchdog until it's done.
+// The handshake has its own limit between its steps (setHandshakeTimeout).
+bool tlsConnect(WiFiClientSecure& client) {
+  disableCore0WDT();
+  const bool ok = client.connect(bridgeHost, bridgePort);
+  enableCore0WDT();
+  return ok;
+}
+
 // Over HTTPS on the connection kept from the last request when it's still open, else a new one.
 Error runHttps() {
   dropKept();
@@ -247,10 +304,15 @@ Error runHttps() {
       tlsHeld.store(true);
       keptTls->setCACert(bridgeCa);
       keptTls->setHandshakeTimeout(15);
-      if (!keptTls->connect(bridgeHost, bridgePort)) {
+      const uint32_t began = millis();
+      const bool ok = tlsConnect(*keptTls);
+      const uint32_t tookConnect = millis() - began;
+      Serial.printf("[CAMNET] tls %s %ums free=%u largest=%u lent=%d\n", ok ? "open" : "failed", unsigned(tookConnect),
+                    unsigned(ESP.getFreeHeap()), unsigned(heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)), lentStart.load() != nullptr);
+      if (!ok) {
         char detail[32] = {};
         const int code = keptTls->lastError(detail, sizeof(detail));
-        noteFailure("tls", code);
+        noteFailure("tls", code, tookConnect);
         const Error e = tlsOutOfMemory(code) ? Error::NoMemory : Error::Connect;
         if (e == Error::NoMemory) noteMemory("TLS");
         dropTls();
@@ -259,7 +321,9 @@ Error runHttps() {
     }
     bool anyAnswer = false, reusable = false;
     const Error e = exchange(*keptTls, false, anyAnswer, reusable);
-    if (!reusable || e == Error::Malformed || e == Error::Timeout || e == Error::Connect || cancelled.load()) dropTls();
+    // On lent memory it's never kept: the lender wants its memory back as soon as the answer is in.
+    if (!reusable || e == Error::Malformed || e == Error::Timeout || e == Error::Connect || cancelled.load() || lentStart.load())
+      dropTls();
     else keptTlsAt = millis();
     // A kept connection the far end had already closed fails before any answer: once more on a new one.
     if (reuse && !anyAnswer && e == Error::Connect && !cancelled.load()) continue;
@@ -440,6 +504,35 @@ bool isSlot(const uint8_t* p) {
   return false;
 }
 bool tlsOpen() { return tlsHeld.load(); }
+bool lend(void* memory, size_t bytes) {
+  if (!memory || bytes < 8192 || lentStart.load() || busy() || tlsHeld.load()) return false;
+  multi_heap_handle_t heap = multi_heap_register(memory, bytes);
+  if (!heap) return false;
+  // Installed once and kept: a piece made elsewhere still goes to the IDF's allocator and back.
+  if (!allocatorSet) allocatorSet = mbedtls_platform_set_calloc_free(tlsCalloc, tlsFree) == 0;
+  if (!allocatorSet) return false;
+  lentHeap = heap;
+  lentBytes = bytes;
+  lentFree = multi_heap_free_size(heap);
+  lentPieces.store(0);
+  lentPeakBytes = 0;
+  lentStart.store(static_cast<uint8_t*>(memory));
+  lentTaking.store(true);
+  return true;
+}
+bool lent() { return lentStart.load() != nullptr; }
+bool giveBack() {
+  if (!lentStart.load()) return true;
+  if (busy() || tlsHeld.load()) return false;  // The request, or its connection, still runs on it.
+  lentTaking.store(false);
+  // Every TLS piece is freed with its connection, so one left would be a leak: keep the memory
+  // lent rather than hand back what something still writes to.
+  if (lentPieces.load() != 0) return false;
+  lentStart.store(nullptr);
+  lentHeap = nullptr;
+  return true;
+}
+size_t lentPeak() { return lentPeakBytes; }
 void cancel() { if (busy()) cancelled.store(true); }
 const char* memoryNote() { return memNote; }
 const char* failureNote() { return failNote; }

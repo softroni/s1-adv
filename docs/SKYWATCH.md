@@ -183,7 +183,15 @@ What a drone says about itself is what you see: the Cardputer can't check it.
 
 The Cardputer asks the bridge every 10 seconds while the sky map or a plane is on screen (every 30
 away from home, where each ask is a heavier HTTPS one), and for the station when its pages are. At home it goes over the bridge's plain-HTTP door on your Wi-Fi, as
-Podcasts and Cameras do, and away from home over HTTPS. The bridge
+Podcasts and Cameras do, and away from home over HTTPS.
+
+An HTTPS ask takes about 7 seconds, nearly all of it checking the bridge's certificates, and more
+memory than Skywatch has spare beside the screen. So for those seconds Skywatch lends the screen's
+own memory to it: the screen holds still, still showing the last picture, and a key you press still
+draws. At home that happens once, the first time Skywatch opens after the Cardputer (or the bridge)
+starts, to find the home door; after that every ask takes about half a second.
+
+The bridge
 (`bridge/src/planes.mjs`) answers in short lines of text:
 
 - **Planes** come from [adsb.lol](https://adsb.lol), a free community flight tracker. Names, routes and

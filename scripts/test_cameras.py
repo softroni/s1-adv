@@ -138,8 +138,11 @@ assert guard.index('if (cameraHttpsBusy()) { criticalSinceMs = 0; return; }') < 
 assert guard.index('noteRestart("memory", freeHeap, largest);') < guard.index('ESP.restart();')
 assert '(gUiMode == UiMode::Cameras || gUiMode == UiMode::Planes) &&\n         ((camera_net::busy() && !camera_net::overHome()) || camera_net::tlsOpen());' in app
 net = (src / 'camera_net.cpp').read_text()
-assert 'vTaskPrioritySet(nullptr, wantHome ? kHomePriority : kHttpsPriority);' in net and 'kHttpsPriority = tskIDLE_PRIORITY' in net, \
-    'HTTPS on the worker runs at idle priority, so a handshake cannot starve the idle task'
+assert 'vTaskPrioritySet(nullptr, wantHome ? kHomePriority : kHttpsPriority);' in net and 'kHttpsPriority = 1;' in net, \
+    'HTTPS on the worker runs above idle: beside the idle task a handshake took over 25 s'
+connect = net.split('bool tlsConnect(WiFiClientSecure& client) {', 1)[1].split('\n}\n', 1)[0]
+assert connect.index('disableCore0WDT();') < connect.index('client.connect(') < connect.index('enableCore0WDT();'), \
+    "core 0's idle task is off the task watchdog for exactly the handshake, which keeps it from running"
 auto = app.split('if (camNextThumb()) return;', 1)[1]
 assert auto.index('if (!camHomeIp()) return;') < auto.index('if (!gCamAutoPlanned) {')
 # The start-up reason goes with the first update check, once.

@@ -407,6 +407,7 @@ void loop() {
   // Ahead of every early return, so a check times out or gives the port back wherever the loop goes.
   serviceLabOnce();
   serviceLabPlayAsked();
+  takeUiCanvasBack();  // As soon as a request that borrowed it is over, wherever the loop goes next.
   if (gRealtimeExclusiveMode) {
     serviceRealtimeExclusiveLoop(loopStartMs);
     return;
@@ -461,7 +462,7 @@ void loop() {
   traceUiService("serviceVoicePreconnect", [] { serviceVoicePreconnect(); });
   traceUiService("serviceVoiceReplySpeech", [] { serviceVoiceReplySpeech(); });
   traceUiService("serviceReplyWaitStatus", [] { serviceReplyWaitStatus(); });
-  if (!gCanvasSpriteActive && gUiMode != UiMode::Nes && !gInboxHttpBusy && !gVoiceReplySpeechBusy &&
+  if (!gCanvasSpriteActive && !gCanvasLent && gUiMode != UiMode::Nes && !gInboxHttpBusy && !gVoiceReplySpeechBusy &&
       !gVoiceDialBusy && !gSubmitting && !gRecording && !gPlaybackActive && !gRealtimeDialBusy) {
     static uint32_t retryCanvasMs = 0;
     if (millis() - retryCanvasMs >= 1000) {

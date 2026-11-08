@@ -309,6 +309,7 @@ struct {void setPsram(bool){};void setColorDepth(int){};void* createSprite(int,i
 struct {int getFreeHeap(){return 10000;}} ESP;
 constexpr int MALLOC_CAP_8BIT=0;int heap_caps_get_largest_free_block(int){return 4000;}
 void configureEmojiRendering(){++configured;}void logf(const char*,...){}
+namespace camera_net {bool lent(){return false;}}bool takeUiCanvasBack(){return true;}
 '''
 canvas+='\n'+function('006_main.cpp.inc','void restoreUiCanvasAfterNetwork()')
 canvas+=r'''
