@@ -428,3 +428,27 @@ test("the page's control route checks the part and the value, and needs the page
   assert.equal(json.live.can_control, true);
   assert.equal(json.live.controls[0].output, "ac_daikin");
 });
+
+test("Radio: off without Skywatch's planes; with them, where, guesses, saves and logos through the page's routes", async () => {
+  const { ui: bare } = makeUi();
+  assert.deepEqual((await call(bare, "GET", "/api/radio")).json, { off: true });
+  const runtime = fakeRuntime();
+  const stateDir = await mkdtemp(path.join(tmpdir(), "s1-ui-radio-"));
+  runtime.planes = { lastAt: null, aircraftNear: async () => [
+    { hex: "a1b2c3", flight: "N12AB", lat: 40.01, lon: -100.02, alt_baro: 2500, squawk: "1200", track: 90 }] };
+  runtime.weather = { place: async () => ({ name: "Salem", latitude: 40, longitude: -100 }) };
+  const ui = new WebUi({ runtime, config: { ui: { enabled: true }, stateDir }, labLive: new LabLiveService(),
+    deviceActivity: new DeviceActivity(), logRing: new LogRing() });
+  ui.radio.fetchImpl = async () => new Response("", { status: 404 });   // No FAA file or logos in a test.
+  ui.radio.log = {};
+  assert.equal((await call(ui, "GET", "/api/radio")).json.spot, false);
+  const write = { "x-s1-ui": "1" };
+  assert.equal((await call(ui, "POST", "/api/radio/spot", { body: { place: "Salem, MA" } })).status, 403, "a write needs the page's header");
+  assert.equal((await call(ui, "POST", "/api/radio/spot", { body: { place: "Salem, MA" }, headers: write })).json.label, "Salem");
+  const s = (await call(ui, "GET", "/api/radio")).json;
+  assert.equal(s.from, "typed");
+  assert.deepEqual(s.planes.map((p) => [p.say, p.who]), [["November 12AB", "Not talking to ATC (VFR, code 1200)"]]);
+  assert.equal((await call(ui, "POST", "/api/radio/heard", { body: { listening: "122.8", typed: "Cessna 12AB" }, headers: write })).json.ok, true);
+  assert.match(await readFile(path.join(stateDir, "radio", "heard.jsonl"), "utf8"), /"text":"Cessna 12AB"/);
+  assert.equal((await call(ui, "GET", "/api/radio/logo/AAL")).status, 404);
+});

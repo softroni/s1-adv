@@ -14,6 +14,7 @@ import { promisify } from "node:util";
 import { describeStart } from "./device-activity.mjs";
 import { parseLogFileLines } from "./log-ring.mjs";
 import { makeId } from "./utils.mjs";
+import { RadioService } from "./radio.mjs";
 
 const UI_DIR = fileURLToPath(new URL("../ui/", import.meta.url));
 const BRIDGE_DIR = fileURLToPath(new URL("..", import.meta.url));
@@ -209,6 +210,8 @@ export class WebUi {
     this.server = null;
     this.linkCache = null;
     this.run = promisify(execFile);
+    // Radio: Skywatch's planes and its position, with frequency guesses (radio.mjs).
+    this.radio = runtime?.planes ? new RadioService({ stateDir: config.stateDir, planes: runtime.planes, weather: runtime.weather }) : null;
   }
 
   // Where a phone opens the page: ui.url if the owner set one, or Tailscale's serve settings.
@@ -259,6 +262,7 @@ export class WebUi {
       if (req.method === "GET" && STATIC.has(url.pathname)) { await this.sendStatic(res, ...STATIC.get(url.pathname)); return; }
       if (!url.pathname.startsWith("/api/")) { fail(res, 404, "not_found"); return; }
       const route = `${req.method} ${url.pathname}`;
+      if (req.method === "GET" && url.pathname.startsWith("/api/radio/logo/")) { await this.radioLogo(url.pathname.slice(16), res); return; }
       if (req.method === "POST" && !writeAllowed(req)) { fail(res, 403, "write_not_allowed"); return; }
       const body = req.method === "POST" ? await readBody(req) : null;
       switch (route) {
@@ -278,6 +282,9 @@ export class WebUi {
         case "GET /api/cameras/link": send(res, 200, this.cameraLink()); return;
         case "GET /api/link": send(res, 200, await this.link()); return;
         case "POST /api/restart": send(res, 200, this.requestRestart()); return;
+        case "GET /api/radio": send(res, 200, this.radio ? await this.radio.state() : { off: true }); return;
+        case "POST /api/radio/spot": send(res, 200, this.radio ? await this.radio.setSpot(body?.place) : { error: "off" }); return;
+        case "POST /api/radio/heard": send(res, 200, this.radio ? await this.radio.heard(body) : { error: "off" }); return;
         default: fail(res, 404, "not_found");
       }
     } catch (error) {
@@ -286,6 +293,15 @@ export class WebUi {
       if (!res.headersSent) fail(res, status, String(error.code || error.message || "failed").slice(0, 80));
       else res.destroy();
     }
+  }
+
+  // An airline's logo for the Radio grid, kept on disk once found; nothing when there's none.
+  async radioLogo(code, res) {
+    const png = this.radio ? await this.radio.logo(String(code).toUpperCase()) : null;
+    if (!png) { res.writeHead(404, { "cache-control": "max-age=600" }); res.end(); return; }
+    res.writeHead(200, { "content-type": "image/png", "content-length": String(png.length), "cache-control": "max-age=86400",
+      "x-content-type-options": "nosniff" });
+    res.end(png);
   }
 
   async sendStatic(res, file, type) {

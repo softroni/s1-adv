@@ -254,3 +254,35 @@ input[type=range]{width:100%;accent-color:var(--lime);background:transparent;bor
 .relaybtn.on{background:rgba(12,163,12,.2);color:#5fe05f;border-color:rgba(12,163,12,.5)}
 .pnote{font-size:12px;color:var(--mute);min-height:15px}
 .part.absent .pc{opacity:.6}
+
+/* ---------- radio ---------- */
+#radio .good{color:#5fe05f} #radio .warnc{color:var(--warn)} #radio .cyanc{color:var(--cyan)}
+#radio .rwhere{margin:0 4px 8px}
+#radio .rrange{margin-bottom:10px}
+.rfreqs{padding:4px 14px}
+.rfq{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);color:var(--ink);text-decoration:none;cursor:pointer}
+.rfq:last-child{border-bottom:0}
+.rfq .n{font-size:20px;font-weight:800;color:var(--cyan);min-width:88px}
+.rfq .l{flex:1;font-size:14px;color:var(--ink2)}
+.rfq .c{font-size:12px;color:var(--mute);text-align:right;min-width:62px}
+.rbig{font-size:30px;font-weight:800;color:var(--cyan);line-height:1.1}
+.rgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:6px;margin-bottom:10px}
+.rgh{grid-column:1/-1;font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--mute);margin:8px 2px 0}
+.rtile{display:flex;flex-direction:column;align-items:center;gap:2px;padding:7px 4px 6px;border-radius:11px;border:1px solid var(--line);background:var(--card);min-width:0}
+.rtile .a{display:flex;align-items:center;justify-content:center;gap:4px;max-width:100%;font-size:11px;color:var(--mute);min-height:20px}
+.rtile .a>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rtile .b{font-size:19px;font-weight:800;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rtile .m{font-size:11px;min-height:14px}
+.rtile.mine{border-color:rgba(95,224,95,.55);background:rgba(12,163,12,.16)}
+.rtile.second{border-color:rgba(250,178,25,.55);background:rgba(250,178,25,.12)}
+.rtile.gone{opacity:.35}
+.rtile.sel{outline:3px solid var(--cyan);outline-offset:1px}
+.rtile.fresh{box-shadow:0 0 0 2px var(--cyan)}
+.rlogo{width:20px;height:20px;flex:none;object-fit:contain;background:#fff;border-radius:5px;padding:1px}
+.rlogo.big{width:34px;height:34px;border-radius:8px;padding:2px}
+.rname{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:750}
+.rbadge{font-size:13px;font-weight:700}
+.rfar{opacity:.6}
+.rpanel{position:fixed;left:0;right:0;bottom:70px;z-index:7;background:var(--card2);border-top:2px solid var(--cyan);padding:12px 16px 14px;box-shadow:0 -10px 28px rgba(0,0,0,.6)}
+#radio.haspanel{padding-bottom:230px}
+@media (min-width:1000px){ .rpanel{left:232px;bottom:0;padding-bottom:18px} }

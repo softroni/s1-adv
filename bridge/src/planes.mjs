@@ -433,6 +433,8 @@ export class PlanesService {
   // --- Planes ---
   async near(params) {
     const at = await this.position(params);
+    // Where the Cardputer last looked from, for the page's Radio (radio.mjs). In memory only.
+    this.lastAt = { latitude: at.latitude, longitude: at.longitude, atMs: this.now() };
     const asked = Number(params.get("r"));
     const radiusM = Number.isFinite(asked) && asked > 0 ? Math.min(MAX_RADIUS_M, Math.max(MIN_RADIUS_M, asked)) : DEFAULT_RADIUS_M;
     const nm = Math.min(100, Math.max(1, Math.ceil(radiusM / 1852)));

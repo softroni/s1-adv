@@ -1,6 +1,6 @@
 # The bridge's web page
 
-The bridge has its own web page: the Cardputer's status, the chat, a remote, the Lab live, the log, firmware and settings. It runs on the computer that runs the bridge, and you open it on your phone or another computer.
+The bridge has its own web page: the Cardputer's status, the chat, a remote, the Lab live, Radio, the log, firmware and settings. It runs on the computer that runs the bridge, and you open it on your phone or another computer.
 
 <table>
 <tr>
@@ -124,6 +124,62 @@ The readings only come over your home Wi-Fi, and only while the Lab is open. See
 Controls need firmware 0.2.330 or later.
 
 **Rules** and **Sequences** show what's saved on the Cardputer, as it last told the bridge with a chat message. Play starts a sequence, and New rule builds one with menus, in the units you read. Like everything Claude sends, a rule from here waits on the Cardputer until you check it there.
+
+## Radio
+
+Which frequency the planes around you are probably on, for listening on an ordinary air-band radio (118–137 MHz, AM). Nothing says which frequency a plane is tuned to, so the page guesses from what each one is doing.
+
+**Where:** the position Skywatch last asked about on the Cardputer (its GPS, or the city saved in Settings), used for 12 hours. "Use a town" types one instead. Either is kept only in the bridge's memory and never saved.
+
+**By frequency** is for listening:
+
+- **Pick the frequency your radio is on.** The list is in groups (your area's approach frequencies, towers within 25 miles, Center within 80), each in number order, with how many planes within your range the page guesses on each. **Something else** takes any frequency.
+- **The planes come as a grid of call signs,** the airline's logo and spoken name over the flight number, so "Southwest 1317" is *Southwest* over **1317**. Green ★ is the page's guess for that frequency, amber its second choice. The rest show with **Every plane**.
+- **The grid keeps its order:** guesses first, then second choices, then the rest, each by airline and number. A new plane joins the end of its group, outlined for 30 seconds. One that leaves your range or the radio's reach fades where it is.
+- **Range** is 5, 10, 25 or 50 miles. Pilots carry far, so a plane 40 miles away may be the one you hear.
+- **Tap a tile** for its details at the bottom: height, climbing or descending, distance, and its guess. **I heard it on** saves that you heard it there. One that isn't listed can be typed in.
+
+**Near me** lists the planes within 8 miles with their guess, and **Listen on** opens that frequency with the plane picked.
+
+**How it guesses:**
+
+- **Low beside a towered airport:** that tower. An airliner gets only the area's big airports.
+- **Code 1200:** a small plane flying on its own, not talking to anyone.
+- **Climbing out of a big airport,** or up 1,500 ft in the last few minutes though level for now: its departure frequency for the direction it's going.
+- **Coming down to one:** its arrival frequency for that side, then the final's as it lines up.
+- **Below 10,000 ft with a code a controller gave it:** the local approach sector.
+- **Cruising or anything else:** the two nearest Center radio sites for its height.
+
+Towers and Center come from the FAA's free frequency list, which the bridge downloads every 28 days. How an approach control divides its frequencies isn't in it in a usable form, so that part comes from an **area file** you keep at `<stateDir>/radio/area.json` (`~/.s1-adv/data/radio/area.json` by default). It never goes in the repo, because it says where you live. Without it the page uses towers and Center only. It looks like this, with the frequencies from the FAA list or your airport's chart supplement:
+
+```json
+{
+  "approachName": "Test Approach",
+  "airports": [
+    { "code": "HUB", "name": "Hub", "lat": 40.0, "lon": -100.0,
+      "departures": { "N": "121.1", "E": "121.2", "S": "121.3", "W": "121.4" },
+      "arrivalSplit": "EW", "arrivals": { "E": ["122.1", "122.2"], "W": ["122.3", "122.4"] },
+      "finals": { "E": "123.1", "W": "123.2" },
+      "towerSplit": "EW", "towers": { "E": ["124.1", "124.2"], "W": ["124.6"] } },
+    { "code": "CTY", "name": "City", "lat": 40.0, "lon": -99.67, "airlines": ["SWX"],
+      "departures": { "E": "121.2", "S": "121.3" },
+      "arrivalSplit": "NS", "arrivals": { "N": ["125.1", "125.2"], "S": ["125.2", "125.1"] },
+      "towers": { "*": ["126.1"] } }
+  ],
+  "local": { "split": "NS", "lat": 40.0, "N": ["127.1", "127.2"], "S": ["127.2", "127.1"] },
+  "catalog": [["Departures", [["121.2", "East"], ["121.1", "North"]]]]
+}
+```
+
+- **The first airport is the hub:** an airliner coming down nearby, not pointed at any airport yet, is taken to be landing there.
+- **`airlines`** names prefixes that fly from that airport rather than the hub.
+- **Two frequencies** in a list are the first and second choice.
+- **A side** (`EW` or `NS`) is which half of the airport the plane is on.
+- **`catalog`** adds groups to the top of the frequency list.
+
+The bridge reads the file when it starts.
+
+What you save goes to `<stateDir>/radio/heard.jsonl`: the plane, its height, the guess and the frequency you heard it on, never where you are.
 
 ## Logs
 

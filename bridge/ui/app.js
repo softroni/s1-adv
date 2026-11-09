@@ -67,8 +67,8 @@ const status = (kind, text, icon = "") => `<span class="status ${kind}">${icon}$
 
 // ---------------------------------------------------------------------------------------------
 // Screens and their timers
-const SCREENS = { status: drawStatus, chat: drawChat, remote: drawRemote, lab: drawLab, logs: drawLogs, firmware: drawFirmware, settings: drawSettings };
-const EVERY = { status: 5000, chat: 2500, remote: 5000, lab: 1000, logs: 10000 };
+const SCREENS = { status: drawStatus, chat: drawChat, remote: drawRemote, lab: drawLab, radio: drawRadio, logs: drawLogs, firmware: drawFirmware, settings: drawSettings };
+const EVERY = { status: 5000, chat: 2500, remote: 5000, lab: 1000, radio: 10000, logs: 10000 };
 let current = "";
 let timer = 0;
 let lastStatus = null;
@@ -914,6 +914,228 @@ async function drawSettings() {
       if (r.restarting) waitForRestart(before);
       else toast(r.reason === "claude_busy" ? "Saved. Claude is working, so restart the bridge once it's done." : "Saved. It's used the next time the bridge starts.", 5000);
     } catch (e) { toast(`Not saved: ${e.message}`); }
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Radio: which air-band frequency the planes around the Cardputer are probably on (radio.mjs).
+// Pick the frequency your radio is on, then the plane you hear. The grid keeps its order: my
+// guesses, then second choices, then the rest, each by airline and number; a new plane joins the end
+// of its group, outlined for 30 s, and one that leaves the range fades in place.
+const radio = { view: "freq", freq: "", range: 50, mine: true, filt: "", sel: "", snap: null, data: null, last: new Map(), saved: new Set(), editSpot: false, wired: false };
+try {
+  radio.freq = localStorage.getItem("radio.freq") || "";
+  radio.range = Number(localStorage.getItem("radio.range")) || 50;
+  radio.view = localStorage.getItem("radio.view") || "freq";
+} catch {}
+const RANGES = [5, 10, 25, 50];
+const SIDE = { likely: "good", maybe: "warn", guess: "serious" };
+function radioKeep() { try { localStorage.setItem("radio.freq", radio.freq); localStorage.setItem("radio.range", radio.range); localStorage.setItem("radio.view", radio.view); } catch {} }
+const radioIcao = (p) => (/^[A-Z]{3}\d/.test(p?.cs || "") ? p.cs.slice(0, 3) : "");
+const radioLogo = (p, big) => (radioIcao(p) ? `<img class="${big ? "rlogo big" : "rlogo"}" src="api/radio/logo/${radioIcao(p)}" alt="">` : "");
+function radioParts(p) {
+  const s = p.say || p.cs || p.hex;
+  const i = s.lastIndexOf(" ");
+  if (i > 0) return [s.slice(0, i), s.slice(i + 1)];
+  return /^[A-Z]{3}\d/.test(s) ? [s.slice(0, 3), s.slice(3)] : ["", s];
+}
+function radioCmp(x, y) {
+  const [a1, b1] = radioParts(x), [a2, b2] = radioParts(y);
+  const n1 = parseInt(b1, 10), n2 = parseInt(b2, 10);
+  return a1.toLowerCase().localeCompare(a2.toLowerCase()) || (isNaN(n1) ? 1e9 : n1) - (isNaN(n2) ? 1e9 : n2) || b1.localeCompare(b2);
+}
+const radioClimb = (p) => (p.vr > 300 ? "climbing" : p.vr < -300 ? "descending" : "level");
+function radioLabel(f) {
+  for (const [, rows] of radio.data?.catalog || []) for (const [x, l] of rows) if (x === f) return l;
+  return "";
+}
+
+async function drawRadio(first) {
+  const el = $("#radio");
+  if (!radio.wired) { radioWire(el); radio.wired = true; }
+  const d = await api("radio");
+  radio.data = d;
+  for (const p of d.planes || []) radio.last.set(p.hex, p);
+  if (first || !el.querySelector("#rBody")) {
+    el.innerHTML = `<div class="seg"><a data-rview="freq">By frequency</a><a data-rview="near">Near me</a></div><div id="rWhere"></div><div id="rBody"></div><div id="rPanel"></div>`;
+  }
+  el.querySelectorAll("[data-rview]").forEach((a) => a.classList.toggle("on", a.dataset.rview === radio.view));
+  radioWhere(d);
+  if (d.off) { $("#rBody").innerHTML = `<div class="empty">Radio needs Skywatch's planes, which this bridge doesn't have.</div>`; return; }
+  if (!d.spot) { $("#rBody").innerHTML = ""; $("#rPanel").innerHTML = ""; return; }
+  if (radio.view === "near") radioNear();
+  else if (!radio.freq) radioFreqs();
+  else radioGrid();
+}
+
+// Where the planes are counted from: the Cardputer's last Skywatch position, or a typed town.
+function radioWhere(d) {
+  const box = $("#rWhere");
+  if (document.activeElement?.id === "rTown") return;
+  if (!d.spot || radio.editSpot) {
+    box.innerHTML = `<div class="card"><div class="label">${d.spot ? "Use a town instead" : "Where are you?"}</div>
+      <div class="tiny muted" style="margin:4px 0 8px">${d.spot ? "" : "Open Skywatch on the Cardputer and its position is used, or "}type a town and state, like Salem, MA. It's kept only in the bridge's memory, never saved.</div>
+      <div class="row" style="display:flex;gap:8px"><input id="rTown" style="flex:1" autocomplete="off"><button class="btn small" data-rspot="set">Use</button>${d.spot ? `<button class="btn small" data-rspot="cancel">Cancel</button>` : ""}</div>
+      <div class="tiny" id="rTownErr" style="color:var(--serious);margin-top:6px"></div></div>`;
+    return;
+  }
+  const notes = [];
+  if (!d.faa) notes.push("Getting the FAA's list of frequencies…");
+  if (!d.area) notes.push("No approach frequencies set for this area, so guesses use towers and Center only.");
+  box.innerHTML = `<div class="tiny muted rwhere">Around ${esc(d.label)} · updated ${d.age} s ago${d.saved ? ` · ${d.saved} saved` : ""}${d.error ? ` · <span style="color:var(--warn)">${esc(d.error)}</span>` : ""}
+    · <a class="link" data-rspot="${d.from === "typed" ? "clear" : "edit"}">${d.from === "typed" ? "Use the Cardputer's" : "Use a town"}</a></div>
+    ${notes.map((n) => `<div class="tiny muted rwhere">${esc(n)}</div>`).join("")}`;
+}
+
+function radioRanges() {
+  return `<div class="seg rrange">${RANGES.map((r) => `<a data-rrange="${r}" class="${radio.range === r ? "on" : ""}">${r} mi</a>`).join("")}</div>`;
+}
+
+function radioFreqs() {
+  const n1 = {}, n2 = {};
+  for (const p of radio.data.planes) {
+    if (p.mi > radio.range) continue;
+    if (p.freq) n1[p.freq] = (n1[p.freq] || 0) + 1;
+    if (p.alt2) n2[p.alt2] = (n2[p.alt2] || 0) + 1;
+  }
+  $("#rPanel").innerHTML = "";
+  $("#radio").classList.remove("haspanel");
+  $("#rBody").innerHTML = `<div class="tiny muted" style="margin:0 4px 8px">Pick the frequency your radio is on. The numbers are how many planes within your range I think are on it now.</div>
+    ${radioRanges()}
+    ${radio.data.catalog.map(([name, rows]) => `<div class="h2"><h2>${esc(name)}</h2></div><div class="card rfreqs">${rows.map(([f, l]) => `
+      <a class="rfq" data-rfreq="${esc(f)}"><span class="n mono">${esc(f)}</span><span class="l">${esc(l)}</span>
+      <span class="c">${n1[f] ? `<b class="good">${n1[f]}</b> likely` : ""}${n2[f] ? `<br>${n2[f]} maybe` : ""}</span></a>`).join("")}</div>`).join("")}
+    <div class="h2"><h2>Something else</h2></div>
+    <div class="card" style="display:flex;gap:8px"><input id="rOther" style="flex:1" placeholder="A frequency, like 121.5" inputmode="decimal"><button class="btn small" data-rother="1">Listen</button></div>`;
+}
+
+function radioGrid() {
+  const F = radio.freq;
+  const all = radio.data.planes;
+  const cls = (p) => (p.freq === F ? 0 : p.alt2 === F ? 1 : 2);
+  const cand = all.filter((p) => p.mi <= radio.range && (!radio.mine || p.freq === F || p.alt2 === F));
+  const key = `${F}|${radio.mine}|${radio.range}`;
+  if (!radio.snap || radio.snap.key !== key) {
+    const order = cand.slice().sort((x, y) => cls(x) - cls(y) || radioCmp(x, y));
+    radio.snap = { key, order: order.map((p) => p.hex), cls: Object.fromEntries(order.map((p) => [p.hex, cls(p)])), added: {} };
+  }
+  const snap = radio.snap;
+  // New matches join the end of their group: nothing already shown moves within its group.
+  for (const p of cand.filter((x) => !snap.order.includes(x.hex)).sort((x, y) => cls(x) - cls(y) || radioCmp(x, y))) {
+    const c = cls(p);
+    let at = 0;
+    for (let i = snap.order.length - 1; i >= 0; i--) if ((snap.cls[snap.order[i]] ?? 2) <= c) { at = i + 1; break; }
+    snap.order.splice(at, 0, p.hex);
+    snap.cls[p.hex] = c;
+    snap.added[p.hex] = Date.now();
+  }
+  const live = new Map(all.map((p) => [p.hex, p]));
+  const rows = snap.order.map((h) => (live.has(h) ? { ...live.get(h), gone: live.get(h).mi > radio.range } : { ...radio.last.get(h), gone: true }))
+    .filter((p) => p.hex && (!radio.filt || `${p.say} ${p.cs} ${p.type}`.toLowerCase().includes(radio.filt)));
+  if (!$("#rHead") || $("#rHead").dataset.key !== key) {
+    $("#rBody").innerHTML = `<div class="card" id="rHead" data-key="${esc(key)}">
+      <div style="display:flex;align-items:center;gap:10px"><div class="rbig mono">${esc(F)}</div><div style="flex:1;font-size:14px;color:var(--ink2)">${esc(radioLabel(F))}</div>
+      <button class="btn small" data-rchange="1">Change</button></div>
+      <input id="rFilt" style="width:100%;margin:10px 0" placeholder="Filter, like 371 or Southwest" value="${esc(radio.filt)}" autocomplete="off">
+      <div class="seg"><a data-rmine="1" class="${radio.mine ? "on" : ""}">My guesses</a><a data-rmine="0" class="${radio.mine ? "" : "on"}">Every plane</a></div>
+      ${radioRanges()}
+      <div class="tiny muted"><b class="good">Green ★</b> my guess for ${esc(F)} · <b class="warnc">amber</b> my second choice · faded: left your range or out of reach. New planes join the end of their group, outlined for 30 s.</div></div>
+      <div id="rGrid"></div>
+      <div class="h2"><h2>Heard one that isn't here?</h2></div>
+      <div class="card" style="display:flex;gap:8px"><input id="rTyped" style="flex:1" placeholder="What you heard, like Southwest 371" autocomplete="off"><button class="btn small" data-rtyped="1">Save</button></div>`;
+  }
+  const heads = ["My guesses ★", "Second choice", "Others"];
+  let prev = -1;
+  $("#rGrid").innerHTML = rows.length ? `<div class="rgrid">${rows.map((p) => {
+    const g = snap.cls[p.hex] ?? 2;
+    const head = g !== prev ? `<div class="rgh">${heads[g]}</div>` : "";
+    prev = g;
+    const [a, b] = radioParts(p);
+    const mine = p.freq === F, second = p.alt2 === F, done = radio.saved.has(`${F}|${p.hex}`);
+    const fresh = Date.now() - (snap.added[p.hex] || 0) < 30000;
+    return `${head}<button class="rtile ${mine ? "mine" : second ? "second" : ""} ${p.gone ? "gone" : ""} ${radio.sel === p.hex ? "sel" : ""} ${fresh ? "fresh" : ""}" data-rhex="${esc(p.hex)}">
+      <span class="a">${radioLogo(p)}<span>${esc(a)}</span></span><span class="b mono">${esc(b)}</span>
+      <span class="m">${done ? `<span class="good">✓ saved</span>` : mine ? `<span class="good">★</span>` : second ? `<span class="warnc">maybe</span>` : ""}${fresh && !done ? ` <span class="cyanc">new</span>` : ""}</span></button>`;
+  }).join("")}</div>` : `<div class="empty">${radio.mine ? "No plane guessed on this one right now. Try Every plane or a wider range." : "No planes in this range."}</div>`;
+  radioPanel();
+}
+
+function radioPanel() {
+  const box = $("#rPanel");
+  const p = radio.sel ? (radio.data.planes.find((x) => x.hex === radio.sel) || radio.last.get(radio.sel)) : null;
+  $("#radio").classList.toggle("haspanel", !!p);
+  if (!p) { box.innerHTML = ""; return; }
+  const F = radio.freq, here = radio.data.planes.some((x) => x.hex === p.hex);
+  const mine = p.freq === F, second = p.alt2 === F, done = radio.saved.has(`${F}|${p.hex}`);
+  box.innerHTML = `<div class="rpanel"><div class="rname">${radioLogo(p, true)}<span>${esc(p.say || p.cs)}</span>
+    ${mine ? `<span class="good rbadge">★ my guess</span>` : second ? `<span class="warnc rbadge">maybe</span>` : ""}</div>
+    <div class="tiny muted" style="margin:3px 0 4px">${esc(p.cs)} ${esc(p.type)} · ${Number(p.alt).toLocaleString()} ft ${radioClimb(p)} · ${p.mi} mi ${esc(p.dir)}${here ? (p.mi > radio.range ? " · outside your range now" : "") : " · out of reach now"}</div>
+    <div style="font-size:14px">My guess for it: <b>${esc(p.freq || "none")}</b>${p.alt2 ? ` or ${esc(p.alt2)}` : ""} · ${esc(p.who)}</div>
+    <div class="tiny muted">${esc(p.why)}</div>
+    <div class="btns" style="margin-top:10px">${done ? `<button class="btn" style="flex:2" disabled>✓ Saved as heard on ${esc(F)}</button>` :
+      `<button class="btn primary" style="flex:2" data-rheard="1">I heard it on ${esc(F)}</button>`}<button class="btn" data-rclose="1">Close</button></div></div>`;
+}
+
+function radioNear() {
+  $("#rPanel").innerHTML = "";
+  $("#radio").classList.remove("haspanel");
+  const near = radio.data.planes.filter((p) => p.mi <= 9.2);
+  $("#rBody").innerHTML = near.length ? near.map((p) => `<div class="card ${p.near ? "" : "rfar"}">
+    <div class="rname">${radioLogo(p, true)}<span>${esc(p.say)}</span></div>
+    <div class="tiny muted" style="margin:3px 0 8px">${esc(p.cs)} ${esc(p.type)} · ${Number(p.alt).toLocaleString()} ft ${radioClimb(p)} · ${p.mi} mi ${esc(p.dir)}</div>
+    ${p.freq ? `<div class="rbig mono">${esc(p.freq)}</div>` : ""}${p.alt2 ? `<div class="tiny muted">or ${esc(p.alt2)}</div>` : ""}
+    <div style="font-size:14px;margin-top:4px">${status(SIDE[p.sure] || "warn", p.sure)} ${esc(p.who)}</div><div class="tiny muted">${esc(p.why)}</div>
+    ${p.freq ? `<button class="btn small" style="margin-top:8px" data-rlisten="${esc(p.freq)}" data-rlhex="${esc(p.hex)}">Listen on ${esc(p.freq)}</button>` : ""}</div>`).join("")
+    : `<div class="empty">No planes within 8 miles right now.</div>`;
+}
+
+function radioWire(el) {
+  // A logo that isn't there just isn't shown (no inline handlers on this page).
+  el.addEventListener("error", (e) => { if (e.target.tagName === "IMG") e.target.remove(); }, true);
+  el.addEventListener("input", (e) => {
+    if (e.target.id === "rFilt") { radio.filt = e.target.value.toLowerCase(); radioGrid(); }
+  });
+  el.addEventListener("click", async (e) => {
+    const t = e.target.closest("[data-rview],[data-rfreq],[data-rrange],[data-rmine],[data-rhex],[data-rheard],[data-rclose],[data-rchange],[data-rtyped],[data-rother],[data-rspot],[data-rlisten]");
+    if (!t) return;
+    const ds = t.dataset;
+    if (ds.rview) { radio.view = ds.rview; radio.sel = ""; radioKeep(); return refresh(true); }
+    if (ds.rfreq) { radio.freq = ds.rfreq; radio.sel = ""; radio.filt = ""; radio.mine = true; radio.snap = null; radioKeep(); window.scrollTo(0, 0); return refresh(true); }
+    if (ds.rrange) { radio.range = Number(ds.rrange); radio.snap = null; radioKeep(); return refresh(true); }
+    if (ds.rmine) { radio.mine = ds.rmine === "1"; radio.snap = null; return refresh(true); }
+    if (ds.rhex) { radio.sel = radio.sel === ds.rhex ? "" : ds.rhex; radioGrid(); return; }
+    if (ds.rclose) { radio.sel = ""; radioGrid(); return; }
+    if (ds.rchange) { radio.freq = ""; radio.sel = ""; radio.snap = null; radioKeep(); window.scrollTo(0, 0); return refresh(true); }
+    if (ds.rheard) {
+      const r = await api("radio/heard", { listening: radio.freq, hex: radio.sel }).catch((err) => ({ error: err.message }));
+      if (r.error) return toast(r.error === "not_found" ? "That plane has gone out of reach: type what you heard instead." : `Not saved: ${r.error}`);
+      radio.saved.add(`${radio.freq}|${radio.sel}`);
+      return radioGrid();
+    }
+    if (ds.rtyped) {
+      const v = $("#rTyped").value.trim();
+      if (!v) return;
+      const r = await api("radio/heard", { listening: radio.freq, typed: v }).catch((err) => ({ error: err.message }));
+      if (r.error) return toast(`Not saved: ${r.error}`);
+      $("#rTyped").value = "";
+      return toast(`Saved: ${v} on ${radio.freq}`);
+    }
+    if (ds.rother) {
+      const v = $("#rOther").value.trim();
+      if (/^\d{3}\.\d{1,3}$/.test(v)) { radio.freq = v; radio.snap = null; radio.mine = false; radioKeep(); return refresh(true); }
+      return toast("A frequency looks like 121.5");
+    }
+    if (ds.rlisten) { radio.view = "freq"; radio.freq = ds.rlisten; radio.sel = ds.rlhex; radio.snap = null; radio.mine = true; radioKeep(); window.scrollTo(0, 0); return refresh(true); }
+    if (ds.rspot === "edit") { radio.editSpot = true; radioWhere(radio.data); $("#rTown")?.focus(); return; }
+    if (ds.rspot === "cancel") { radio.editSpot = false; return refresh(true); }
+    if (ds.rspot === "clear") { await api("radio/spot", { place: "" }); radio.snap = null; return refresh(true); }
+    if (ds.rspot === "set") {
+      const r = await api("radio/spot", { place: $("#rTown").value }).catch((err) => ({ error: err.message }));
+      if (r.error) { $("#rTownErr").textContent = r.error; return; }
+      radio.editSpot = false; radio.snap = null;
+      document.activeElement?.blur();
+      return refresh(true);
+    }
   });
 }
 
