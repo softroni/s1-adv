@@ -34,6 +34,11 @@ struct Plane {
   int16_t track = -1;
   int8_t elev = 0;
   char category[3] = "";
+  // The bridge's guess at which air-band frequency it's on (bridge/src/radio.mjs), when one came:
+  // the frequency and a second choice ("" for none), the name pilots say, and who's talking to it.
+  char freq[8] = "", freq2[8] = "";
+  char say[24] = "", who[24] = "";
+  char sure = 0;  // 'L' likely, 'M' maybe, 'G' a guess; 0 when the bridge sent no guess
 };
 struct Sky {
   char place[26] = "";
@@ -116,6 +121,32 @@ inline bool parsePlane(char** f, Plane& p) {
   return true;
 }
 // False when the answer isn't the bridge's (no "at" line); bad plane lines are left out.
+// An air-band frequency as the bridge writes it: "118.1" to "136.975".
+inline bool freqValid(const char* s) {
+  const size_t n = s ? strlen(s) : 0;
+  if (n < 5 || n > 7 || s[3] != '.') return false;
+  for (size_t i = 0; i < n; ++i) if (i != 3 && (s[i] < '0' || s[i] > '9')) return false;
+  const int mhz = (s[0] - '0') * 100 + (s[1] - '0') * 10 + (s[2] - '0');
+  return mhz >= 118 && mhz <= 136;
+}
+// "radio <hex> <frequency|-> <second|-> <likely|maybe|guess> <name pilots say> <who>", after the
+// planes: fills in the plane it names. False when there's no such plane.
+inline bool parseRadio(char** f, Sky& out) {
+  if (!hexValid(f[1])) return false;
+  for (uint8_t i = 0; i < out.count; ++i) {
+    Plane& p = out.planes[i];
+    if (strcmp(p.hex, f[1])) continue;
+    p.freq[0] = p.freq2[0] = 0;
+    if (freqValid(f[2])) strcpy(p.freq, f[2]);
+    if (freqValid(f[3])) strcpy(p.freq2, f[3]);
+    p.sure = !strcmp(f[4], "likely") ? 'L' : !strcmp(f[4], "maybe") ? 'M' : 'G';
+    readText(p.say, sizeof(p.say), f[5]);
+    readText(p.who, sizeof(p.who), f[6]);
+    return true;
+  }
+  return false;
+}
+
 inline bool parseNear(const char* text, size_t len, Sky& out) {
   out.place[0] = 0;
   out.count = 0;
@@ -125,6 +156,7 @@ inline bool parseNear(const char* text, size_t len, Sky& out) {
     const size_t n = podcast::splitFields(line, f, 18);
     if (n == 2 && !strcmp(f[0], "at")) { readText(out.place, sizeof(out.place), f[1]); at = true; }
     else if (n == 18 && !strcmp(f[0], "plane") && out.count < kMaxPlanes && parsePlane(f, out.planes[out.count])) ++out.count;
+    else if (n == 7 && !strcmp(f[0], "radio")) parseRadio(f, out);
   });
   return at;
 }

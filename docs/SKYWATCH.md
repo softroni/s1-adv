@@ -83,9 +83,10 @@ where it's going by name, or just "to London" when both don't fit; small planes 
 which way to look in big letters, and how high in **fists**: hold your arm out straight with a fist,
 put the bottom of your fist on the horizon, and stack fists on top, each about 10 degrees of sky.
 Then its height, with a small arrow when it's climbing or coming down, how far away it is, and its
-speed and heading.
+speed and heading, or, when the bridge has a guess, which [radio frequency](#radio) it's probably on.
 
-`,` and `/` go to the other planes, **S** keeps it in Spotted, and Esc goes back to the map or the list.
+`,` and `/` go to the other planes, **F** shows its radio, **S** keeps it in Spotted, and Esc goes back
+to the map or the list.
 If the plane flies out of the ring, its screen says so and keeps what it last knew.
 
 ### Look up!
@@ -108,6 +109,34 @@ A plane's own screen, while it's overhead, says **LOOK UP!** in big letters, whi
 the sky ("from E, going W"), and whether it's landing somewhere near or has just taken off, with the
 pulsing ring round it on your sky. In the list, it says LOOK UP in amber. While Skywatch is open the
 screen dims at the screensaver's time instead of going to the clock, so the chime can light it again.
+
+### Radio
+
+![A plane's radio: the frequency big, a second choice, who's talking to it, and the name pilots say](assets/planes/radio.png)
+
+With an air-band radio (118 to 137 MHz, AM) you can listen to the pilots. The bridge guesses which
+frequency each plane is on from what it's doing: low beside an airport with a tower, that tower;
+climbing out or coming down at a big airport, its departure or arrival controllers for that side;
+a small plane flying on its own (code 1200), nobody; cruising, the nearest Center for its height. Nothing
+says which frequency a plane is really on, so the color says how sure the guess is: **green** likely,
+**amber** maybe, **orange** a guess.
+
+- **The sky map's card** ends with the chosen plane's frequency, "Radio 128.4", beside where it's
+  looking from. When a plane flashes overhead, that's what to tune while you look up.
+- **A plane's screen** says "Radio 128.4 or 134.25" on its last line.
+- **F** on a plane's screen shows its radio: the frequency big, the second choice, who's talking to
+  it, and in quotes the name to listen for. Pilots say the airline's radio name, not its code: "Blue
+  Streak 5531" for PSA's JIA5531, "November 174HA" for N174HA. F again goes back, and it stays on for
+  the next planes until then.
+
+You'll often hear the pilots more than the controller: a plane high up carries a long way, and the
+controller's radio only reaches you near it. On the right frequency you hear every plane talking to
+that controller, so wait for the name.
+
+The guesses come from the bridge's [Radio](BRIDGE-UI.md#radio), which also has a page for picking a
+frequency and saying which plane you heard. How approach control splits its frequencies at your
+airports comes from an area file you keep on the bridge's computer; without it the guesses use towers
+and Center only. A bridge without Radio sends no guesses, and Skywatch shows speed and heading as before.
 
 ### The space station's next passes
 
@@ -227,6 +256,11 @@ other channels in turn for drones that send it in beacons, staying longer where 
 - **"Can't find" your town:** change the Weather city in Settings, Device. "Salem, MA" style, a town and
   a state, works best.
 - **No passes:** there may be none you can see this week. Try again in a few days.
-- **A route that looks wrong:** the routes come from a shared database and are sometimes out of date.
+- **A route that looks wrong, or "Route not known" on an airliner:** the routes come from a shared
+  database by flight number, and an airline flies one number on several legs a day. The bridge leaves
+  out a route the plane can't be flying (far off the line between its airports, or low and climbing
+  far from where it says it left), so you see no route rather than a wrong one. Some still slip through.
+- **"No radio guess":** the bridge hasn't got Radio, or knows too little about that plane. Update and
+  restart the bridge.
 - **No drones heard:** a drone has to be on and close, and send Remote ID over Wi-Fi. Some send it only
   over Bluetooth, which the Cardputer doesn't listen to yet.

@@ -141,6 +141,8 @@ Which frequency the planes around you are probably on, for listening on an ordin
 
 **Near me** lists the planes within 8 miles with their guess, and **Listen on** opens that frequency with the plane picked.
 
+**On the Cardputer,** Skywatch shows the same guesses: the chosen plane's frequency on the sky map's card and a plane's screen, and **F** on a plane's screen for its radio and the name to listen for. See [Skywatch](SKYWATCH.md#radio).
+
 **How it guesses:**
 
 - **Low beside a towered airport:** that tower. An airliner gets only the area's big airports.

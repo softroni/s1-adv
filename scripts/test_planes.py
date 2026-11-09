@@ -122,7 +122,12 @@ int main() {
     "plane\ta1b2c3\t-\t-\t-\t-\t-\t-\t1100\t0\t90\t-1\t900\t120\t35\t-1\t-1\t-\n"
     "plane\tBAD\tX\t-\t-\t-\t-\t-\t1\t0\t0\t0\t0\t0\t0\t-1\t-1\t-\n"
     "plane\ta1b2c4\tToo few\n"
-    "junk line\n";
+    "junk line\n"
+    "radio\ta35a98\t128.4\t134.25\tlikely\tEnvoy 3390\tORD arrivals east\n"
+    "radio\tad9edf\t-\t-\tmaybe\tAmerican 2278\tNo controller (VFR)\n"
+    "radio\tffffff\t118.1\t-\tlikely\tGhost\tNobody\n"
+    "radio\ta1b2c3\t999.1\t12.5\tsure\tX\tY\n"
+    "radio\ta35a98\ttoo few\n";
   Sky sky;
   assert(parseNear(near, sizeof(near) - 1, sky));
   assert(text(sky.place) == "Here" && sky.count == 3);
@@ -133,6 +138,17 @@ int main() {
   assert(envoy.bearing == 49 && envoy.elev == -2 && envoy.closestS == 16 && envoy.closestM == 929 && text(envoy.category) == "A3");
   const Plane& unknown = sky.planes[2];
   assert(text(unknown.name) == "A1B2C3" && !unknown.type[0] && !unknown.from[0] && !unknown.category[0] && unknown.track == -1);
+  // The radio guesses that follow fill in their planes: frequencies checked, an unknown word a guess.
+  assert(text(envoy.freq) == "128.4" && text(envoy.freq2) == "134.25" && envoy.sure == 'L');
+  assert(text(envoy.say) == "Envoy 3390" && text(envoy.who) == "ORD arrivals east");
+  const Plane& american = sky.planes[1];
+  assert(!american.freq[0] && !american.freq2[0] && american.sure == 'M' && text(american.who) == "No controller (VFR)");
+  assert(!unknown.freq[0] && !unknown.freq2[0] && unknown.sure == 'G');
+  Sky bare;
+  const char bareNear[] = "at\tHere\nplane\ta1b2c3\t-\t-\t-\t-\t-\t-\t1100\t0\t90\t-1\t900\t120\t35\t-1\t-1\t-\n";
+  assert(parseNear(bareNear, sizeof(bareNear) - 1, bare) && bare.count == 1);
+  assert(bare.planes[0].sure == 0 && !bare.planes[0].say[0]);  // No radio line: no guess, as from an older bridge.
+  assert(freqValid("118.1") && freqValid("136.975") && !freqValid("117.9") && !freqValid("137.0") && !freqValid("12.5") && !freqValid("1x5.1"));
   Sky empty;
   assert(!parseNear("plane\tnope\n", 11, empty) && empty.count == 0);
   assert(parseNear("at\tSalem\n", 9, empty) && text(empty.place) == "Salem" && empty.count == 0);

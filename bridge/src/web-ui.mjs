@@ -211,7 +211,7 @@ export class WebUi {
     this.linkCache = null;
     this.run = promisify(execFile);
     // Radio: Skywatch's planes and its position, with frequency guesses (radio.mjs).
-    this.radio = runtime?.planes ? new RadioService({ stateDir: config.stateDir, planes: runtime.planes, weather: runtime.weather }) : null;
+    this.radio = runtime?.radio || (runtime?.planes ? new RadioService({ stateDir: config.stateDir, planes: runtime.planes, weather: runtime.weather }) : null);
   }
 
   // Where a phone opens the page: ui.url if the owner set one, or Tailscale's serve settings.

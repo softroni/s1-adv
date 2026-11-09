@@ -3,6 +3,7 @@ import { WeatherService, parseCoordinates, validPlace } from "./weather.mjs";
 import { LAN_PORT, PodcastError, PodcastService, lanHandler, showLines } from "./podcasts.mjs";
 import { CameraService, cameraLanRoute, handleCameraRoute } from "./cameras.mjs";
 import { PlanesService, handlePlanesRoute, planesLanRoute } from "./planes.mjs";
+import { RadioService } from "./radio.mjs";
 import { handleSetupPage } from "./cameras-setup.mjs";
 import { startFirmwareJob, updateFirmwareJob, publicFirmwareJob, firmwareJobDeliveryUncertain } from "./firmware-job-status.mjs";
 import { firmwareCapability, firmwareWorkflowPaths } from "./firmware-automation.mjs";
@@ -3753,6 +3754,9 @@ class BridgeRuntime {
 	    this.podcasts = new PodcastService(config.podcasts || {});
 	    this.cameras = new CameraService(config.cameras || {});
 	    this.planes = new PlanesService({ ...(config.planes || {}), stateDir: config.stateDir, weather: this.weather });
+	    // Radio guesses for Skywatch's planes and the page's Radio tab, one engine for both (radio.mjs).
+	    this.radio = new RadioService({ stateDir: config.stateDir, planes: this.planes, weather: this.weather });
+	    this.planes.radio = this.radio;
 	    this.turnActivity = new Map();
 	    this.activitySeq = 0;
 	    this.heldPolls = new Set();

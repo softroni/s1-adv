@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { PlanesError, PlanesService, closestApproach, countryName, elevationDegrees, field, findPasses, handlePlanesRoute,
-  oceanName, parseTle, planeName, planesLanRoute, shortAirline, sunAltitude, sunPosition, typeName, URLS } from "./planes.mjs";
+  oceanName, parseTle, planeName, planesLanRoute, radioLine, routeFits, shortAirline, sunAltitude, sunPosition, typeName, URLS } from "./planes.mjs";
 
 // The station's orbit as CelesTrak gave it on 2026-11-06 (public data).
 const TLE = `ISS (ZARYA)
@@ -392,4 +392,66 @@ test("the home door: tickets from home addresses only", async () => {
   ({ res } = ask(`/planes/${id}/near?lat=1&lon=2`, "127.0.0.1"));
   await done(res);
   assert.deepEqual([res.status, res.body], [503, "planes_unavailable\n"]);
+});
+
+
+// Public airports, nowhere in particular: Denver to Chicago O'Hare.
+const DEN = { lat: 39.86, lon: -104.67 }, ORD = { lat: 41.98, lon: -87.9 };
+test("a route is shown only where the plane could be flying it", () => {
+  const route = { fromAt: DEN, toAt: ORD };
+  // Cruising between them: fits.
+  assert.equal(routeFits({ lat: 40.9, lon: -96, altFt: 36000, rate: 0 }, route), true);
+  // Climbing out near Phoenix, far off the line: another leg under the same number.
+  assert.equal(routeFits({ lat: 33.4, lon: -112, altFt: 12000, rate: 2000 }, route), false);
+  // On the line, but climbing low 400 nm from Denver: it left somewhere else.
+  assert.equal(routeFits({ lat: 41.3, lon: -95.9, altFt: 12000, rate: 2000 }, route), false);
+  // Coming down low next to Denver: it's landing there, not in Chicago.
+  assert.equal(routeFits({ lat: 39.9, lon: -104.2, altFt: 9000, rate: -1500 }, route), false);
+  // Climbing out of Denver and coming down into Chicago: fits.
+  assert.equal(routeFits({ lat: 40.1, lon: -104.0, altFt: 9000, rate: 2500 }, route), true);
+  assert.equal(routeFits({ lat: 41.9, lon: -88.6, altFt: 7000, rate: -1200 }, route), true);
+  // Beyond the destination by far: no.
+  assert.equal(routeFits({ lat: 42.4, lon: -80, altFt: 35000, rate: 0 }, route), false);
+  // Ends or position unknown: shown, as before.
+  assert.equal(routeFits({ lat: 33.4, lon: -112, altFt: 12000, rate: 2000 }, { fromAt: null, toAt: ORD }), true);
+  assert.equal(routeFits({ lat: null, lon: null, altFt: 12000, rate: 2000 }, route), true);
+});
+
+test("near: a route that doesn't fit is left out, keeping the airline's name", async () => {
+  const ac = [{ hex: "b00001", flight: "UAL88", t: "B738", lat: 33.5, lon: -112.0, alt_baro: 11000, baro_rate: 2200, gs: 280, track: 90 }];
+  const { fetchImpl } = fakeFetch([
+    [URLS.planes, json({ ac })], [URLS.elevation, json({ elevation: [300] })],
+    [`${URLS.routes}/UAL88`, json({ response: { flightroute: { airline: { name: "United Airlines" },
+      origin: { iata_code: "DEN", municipality: "Denver", latitude: DEN.lat, longitude: DEN.lon },
+      destination: { iata_code: "ORD", municipality: "Chicago", latitude: ORD.lat, longitude: ORD.lon } } } })],
+    [URLS.aircraft, json({ response: "unknown aircraft" }, 404)],
+  ]);
+  const service = new PlanesService({ fetchImpl, now: () => T0, log: quiet });
+  const rows = (await service.near(new URLSearchParams({ lat: "33.45", lon: "-112.0", r: "40000" }))).trimEnd().split("\n");
+  assert.deepEqual(fields(rows[1]).slice(0, 8), ["plane", "b00001", "United 88", "Boeing 737-800", "-", "-", "-", "-"]);
+});
+
+test("near: each plane's radio guess follows the planes, one line each, which older firmware skips", async () => {
+  const { fetchImpl } = planesFetch();
+  const service = new PlanesService({ fetchImpl, now: () => T0, log: quiet });
+  const asked = [];
+  service.radio = { async guessFor(list) {
+    asked.push(...list.map((ac) => ac.hex));
+    return new Map([["a00001", { freq: "124.5", alt2: null, sure: "likely", say: "United 1534", short: "Departure\tnorth" }],
+      ["a00002", { freq: null, alt2: null, sure: "likely", say: "November 174HA", short: "No controller (VFR)" }]]);
+  } };
+  const rows = (await service.near(new URLSearchParams({ lat: String(LAT), lon: String(LON), r: "40000" }))).trimEnd().split("\n");
+  assert.deepEqual(rows.map((r) => fields(r)[0]), ["at", "plane", "plane", "plane", "radio", "radio"]);
+  assert.deepEqual(asked.sort(), ["a00001", "a00002", "~a00005"].sort());
+  const radio = rows.filter((r) => r.startsWith("radio")).map(fields);
+  assert.deepEqual(radio[0], ["radio", "a00002", "-", "-", "likely", "November 174HA", "No controller (VFR)"]);
+  assert.deepEqual(radio[1], ["radio", "a00001", "124.5", "-", "likely", "United 1534", "Departure north"]);
+  for (const r of radio) assert.equal(r.length, 7);
+  // A radio that fails leaves the planes alone.
+  service.radio = { guessFor: async () => { throw new Error("nope"); } };
+  service.nearCache.clear();
+  const plain = (await service.near(new URLSearchParams({ lat: String(LAT), lon: String(LON), r: "40000" }))).trimEnd().split("\n");
+  assert.equal(plain.filter((r) => r.startsWith("radio")).length, 0);
+  assert.equal(radioLine("a1", null), "");
+  assert.equal(radioLine("a1", { freq: "118.1", sure: "sure?", say: "", short: "" }), "radio\ta1\t118.1\t-\tguess\t-\t-");
 });

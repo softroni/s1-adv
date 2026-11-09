@@ -178,6 +178,41 @@ export function shortAirline(name) {
   return cut && !KEEP_WHOLE.has(cut) ? cut : whole;
 }
 // "United 1534", else the registration, else the callsign, else the hex address.
+const coordinates = (airport) => {
+  const lat = Number(airport?.latitude), lon = Number(airport?.longitude);
+  return Number.isFinite(lat) && Number.isFinite(lon) && (lat || lon) ? { lat, lon } : null;
+};
+
+// Whether a route fits where the plane is. adsbdb answers by call sign, and an airline flies one
+// number on several legs a day, so its route can be another leg: a plane climbing out of one city
+// listed as flying between two others. A route that doesn't fit isn't shown. Fits: within 150 nm of
+// the line between its ends and not over 100 nm past either; low and climbing, within 80 nm of
+// where it left; low and coming down, within 120 nm of where it's going. Unknown ends fit.
+export function routeFits(plane, route) {
+  const a = route?.fromAt, b = route?.toAt;
+  if (!a || !b || !Number.isFinite(plane?.lat) || !Number.isFinite(plane?.lon)) return true;
+  const p = { lat: plane.lat, lon: plane.lon };
+  const R = 3440.065, rad = Math.PI / 180;
+  const d13 = distanceMeters(a.lat, a.lon, p.lat, p.lon) / 1852 / R;
+  const t13 = bearingDegrees(a.lat, a.lon, p.lat, p.lon) * rad, t12 = bearingDegrees(a.lat, a.lon, b.lat, b.lon) * rad;
+  const cross = Math.asin(Math.sin(d13) * Math.sin(t13 - t12));
+  const along = Math.acos(Math.max(-1, Math.min(1, Math.cos(d13) / Math.cos(cross)))) * Math.sign(Math.cos(t13 - t12)) * R;
+  const length = distanceMeters(a.lat, a.lon, b.lat, b.lon) / 1852;
+  if (Math.abs(cross * R) > 150 || along < -100 || along > length + 100) return false;
+  const low = plane.altFt < 15000;
+  if (low && plane.rate > 500 && distanceMeters(a.lat, a.lon, p.lat, p.lon) / 1852 > 80) return false;
+  if (low && plane.rate < -500 && distanceMeters(b.lat, b.lon, p.lat, p.lon) / 1852 > 120) return false;
+  return true;
+}
+
+// A plane's radio guess for Skywatch (radio.mjs):
+//   radio <hex> <frequency|-> <second|-> <likely|maybe|guess> <name pilots say> <who, short>
+export function radioLine(hex, g) {
+  if (!g) return "";
+  const sure = ["likely", "maybe", "guess"].includes(g.sure) ? g.sure : "guess";
+  return ["radio", hex, g.freq || "-", g.alt2 || "-", sure, field(g.say || "", 22) || "-", field(g.short || "", 22) || "-"].join("\t");
+}
+
 export function planeName({ callsign = "", airline = "", registration = "", hex = "" }) {
   const match = String(callsign).match(AIRLINE_CALLSIGN);
   if (match && airline) {
@@ -439,15 +474,17 @@ export class PlanesService {
     const radiusM = Number.isFinite(asked) && asked > 0 ? Math.min(MAX_RADIUS_M, Math.max(MIN_RADIUS_M, asked)) : DEFAULT_RADIUS_M;
     const nm = Math.min(100, Math.max(1, Math.ceil(radiusM / 1852)));
     const [list, groundM] = await Promise.all([this.aircraftNear(at, nm), this.groundHeight(at)]);
-    const planes = [];
+    const planes = [], raw = new Map();
     for (const ac of list) {
       const plane = this.planeFrom(ac, at, groundM);
-      if (plane && plane.distanceM <= radiusM) planes.push(plane);
+      if (plane && plane.distanceM <= radiusM) { planes.push(plane); raw.set(plane.hex, ac); }
     }
     planes.sort((a, b) => a.distanceM - b.distanceM);
     const shown = planes.slice(0, MAX_PLANES);
     await this.lookUp(shown);
-    return [`at\t${field(at.name, 24)}`, ...shown.map((plane) => this.planeLine(plane))].join("\n") + "\n";
+    const radio = this.radio ? await this.radio.guessFor(shown.map((plane) => raw.get(plane.hex))).catch(() => null) : null;
+    return [`at\t${field(at.name, 24)}`, ...shown.map((plane) => this.planeLine(plane)),
+      ...shown.map((plane) => radioLine(plane.hex, radio?.get(plane.hex))).filter(Boolean)].join("\n") + "\n";
   }
 
   async aircraftNear(at, nm) {
@@ -501,7 +538,8 @@ export class PlanesService {
     const rate = Number.isFinite(Number(ac.baro_rate)) ? Number(ac.baro_rate) : Number(ac.geom_rate);
     const closest = closestApproach(distanceM, bearing, track, gs);
     const category = /^[A-D][0-7]$/u.test(String(ac.category || "")) ? ac.category : "-";
-    return { hex, callsign: String(ac.flight || "").trim().toUpperCase(), registration: String(ac.r || "").trim(),
+    return { hex, lat: Number.isFinite(lat) ? lat : null, lon: Number.isFinite(lon) ? lon : null,
+      callsign: String(ac.flight || "").trim().toUpperCase(), registration: String(ac.r || "").trim(),
       typeCode: String(ac.t || "").trim().toUpperCase(), altFt, rate: Number.isFinite(rate) ? rate : 0, gs: Number.isFinite(gs) ? gs : 0,
       track: Number.isFinite(track) ? norm360(track) : -1, distanceM, bearing,
       // How high it looks goes by GPS height where there is one: the barometric altitude shown is off by
@@ -543,7 +581,8 @@ export class PlanesService {
       if (!route || typeof route !== "object") throw Object.assign(new Error("unknown"), { status: 404 });
       setCapped(this.routes, callsign, { until: this.now() + ROUTE_MS, airline: String(route.airline?.name || ""),
         from: String(route.origin?.iata_code || ""), fromCity: String(route.origin?.municipality || ""),
-        to: String(route.destination?.iata_code || ""), toCity: String(route.destination?.municipality || "") }, 2000);
+        to: String(route.destination?.iata_code || ""), toCity: String(route.destination?.municipality || ""),
+        fromAt: coordinates(route.origin), toAt: coordinates(route.destination) }, 2000);
     } catch (error) {
       setCapped(this.routes, callsign, { until: this.now() + (error?.status === 404 ? ROUTE_MISS_MS : LOOKUP_ERROR_MS) }, 2000);
     }
@@ -561,7 +600,8 @@ export class PlanesService {
   }
 
   planeLine(plane) {
-    const route = this.routes.get(plane.callsign) || {};
+    const held = this.routes.get(plane.callsign) || {};
+    const route = routeFits(plane, held) ? held : { airline: held.airline };
     const known = this.aircraft.get(plane.hex) || {};
     const code = plane.typeCode || known.code || "";
     const type = TYPES[code] || (known.code || known.manufacturer ? typeName(known.code || code, known.manufacturer) : code);

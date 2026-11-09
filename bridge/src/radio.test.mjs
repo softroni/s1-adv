@@ -240,3 +240,19 @@ test("logos: Google's unless it sends its placeholder, then kiwi.com's, kept on 
   assert.ok(await radio.logo("AAL"));
   assert.equal(fetched.length, before);           // From memory now
 });
+
+
+test("service: Skywatch's guesses, with the name pilots say, before the FAA list is in", async (t) => {
+  const { radio } = await service(t);
+  const g = await radio.guessFor([
+    { hex: "C1", flight: "AAL12", ...at(40, -100, 12, 80), alt_baro: 7000, baro_rate: 2000, track: 80, squawk: "1111" },
+    { hex: "c2", flight: "N9QX", ...at(40, -100, 25, 10), alt_baro: 3000, squawk: "1200" },
+    { hex: "c3", flight: "XYZ1" },                                 // No position: no guess
+  ]);
+  assert.deepEqual([...g.keys()], ["c1", "c2"]);
+  assert.deepEqual([g.get("c1").freq, g.get("c1").say, g.get("c1").short, g.get("c1").sure], ["121.2", "American 12", "Departure HUB east", "likely"]);
+  assert.deepEqual([g.get("c2").freq, g.get("c2").short], [null, "No controller (VFR)"]);
+  // Its heights are remembered: level now, but up 3,000 ft since, so still departing.
+  const later = await radio.guessFor([{ hex: "c1", flight: "AAL12", ...at(40, -100, 14, 80), alt_baro: 10000, baro_rate: 0, track: 80, squawk: "1111" }]);
+  assert.equal(later.get("c1").freq, "121.2");
+});

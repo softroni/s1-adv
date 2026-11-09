@@ -167,7 +167,8 @@ export function guess(a, { towers = [], sites = [], area = null } = {}) {
   const rose = a.rose || 0, fell = a.fell || 0;
   const climbing = vr > 400 || (rose > 1500 && vr > -300);
   const descending = vr < -300 || (fell > 1500 && vr < 300);
-  const g = { freq: null, alt2: null, who: "", sure: "guess", why: "" };
+  const g = { freq: null, alt2: null, who: "", short: "", sure: "guess", why: "" };
+  const word = (s) => ({ E: "east", W: "west", N: "north", S: "south" }[s] || "");
   const airports = (area?.airports || []).map((ap) => ({ ...ap, d: nm(ap, p), b: bearing(ap, p) }));
   const big = new Set(airports.map((ap) => ap.code));
   const away = (ap, slack = 60) => trk !== null && angle(trk, ap.b) < slack;
@@ -189,14 +190,14 @@ export function guess(a, { towers = [], sites = [], area = null } = {}) {
     if (ap?.towers) {
       const s = ap.towers["*"] ? "*" : side(ap.towerSplit || "EW", ap, p);
       const tw = ap.towers[s];
-      const word = { E: " (east)", W: " (west)", N: " (north)", S: " (south)" }[s] || "";
-      return { ...g, freq: first(tw), alt2: second(tw), who: `${ap.name || ap.code} Tower${word}`, sure: "likely", why: `${alt} ft, ${d.toFixed(1)} nm from ${ap.code}` };
+      const towerWord = { E: " (east)", W: " (west)", N: " (north)", S: " (south)" }[s] || "";
+      return { ...g, freq: first(tw), alt2: second(tw), who: `${ap.name || ap.code} Tower${towerWord}`, short: `${ap.code} Tower${towerWord}`, sure: "likely", why: `${alt} ft, ${d.toFixed(1)} nm from ${ap.code}` };
     }
-    return { ...g, freq: t.freq, who: `${t.code} Tower`, sure: "likely", why: `${alt} ft, ${d.toFixed(1)} nm from ${t.code}` };
+    return { ...g, freq: t.freq, who: `${t.code} Tower`, short: `${t.code} Tower`, sure: "likely", why: `${alt} ft, ${d.toFixed(1)} nm from ${t.code}` };
   }
-  if (sq === "1200") return { ...g, who: "Not talking to ATC (VFR, code 1200)", sure: "likely", why: "code 1200 means no controller" };
+  if (sq === "1200") return { ...g, who: "Not talking to ATC (VFR, code 1200)", short: "No controller (VFR)", sure: "likely", why: "code 1200 means no controller" };
   if (alt >= 24000 && Math.abs(vr) < 1000)
-    return { ...g, freq: c0.freq, alt2: c1?.freq || null, who: `${c0.who} (high, via ${c0.via})`, why: `cruising at ${alt} ft; nearest high-altitude radio sites` };
+    return { ...g, freq: c0.freq, alt2: c1?.freq || null, who: `${c0.who} (high, via ${c0.via})`, short: c0.who, why: `cruising at ${alt} ft; nearest high-altitude radio sites` };
   const approach = area?.approachName || "Approach";
   const departure = (ap) => nearestDir(ap.departures, quad(ap.b));
 
@@ -208,9 +209,10 @@ export function guess(a, { towers = [], sites = [], area = null } = {}) {
     if (from) {
       const dep = departure(from);
       const why = `climbing (${vr} ft/min, up ${rose} ft lately) away from ${from.code}, ${alt} ft`;
-      if (alt < 13000) return { ...g, freq: dep, alt2: c0.freq, who: `${approach}, departure (${from.code}, ${quad(from.b)})`, sure: "likely", why };
-      if (alt < 17000) return { ...g, freq: dep, alt2: c0.freq, who: `Departure, or ${c0.who} by now`, sure: "maybe", why };
-      return { ...g, freq: c0.freq, alt2: c1?.freq || dep, who: `${c0.who} (via ${c0.via})`, why };
+      const short = `Departure ${from.code} ${word(quad(from.b))}`;
+      if (alt < 13000) return { ...g, freq: dep, alt2: c0.freq, who: `${approach}, departure (${from.code}, ${quad(from.b)})`, short, sure: "likely", why };
+      if (alt < 17000) return { ...g, freq: dep, alt2: c0.freq, who: `Departure, or ${c0.who} by now`, short: "Departure or Center", sure: "maybe", why };
+      return { ...g, freq: c0.freq, alt2: c1?.freq || dep, who: `${c0.who} (via ${c0.via})`, short: c0.who, why };
     }
   }
   // Coming down toward a big airport, or an airliner low near one: an arrival.
@@ -229,10 +231,10 @@ export function guess(a, { towers = [], sites = [], area = null } = {}) {
       const sideWord = { E: "east", W: "west", N: "north", S: "south" }[s];
       if (to.finals && to.d < 18 && alt < 6000) {
         const fs = side(to.finalSplit || "EW", to, p);
-        return { ...g, freq: to.finals[fs], alt2: first(arr), who: `${approach}, ${to.code} final (${{ E: "east", W: "west", N: "north", S: "south" }[fs]})`, sure: "likely", why };
+        return { ...g, freq: to.finals[fs], alt2: first(arr), who: `${approach}, ${to.code} final (${word(fs)})`, short: `${to.code} final ${word(fs)}`, sure: "likely", why };
       }
-      if (arr && alt < 18000) return { ...g, freq: first(arr), alt2: second(arr), who: `${approach}, ${to.code} arrivals (${sideWord})`, sure: "likely", why };
-      if (arr) return { ...g, freq: c0.freq, alt2: first(arr), who: `${c0.who}, starting down to ${to.code}`, sure: "maybe", why };
+      if (arr && alt < 18000) return { ...g, freq: first(arr), alt2: second(arr), who: `${approach}, ${to.code} arrivals (${sideWord})`, short: `${to.code} arrivals ${sideWord}`, sure: "likely", why };
+      if (arr) return { ...g, freq: c0.freq, alt2: first(arr), who: `${c0.who}, starting down to ${to.code}`, short: "Center, coming down", sure: "maybe", why };
     }
   }
   // A departure held level near 10,000 ft, under the arrivals, is still with departure control.
@@ -240,15 +242,15 @@ export function guess(a, { towers = [], sites = [], area = null } = {}) {
     const from = (home && home.d < 40 && away(home, 90) ? home : null) ||
       airports.filter((ap) => ap.departures && ap.d < 40 && away(ap, 90)).sort((x, y) => x.d - y.d)[0];
     if (from) return { ...g, freq: departure(from), alt2: c0.freq, who: `${approach}, departure (${from.code}, ${quad(from.b)}), held level`,
-      sure: "maybe", why: `level at ${alt} ft heading away from ${from.code}: departures are often held near 10,000 ft` };
+      short: `Departure ${from.code} ${word(quad(from.b))}`, sure: "maybe", why: `level at ${alt} ft heading away from ${from.code}: departures are often held near 10,000 ft` };
   }
   // Below 10,000 ft with a code a controller gave it, not clearly arriving or leaving: the local sector.
   if (alt < 10000 && sq && area?.local) {
     const loc = area.local, s = side(loc.split || "NS", loc, p), v = loc[s];
-    if (v) return { ...g, freq: first(v), alt2: second(v), who: `${approach}, local sector ${{ E: "east", W: "west", N: "north", S: "south" }[s]}`,
+    if (v) return { ...g, freq: first(v), alt2: second(v), who: `${approach}, local sector ${word(s)}`, short: `Approach ${word(s)}`,
       sure: "maybe", why: `${alt} ft with an assigned code, not clearly arriving or leaving` };
   }
-  return { ...g, freq: c0.freq, alt2: c1?.freq || null, who: `${c0.who} (via ${c0.via})`, why: `${alt} ft, not clearly arriving or leaving` };
+  return { ...g, freq: c0.freq, alt2: c1?.freq || null, who: `${c0.who} (via ${c0.via})`, short: c0.who, why: `${alt} ft, not clearly arriving or leaving` };
 }
 
 // --- The service -----------------------------------------------------------------------------------
@@ -377,12 +379,7 @@ export class RadioService {
         const d = nm(spot, where);
         if (d > RADIUS_NM) continue;
         const hex = String(ac.hex || "").replace(/^~/u, "").toLowerCase();
-        const h = this.history.get(hex) || [];
-        h.push([now, alt]);
-        while (h.length && now - h[0][0] > HISTORY_MS) h.shift();
-        this.history.set(hex, h);
-        const alts = h.map((x) => x[1]);
-        const g = guess({ ...ac, rose: alt - Math.min(...alts), fell: Math.max(...alts) - alt }, { towers: freqs.towers, sites: freqs.sites, area });
+        const g = guess({ ...ac, ...this.heights(hex, alt, now) }, { towers: freqs.towers, sites: freqs.sites, area });
         const cs = String(ac.flight || "").trim().toUpperCase();
         const hub = area?.airports?.[0];
         planes.push({ hex, cs, say: this.spoken(cs) || hex, type: String(ac.t || ""), alt, vr: Number(ac.baro_rate ?? ac.geom_rate ?? 0) || 0,
@@ -397,6 +394,36 @@ export class RadioService {
       this.last = { ...this.last, at: this.now(), error: "Flight data isn't answering. Trying again..." };
       this.log.warn?.(`[radio] planes failed: ${String(error?.code || error?.message || error).slice(0, 60)}`);
     }
+  }
+
+  // How far a plane has climbed and come down over the last few minutes, from what both the page and
+  // Skywatch have seen of it.
+  heights(hex, alt, now) {
+    const h = this.history.get(hex) || [];
+    if (!h.length || h[h.length - 1][0] !== now) h.push([now, alt]);
+    while (h.length && now - h[0][0] > HISTORY_MS) h.shift();
+    this.history.set(hex, h);
+    const alts = h.map((x) => x[1]);
+    return { rose: alt - Math.min(...alts), fell: Math.max(...alts) - alt };
+  }
+
+  // Skywatch's guesses, for its planes (adsb.lol aircraft): hex -> { freq, alt2, sure, short, say }.
+  // Never waits for the FAA list: until it's in, guesses use the area file alone.
+  async guessFor(list) {
+    const area = await this.areaFile();
+    if (!this.freqs) this.frequencies().catch(() => {});
+    const freqs = this.freqs || { towers: [], sites: [] };
+    const now = this.now(), out = new Map();
+    for (const ac of list) {
+      const alt = Number(ac?.alt_baro);
+      if (!Number.isFinite(alt) || !Number.isFinite(Number(ac.lat)) || !Number.isFinite(Number(ac.lon))) continue;
+      const hex = String(ac.hex || "").replace(/^~/u, "").toLowerCase();
+      const g = guess({ ...ac, lat: Number(ac.lat), lon: Number(ac.lon), alt_baro: alt, ...this.heights(hex, alt, now) },
+        { towers: freqs.towers, sites: freqs.sites, area });
+      out.set(hex, { ...g, say: this.spoken(String(ac.flight || "").trim().toUpperCase()) });
+    }
+    this.learnAirlineFrom([...list].map((ac) => String(ac?.flight || "").trim().toUpperCase()));
+    return out;
   }
 
   // The frequencies to pick from, in a fixed order: the area file's groups, then the towers within
@@ -431,9 +458,10 @@ export class RadioService {
     return name ? `${name} ${cs.slice(3).replace(/^0+(?=\d)/u, "")}` : cs;
   }
   // One unknown airline at a time, from a real call sign seen in traffic.
-  learnAirline() {
+  learnAirline() { this.learnAirlineFrom(this.last.planes.map((p) => p.cs)); }
+  learnAirlineFrom(calls) {
     if (this.learning || !this.planes?.getJson) return;
-    const cs = this.last.planes.map((p) => p.cs).find((c) => airlineCall(c) && !this.names.has(c.slice(0, 3)) && !this.asked.has(c.slice(0, 3)));
+    const cs = calls.find((c) => airlineCall(c) && !this.names.has(c.slice(0, 3)) && !this.asked.has(c.slice(0, 3)));
     if (!cs) return;
     this.asked.add(cs.slice(0, 3));
     this.learning = this.planes.getJson(`https://api.adsbdb.com/v0/callsign/${encodeURIComponent(cs)}`, { timeoutMs: 6000 })

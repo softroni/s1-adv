@@ -46,9 +46,11 @@ uint16_t plAmber() { return rgb565_local(255, 196, 64); }
 uint16_t plGreen() { return rgb565_local(88, 240, 141); }
 uint16_t plGold() { return rgb565_local(255, 220, 100); }
 uint16_t plPink() { return rgb565_local(255, 110, 200); }
+uint16_t plOrange() { return rgb565_local(255, 143, 107); }
 
 PlView gPlView = PlView::Sky, gPlBack = PlView::Sky;
 PlView gPlPlaneBack = PlView::Sky;     // Where a plane's screen goes back to: the map or the list.
+bool gPlRadioView = false;               // F on a plane's screen: its radio frequency, big. Kept for the next.
 PlView gPlOpenOn = PlView::Sky;           // Where the next opening starts: the reminder opens on its notice.
 planes::Sky* gPlSky = nullptr;            // On the heap while the app is open.
 planes::Space* gPlSpace = nullptr;
@@ -862,10 +864,43 @@ void plWhereWords(char* out, size_t room, const char* place, uint16_t& ink) {
     ink = plAmber(); snprintf(out, room, "Using %s, no GPS", city.c_str());
   }
 }
-void plWhereLine(int16_t x, int16_t y, int16_t w, const char* place) {
+// How sure the bridge is of a plane's frequency, as a color: green likely, amber maybe, orange a guess.
+uint16_t plSureInk(char sure) { return sure == 'L' ? plGreen() : sure == 'M' ? plAmber() : plOrange(); }
+const char* plSureWord(char sure) { return sure == 'L' ? "likely" : sure == 'M' ? "maybe" : "a guess"; }
+// "Radio 128.4" (and " or 134.25" when `both`), or who's talking to it when no frequency, like a
+// small plane with no controller. False when the bridge sent no guess.
+bool plRadioWords(const planes::Plane& p, char* out, size_t room, bool both) {
+  if (!p.sure) return false;
+  if (!p.freq[0]) snprintf(out, room, "%s", p.who[0] ? p.who : "No frequency");
+  else if (both && p.freq2[0]) snprintf(out, room, "Radio %s or %s", p.freq, p.freq2);
+  else snprintf(out, room, "Radio %s", p.freq);
+  return true;
+}
+void plWhereLine(int16_t x, int16_t y, int16_t w, const char* place, const planes::Plane* plane = nullptr) {
   auto& d = gCanvas;
   char text[64];
   uint16_t ink = plMuted();
+  // The chosen plane's frequency first, then where, short: "GPS" or the city.
+  if (plane && plRadioWords(*plane, text, sizeof(text), false)) {
+    d.setFont(&fonts::Font0);
+    d.setTextColor(plSureInk(plane->sure));
+    d.setCursor(x, y);
+    const String radio = fitCurrentFontToWidth(text, w);
+    d.print(radio);
+    // As plWhereWords decides it: the GPS when the bridge was asked from "Here" or it has a fix, else
+    // the saved city.
+    const bool gps = (place && !strcmp(place, "Here")) || (gLabGps.hearing(millis()) && gLabGps.fix.valid);
+    String where = gps ? String("GPS") : gDeviceSettings.weatherPlace;
+    if (where.indexOf(',') > 0) where = where.substring(0, where.indexOf(','));
+    const int16_t room = w - d.textWidth(radio) - 10;
+    if (where.length() && room > 18) {
+      const String fit = fitCurrentFontToWidth(where, room);
+      d.setTextColor(plMuted());
+      d.setCursor(x + w - d.textWidth(fit), y);
+      d.print(fit);
+    }
+    return;
+  }
   plWhereWords(text, sizeof(text), place, ink);
   d.fillCircle(x + 2, y + 3, 2, ink);
   d.setFont(&fonts::Font0);
@@ -964,7 +999,7 @@ void plDrawSky() {
   planes::altitudeShort(alt, sizeof(alt), p.altFt, plUnits());
   plTile(x, 87, 62, "AWAY", dist);
   plTile(x + 64, 87, 66, "HEIGHT", alt, plHeightInk(p));
-  plWhereLine(x, 114, w, gPlSky->place);
+  plWhereLine(x, 114, w, gPlSky->place, &p);
   // A plane overhead that isn't the one shown: U goes to it.
   const int up = plOverhead();
   if (up >= 0 && up != gPlSel) plKeys({{"U", "Look up!"}, {"Enter", "More"}, {",/", "Pages"}});
@@ -992,6 +1027,53 @@ String plRouteWords(const planes::Plane& p, int16_t width) {
   }
   return fitCurrentFontToWidth(String("to ") + to, width);
 }
+// The lower half of a plane's card on its radio: how sure, the frequency big, the second choice and
+// who's talking to it, and the name to listen for.
+void plDrawPlaneRadio(const planes::Plane& p, int16_t x, int16_t w) {
+  auto& d = gCanvas;
+  d.setFont(&fonts::Font0);
+  d.setTextColor(plMuted());
+  d.setCursor(x, 54);
+  d.print("RADIO");
+  if (!p.sure) {
+    d.setFont(&fonts::Font2);
+    d.setTextColor(plMuted());
+    plWrap("No radio guess for this one.", x, 66, w, 15, 3);
+    return;
+  }
+  d.setTextColor(plSureInk(p.sure));
+  d.setCursor(x + d.textWidth("RADIO") + 6, 54);
+  d.print(plSureWord(p.sure));
+  if (p.freq[0]) {
+    d.setFont(&fonts::FreeSansBold12pt7b);
+    d.setTextColor(plSureInk(p.sure));
+    d.setCursor(x, 64);
+    d.print(p.freq);
+  } else {
+    d.setFont(&fonts::FreeSansBold9pt7b);
+    d.setTextColor(TFT_WHITE);
+    d.setCursor(x, 66);
+    d.print(fitCurrentFontToWidth("No controller", w));
+  }
+  // The second choice and who's talking to it, a line each; then the name to listen for, as said.
+  char text[56];
+  d.setFont(&fonts::Font0);
+  d.setTextColor(plMuted());
+  d.setCursor(x, 86);
+  if (p.freq[0] && p.freq2[0]) snprintf(text, sizeof(text), "or %s", p.freq2);
+  else snprintf(text, sizeof(text), "%s", p.freq[0] ? p.who : "flying on its own");
+  d.print(fitCurrentFontToWidth(text, w));
+  if (p.freq[0] && p.freq2[0]) {
+    d.setCursor(x, 96);
+    d.print(fitCurrentFontToWidth(p.who, w));
+  }
+  snprintf(text, sizeof(text), "\"%s\"", p.say[0] ? p.say : p.name);
+  d.setFont(&fonts::Font2);
+  d.setTextColor(TFT_WHITE);
+  d.setCursor(x, 106);
+  d.print(fitCurrentFontToWidth(text, w));
+}
+
 void plDrawPlane() {
   auto& d = gCanvas;
   const planes::Plane* sel = plSelected();
@@ -1074,6 +1156,11 @@ void plDrawPlane() {
   d.setTextColor(route.length() ? plAccent() : plMuted());
   d.print(route.length() ? route : String("Route not known"));
   char text[48], alt[16], dist[16], speed[16];
+  if (gPlRadioView) {
+    plDrawPlaneRadio(p, x, w);
+    plKeys({{",/", "Others"}, {"F", "Plane"}, {"S", "Keep"}, {"Esc", "Back"}});
+    return;
+  }
   if (overhead) {
     // Look up: big, and which way it's crossing the sky.
     d.setFont(&fonts::FreeSansBold12pt7b);
@@ -1115,11 +1202,13 @@ void plDrawPlane() {
   else if (overhead && p.climbFpm >= 300 && fromPlace[0]) snprintf(text, sizeof(text), "just left %s", fromPlace);
   else if (p.track >= 0) snprintf(text, sizeof(text), "%s heading %s", speed, planes::compass(p.track));
   else snprintf(text, sizeof(text), "%s", speed);
+  // With a radio guess, the last line is its frequency instead: what to tune while looking up.
+  const bool radio = plRadioWords(p, text, sizeof(text), true);
   d.setFont(&fonts::Font0);
-  d.setTextColor(plMuted());
+  d.setTextColor(radio ? plSureInk(p.sure) : plMuted());
   d.setCursor(x, 115);
   d.print(fitCurrentFontToWidth(text, w));
-  plKeys({{",/", "Other planes"}, {"S", "Keep"}, {"Esc", "Back"}});
+  plKeys({{",/", "Others"}, {"F", "Radio"}, {"S", "Keep"}, {"Esc", "Back"}});
 }
 
 // Every plane in the ring, nearest first, as the bridge sends them.
@@ -1976,6 +2065,7 @@ bool handlePlanesKey(char key, const Keyboard_Class::KeysState& keys) {
     case PlView::Plane:
       if (left || right) plSelectPlane(gPlSel + (left ? -1 : 1));
       else if (lower == 's') { if (const planes::Plane* p = plSelected()) plSaveSighting(*p); }
+      else if (lower == 'f') { gPlRadioView = !gPlRadioView; plInvalidate(); }
       break;
     case PlView::Passes:
       if (gPlSpaceOk && gPlSpace->count && (up || down)) gPlPassSel = uint8_t((gPlPassSel + (up ? gPlSpace->count - 1 : 1)) % gPlSpace->count);
