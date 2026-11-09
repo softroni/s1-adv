@@ -3,9 +3,10 @@
 // (bridge/src/planes.mjs). Four pages, flipped with , and /: the sky map with the nearest planes,
 // the station's next passes you can see, where the station is right now, and what the kids have
 // spotted. Enter on a plane says which way to look and how high; Enter on a pass draws its path
-// across the sky. A plane high overhead brings up "Look up!", S keeps a plane in Spotted on the
-// SD card, and R on a pass rings ten minutes before it, from any screen. A fifth page listens for
-// drones' Remote ID over Wi-Fi itself, with no bridge (drone_id.h, drone_listen.cpp).
+// across the sky. A plane high overhead flashes on the map, chimes and becomes the chosen one there
+// (nothing opens), S keeps a plane in Spotted on the SD card, and R on a pass rings ten minutes
+// before it, from any screen. A fifth page listens for drones' Remote ID over Wi-Fi itself, with no
+// bridge (drone_id.h, drone_listen.cpp).
 //
 // Where: the Cap's GPS when it has a fix, else the Weather city in Settings. The position leaves
 // the device rounded to about a kilometre, as weather's does, and only to the owner's bridge.
@@ -83,6 +84,9 @@ bool gPlHoldsGps = false;
 uint32_t gPlLastChimeMs = 0;
 char gPlAlerted[kPlAlertMemory][7] = {};
 uint8_t gPlAlertedNext = 0;
+// Bit i: gPlAlerted[i]'s plane has been picked on the sky map since the app opened (plPickOverhead).
+uint16_t gPlAlertPicked = 0;
+static_assert(kPlAlertMemory <= 16, "one bit of gPlAlertPicked each");
 char gPlSaved[kPlSavedMemory][7] = {};
 uint8_t gPlSavedNext = 0;
 // The station reminder, kept in flash so it rings after a restart too.
@@ -268,10 +272,12 @@ String plProblemText(camera_net::Error e, const String& word) {
   return text && *text ? String(text) : String("Something went wrong");
 }
 
-bool plAlreadyAlerted(const char* hex) {
-  for (const auto& h : gPlAlerted) if (!strcmp(h, hex)) return true;
-  return false;
+// gPlAlerted's slot for a plane, or -1.
+int plAlertSlot(const char* hex) {
+  for (uint8_t i = 0; i < kPlAlertMemory; ++i) if (!strcmp(gPlAlerted[i], hex)) return i;
+  return -1;
 }
+bool plAlreadyAlerted(const char* hex) { return plAlertSlot(hex) >= 0; }
 // times plays it again, a second and a half apart: the station reminder's three.
 void plChime(planes::Chime kind, uint8_t times = 1) { gPlChimeKind = kind; gPlChimeLeft = times; gPlChimeNextMs = millis(); }
 bool plFlashOn() { return (millis() / 350) % 2 == 0; }
@@ -289,6 +295,7 @@ void plNoteOverhead() {
   for (uint8_t i = 0; i < gPlSky->count; ++i) {
     const planes::Plane& p = gPlSky->planes[i];
     if (!planes::wantsLookUp(p) || plAlreadyAlerted(p.hex)) continue;
+    gPlAlertPicked = uint16_t(gPlAlertPicked & ~(1u << gPlAlertedNext));  // A new plane in this slot.
     strcpy(gPlAlerted[gPlAlertedNext], p.hex);
     gPlAlertedNext = uint8_t((gPlAlertedNext + 1) % kPlAlertMemory);
     if (gPlLastChimeMs && millis() - gPlLastChimeMs < kPlLookUpChimeGapMs) continue;
@@ -303,6 +310,31 @@ int plOverhead() {
   if (!gPlSkyOk) return -1;
   for (uint8_t i = 0; i < gPlSky->count; ++i) if (planes::wantsLookUp(gPlSky->planes[i])) return i;
   return -1;
+}
+void plSelectPlane(int i) {
+  if (!gPlSkyOk || !gPlSky->count) return;
+  gPlSel = uint8_t((i + gPlSky->count) % gPlSky->count);
+  strcpy(gPlSelHex, gPlSky->planes[gPlSel].hex);
+  gPlShown = gPlSky->planes[gPlSel];
+  gPlSelGone = false;
+  plInvalidate();
+}
+// On the sky map, a plane that starts flashing becomes the chosen one, so its card shows it and
+// Enter opens it; nothing opens by itself (the owner's ask, 2026-11-08). Each plane is picked once
+// while the app is open, so ;. can move off it for good, and one already chosen that's overhead
+// too stays chosen. Planes that went overhead on another screen are picked on coming back here.
+void plPickOverhead() {
+  if (gPlView != PlView::Sky || !gPlSkyOk) return;
+  const bool keep = gPlSel < gPlSky->count && planes::wantsLookUp(gPlSky->planes[gPlSel]);
+  int pick = -1;
+  for (uint8_t i = 0; i < gPlSky->count; ++i) {
+    if (!planes::wantsLookUp(gPlSky->planes[i])) continue;
+    const int slot = plAlertSlot(gPlSky->planes[i].hex);  // Not there yet: the next list's chime puts it there.
+    if (slot < 0 || (gPlAlertPicked & (1u << slot))) continue;
+    gPlAlertPicked = uint16_t(gPlAlertPicked | (1u << slot));
+    if (pick < 0) pick = i;  // The list is nearest first.
+  }
+  if (pick >= 0 && !keep) plSelectPlane(pick);
 }
 
 void plTakeNear(uint8_t* data, size_t length) {
@@ -1810,6 +1842,7 @@ void beginPlanes() {
   gPlSelHex[0] = 0;
   gPlShown = planes::Plane{};
   gPlSelGone = false;
+  gPlAlertPicked = 0;  // A plane still overhead is picked again; its chime isn't played again.
   if (gPlView != PlView::GoOut) gPlPassFromReminder = false;
   gPlJob = PlJob::None;
   gPlNearDueMs = gPlIssDueMs = millis();
@@ -1855,6 +1888,7 @@ void servicePlanes() {
     }
   }
   plDroneService(now);
+  plPickOverhead();
   if (!camera_net::opened()) {
     static uint32_t lastTry = 0;
     if (gPlSky && gPlSpace && now - lastTry > 300) {
@@ -1903,14 +1937,6 @@ void plOpenPage(uint8_t page) {
 }
 // , and / step through the five pages, round and round.
 void plFlip(bool left) { plOpenPage(uint8_t((plPage() + (left ? 4 : 1)) % 5)); }
-void plSelectPlane(int i) {
-  if (!gPlSkyOk || !gPlSky->count) return;
-  gPlSel = uint8_t((i + gPlSky->count) % gPlSky->count);
-  strcpy(gPlSelHex, gPlSky->planes[gPlSel].hex);
-  gPlShown = gPlSky->planes[gPlSel];
-  gPlSelGone = false;
-  plInvalidate();
-}
 
 bool handlePlanesKey(char key, const Keyboard_Class::KeysState& keys) {
   if (keys.ctrl || keys.alt) return false;

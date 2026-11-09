@@ -44,7 +44,8 @@ The round map is north up, with you at the `+` in the middle. Each plane is an a
 it's flying, coloured by its height: green under 3,000 feet, amber under 15,000 feet, and blue above
 that. A drone that broadcasts ADS-B shows in pink, but few do. The chosen plane has a white ring, and
 its card beside the map says which way to look, with an arrow pointing that way and how many fists up,
-then how far away it is and how high. It starts on the nearest.
+then how far away it is and how high. It starts on the nearest, and moves to a plane that goes
+overhead (see [Look up!](#look-up)).
 
 - **`;` and `.`** go to the next or the one before, and **Enter** opens it.
 - **`-` and `=`** make the ring smaller or bigger: 5, 10, 25 or 50 miles (8, 15, 40 or 80 km). It starts
@@ -93,8 +94,15 @@ If the plane flies out of the ring, its screen says so and keeps what it last kn
 
 When a plane is high above you, more than about 50 degrees up, it **flashes on the sky map** with an
 amber ring pulsing round it, and the Cardputer plays a soft chime, once for each plane and not more
-than once in 30 seconds. Nothing opens or closes by itself. If it's the plane on the card, the card
-says **LOOK UP!**; if it isn't, **U** goes straight to it.
+than once in 30 seconds. The sky map also **picks it for you**: it becomes the plane on the card,
+which says **LOOK UP!**, and **Enter** opens its screen if you want more. Nothing opens or closes by
+itself.
+
+Each plane is picked once. Move to another with `;` and `.` and it stays where you put it, even
+while the first one is still flashing. If the plane on the card is already overhead, a second one
+going overhead doesn't take its place; **U** goes straight to the other one. A plane that goes
+overhead while you're in the list or on a plane's screen is picked when you come back to the map,
+and opening Skywatch again picks one that's still overhead, without chiming again.
 
 A plane's own screen, while it's overhead, says **LOOK UP!** in big letters, which way it's crossing
 the sky ("from E, going W"), and whether it's landing somewhere near or has just taken off, with the

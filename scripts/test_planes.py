@@ -71,6 +71,12 @@ assert 'PlView::LookUp' not in app and 'PlView::DroneAlert' not in app and 'focu
 note = app.split('void plNoteOverhead() {', 1)[1].split('\n}\n', 1)[0]
 assert 'gPlView' not in note.replace('plWantsSky()', '') and 'plChime(planes::Chime::LookUp);' in note
 assert "else if (lower == 'u' && plOverhead() >= 0)" in app
+# A plane that starts flashing becomes the chosen one on the sky map, and nothing opens (the owner's
+# ask, 2026-11-08); the program below runs the real code. Each plane is picked once per opening.
+pick = app.split('void plPickOverhead() {', 1)[1].split('\n}\n', 1)[0]
+assert 'if (gPlView != PlView::Sky || !gPlSkyOk) return;' in pick and 'gPlView =' not in pick
+assert 'plPickOverhead();' in app.split('void servicePlanes() {', 1)[1].split('if (!camera_net::opened()) {', 1)[0]
+assert 'gPlAlertPicked = 0;' in app.split('void beginPlanes() {', 1)[1].split('\n}\n', 1)[0]
 # The bridge out of reach: said at once with why (the worker's note), the ticket asked again in a
 # while, and reported once the bridge answers again.
 fin = app.split('void plFinished() {', 1)[1].split('\n}\n', 1)[0]
@@ -328,12 +334,131 @@ int main() {
 }
 '''
 
+def function(signature):
+    return signature + app.split(signature, 1)[1].split('\n}\n', 1)[0] + '\n}\n'
+enum = next(line for line in app.splitlines() if line.startswith('enum class PlView '))
+picking = r'''
+#include "planes_catalog.h"
+#include <algorithm>
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include <string>
+using std::min;
+using String = std::string;
+constexpr uint8_t kPlAlertMemory = 16;
+constexpr uint32_t kPlLookUpChimeGapMs = 30000;
+static uint32_t nowMs = 100000;
+uint32_t millis() { return nowMs; }
+static int chimes = 0, wakes = 0, redraws = 0;
+void plWakeScreen() { ++wakes; }
+void plChime(planes::Chime, uint8_t = 1) { ++chimes; }
+void appendRuntimeLog(const char*, const String&) {}
+void plInvalidate() { ++redraws; }
+%s
+PlView gPlView = PlView::Sky;
+planes::Sky* gPlSky = new planes::Sky();
+bool gPlSkyOk = false, gPlSelGone = false;
+uint8_t gPlSel = 0;
+char gPlSelHex[7] = "";
+planes::Plane gPlShown;
+String gPlProblem;
+uint32_t gPlSkyAtMs = 0, gPlLastChimeMs = 0;
+char gPlAlerted[kPlAlertMemory][7] = {};
+uint8_t gPlAlertedNext = 0;
+uint16_t gPlAlertPicked = 0;
+%s
+// A list from the bridge, nearest first: each plane its hex and how high it stands in the sky.
+static void list(std::initializer_list<std::pair<const char*, int>> planesIn) {
+  std::string text = "at\tHere\n";
+  int dist = 500;
+  for (const auto& p : planesIn) {
+    char line[160];
+    snprintf(line, sizeof(line), "plane\t%%s\t-\t-\t-\t-\t-\t-\t9000\t0\t300\t90\t%%d\t180\t%%d\t-1\t-1\t-\n", p.first, dist, p.second);
+    text += line;
+    dist += 400;
+  }
+  plTakeNear(reinterpret_cast<uint8_t*>(&text[0]), text.size());
+  plPickOverhead();  // servicePlanes, every loop.
+  nowMs += 5000;
+}
+static std::string chosen() { return gPlSky->planes[gPlSel].hex; }
+static void choose(const char* hex) {
+  for (uint8_t i = 0; i < gPlSky->count; ++i) if (!strcmp(gPlSky->planes[i].hex, hex)) plSelectPlane(i);
+  assert(chosen() == hex);
+}
+int main() {
+  // Opened on the map: the nearest is chosen until one goes overhead, then that one is, with one chime.
+  list({{"aaaaa1", 20}, {"bbbbb1", 30}});
+  assert(gPlSkyOk && chosen() == "aaaaa1" && chimes == 0);
+  list({{"aaaaa1", 25}, {"bbbbb1", 60}});
+  assert(chosen() == "bbbbb1" && chimes == 1 && wakes == 1 && gPlView == PlView::Sky);
+  // Moved off it with ; or . : it stays where it was put while the plane is still overhead.
+  choose("aaaaa1");
+  list({{"aaaaa1", 25}, {"bbbbb1", 70}});
+  list({{"bbbbb1", 75}, {"aaaaa1", 25}});
+  assert(chosen() == "aaaaa1" && chimes == 1);
+  // Another one goes overhead: picked, even inside the chime's 30 seconds of quiet.
+  list({{"aaaaa1", 25}, {"bbbbb1", 70}, {"ccccc1", 55}});
+  assert(chosen() == "ccccc1" && chimes == 1);
+  // While the chosen one is overhead, a second one overhead doesn't take it away, and isn't picked later.
+  nowMs += 40000;
+  list({{"aaaaa1", 25}, {"ccccc1", 60}, {"ddddd1", 52}});
+  assert(chosen() == "ccccc1" && chimes == 2);
+  choose("aaaaa1");
+  list({{"aaaaa1", 25}, {"ccccc1", 60}, {"ddddd1", 58}});
+  assert(chosen() == "aaaaa1");
+  // In the list, or on a plane's own screen, nothing moves; back on the map it's picked.
+  gPlView = PlView::PlaneList;
+  list({{"aaaaa1", 25}, {"eeeee1", 65}});
+  assert(chosen() == "aaaaa1");
+  gPlView = PlView::Sky;
+  plPickOverhead();
+  assert(chosen() == "eeeee1");
+  choose("aaaaa1");
+  gPlView = PlView::Plane;
+  list({{"aaaaa1", 25}, {"eeeee1", 65}, {"fffff1", 80}});
+  assert(chosen() == "aaaaa1" && gPlView == PlView::Plane);
+  gPlView = PlView::Sky;  // Esc.
+  plPickOverhead();
+  assert(chosen() == "fffff1");
+  // Opened again (beginPlanes): a plane still overhead is chosen again, without chiming again.
+  choose("aaaaa1");
+  const int before = chimes;
+  gPlAlertPicked = 0;
+  list({{"aaaaa1", 25}, {"fffff1", 80}});
+  assert(chosen() == "fffff1" && chimes == before);
+  // Past the sixteen remembered, a new plane in an old one's place is still picked.
+  for (int i = 0; i < 40; ++i) {
+    char hex[7];
+    snprintf(hex, sizeof(hex), "%%06x", 0x100000 + i);
+    choose("aaaaa1");
+    list({{"aaaaa1", 25}, {hex, 70}});
+    assert(chosen() == hex);
+  }
+  // Nothing on the map: nothing to pick.
+  list({});
+  plPickOverhead();
+  assert(gPlSky->count == 0);
+  delete gPlSky;
+  puts("planes pick overhead: ok");
+}
+''' % (enum, ''.join(function(sig) for sig in [
+    'int plAlertSlot(const char* hex) {', 'bool plWantsSky() {', 'void plNoteOverhead() {', 'void plSelectPlane(int i) {',
+    'void plTakeNear(uint8_t* data, size_t length) {', 'void plPickOverhead() {']).replace(
+    'bool plWantsSky() {', 'bool plAlreadyAlerted(const char* hex) { return plAlertSlot(hex) >= 0; }\nbool plWantsSky() {'))
+assert 'bool plAlreadyAlerted(const char* hex) { return plAlertSlot(hex) >= 0; }' in app
+
 with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp)
     (tmp / 'test.cpp').write_text(code)
     subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++17', '-O1', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
                     '-fno-omit-frame-pointer', '-no-pie', '-I' + str(src), str(tmp / 'test.cpp'), '-o', str(tmp / 'test')], check=True)
     subprocess.run([str(tmp / 'test')], check=True)
+    (tmp / 'pick.cpp').write_text(picking)
+    subprocess.run([os.environ.get('CXX', 'c++'), '-std=c++17', '-O1', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
+                    '-fno-omit-frame-pointer', '-no-pie', '-I' + str(src), str(tmp / 'pick.cpp'), '-o', str(tmp / 'pick')], check=True)
+    subprocess.run([str(tmp / 'pick')], check=True)
 
     # The bridge's real answers, made from a fake internet, read by the device's own reader.
     node = shutil.which('node')
