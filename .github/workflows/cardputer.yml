@@ -114,6 +114,7 @@ jobs:
       - run: python scripts/test_assistant_activity.py
       - run: python scripts/test_weather.py
       - run: python scripts/test_units.py
+      - run: python scripts/test_ext_display.py
       - run: python scripts/test_voice_tap.py
       - run: python scripts/test_voice_tool.py
       - run: python scripts/test_launcher_memory.py

@@ -15,11 +15,11 @@ namespace lgfx {struct LGFXBase{int draws=0;void drawFastHLine(int,int,int,uint1
 struct Sprite:lgfx::LGFXBase{int pushes=0;void pushSprite(int,int){++pushes;}}gCanvasBuffer;
 struct Display:lgfx::LGFXBase{int waits=0;void waitDMA(){++waits;}};struct{struct Display Display;}M5Cardputer;
 struct{void presented(uint32_t){}}gUiFramePolicy;uint32_t uiSceneKey(){return 1;}
-bool gCanvasSpriteActive=true,gInboxHttpBusy=false;bool cameraDrawsDirect(){return false;}
+bool gCanvasSpriteActive=true,gInboxHttpBusy=false;bool cameraDrawsDirect(){return false;}uint32_t gExtScreenFrames=0;
 unsigned millis(){return 1000;}uint16_t rgb565_local(int,int,int){return 1;}
 '''+function('lgfx::LGFXBase& uiCanvas()')+function('void presentUiFrame()')+r'''
 int main(){
- assert(&uiCanvas()==static_cast<lgfx::LGFXBase*>(&gCanvasBuffer));presentUiFrame();assert(gCanvasBuffer.pushes==1);
+ assert(&uiCanvas()==static_cast<lgfx::LGFXBase*>(&gCanvasBuffer));presentUiFrame();assert(gCanvasBuffer.pushes==1&&gExtScreenFrames==1);  // The EXT screen copies only frames that went out.
  gCanvasSpriteActive=false;gInboxHttpBusy=true;
  assert(&uiCanvas()==&M5Cardputer.Display);uiCanvas().drawFastHLine(1,2,3,0);presentUiFrame();
  assert(M5Cardputer.Display.draws==1&&gCanvasBuffer.pushes==1);

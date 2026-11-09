@@ -194,6 +194,7 @@ String gSetupPortalPassword;
 String gSetupPortalCsrf;
 WiFiUDP gSmartLampUdp;
 M5Canvas gCanvasBuffer(&M5Cardputer.Display);
+uint32_t gExtScreenFrames = 0;  // Each frame the screen gets, for the EXT screen's copy (part 099).
 lgfx::LGFXBase& uiCanvas();
 // Drawing uses the current surface; allocation/presentation always names the
 // backing sprite explicitly. The network worker never accesses either surface.

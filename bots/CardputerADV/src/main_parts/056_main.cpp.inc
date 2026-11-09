@@ -294,6 +294,10 @@ String settingLabel(uint8_t index) {
         return "Clock on wake";
       case 10:
         return "Text size";
+      case kExtScreenSetting:
+        return "Ext screen";
+      case kExtUpsideDownSetting:
+        return "Ext upside down";
       default:
         return "-";
     }

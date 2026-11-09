@@ -123,8 +123,9 @@ S1-ADV gives you a working device on day one. Then you go as deep as you like: p
 | **I/O hub** (Unit PbHub) | Runs a Mini Angle, Light, PIR, relays, a servo and an LED strip all at once. One at a time, they plug straight into the Grove port. [Which setup do I need?](docs/LAB.md#pick-a-setup) |
 | **Cap LoRa-1262** (about $15) | Mesh text, a private channel and direct messages, Help with your location when your phone can't, a radio scanner and GPS. Read the [Mesh note](#good-to-know) first. M5Stack also sells it with the Cardputer as a Mesh Kit |
 | **Grove IR receiver** | Teaching the IR Remote new buttons. Sending needs nothing extra |
+| **2.8" ILI9341 screen** (the SPI one, about $10) | A copy of the Cardputer's screen a third bigger, on the EXT header. [Wiring](docs/EXT-SCREEN.md) |
 
-RFID Lab (an RC522 reader) uses a part wired to the EXT header instead of the Grove port, and it can't share that header with the Cap. Sonar works with the Ultrasonic unit on Grove or with an HC-SR04 wired to the EXT header, and finds whichever is plugged in. Mesh keeps it closed either way, because of the HC-SR04's pins.
+RFID Lab (an RC522 reader) uses a part wired to the EXT header instead of the Grove port, and it can't share that header with the Cap. Sonar works with the Ultrasonic unit on Grove or with an HC-SR04 wired to the EXT header, and finds whichever is plugged in. Mesh keeps it closed either way, because of the HC-SR04's pins. The 2.8" screen uses the Cap's pins too, so it's one or the other on that header.
 
 ## Set it up
 
@@ -295,7 +296,7 @@ Type `/status` on the device to see its connection and version. There's much mor
 | [Podcasts](docs/PODCASTS.md) | Podcasts, free audiobooks and old-time radio through the bridge, with your place kept and episodes saved for offline |
 | [TV Remote](docs/TV-REMOTE.md) | An Apple TV, a Bose soundbar, an Epson projector and a Samsung TV, a page each |
 | [Skywatch](docs/SKYWATCH.md) | What's flying overhead and which way to look, the space station's passes with a reminder, drones nearby by their Remote ID, and a collection of what you've spotted |
-| [Mesh](docs/MESH.md) · [NES](docs/NES.md) · [Focus audio](docs/FOCUS-AUDIO.md) | The optional extras |
+| [Mesh](docs/MESH.md) · [NES](docs/NES.md) · [Focus audio](docs/FOCUS-AUDIO.md) · [Ext screen](docs/EXT-SCREEN.md) | The optional extras |
 | [OpenClaw](docs/OPENCLAW.md) | Using the bridge with your own OpenClaw agent |
 | [Architecture](docs/ARCHITECTURE.md) | How the firmware and bridge fit together |
 | [Security](SECURITY.md) | What to keep private, and the trust model |

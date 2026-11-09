@@ -202,6 +202,8 @@ void loadDeviceSettings() {
   gDeviceSettings.meshRegion = s1_mesh::regionOrDefault(gPrefs.getUChar("mesh_reg", s1_mesh::kDefaultRegion));
   gDeviceSettings.meshPublicLocation = static_cast<uint8_t>(s1_mesh::sharingOrDefault(gPrefs.getUChar("mesh_loc", 0)));
   gDeviceSettings.meshSounds = gPrefs.getBool("mesh_snd", true);
+  gDeviceSettings.extScreen = static_cast<uint8_t>(ext_display::modeOrDefault(gPrefs.getUChar("ext_scr", 0)));
+  gDeviceSettings.extScreenUpsideDown = gPrefs.getBool("ext_flip", false);
   gDeviceSettings.units = static_cast<uint8_t>(units::fromSaved(gPrefs.getUChar("units", static_cast<uint8_t>(units::kDefault))));
   launcher_favorites::read(gFavorites, kLauncherGroups, kLauncherGroupCount, gPrefs.getString("favs", "").c_str());
   launcher_order::read(gLauncherOrder, kLauncherGroups, kLauncherGroupCount, gPrefs.getString("menu_order", "").c_str());
@@ -262,6 +264,8 @@ void saveDeviceSettings() {
   gPrefs.putUChar("mesh_reg", gDeviceSettings.meshRegion);
   gPrefs.putUChar("mesh_loc", gDeviceSettings.meshPublicLocation);
   gPrefs.putBool("mesh_snd", gDeviceSettings.meshSounds);
+  gPrefs.putUChar("ext_scr", gDeviceSettings.extScreen);
+  gPrefs.putBool("ext_flip", gDeviceSettings.extScreenUpsideDown);
   gPrefs.putUChar("units", gDeviceSettings.units);
   gPrefs.end();
 }

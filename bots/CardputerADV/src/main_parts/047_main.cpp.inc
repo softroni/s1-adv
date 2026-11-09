@@ -108,7 +108,11 @@ void adjustCurrentSetting(int delta) {
 
   if (gUiMode == UiMode::ScreenSettings) {
     switch (gSelectedSetting) {
-      case 1: case 7: case 9: toggleCurrentSetting(); return;
+      case 1: case 7: case 9: case kExtUpsideDownSetting: toggleCurrentSetting(); return;
+      case kExtScreenSetting:
+        gDeviceSettings.extScreen = static_cast<uint8_t>(
+            (gDeviceSettings.extScreen + ext_display::kModeCount + (delta >= 0 ? 1 : -1)) % ext_display::kModeCount);
+        break;
       case 0:
         gDeviceSettings.displayBrightnessPct = static_cast<uint8_t>(clampValue<int>(gDeviceSettings.displayBrightnessPct + delta * 5, 0, 100));
         applyDisplayBrightness();
@@ -228,6 +232,12 @@ void toggleCurrentSetting() {
         break;
       case 10:
         gDeviceSettings.textSize = static_cast<uint8_t>((gDeviceSettings.textSize + 1U) % kTextSizeCount);
+        break;
+      case kExtScreenSetting:
+        gDeviceSettings.extScreen = static_cast<uint8_t>((gDeviceSettings.extScreen + 1U) % ext_display::kModeCount);
+        break;
+      case kExtUpsideDownSetting:
+        gDeviceSettings.extScreenUpsideDown = !gDeviceSettings.extScreenUpsideDown;
         break;
       default:
         break;

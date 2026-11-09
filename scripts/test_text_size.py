@@ -8,7 +8,7 @@ parts = root / 'bots/CardputerADV/src/main_parts'
 read = lambda name: (parts / f'{name}_main.cpp.inc').read_text()
 
 constants = read('001')
-assert 'kScreenSettingsItemCount = 11;' in constants
+assert 'kScreenSettingsItemCount = 13;' in constants
 assert 'kTextSizeScales[kTextSizeCount] = {1.0f, 1.5f, 2.0f};' in constants
 assert 'gPrefs.getUChar("text_size", 0)' in read('026') and 'gPrefs.putUChar("text_size"' in read('026')
 assert 'return "Text size";' in read('056') and 'textSizeName(gDeviceSettings.textSize)' in read('057')

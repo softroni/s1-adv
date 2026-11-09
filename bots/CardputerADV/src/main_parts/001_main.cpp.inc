@@ -94,6 +94,7 @@
 #include "mesh_cap_radio.h"
 #include "mesh_heard.h"
 #include "mesh_sounds.h"
+#include "ext_display.h"
 #include <pb_decode.h>
 #include <generated/meshtastic/leafdata.pb.h>
 #ifndef DEFAULT_FOCUS_LAMP_ENABLED
@@ -127,7 +128,7 @@ namespace {
 constexpr const char* kDeviceType = "cardputer_adv";
 constexpr const char* kDefaultDisplayName = "ADV Cardputer";
 #ifndef APP_VERSION
-#define APP_VERSION "0.2.338-dev"
+#define APP_VERSION "0.2.339-dev"
 #endif
 #ifndef BUILD_GIT_SHA
 #define BUILD_GIT_SHA "local"
@@ -264,7 +265,9 @@ constexpr uint8_t kUnitsSetting = 10;
 constexpr uint8_t kMeshLocationSetting = 11;  // How much of where you are Mesh puts on the public channel.
 constexpr uint8_t kMeshSoundsSetting = 12;    // Whether Mesh makes its sounds.
 constexpr uint8_t kFocusSettingsItemCount = 11;
-constexpr uint8_t kScreenSettingsItemCount = 11;
+constexpr uint8_t kScreenSettingsItemCount = 13;
+constexpr uint8_t kExtScreenSetting = 11;      // The 2.8" screen on EXT: auto, on or off (ext_display.h).
+constexpr uint8_t kExtUpsideDownSetting = 12;  // That screen turned round, for its pin header on the right.
 constexpr uint8_t kTextSizeCount = 3;
 // Scaling the one font that covers Cyrillic costs no flash. Larger efont files
 // would not fit the 3 MB app slot.

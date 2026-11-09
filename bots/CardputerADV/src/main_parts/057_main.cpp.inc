@@ -47,6 +47,10 @@ String settingValue(uint8_t index) {
         return gDeviceSettings.screensaverClockOnWake ? "on" : "off";
       case 10:
         return textSizeName(gDeviceSettings.textSize);
+      case kExtScreenSetting:
+        return ext_display::modeName(ext_display::modeOrDefault(gDeviceSettings.extScreen), extScreenShown());
+      case kExtUpsideDownSetting:
+        return gDeviceSettings.extScreenUpsideDown ? "yes" : "no";
       default:
         return "-";
     }

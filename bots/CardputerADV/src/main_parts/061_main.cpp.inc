@@ -306,6 +306,7 @@ void setup() {
   loadFocusSettings();
   loadDeviceSettings();
   applyDisplayBrightness();
+  serviceExtScreen();  // A screen on EXT starts now, on the SD card's bus, rather than after Wi-Fi.
   if (!gOtaBootApplyMode) {
     applySpeakerVolumeSetting();
   }
@@ -408,6 +409,7 @@ void loop() {
   serviceLabOnce();
   serviceLabPlayAsked();
   takeUiCanvasBack();  // As soon as a request that borrowed it is over, wherever the loop goes next.
+  serviceExtScreen();  // Wherever the loop goes next, the EXT screen keeps copying.
   if (gRealtimeExclusiveMode) {
     serviceRealtimeExclusiveLoop(loopStartMs);
     return;

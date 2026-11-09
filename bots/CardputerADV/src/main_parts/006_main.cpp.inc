@@ -80,6 +80,7 @@ void presentUiFrame() {
     gCanvasBuffer.pushSprite(0, 0);
     // A complete frame must finish DMA before an app can release its storage.
     M5Cardputer.Display.waitDMA();
+    ++gExtScreenFrames;
   }
   gUiFramePolicy.presented(uiSceneKey());
 }

@@ -592,6 +592,10 @@ Device Settings → Mesh sounds turns off Mesh's sounds: messages arriving, deli
 Help, and Radio Scan's tick for each packet. It's on by default. [Mesh](MESH.md#sounds) lists them.
 Display Settings → Text size switches chat and voice replies between Small, Medium
 and Large.
+Display Settings → Ext screen is for a 2.8" ILI9341 screen on the EXT header, which then shows
+a bigger copy of this one: auto (the default) looks for it and says "auto, found" once it's there,
+on drives a screen that can't be found, off leaves the EXT pins alone. Ext upside down turns its
+picture round. [Ext screen](EXT-SCREEN.md) has the wiring.
 Ordinary voice keeps the original REC graphics during capture and THINK until the
 reply arrives, with the status showing how long the assistant has been working.
 A background task stops blocking the device as soon as its receipt arrives. Holding
