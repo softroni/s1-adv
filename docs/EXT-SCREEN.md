@@ -32,8 +32,14 @@ the Cardputer. When the Cardputer's own screen goes off, this one shows black in
 ## What it shows
 
 Everything the Cardputer draws on its screen, 320x180 across the middle, with a black band above
-and below. It copies at most 20 times a second, and only when something changed, a few rows
-each time round the loop so keys and sound don't wait for it.
+and below. Each new frame goes over in one go, but only the rows that changed, so a clock ticking
+or a menu moving takes a few rows, and a whole new screen about 25 ms at the fastest clock. It
+copies up to about 30 times a second, and never spends more than half the time copying.
+
+It picks its own pixel clock. When it starts, it writes rows of noise at 40 MHz, reads them back,
+and keeps that speed if they came back whole, trying 27 and then 20 MHz if not. Every two seconds
+after, it reads back one row of the picture, and a wrong one steps the clock down. A screen that
+can't be read back gets 20 MHz.
 
 Two apps draw straight onto the Cardputer's screen and aren't copied: the Cameras picture and NES.
 The Ext screen keeps the last picture until they close.
@@ -67,7 +73,8 @@ White means the screen has power but hasn't been set up.
 - **Ext screen says auto, none.** Nothing answered. Check SDO (pin 11) and CS (pin 13), or set it
   to **on**.
 - **The picture is upside down.** Set **Ext upside down** to **yes**.
-- **Speckles or wrong colours.** Use shorter wires. The pixels go at 20 MHz.
+- **Speckles or wrong colours.** Use shorter wires. It should slow itself down within a few
+  seconds; the `[EXT]` log line says which clock it's on.
 - **It worked on USB and not on battery.** Try VCC on pin 6, with LED.
 
 Over USB, the serial log has a line starting `[EXT]` for each thing it found or lost, with what

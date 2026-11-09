@@ -17,6 +17,7 @@ CODE = r'''
 #include "ext_display.h"
 #include <cassert>
 #include <cstring>
+#include <cstdio>
 #include <string>
 #include <vector>
 using namespace ext_display;
@@ -28,22 +29,29 @@ struct Fake {
   uint32_t floating = 0xFFFFFFFF;  // What a read gets with nothing answering.
   bool cap = false, held = false;
   int skip = 1;         // Dummy clocks before a read's value.
+  bool ramrd = true;    // RAMRD reads back what's in memory.
+  int readSkip = 8;     // Dummy clocks before RAMRD's pixels.
+  bool blueFirst = false;  // RAMRD's colour order.
+  uint32_t goodHz = 40000000;  // Faster than this, the wires garble what's written.
+  uint32_t hz = 0;      // The pixel clock asked for; 0 until it has been.
   uint32_t now = 0;
   // Pins.
   bool claimed = false;
-  int claims = 0, releases = 0, resets = 0, capAsks = 0, heldAsks = 0, traffic = 0, maxRows = 0, rowsSent = 0;
+  int claims = 0, releases = 0, resets = 0, capAsks = 0, heldAsks = 0, traffic = 0, maxRows = 0, rowsSent = 0, rowReads = 0;
   // The controller.
   uint8_t madctl = 0;
   bool awake = false, on = false;
   uint32_t resetAt = 0, sleepOutAt = 0;
   std::vector<uint16_t> gram = std::vector<uint16_t>(kWidth * kHeight, 0x1234);
-  uint16_t y0 = 0, y1 = 0, at = 0;
+  uint16_t y0 = 0, y1 = 0;
+  uint32_t at = 0;  // A whole screen is more pixels than 16 bits count.
   bool writing = false;
   std::vector<uint8_t> commands;
   std::vector<std::string> lines;
 
   void powerBlip() { madctl = 0; awake = on = false; }  // As after its own power-on reset.
-  uint32_t ms() { return now; }
+  uint64_t busNs = 0;   // Time the wires spent on pixels, at the clock asked for.
+  uint32_t ms() { return now + uint32_t(busNs / 1000000); }
   bool capPresent() { ++capAsks; return cap; }
   bool dcHeld() { assert(!claimed); ++heldAsks; return held; }  // Only asked while G6 is an input.
   void claim() { claimed = true; ++claims; }
@@ -66,14 +74,31 @@ struct Fake {
     const uint32_t dummies = skip ? (0xFFFFFFFFu << (32 - skip)) : 0;  // Whatever the dummy clocks hold.
     return dummies | (uint32_t(madctl) << (24 - skip));
   }
+  void speed(uint32_t h) { hz = h; }
+  // RAMRD of a row: dummy clocks, then three bytes a pixel, 6 bits of each colour at the top.
+  void readRow(uint16_t y, uint8_t* in, size_t n) {
+    assert(claimed && !writing && n == kRowReadBytes && y < kHeight); ++traffic; ++rowReads;
+    if (!screen || !miso || !ramrd) { memset(in, uint8_t(floating), n); return; }
+    memset(in, 0, n);
+    size_t bit = 0;
+    auto put = [&](unsigned v, int bits) { for (int i = bits - 1; i >= 0; --i, ++bit) if (v >> i & 1) in[bit / 8] |= uint8_t(0x80 >> (bit % 8)); };
+    put((1u << readSkip) - 1, readSkip);
+    for (uint16_t x = 0; x < kWidth; ++x) {
+      const uint16_t c = gram[y * kWidth + x];
+      const unsigned r6 = (c >> 11) << 1 | (c >> 15), g6 = (c >> 5) & 63, b6 = (c & 31) << 1 | (c >> 4 & 1);
+      put((blueFirst ? b6 : r6) << 2, 8); put(g6 << 2, 8); put((blueFirst ? r6 : b6) << 2, 8);
+    }
+  }
   void beginPixels(uint16_t y, uint16_t rows) {
-    assert(claimed && !writing && rows >= 1 && y + rows <= kHeight); ++traffic;
-    if (screen) assert(on);
+    assert(claimed && !writing && rows >= 1 && y + rows <= kHeight && hz); ++traffic;
+    if (screen) assert(on || y + rows <= kTestRows);  // Only the speed test goes before Display On.
     writing = true; y0 = y; y1 = uint16_t(y + rows); at = 0;
     maxRows = rows > maxRows ? rows : maxRows; rowsSent += rows;
   }
   void put(uint16_t c) {
     assert(writing && y0 + at / kWidth < y1);
+    if (hz > goodHz && at % 7 == 3) c ^= 0x0820;  // Too fast for the wires: bits go missing.
+    busNs += 16000000000ull / hz;
     if (screen) gram[y0 * kWidth + at] = c;
     ++at;
   }
@@ -149,30 +174,85 @@ int main() {
     r.pass();
     assert(r.mirror.shown() && r.mirror.skip() == skip && r.port.resets == 1 && r.port.saidSomething("found an ILI9341"));
     r.run(400);
-    assert(r.port.on && r.port.madctl == 0xE8 && r.showsCanvas() && r.port.maxRows <= kRowsPerPass);
-    assert(r.port.saidSomething("showing the Cardputer's screen"));
-    // Nothing new: nothing sent but a question every two seconds.
-    const int rows = r.port.rowsSent, traffic = r.port.traffic;
+    assert(r.port.on && r.port.madctl == 0xE8 && r.showsCanvas());
+    assert(r.mirror.speedHz() == 40000000 && r.mirror.checked() && r.port.hz == 40000000);
+    assert(r.port.saidSomething("showing the Cardputer's screen, pixels at 40000 kHz, checked"));
+    // Nothing new: nothing sent, only a question and one row read back every two seconds.
+    const int rows = r.port.rowsSent, reads = r.port.rowReads;
     r.run(4000);
-    assert(r.port.rowsSent == rows && r.port.traffic - traffic == 2 && r.port.resets == 1);
-    // A new frame: the picture's rows only, at most twenty copies a second.
+    assert(r.port.rowsSent == rows && r.port.rowReads - reads == 2 && r.port.resets == 1);
+    // A whole new picture goes in one pass, not a few rows a pass: no wipe to watch.
     paint(2); ++r.frame.generation;
-    r.run(400);
+    r.pass();
     assert(r.showsCanvas() && r.port.rowsSent - rows == kPictureHeight);
-    const int before = r.port.rowsSent;
-    for (int i = 0; i < 40; ++i) { paint(uint8_t(3 + i)); ++r.frame.generation; r.pass(); }  // 200 ms of frames.
-    assert(r.port.rowsSent - before <= 5 * kPictureHeight);
-    r.run(300);
+    // At most one copy every 30 ms, however fast frames come.
+    const int before = r.port.rowsSent; const uint32_t began = r.port.ms();
+    for (int i = 0; i < 40; ++i) { paint(uint8_t(3 + i)); ++r.frame.generation; r.pass(); }
+    assert((r.port.rowsSent - before) / kPictureHeight <= int(r.port.ms() - began) / int(kMinGapMs) + 1);
+    r.run(100);
     assert(r.showsCanvas());
   }
 
-  // The canvas lent out part-way: the copy waits for it, then finishes.
-  { Run r; paint(5); r.run(260);
-    ++r.frame.generation; paint(6); r.pass(); r.pass();
+  // A copy that takes long (a slow clock, a whole screen) waits twice as long before the next.
+  // Here at 20 MHz, unchecked, a whole picture is 46 ms of bus.
+  { Run r; r.port.ramrd = false; paint(30); r.run(400);
+    const uint64_t bus = r.port.busNs; const uint32_t began = r.port.ms();
+    for (int i = 0; i < 400; ++i) { paint(uint8_t(31 + i)); ++r.frame.generation; r.pass(); }
+    const double share = double(r.port.busNs - bus) / 1e6 / double(r.port.ms() - began);
+    assert(share > 0.35 && share < 0.55); }
+
+  // Only the rows that changed: one canvas row is one or two screen rows, sent in one go.
+  { Run r; paint(20); r.run(400);
+    for (int y : {0, 10, 134}) {
+      r.run(40);  // Past the gap since the last copy.
+      const int rows = r.port.rowsSent, begins = r.port.traffic;
+      for (int x = 0; x < kSourceWidth; ++x) canvas[y][x] ^= 0x5A;
+      ++r.frame.generation; r.pass();
+      const int sent = r.port.rowsSent - rows;
+      assert(sent == (y % 3 == 0 ? 2 : 1) && r.port.traffic - begins == 1 && r.showsCanvas());
+    }
+    // A frame that redraws the same picture sends nothing.
+    const int rows = r.port.rowsSent; r.run(40); ++r.frame.generation; r.run(40); assert(r.port.rowsSent == rows);
+    // Rows changed far apart go as separate runs, nothing between them.
+    r.run(40);
+    for (int x = 0; x < kSourceWidth; ++x) { canvas[1][x] ^= 1; canvas[100][x] ^= 1; }
+    ++r.frame.generation; r.pass();
+    assert(r.port.rowsSent - rows == 2 && r.showsCanvas()); }
+
+  // The pixel clock: the fastest whose test rows read back whole, whatever the read's dummy bits
+  // or colour order; with nothing to read back, the 20 MHz the first version used.
+  for (uint32_t good : {40000000u, 30000000u, 21000000u}) for (int readSkip : {7, 8, 9}) for (bool blueFirst : {false, true}) {
+    Run r; r.port.goodHz = good; r.port.readSkip = readSkip; r.port.blueFirst = blueFirst; paint(21);
+    while (r.mirror.phase() != Mirror<Fake>::Phase::Ready) r.pass();
+    assert(r.port.on);  // On the moment it lights, before the first copy, no test noise shows.
+    for (int y = 0; y < kTestRows; ++y) for (int x = 0; x < kWidth; ++x) assert(r.port.gram[y * kWidth + x] == 0);
+    r.run(400);
+    const uint32_t want = good >= 40000000 ? 40000000 : good >= 26666667 ? 26666667 : 20000000;
+    assert(r.mirror.speedHz() == want && r.mirror.checked() && r.showsCanvas());
+    for (int y = 0; y < kTestRows; ++y) for (int x = 0; x < kWidth; ++x) assert(r.port.gram[y * kWidth + x] == 0);  // No noise left.
+  }
+  { Run r; r.port.ramrd = false; paint(22); r.run(400);
+    assert(r.mirror.speedHz() == 20000000 && !r.mirror.checked() && r.showsCanvas() && r.port.saidSomething("unchecked")); }
+  { Run r; r.port.goodHz = 10000000; paint(23); r.run(400);  // Nothing reads back whole: the slowest, and it says so.
+    assert(r.mirror.speedHz() == 20000000); }
+  // The wires get worse while it runs: a row read back wrong steps the clock down, and all of it goes again.
+  { Run r; paint(24); r.run(400); assert(r.mirror.speedHz() == 40000000);
+    r.port.goodHz = 30000000; paint(25); ++r.frame.generation; r.run(100);
+    assert(!r.showsCanvas());  // Sent at 40 MHz: garbled.
+    r.run(2100);
+    assert(r.mirror.speedHz() == 26666667 && r.port.saidSomething("came back wrong") && r.showsCanvas());
+    r.port.goodHz = 1; ++r.frame.generation; paint(26); r.run(4100);
+    assert(r.mirror.speedHz() == 20000000);
+    r.run(4100);
+    assert(!r.mirror.checked() && r.port.saidSomething("not checking pixels"));
+    const int reads = r.port.rowReads; r.run(4000); assert(r.port.rowReads == reads); }
+
+  // The canvas lent out: nothing copied until it's back, then the new picture.
+  { Run r; paint(5); r.run(400);
     const int sent = r.port.rowsSent;
-    r.frame.pixels = nullptr; r.run(200);
+    r.frame.pixels = nullptr; ++r.frame.generation; paint(6); r.run(200);
     assert(r.port.rowsSent == sent);
-    r.frame.pixels = &canvas[0][0]; r.run(200);
+    r.frame.pixels = &canvas[0][0]; r.run(100);
     assert(r.showsCanvas()); }
 
   // The Cardputer's screen off: black, since this one's backlight can't go off. Back on, all of it again.
@@ -294,6 +374,6 @@ assert 'constexpr uint8_t kScreenSettingsItemCount = 13;' in read('001')
 assert re.search(r'kExtScreenSetting = 11;.*\n.*kExtUpsideDownSetting = 12;', read('001'))
 assert 'getUChar("ext_scr", 0)' in read('026') and 'putUChar("ext_scr"' in read('026') and 'putBool("ext_flip"' in read('026')
 assert 'return "Ext screen";' in read('056') and 'return "Ext upside down";' in read('056')
-print('PASS ext display: found by read-back at any of 9 bit offsets, set up with the waits, copied a third bigger in passes of '
-      'at most 12 rows, black when off, upside down, redrawn after a power blip, let go when unplugged or a Cap appears, '
+print('PASS ext display: found by read-back at any of 9 bit offsets, set up with the waits, copied a third bigger in one go, '
+      'only changed rows, pixel clock picked by read-back (40, 27, 20 MHz) and stepped down when a row comes back wrong, black when off, upside down, redrawn after a power blip, let go when unplugged or a Cap appears, '
       'EXT untouched when off, with a Cap or sensor, or while Mesh, RFID or Sonar has it; On drives a screen without MISO')

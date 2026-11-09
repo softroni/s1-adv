@@ -1,13 +1,13 @@
 // The 2.8" ILI9341 screen on the EXT header (ext_display.h, docs/EXT-SCREEN.md): what the
-// Cardputer's own screen shows, a third bigger. It's on the SD card's SPI object, so the bus's own
+// Cardputer's own screen shows, a third bigger, the rows that changed in one go at the fastest
+// pixel clock that reads back whole. It's on the SD card's SPI object, so the bus's own
 // lock keeps the two apart, and its pins are the Cap's and the RC522's, so it leaves them alone
 // while Mesh, the RFID Lab or Sonar's HC-SR04 has them. Settings > Display > Ext screen.
 namespace {
 constexpr uint8_t kExtCsPin = 5, kExtResetPin = 3, kExtDcPin = 6;
 static_assert(kExtCsPin == kRfidCsPin && kExtResetPin == kRfidResetPin && kExtDcPin == kSonarEchoPin,
               "the EXT screen shares its pins with the Cap, the RC522 and the HC-SR04");
-constexpr uint32_t kExtWriteHz = 20000000;  // Pixels. Jumper wires and the SD card share the lines.
-constexpr uint32_t kExtReadHz = 4000000;    // Commands and reads; the ILI9341 reads at 6.6 MHz at most.
+constexpr uint32_t kExtReadHz = 4000000;  // Commands and reads; the ILI9341 reads at 6.6 MHz at most.
 
 struct ExtScreenPort {
   uint32_t ms() { return millis(); }
@@ -62,6 +62,18 @@ struct ExtScreenPort {
     end();
   }
 
+  // Pixels go as fast as ext_display found the wires take them; 20 MHz until it has asked.
+  void speed(uint32_t hz) { writeHz_ = hz; }
+
+  void readRow(uint16_t y, uint8_t* in, size_t n) {
+    memset(in, 0, n);
+    begin(kExtReadHz);
+    window(y, y);
+    send(ext_display::cmd::kRead);
+    gSdSpi.transfer(in, n);
+    end();
+  }
+
   uint32_t read32(uint8_t c) {
     const uint8_t zeros[4] = {};
     uint8_t in[4] = {};
@@ -73,14 +85,8 @@ struct ExtScreenPort {
   }
 
   void beginPixels(uint16_t y, uint16_t rows) {
-    const uint16_t last = y + rows - 1;
-    const uint8_t columns[4] = {0, 0, (ext_display::kWidth - 1) >> 8, (ext_display::kWidth - 1) & 0xFF};
-    const uint8_t lines[4] = {uint8_t(y >> 8), uint8_t(y), uint8_t(last >> 8), uint8_t(last)};
-    begin(kExtWriteHz);
-    send(ext_display::cmd::kColumns);
-    gSdSpi.writeBytes(columns, sizeof(columns));
-    send(ext_display::cmd::kRows);
-    gSdSpi.writeBytes(lines, sizeof(lines));
+    begin(writeHz_);
+    window(y, uint16_t(y + rows - 1));
     send(ext_display::cmd::kWrite);
   }
   void pixels(const uint8_t* bytes, size_t n) { gSdSpi.writeBytes(bytes, n); }
@@ -97,6 +103,17 @@ struct ExtScreenPort {
   void said(const char* line) { logf("%s", line); }
 
  private:
+  uint32_t writeHz_ = ext_display::kSpeedsHz[ext_display::kSafeSpeed];
+
+  void window(uint16_t top, uint16_t bottom) {  // Whole rows, top to bottom.
+    const uint8_t columns[4] = {0, 0, (ext_display::kWidth - 1) >> 8, (ext_display::kWidth - 1) & 0xFF};
+    const uint8_t rows[4] = {uint8_t(top >> 8), uint8_t(top), uint8_t(bottom >> 8), uint8_t(bottom)};
+    send(ext_display::cmd::kColumns);
+    gSdSpi.writeBytes(columns, sizeof(columns));
+    send(ext_display::cmd::kRows);
+    gSdSpi.writeBytes(rows, sizeof(rows));
+  }
+
   void begin(uint32_t hz) {
     gSdSpi.beginTransaction(SPISettings(hz, MSBFIRST, SPI_MODE0));
     digitalWrite(kExtCsPin, LOW);
